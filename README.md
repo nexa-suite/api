@@ -115,6 +115,8 @@ This repository currently contains the approved architecture baseline.
 
 Business capabilities, API integrations, persistence and security will be implemented incrementally through vertical slices.
 
+Release v0.1.0 records this approved baseline; it does not claim production capability.
+
 ## Out of Scope
 
 - Authentication.
