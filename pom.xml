@@ -12,7 +12,7 @@
 	<artifactId>api</artifactId>
 	<version>0.1.0</version>
 	<name>nexa-api</name>
-	<description>Nexa Suite shared API architecture baseline</description>
+	<description>Nexa Suite business and integration API</description>
 	<url/>
 	<licenses>
 		<license/>
@@ -65,6 +65,13 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 		</plugins>
 	</build>
