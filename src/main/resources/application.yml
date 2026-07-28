@@ -18,5 +18,4 @@ management:
 info:
   application:
     name: Nexa API
-    version: 0.1.0
-    status: architecture-baseline
+    status: foundation
