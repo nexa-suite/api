@@ -7,8 +7,7 @@ The project uses Semantic Versioning.
 
 ### Documentation
 
-- Aligned the README, suite map and runtime diagram with the tagged `v0.3.0` API foundation.
-- Made non-implemented persistence, identity, tenant, AI, IoT, cloud and mobile scope explicit.
+- Kept future sales, warehouse, logistics, invoicing, AI, IoT, cloud and mobile scope explicit while documenting the secured identity and workspace slice.
 - Added a local repository map and a release-notes index.
 
 ## [0.4.0] - 2026-07-28
@@ -26,6 +25,20 @@ The project uses Semantic Versioning.
 
 - Anonymous catalog access returns `401`; authenticated access without an approved rule returns `403`.
 - Health/info remain public; local OpenAPI is profile-gated.
+
+## [0.5.0] - 2026-07-28
+
+### Added
+
+- Flyway-managed IAM and tenant-management schemas for PostgreSQL 18.4.
+- RS256 access tokens, HttpOnly refresh-cookie rotation and session-family reuse revocation.
+- Tenant/workspace/membership verification, surface policy and canonical permissions.
+- Secured Catalog read endpoints and local-only OpenAPI for the six approved routes.
+
+### Security
+
+- No browser token storage, public sign-up, user-management or Catalog write endpoint.
+- Catalog reference data remains shared local seed data; tenant-specific pricing and stock are not claimed.
 
 ## [0.3.0] - 2026-07-28
 
@@ -70,6 +83,7 @@ The project uses Semantic Versioning.
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
 [Unreleased]: https://github.com/nexa-suite/api/compare/v0.4.0...HEAD
+[0.5.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nexa-suite/api/compare/v0.1.0...v0.2.0
