@@ -4,13 +4,13 @@
 
 # Nexa API
 
-Business and integration API for Nexa Suite, implemented as a Spring Boot modular monolith.
+Business and integration API foundation for Nexa Suite, implemented as a Spring Boot modular monolith.
 
-[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://dev.java/) [![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Modular Monolith](https://img.shields.io/badge/architecture-Modular%20Monolith-2563EB?style=flat-square)](./docs/architecture/) [![Latest release](https://img.shields.io/github/v/release/nexa-suite/api?style=flat-square&label=latest%20release)](https://github.com/nexa-suite/api/releases/latest)
+[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.3.0](https://img.shields.io/badge/release-v0.3.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.3.0)
 
-[Latest Release](https://github.com/nexa-suite/api/releases/latest) · [Changelog](./CHANGELOG.md) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
+[Changelog](./CHANGELOG.md) · [Release notes](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
 
-**Current repository:** API
+**Current repository:** API · **Current release:** `v0.3.0`
 
 [Website](https://github.com/nexa-suite/website) · [Platform](https://github.com/nexa-suite/platform) · [Portal](https://github.com/nexa-suite/portal) · [API](https://github.com/nexa-suite/api) · [Mobile](https://github.com/nexa-suite/mobile)
 
@@ -18,62 +18,48 @@ Business and integration API for Nexa Suite, implemented as a Spring Boot modula
 
 ---
 
-## Overview
+## What is implemented
 
-Nexa API is the future authority for Nexa business and integration contracts. It is a modular monolith with explicit bounded-context boundaries and a pure Catalog Management domain foundation.
+The tagged `v0.3.0` release establishes the Catalog Management domain foundation and a seed anticorruption mapping. It also includes correlation IDs, safe Problem Details handling and automated tests. The `v0.3.0` tag does not expose a catalog REST endpoint.
 
-## Role in the Nexa Ecosystem
+The API is the future business authority for approved client contracts. The tagged release is intentionally smaller than the complete Nexa domain: there is no persistence, tenant identity, multi-tenant authorization or external integration in this release.
 
-API serves independent clients through approved HTTP contracts. v0.3.0 establishes Catalog Management domain rules and a seed anticorruption layer without adding a catalog REST endpoint.
+The current worktree also contains untagged catalog query, security and OpenAPI changes under active development. They are not release evidence for `v0.3.0` until independently validated and tagged.
 
-## Nexa Suite Architecture
+## Product boundaries
 
 ```mermaid
 flowchart LR
-    Visitor["Public visitor"] --> Website["Website<br/>Public discovery"]
-    Website --> Platform["Platform<br/>Internal operations"]
-    Website --> Portal["Buyer Portal<br/>B2B self-service"]
-    InternalUsers["Sales · Warehouse · Logistics · Owner"] --> Platform
-    Buyer["B2B Buyer"] --> Portal
-    Platform --> API["API<br/>Business authority"]
-    Portal --> API
-    Mobile["Mobile<br/>Future native clients"] -. planned .-> API
+    Website["Website<br/>Static public site<br/>v0.1.0"]
+    Platform["Platform<br/>Angular shell<br/>v0.2.1"]
+    Portal["Buyer Portal<br/>Angular shell<br/>v0.2.1"]
+    API["API<br/>Spring Boot foundation<br/>v0.3.0"]
+
+    Website -. "product navigation" .-> Platform
+    Website -. "product navigation" .-> Portal
+    Platform -. "future approved HTTP contract" .-> API
+    Portal -. "future approved HTTP contract" .-> API
 ```
 
-## Repository Map
+The diagram describes product boundaries, not a claim of deployed integration. Mobile is not part of this runtime map: `mobile v0.1.0` is documentation-only. PostgreSQL, AI, IoT and cloud services are not implemented in this repository release.
 
-<table>
-  <tr>
-    <td width="50%"><h3>Website</h3><p>Public commercial discovery entry point.</p><p>Status: repository foundation target v0.1.0.</p><p><a href="https://github.com/nexa-suite/website">Repository</a></p></td>
-    <td width="50%"><h3>Platform</h3><p>Internal operations for Sales, Warehouse, Logistics, Company Ownership and Administration.</p><p>Angular · v0.2.1 target.</p><p><a href="https://github.com/nexa-suite/platform">Repository</a></p></td>
-  </tr>
-  <tr>
-    <td width="50%"><h3>Buyer Portal</h3><p>Buyer-facing catalog, requests, orders and delivery visibility.</p><p>Angular · v0.2.1 target.</p><p><a href="https://github.com/nexa-suite/portal">Repository</a></p></td>
-    <td width="50%"><h3><b>API</b></h3><p>Business and integration authority.</p><p>Java 26 / Spring Boot 4.1 · v0.3.0 target.</p><p><a href="https://github.com/nexa-suite/api">Current repository</a></p></td>
-  </tr>
-  <tr>
-    <td width="50%"><h3>Mobile</h3><p>Future native buyer and field-operation clients.</p><p>Status: planned · v0.1.0 target.</p><p><a href="https://github.com/nexa-suite/mobile">Repository</a></p></td>
-    <td width="50%"></td>
-  </tr>
-</table>
+![Nexa Suite repository map](./docs/assets/repository-map/nexa-suite-map.svg)
 
-## Scope
+## Repository map
 
-- Independent Spring Boot application and modular monolith.
-- Correlation ID filter and safe Problem Details foundation.
-- Pure Catalog Management aggregate, value objects and invariants.
-- Anticorruption mapping from canonical seed records into domain objects.
-- No catalog REST, persistence, authentication, authorization or tenant ownership behavior.
+| Repository | Current release | Responsibility | Evidence status |
+|---|---:|---|---|
+| [Website](https://github.com/nexa-suite/website) | `v0.1.0` | Static public product discovery | Released static site |
+| [Platform](https://github.com/nexa-suite/platform) | `v0.2.1` | Internal operations shell | Angular shell; integrations planned |
+| [Portal](https://github.com/nexa-suite/portal) | `v0.2.1` | Buyer self-service shell | Angular shell; integrations planned |
+| **API** | **`v0.3.0`** | Business and integration authority | Catalog domain foundation |
+| [Mobile](https://github.com/nexa-suite/mobile) | `v0.1.0` | Future native clients | Documentation-only |
 
-## Architecture
+## Bounded contexts
 
-Each bounded context contains Presentation, Application, Domain and Infrastructure packages. Domain contains no framework or transport concerns. Catalog seed loading is infrastructure and is not a persistence entity.
-
-## Bounded Contexts
-
-| Area | Maturity |
+| Area | Current maturity |
 |---|---|
-| Catalog Management | Foundation in v0.3.0 |
+| Catalog Management | Domain foundation in `v0.3.0` |
 | IAM | Planned |
 | Tenant Management | Planned |
 | Sales | Planned |
@@ -81,36 +67,33 @@ Each bounded context contains Presentation, Application, Domain and Infrastructu
 | Logistics | Planned |
 | Invoicing | Planned |
 
-## Tech Stack
+## Architecture
 
-Java 26, Spring Boot 4.1, Spring MVC, Bean Validation, Actuator, Spring Boot Test, Maven Wrapper and jar packaging.
+Each future bounded context keeps Presentation, Application, Domain and Infrastructure separated. Domain code remains framework-free. Catalog seed loading is an Infrastructure concern and is not a persistence entity.
 
-## Getting Started
+## Tech stack
+
+Java 26, Spring Boot 4.1.0, Spring MVC, Bean Validation, Actuator, Spring Boot Test, Maven Wrapper and jar packaging.
+
+## Getting started
 
 ```bash
 ./mvnw clean test
 ./mvnw spring-boot:run
 ```
 
-Open [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health) and [http://localhost:8080/actuator/info](http://localhost:8080/actuator/info).
+The local application exposes the Spring Boot health and info endpoints at [http://localhost:8080/actuator/health](http://localhost:8080/actuator/health) and [http://localhost:8080/actuator/info](http://localhost:8080/actuator/info). Swagger/OpenAPI is configured only for the `local` profile. These checks do not imply a released public business API.
 
-## Available Commands
-
-```bash
-./mvnw clean test
-./mvnw clean package
-./mvnw spring-boot:run
-```
-
-## Project Structure
+## Project structure
 
 ```text
-src/main/java/com/nexa/api/                  # Application and bounded contexts
-src/main/java/com/nexa/api/shared/presentation # Correlation and Problem Details
-src/main/java/com/nexa/api/catalogmanagement/infrastructure/seed # Seed authority
-src/main/resources/seed/catalog/             # Byte-exact canonical seed and checksum
-src/test/java/com/nexa/api/                  # HTTP and seed integrity tests
-docs/releases/                               # Versioned release notes
+src/main/java/com/nexa/api/                              # Application and bounded-context packages
+src/main/java/com/nexa/api/shared/presentation/          # Correlation and Problem Details
+src/main/java/com/nexa/api/catalogmanagement/            # Catalog domain and seed mapping
+src/main/resources/seed/catalog/                         # Canonical seed and checksum
+src/test/java/com/nexa/api/                              # HTTP, domain and seed-integrity tests
+docs/assets/repository-map/                              # Local architecture map
+docs/releases/                                           # Versioned release notes
 ```
 
 ## Documentation
@@ -118,12 +101,10 @@ docs/releases/                               # Versioned release notes
 - [Catalog Management domain](./docs/domain/catalog-management.md)
 - [Client and automation compatibility](./docs/architecture/client-and-automation-compatibility.md)
 - [ADR-003: Catalog domain foundation](./docs/architecture/decisions/ADR-003-catalog-domain-foundation.md)
+- [Local OpenAPI instructions](./docs/openapi/README.md)
+- [Release notes index](./docs/releases/)
 - [Release policy](./.github/RELEASE_POLICY.md)
 
-## Current Release
+## Roadmap boundary
 
-v0.3.0 adds pure Catalog Management domain rules, seed mapping and compatibility constraints. It adds no catalog REST endpoint and no persistence behavior.
-
-## Roadmap
-
-Future vertical slices require explicit contracts, identity, tenant isolation, persistence decisions and runtime evidence.
+New vertical slices require an explicit contract, identity and tenant decision, persistence evidence and runtime validation. Documentation must keep planned PostgreSQL, AI, IoT, cloud and mobile work separate from the current implementation.

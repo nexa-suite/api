@@ -39,6 +39,8 @@ public final class ApiProblemDetailFactory {
 			case INVALID_REQUEST -> "Invalid request";
 			case RESOURCE_NOT_FOUND -> "Resource not found";
 			case METHOD_NOT_ALLOWED -> "Method not allowed";
+			case UNAUTHORIZED -> "Authentication required";
+			case FORBIDDEN -> "Access denied";
 			case INTERNAL_ERROR -> "Internal server error";
 		};
 	}

@@ -5,6 +5,12 @@ The project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Documentation
+
+- Aligned the README, suite map and runtime diagram with the tagged `v0.3.0` API foundation.
+- Made non-implemented persistence, identity, tenant, AI, IoT, cloud and mobile scope explicit.
+- Added a local repository map and a release-notes index.
+
 ## [0.3.0] - 2026-07-28
 
 ### Added

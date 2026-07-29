@@ -10,11 +10,10 @@ public record CatalogItemId(String value) {
 
 	private static String normalize(String value, String label) {
 		if (value == null || value.isBlank()) throw new CatalogInvariantViolation(label + " is required");
-		String normalized = value.trim().toUpperCase(java.util.Locale.ROOT);
+		String trimmed = value.trim();
+		if (!trimmed.matches("(?i)[A-Z0-9-]+")) throw new CatalogInvariantViolation(label + " contains invalid characters");
+		String normalized = trimmed.toUpperCase(java.util.Locale.ROOT);
 		if (normalized.length() > 64) throw new CatalogInvariantViolation(label + " exceeds 64 characters");
-		if (!normalized.equals(value.trim().toUpperCase(java.util.Locale.ROOT))) {
-			throw new CatalogInvariantViolation(label + " contains invalid characters");
-		}
 		return normalized;
 	}
 

@@ -1,0 +1,156 @@
+name: nexa
+
+services:
+  modern-api:
+    profiles: [modern]
+    build:
+      context: ../../../api
+      dockerfile: Dockerfile
+    image: nexa/modern-api:local
+    container_name: nexa-modern-api
+    environment:
+      SERVER_PORT: "8080"
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      modern:
+        aliases: [api]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+
+  modern-platform:
+    profiles: [modern]
+    build:
+      context: ../../../platform
+      dockerfile: Dockerfile
+    image: nexa/modern-platform:local
+    container_name: nexa-modern-platform
+    depends_on:
+      modern-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4200:80"
+    networks: [modern]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 12
+
+  modern-portal:
+    profiles: [modern]
+    build:
+      context: ../../../portal
+      dockerfile: Dockerfile
+    image: nexa/modern-portal:local
+    container_name: nexa-modern-portal
+    depends_on:
+      modern-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4300:80"
+    networks: [modern]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 12
+
+  legacy-postgres:
+    profiles: [legacy]
+    image: postgres:16-alpine
+    container_name: nexa-legacy-postgres
+    environment:
+      POSTGRES_DB: ${NEXA_LEGACY_POSTGRES_DB:-nexa_platform_db}
+      POSTGRES_USER: ${NEXA_LEGACY_POSTGRES_USER:-nexa}
+      POSTGRES_PASSWORD: ${NEXA_POSTGRES_PASSWORD:?Set NEXA_POSTGRES_PASSWORD in .env.local}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - nexa-legacy-postgres-data:/var/lib/postgresql/data
+    networks: [legacy]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 20
+
+  legacy-api:
+    profiles: [legacy]
+    build:
+      context: ../../../api-asp
+      dockerfile: Dockerfile
+    image: nexa/legacy-api:local
+    container_name: nexa-legacy-api
+    depends_on:
+      legacy-postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: >-
+        Host=legacy-postgres;Port=5432;Database=${NEXA_LEGACY_POSTGRES_DB:-nexa_platform_db};Username=${NEXA_LEGACY_POSTGRES_USER:-nexa};Password=${NEXA_POSTGRES_PASSWORD:?Set NEXA_POSTGRES_PASSWORD in .env.local};SSL Mode=Disable
+      NEXA_JWT_SECRET: ${NEXA_SECURITY_JWT_SIGNING_KEY:?Set NEXA_SECURITY_JWT_SIGNING_KEY in .env.local}
+      NEXA_JWT_ISSUER: nexa-platform
+      NEXA_JWT_AUDIENCE: nexa-webapp
+      APPLY_MIGRATIONS_ON_STARTUP: "true"
+      SEED_DATA__ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:5174
+    ports:
+      - "127.0.0.1:5068:8080"
+    networks: [legacy]
+
+  legacy-platform:
+    profiles: [legacy]
+    build:
+      context: ../../../platform-vue
+      dockerfile: Dockerfile
+    image: nexa/legacy-platform:local
+    container_name: nexa-legacy-platform
+    depends_on:
+      legacy-api:
+        condition: service_started
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    environment:
+      VITE_DEV_PROXY_TARGET: http://legacy-api:8080
+      VITE_NEXA_API_BASE_URL: http://localhost:5068/api/v1
+      VITE_SERVER_OPEN: "false"
+    ports:
+      - "127.0.0.1:5173:5173"
+    networks: [legacy]
+
+  legacy-portal:
+    profiles: [legacy]
+    build:
+      context: ../../../portal-vue
+      dockerfile: Dockerfile
+    image: nexa/legacy-portal:local
+    container_name: nexa-legacy-portal
+    depends_on:
+      legacy-api:
+        condition: service_started
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5174"]
+    environment:
+      VITE_DEV_PROXY_TARGET: http://legacy-api:8080
+      VITE_NEXA_API_BASE_URL: http://localhost:5068/api/v1
+      VITE_SERVER_OPEN: "false"
+    ports:
+      - "127.0.0.1:5174:5174"
+    networks: [legacy]
+
+networks:
+  modern:
+    name: nexa-modern-network
+  legacy:
+    name: nexa-legacy-network
+
+volumes:
+  nexa-legacy-postgres-data:
+    name: nexa-legacy-postgres-data

@@ -52,10 +52,16 @@ The legacy aggregate mixed catalog definition with `AvailableStock`, `ReserveSto
 
 `CatalogSeedItemRecord` remains an Infrastructure import format. `CatalogSeedDomainMapper` maps the 50 validated records to `CatalogItem` objects while preserving IDs, names, price, cold-chain value, media and presentation. `availableStock`, `sourcePriceCode` and `sourcePriceDescription` remain import metadata and never become aggregate state. `loadDomainCatalog()` preserves seed order and returns an immutable list.
 
+## Application query
+
+`CatalogItemQueryPort` is the Application read boundary for Catalog Management. `CatalogQueryService` delegates to that port using immutable `CatalogSearchCriteria`, `CatalogPage`, `CatalogItemSummary` and `CatalogItemDetail` models. The seed adapter performs filtering, sorting, pagination and explicit domain-to-application projection. The response contains only the commercial definition: identifiers, names, description, presentation, price, cold-chain requirement and media. It contains no stock, tenant or persistence state.
+
+`CatalogSeedQueryAdapter` is the current Infrastructure implementation. It delegates to the validated canonical seed loader, preserving the 50-item seed order and checksum guarantees without exposing `CatalogSeedItemRecord` or import-only fields to Application.
+
 ## Deliberately excluded concepts
 
 No tenant ID, stock quantity, reservation, repository, entity base class, domain event, persistence mapping, DTO, controller, HTTP endpoint or framework annotation belongs in this foundation.
 
 ## Future integration points
 
-Application use cases may later load, edit or publish catalog items through explicit ports. Presentation may map future contracts to client-specific DTOs. Persistence, tenant ownership, authorization and independent Brand/Category lifecycle require separate approved decisions.
+Future command use cases may edit or publish catalog items through explicit ports. Presentation may map application projections to approved client-specific contracts. Persistence, tenant ownership, authorization and independent Brand/Category lifecycle require separate approved decisions.
