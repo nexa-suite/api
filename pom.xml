@@ -12,7 +12,7 @@
 	<artifactId>api</artifactId>
 	<version>0.2.0</version>
 	<name>nexa-api</name>
-	<description>Nexa Suite business and integration API</description>
+	<description>Nexa business and integration API built with Java 26 and Spring Boot, following modular monolith and domain-driven design principles.</description>
 	<url/>
 	<licenses>
 		<license/>

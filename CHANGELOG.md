@@ -5,6 +5,29 @@ The project uses Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-28
+
+### Added
+
+- Catalog Management domain foundation.
+- Catalog seed anticorruption mapping.
+- Domain invariants and purity tests.
+- Client and automation compatibility constraints.
+- Suite-wide repository documentation.
+
+### Changed
+
+- Catalog stock ownership is assigned to Warehouse rather than Catalog Management.
+- Brand and Category remain value concepts until independent lifecycle evidence exists.
+
+### Fixed
+
+- Removed verified duplicate local artifacts.
+
+### Security
+
+- Added coordinated vulnerability reporting guidance.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added
@@ -24,6 +47,7 @@ The project uses Semantic Versioning.
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nexa-suite/api/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nexa-suite/api/releases/tag/v0.1.0
