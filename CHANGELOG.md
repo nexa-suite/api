@@ -10,19 +10,22 @@ The project uses Semantic Versioning.
 - Kept future sales, warehouse, logistics, invoicing, AI, IoT, cloud and mobile scope explicit while documenting the secured identity and workspace slice.
 - Added a local repository map and a release-notes index.
 
-## [0.5.0] - 2026-07-28
-
 ### Added
 
 - Flyway-managed IAM and tenant-management schemas for PostgreSQL 18.4.
 - RS256 access tokens, HttpOnly refresh-cookie rotation and session-family reuse revocation.
 - Tenant/workspace/membership verification, surface policy and canonical permissions.
 - Secured Catalog read endpoints and local-only OpenAPI for the six approved routes.
+- Organization administration with tenant-scoped workspace and membership operations.
+- Sales-owned client accounts, purchase requests and server-side catalog/price snapshots.
+- Pure SalesOrder domain readiness with no persistence, HTTP or frontend integration.
 
 ### Security
 
 - No browser token storage, public sign-up, user-management or Catalog write endpoint.
 - Catalog reference data remains shared local seed data; tenant-specific pricing and stock are not claimed.
+- Revoked access sessions fail on the next bearer request and refresh-family reuse revokes the family.
+- Authentication throttling is durable, normalized and fingerprinted without exposing sensitive values.
 
 ## [0.4.0] - 2026-07-28
 
@@ -82,8 +85,7 @@ The project uses Semantic Versioning.
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.5.0
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nexa-suite/api/compare/v0.1.0...v0.2.0
