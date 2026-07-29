@@ -1,5 +1,8 @@
 HELP.md
 target/
+.env.local
+.local-keys/
+*.pem
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
