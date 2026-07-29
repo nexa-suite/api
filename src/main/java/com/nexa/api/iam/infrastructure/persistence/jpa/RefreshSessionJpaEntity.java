@@ -24,6 +24,7 @@ public class RefreshSessionJpaEntity {
 	@Column(name = "last_used_at") private Instant lastUsedAt;
 	@Column(name = "expires_at", nullable = false) private Instant expiresAt;
 	@Column(name = "revoked_at") private Instant revokedAt;
+	@Column(name = "family_revoked_at") private Instant familyRevokedAt;
 	@Column(name = "replaced_by_session_id") private UUID replacedBySessionId;
 	@Version @Column(nullable = false) private long version;
 
@@ -39,8 +40,10 @@ public class RefreshSessionJpaEntity {
 	public Instant getLastUsedAt() { return lastUsedAt; }
 	public Instant getExpiresAt() { return expiresAt; }
 	public Instant getRevokedAt() { return revokedAt; }
+	public Instant getFamilyRevokedAt() { return familyRevokedAt; }
 	public UUID getReplacedBySessionId() { return replacedBySessionId; }
 	public void revoke(Instant at) { this.revokedAt = at; }
+	public void revokeFamily(Instant at) { this.revokedAt = at; this.familyRevokedAt = at; }
 	public void rotateTo(UUID replacementId, Instant at) { this.lastUsedAt = at; this.revokedAt = at; this.replacedBySessionId = replacementId; }
 
 	public static RefreshSessionJpaEntity from(com.nexa.api.iam.application.model.SessionRecord record, String tokenHash) {

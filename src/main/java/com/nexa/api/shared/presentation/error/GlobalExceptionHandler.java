@@ -3,6 +3,7 @@ package com.nexa.api.shared.presentation.error;
 import com.nexa.api.iam.application.exception.InvalidCredentialsException;
 import com.nexa.api.iam.application.exception.InvalidRefreshTokenException;
 import com.nexa.api.iam.application.exception.SessionNotFoundException;
+import com.nexa.api.iam.application.exception.AuthenticationThrottledException;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -32,6 +33,13 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(InvalidCredentialsException.class)
 	public ResponseEntity<ProblemDetail> handleInvalidCredentials(InvalidCredentialsException exception, HttpServletRequest request) {
 		return response(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTHENTICATION_FAILED, "Authentication failed", request);
+	}
+
+	@ExceptionHandler(AuthenticationThrottledException.class)
+	public ResponseEntity<ProblemDetail> handleAuthenticationThrottled(AuthenticationThrottledException exception,
+			HttpServletRequest request) {
+		return response(HttpStatus.TOO_MANY_REQUESTS, ApiErrorCode.AUTHENTICATION_THROTTLED,
+				"Authentication temporarily unavailable", request);
 	}
 
 	@ExceptionHandler({InvalidRefreshTokenException.class, SessionNotFoundException.class})

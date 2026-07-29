@@ -74,6 +74,17 @@ public class JpaSessionAdapter implements SessionPort {
 
 	@Override
 	@Transactional(readOnly = true)
+	public Optional<SessionRecord> findBySessionId(SessionId sessionId) {
+		try {
+			return sessions.findById(UUID.fromString(sessionId.value())).flatMap(entity ->
+				toRecord(entity, null, null, entity.getCreatedAt(), entity.getCreatedAt().plus(accessTokenTtl)));
+		} catch (RuntimeException exception) {
+			return Optional.empty();
+		}
+	}
+
+	@Override
+	@Transactional(readOnly = true)
 	public Optional<SessionRecord> findByRefreshToken(String refreshToken) {
 		return sessions.findByTokenHash(sha256(refreshToken)).flatMap(entity -> toRecord(entity, null, refreshToken, null, null));
 	}
@@ -100,8 +111,25 @@ public class JpaSessionAdapter implements SessionPort {
 
 	@Override
 	@Transactional
+	public void revoke(SessionId sessionId, UserAccountId userId, ClientSurface surface, Instant revokedAt) {
+		sessions.findById(UUID.fromString(sessionId.value())).ifPresent(entity -> {
+			if (entity.getUserId().equals(UUID.fromString(userId.value())) && entity.getSurface().equals(surface.name())) {
+				entity.revoke(revokedAt);
+			}
+		});
+	}
+
+	@Override
+	@Transactional
 	public void revokeFamily(RefreshTokenFamilyId familyId, Instant revokedAt) {
-		sessions.findByFamilyId(UUID.fromString(familyId.value())).forEach(entity -> entity.revoke(revokedAt));
+		sessions.findByFamilyId(UUID.fromString(familyId.value())).forEach(entity -> entity.revokeFamily(revokedAt));
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public boolean isFamilyRevoked(RefreshTokenFamilyId familyId) {
+		return sessions.findByFamilyId(UUID.fromString(familyId.value())).stream()
+				.anyMatch(entity -> entity.getFamilyRevokedAt() != null);
 	}
 
 	private Optional<SessionRecord> toRecord(RefreshSessionJpaEntity entity, String accessToken, String refreshToken,

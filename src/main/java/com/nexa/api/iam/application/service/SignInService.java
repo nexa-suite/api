@@ -1,6 +1,7 @@
 package com.nexa.api.iam.application.service;
 
 import com.nexa.api.iam.application.exception.InvalidCredentialsException;
+import com.nexa.api.iam.application.exception.AuthenticationThrottledException;
 import com.nexa.api.iam.application.model.AccessPolicy;
 import com.nexa.api.iam.application.model.AuthenticationResult;
 import com.nexa.api.iam.application.model.AuthenticationSubject;
@@ -14,6 +15,8 @@ import com.nexa.api.iam.application.port.out.AuthenticationTokenPort;
 import com.nexa.api.iam.application.port.out.PasswordVerificationPort;
 import com.nexa.api.iam.application.port.out.SessionPort;
 import com.nexa.api.iam.application.port.out.UserAccountQueryPort;
+import com.nexa.api.iam.application.port.out.AuthenticationThrottlePort;
+import com.nexa.api.iam.application.port.out.NoopAuthenticationThrottle;
 import com.nexa.api.iam.domain.model.session.AuthenticationSession;
 import com.nexa.api.iam.domain.model.session.RefreshTokenFamilyId;
 import com.nexa.api.iam.domain.model.session.SessionId;
@@ -28,30 +31,45 @@ public final class SignInService implements SignInUseCase {
 	private final AccessPolicyPort accessPolicies;
 	private final AuthenticationTokenPort tokenIssuer;
 	private final SessionPort sessions;
+	private final AuthenticationThrottlePort throttle;
 	private final Clock clock;
 
 	public SignInService(UserAccountQueryPort userAccounts, PasswordVerificationPort passwordVerifier,
 			AccessPolicyPort accessPolicies, AuthenticationTokenPort tokenIssuer, SessionPort sessions, Clock clock) {
+		this(userAccounts, passwordVerifier, accessPolicies, tokenIssuer, sessions, new NoopAuthenticationThrottle(), clock);
+	}
+
+	public SignInService(UserAccountQueryPort userAccounts, PasswordVerificationPort passwordVerifier,
+			AccessPolicyPort accessPolicies, AuthenticationTokenPort tokenIssuer, SessionPort sessions,
+			AuthenticationThrottlePort throttle, Clock clock) {
 		this.userAccounts = Objects.requireNonNull(userAccounts, "User account query port is required");
 		this.passwordVerifier = Objects.requireNonNull(passwordVerifier, "Password verification port is required");
 		this.accessPolicies = Objects.requireNonNull(accessPolicies, "Access policy port is required");
 		this.tokenIssuer = Objects.requireNonNull(tokenIssuer, "Authentication token port is required");
 		this.sessions = Objects.requireNonNull(sessions, "Session port is required");
+		this.throttle = Objects.requireNonNull(throttle, "Authentication throttle is required");
 		this.clock = Objects.requireNonNull(clock, "Clock is required");
 	}
 
 	@Override
 	public AuthenticationResult signIn(SignInCommand command) {
 		Objects.requireNonNull(command, "Sign-in command is required");
-		StoredUserAccount stored = userAccounts.findByLogin(command.login()).orElseThrow(InvalidCredentialsException::new);
+		Instant now = clock.instant();
+		if (throttle.isThrottled(command.login(), command.clientFingerprint(), now)) throw new AuthenticationThrottledException();
+		StoredUserAccount stored = userAccounts.findByLogin(command.login()).orElse(null);
+		if (stored == null) {
+			throttle.recordFailure(command.login(), command.clientFingerprint(), now);
+			throw new InvalidCredentialsException();
+		}
 		if (!stored.account().canAuthenticate() || !passwordVerifier.matches(command.password(), stored.passwordHash())) {
+			throttle.recordFailure(command.login(), command.clientFingerprint(), now);
 			throw new InvalidCredentialsException();
 		}
 		AccessPolicy policy = accessPolicies.findFor(stored.account().id(), command.workspaceSlug(), command.surface())
-				.orElseThrow(InvalidCredentialsException::new);
+				.orElseGet(() -> { throttle.recordFailure(command.login(), command.clientFingerprint(), now); throw new InvalidCredentialsException(); });
+		throttle.clear(command.login(), command.clientFingerprint());
 		AuthenticationSubject subject = new AuthenticationSubject(stored.account().id(), stored.account().email(),
 				command.surface(), policy);
-		Instant now = clock.instant();
 		SessionId sessionId = SessionId.random();
 		IssuedAuthenticationTokens tokens = tokenIssuer.issue(subject, now, sessionId);
 		AuthenticationSession session = AuthenticationSession.start(sessionId, stored.account().id(), command.surface(),

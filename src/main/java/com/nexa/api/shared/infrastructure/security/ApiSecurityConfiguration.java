@@ -33,7 +33,14 @@ public class ApiSecurityConfiguration {
 			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter) throws Exception {
 		boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
 		Set<String> allowedOrigins = allowedOrigins(environment);
-		http.csrf(AbstractHttpConfigurer::disable)
+			http.csrf(AbstractHttpConfigurer::disable)
+				.headers(headers -> {
+					headers.contentSecurityPolicy(policy -> policy.policyDirectives("default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"));
+					headers.contentTypeOptions(content -> { });
+					headers.referrerPolicy(referrer -> referrer.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER));
+					headers.permissionsPolicy(permissions -> permissions.policy("camera=(), microphone=(), geolocation=()"));
+					if (!localProfile) headers.httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).preload(true));
+				})
 				.cors(cors -> cors.configurationSource(corsConfigurationSource(environment)))
 				.formLogin(AbstractHttpConfigurer::disable)
 				.httpBasic(AbstractHttpConfigurer::disable)
@@ -89,12 +96,20 @@ public class ApiSecurityConfiguration {
 	@org.springframework.context.annotation.Profile("!test")
 	CurrentAccessContextFilter currentAccessContextFilter(
 			com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase accessContext,
-			AuthenticationEntryPoint authenticationEntryPoint, AccessContextInvalidHandler accessContextInvalidHandler) {
-		return new CurrentAccessContextFilter(accessContext, authenticationEntryPoint, accessContextInvalidHandler);
+			com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase accessSession,
+			AuthenticationEntryPoint authenticationEntryPoint, AccessTokenInvalidEntryPoint accessTokenInvalidEntryPoint,
+			AccessContextInvalidHandler accessContextInvalidHandler) {
+		return new CurrentAccessContextFilter(accessContext, accessSession, authenticationEntryPoint,
+				accessTokenInvalidEntryPoint, accessContextInvalidHandler);
 	}
 
 	@Bean
 	AccessContextInvalidHandler accessContextInvalidHandler(ObjectMapper objectMapper) {
 		return new AccessContextInvalidHandler(objectMapper);
+	}
+
+	@Bean
+	AccessTokenInvalidEntryPoint accessTokenInvalidEntryPoint(ObjectMapper objectMapper) {
+		return new AccessTokenInvalidEntryPoint(objectMapper);
 	}
 }
