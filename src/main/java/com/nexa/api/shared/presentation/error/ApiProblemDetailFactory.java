@@ -51,6 +51,22 @@ public final class ApiProblemDetailFactory {
 			case ORIGIN_NOT_ALLOWED -> "Origin not allowed";
 			case CATALOG_ITEM_NOT_FOUND -> "Catalog item not found";
 			case INVALID_CATALOG_QUERY -> "Invalid catalog query";
+			case ORGANIZATION_NOT_FOUND -> "Organization not found";
+			case WORKSPACE_NOT_FOUND -> "Workspace not found";
+			case MEMBERSHIP_NOT_FOUND -> "Membership not found";
+			case LAST_ACTIVE_OWNER_REQUIRED -> "Last active owner required";
+			case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
+			case CONCURRENCY_CONFLICT -> "Concurrency conflict";
+			case PRECONDITION_REQUIRED -> "Precondition required";
+			case CLIENT_ACCOUNT_NOT_FOUND -> "Client account not found";
+			case CLIENT_ACCOUNT_CODE_CONFLICT -> "Client account code conflict";
+			case CLIENT_ACCOUNT_TAX_ID_CONFLICT -> "Client account tax identifier conflict";
+			case BUYER_MEMBERSHIP_ALREADY_ASSIGNED -> "Buyer membership already assigned";
+			case PURCHASE_REQUEST_NOT_FOUND -> "Purchase request not found";
+			case PURCHASE_REQUEST_TRANSITION_INVALID -> "Purchase request transition invalid";
+			case PURCHASE_REQUEST_LINE_INVALID -> "Purchase request line invalid";
+			case PURCHASE_REQUEST_CLIENT_SCOPE_INVALID -> "Purchase request client scope invalid";
+			case IDEMPOTENCY_KEY_REQUIRED -> "Idempotency key required";
 			case INTERNAL_ERROR -> "Internal server error";
 		};
 	}

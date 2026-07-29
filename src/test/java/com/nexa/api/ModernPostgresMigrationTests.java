@@ -25,9 +25,10 @@ class ModernPostgresMigrationTests {
 				.locations("classpath:db/migration").cleanDisabled(false).load().migrate();
 
 		try (var connection = POSTGRES.createConnection("")) {
-			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management");
+			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management", "sales");
 			assertThat(tables(connection, "iam")).containsExactlyInAnyOrder("user_account", "password_credential", "refresh_session");
 			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership");
+			assertThat(tables(connection, "sales")).containsExactlyInAnyOrder("client_account", "client_account_membership", "purchase_request", "purchase_request_line", "purchase_request_event", "idempotency_record");
 			assertThat(columns(connection, "iam", "refresh_session")).containsExactlyInAnyOrder(
 				"id", "user_id", "membership_id", "surface", "token_hash", "family_id", "created_at", "last_used_at",
 				"expires_at", "revoked_at", "replaced_by_session_id", "version");

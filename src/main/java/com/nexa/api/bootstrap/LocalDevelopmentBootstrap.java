@@ -1,5 +1,6 @@
 package com.nexa.api.bootstrap;
 
+import com.nexa.api.sales.infrastructure.seed.ClientAccountSeedLoader;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
@@ -22,12 +23,14 @@ public class LocalDevelopmentBootstrap {
 	private final BCryptPasswordEncoder encoder;
 	private final org.springframework.core.env.Environment environment;
 	private final Clock clock;
+	private final ClientAccountSeedLoader clientAccountSeedLoader;
 
-	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock) {
+	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock, ClientAccountSeedLoader clientAccountSeedLoader) {
 		this.jdbc = jdbc;
 		this.environment = environment;
 		this.encoder = new BCryptPasswordEncoder(environment.getProperty("nexa.security.bcrypt-strength", Integer.class, 12));
 		this.clock = clock;
+		this.clientAccountSeedLoader = clientAccountSeedLoader;
 	}
 
 	@EventListener(ApplicationReadyEvent.class)
@@ -42,12 +45,31 @@ public class LocalDevelopmentBootstrap {
 				new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", "WAREHOUSE"),
 				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", "LOGISTICS"),
 				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", "BUYER"));
+		UUID buyerUserId = null;
 		for (UserSeed user : users) {
 			UUID userId = user(user, now);
+			if ("BUYER".equals(user.role())) buyerUserId = userId;
 			jdbc.update("insert into tenant_management.workspace_membership "
 					+ "(id, workspace_id, user_id, role, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
 					+ "on conflict (workspace_id, user_id) do update set role = excluded.role, status = 'ACTIVE', updated_at = excluded.updated_at",
 					UUID.randomUUID(), workspaceId, userId, user.role(), timestamp(now), timestamp(now));
+		}
+		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
+	}
+
+	private void seedClientAccounts(UUID tenantId, UUID workspaceId, UUID buyerUserId, Instant now) {
+		if (buyerUserId == null) return;
+		List<UUID> memberships = jdbc.query("select id from tenant_management.workspace_membership where workspace_id=? and user_id=? and role='BUYER' and status='ACTIVE'", (rs, row) -> rs.getObject(1, UUID.class), workspaceId, buyerUserId);
+		if (memberships.isEmpty()) return;
+		UUID membershipId = memberships.get(0);
+		for (var seed : clientAccountSeedLoader.load()) {
+			jdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) on conflict (tenant_id,code) do update set business_name=excluded.business_name,commercial_name=excluded.commercial_name,status=excluded.status,updated_at=excluded.updated_at",
+					UUID.randomUUID(), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
+			List<UUID> accounts = jdbc.query("select id from sales.client_account where tenant_id=? and workspace_id=? and code=?", (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, seed.code());
+			if (accounts.isEmpty() || !seed.portalAccess()) continue;
+			String buyerEmail = environment.getProperty("NEXA_DEV_BUYER_EMAIL", "").trim();
+			if (!seed.contactEmail().equalsIgnoreCase(buyerEmail)) continue;
+			jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing", accounts.get(0), membershipId, tenantId, workspaceId, timestamp(now));
 		}
 	}
 

@@ -26,9 +26,12 @@ class SalesDomainPrimitivesTests {
 		assertThat(PurchaseRequestStatus.values()).containsExactly(
 			PurchaseRequestStatus.DRAFT,
 			PurchaseRequestStatus.SUBMITTED,
+			PurchaseRequestStatus.IN_REVIEW,
+			PurchaseRequestStatus.NEEDS_ADJUSTMENT,
 			PurchaseRequestStatus.APPROVED,
 			PurchaseRequestStatus.REJECTED,
-			PurchaseRequestStatus.CANCELLED);
+			PurchaseRequestStatus.CANCELLED,
+			PurchaseRequestStatus.CONVERTED_TO_ORDER);
 		assertThat(SalesOrderStatus.values()).containsExactly(
 			SalesOrderStatus.DRAFT,
 			SalesOrderStatus.CONFIRMED,
