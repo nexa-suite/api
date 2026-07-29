@@ -25,6 +25,12 @@ import org.springframework.security.access.AccessDeniedException;
 import com.nexa.api.tenantmanagement.domain.model.administration.OrganizationAdministrationInvariantViolation;
 import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
 import com.nexa.api.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
+import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
+import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
+import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
+import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
+import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 
 import java.util.List;
 import java.util.Map;
@@ -71,6 +77,25 @@ public final class GlobalExceptionHandler {
 				? ApiErrorCode.ROLE_TRANSITION_NOT_ALLOWED : ApiErrorCode.LAST_ACTIVE_OWNER_REQUIRED;
 		return response(HttpStatus.CONFLICT, code, "Organization membership policy prevents this change", request);
 	}
+	@ExceptionHandler(AccessPolicyViolation.class)
+	public ResponseEntity<ProblemDetail> handleAccessPolicy(AccessPolicyViolation exception, HttpServletRequest request) {
+		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
+	}
+
+	@ExceptionHandler(SalesResourceNotFoundException.class)
+	public ResponseEntity<ProblemDetail> handleSalesNotFound(SalesResourceNotFoundException exception, HttpServletRequest request) {
+		ApiErrorCode code = "purchase-request".equals(exception.getMessage()) ? ApiErrorCode.PURCHASE_REQUEST_NOT_FOUND : ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
+		return response(HttpStatus.NOT_FOUND, code, "Resource not found", request);
+	}
+
+	@ExceptionHandler(SalesConcurrencyConflictException.class)
+	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request); }
+	@ExceptionHandler(SalesPreconditionRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleSalesPrecondition(SalesPreconditionRequiredException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request); }
+	@ExceptionHandler(IdempotencyKeyRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleIdempotency(IdempotencyKeyRequiredException exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request); }
+	@ExceptionHandler(PurchaseRequestTransitionException.class)
+	public ResponseEntity<ProblemDetail> handleTransition(PurchaseRequestTransitionException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_TRANSITION_INVALID, "Purchase request transition is not allowed", request); }
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	public ResponseEntity<ProblemDetail> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {
