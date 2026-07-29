@@ -17,7 +17,7 @@ public interface SalesPort {
 	int updateClientAccountStatus(String tenantId, String workspaceId, String id, String status, long version);
 	Optional<ClientAccountView> findClientAccountForBuyer(String tenantId, String workspaceId, String membershipId);
 	boolean isAvailableBuyerMembership(String tenantId, String workspaceId, String membershipId);
-	void associateBuyer(String tenantId, String workspaceId, String accountId, String membershipId, UUID associationId, long nowEpochMillis);
+	int associateBuyer(String tenantId, String workspaceId, String accountId, String membershipId, UUID associationId, long nowEpochMillis, long version);
 
 	SalesPage<PurchaseRequestView> listPurchaseRequests(String tenantId, String workspaceId, String buyerAccountId, PurchaseRequestFilter filter);
 	Optional<PurchaseRequestView> findPurchaseRequest(String tenantId, String workspaceId, String buyerAccountId, String id);

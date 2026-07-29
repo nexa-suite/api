@@ -45,7 +45,11 @@ public class JdbcSalesAdapter implements SalesPort {
 	@Override public int updateClientAccountStatus(String tenant, String workspace, String id, String status, long version) { return jdbc.update("update sales.client_account set status=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?", status, tenant, workspace, id, version); }
 	@Override public Optional<ClientAccountView> findClientAccountForBuyer(String tenant, String workspace, String membership) { return jdbc.query(accountSql() + " where a.tenant_id=? and a.workspace_id=? and cam.workspace_membership_id=? and a.status='ACTIVE'", this::optionalAccount, tenant, workspace, membership); }
 	@Override public boolean isAvailableBuyerMembership(String tenant, String workspace, String membership) { Integer count = jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id where w.tenant_id=? and m.workspace_id=? and m.id=? and m.role='BUYER' and m.status='ACTIVE'", Integer.class, tenant, workspace, membership); return count != null && count == 1; }
-	@Override public void associateBuyer(String tenant, String workspace, String account, String membership, UUID associationId, long epoch) { jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?)", account, membership, tenant, workspace, timestamp(epoch)); }
+	@Override public int associateBuyer(String tenant, String workspace, String account, String membership, UUID associationId, long epoch, long version) {
+		int inserted = jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?)", account, membership, tenant, workspace, timestamp(epoch));
+		if (inserted != 1) return 0;
+		return jdbc.update("update sales.client_account set updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?", tenant, workspace, account, version);
+	}
 
 	@Override public SalesPage<PurchaseRequestView> listPurchaseRequests(String tenant, String workspace, String buyerAccount, PurchaseRequestFilter filter) {
 		String where = " where r.tenant_id=? and r.workspace_id=?"; List<Object> args = new ArrayList<>(List.of(tenant, workspace));

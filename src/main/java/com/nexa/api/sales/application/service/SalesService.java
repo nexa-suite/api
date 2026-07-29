@@ -54,8 +54,9 @@ public class SalesService implements SalesUseCase {
 	public ClientAccountView associateBuyer(CurrentAccessContext context, String id, String membershipId, long version) {
 		internal(context, Permission.SALES_WRITE);
 		ClientAccountView account = clientAccount(context, id);
+		if (account.version() != version) throw new SalesConcurrencyConflictException();
 		if (!port.isAvailableBuyerMembership(context.tenantId().toString(), context.workspaceId().toString(), membershipId)) throw new SalesResourceNotFoundException("buyer-membership");
-		port.associateBuyer(context.tenantId().toString(), context.workspaceId().toString(), account.id(), membershipId, UUID.randomUUID(), now());
+		if (port.associateBuyer(context.tenantId().toString(), context.workspaceId().toString(), account.id(), membershipId, UUID.randomUUID(), now(), version) == 0) throw new SalesConcurrencyConflictException();
 		return clientAccount(context, id);
 	}
 
