@@ -3,6 +3,19 @@ spring:
     name: nexa-api
   autoconfigure:
     exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+  datasource:
+    url: ${NEXA_DATABASE_URL:jdbc:postgresql://localhost:5432/nexa}
+    username: ${NEXA_DATABASE_USERNAME:nexa}
+    password: ${NEXA_DATABASE_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${NEXA_DATABASE_POOL_MAX:10}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: ${NEXA_FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
 
 server:
   port: ${SERVER_PORT:8080}
@@ -16,6 +29,12 @@ management:
     health:
       probes:
         enabled: true
+      show-details: when_authorized
+  health:
+    db:
+      enabled: true
+    diskspace:
+      enabled: true
 
 info:
   application:
