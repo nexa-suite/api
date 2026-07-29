@@ -12,12 +12,14 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -29,11 +31,13 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 
 	private final ResolveCurrentAccessContextUseCase accessContext;
 	private final AuthenticationEntryPoint authenticationEntryPoint;
+	private final AccessDeniedHandler accessDeniedHandler;
 
 	CurrentAccessContextFilter(ResolveCurrentAccessContextUseCase accessContext,
-			AuthenticationEntryPoint authenticationEntryPoint) {
+			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) {
 		this.accessContext = Objects.requireNonNull(accessContext, "Access context use case is required");
 		this.authenticationEntryPoint = Objects.requireNonNull(authenticationEntryPoint, "Authentication entry point is required");
+		this.accessDeniedHandler = Objects.requireNonNull(accessDeniedHandler, "Access denied handler is required");
 	}
 
 	@Override
@@ -45,27 +49,41 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 			return;
 		}
 
+		Jwt jwt = jwtAuthentication.getToken();
+		Surface surface;
+		UserId userId;
+		TenantId tenantId;
+		WorkspaceId workspaceId;
 		try {
-			Jwt jwt = jwtAuthentication.getToken();
-			Surface surface = Surface.valueOf(requiredClaim(jwt, "surface").toUpperCase(java.util.Locale.ROOT));
-			CurrentAccessContext resolved = accessContext.resolve(new CurrentAccessRequest(
-					new UserId(jwt.getSubject()),
-					new TenantId(requiredClaim(jwt, "tenant_id")),
-					new WorkspaceId(requiredClaim(jwt, "workspace_id")),
-					surface));
-			var authorities = resolved.permissions().stream()
-					.map(permission -> new SimpleGrantedAuthority(permission.code()))
-					.toList();
-			var verifiedAuthentication = new JwtAuthenticationToken(jwt, authorities, jwtAuthentication.getName());
-			verifiedAuthentication.setDetails(jwtAuthentication.getDetails());
-			SecurityContextHolder.getContext().setAuthentication(verifiedAuthentication);
-			request.setAttribute(ACCESS_CONTEXT_ATTRIBUTE, resolved);
-			filterChain.doFilter(request, response);
+			surface = Surface.valueOf(requiredClaim(jwt, "surface").toUpperCase(java.util.Locale.ROOT));
+			userId = new UserId(jwt.getSubject());
+			tenantId = new TenantId(requiredClaim(jwt, "tenant_id"));
+			workspaceId = new WorkspaceId(requiredClaim(jwt, "workspace_id"));
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			authenticationEntryPoint.commence(request, response,
-					new BadCredentialsException("The active workspace membership is invalid", exception));
+				new BadCredentialsException("The access token claims are invalid", exception));
+			return;
 		}
+
+		CurrentAccessContext resolved;
+		try {
+			resolved = accessContext.resolve(new CurrentAccessRequest(userId, tenantId, workspaceId, surface));
+		} catch (RuntimeException exception) {
+			SecurityContextHolder.clearContext();
+			accessDeniedHandler.handle(request, response,
+				new AccessDeniedException("The active workspace membership is invalid", exception));
+			return;
+		}
+
+		var authorities = resolved.permissions().stream()
+					.map(permission -> new SimpleGrantedAuthority(permission.code()))
+					.toList();
+		var verifiedAuthentication = new JwtAuthenticationToken(jwt, authorities, jwtAuthentication.getName());
+		verifiedAuthentication.setDetails(jwtAuthentication.getDetails());
+		SecurityContextHolder.getContext().setAuthentication(verifiedAuthentication);
+		request.setAttribute(ACCESS_CONTEXT_ATTRIBUTE, resolved);
+		filterChain.doFilter(request, response);
 	}
 
 	private static String requiredClaim(Jwt jwt, String name) {
