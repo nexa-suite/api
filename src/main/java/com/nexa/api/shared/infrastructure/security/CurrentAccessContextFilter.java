@@ -3,6 +3,8 @@ package com.nexa.api.shared.infrastructure.security;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase;
+import com.nexa.api.iam.domain.model.session.SessionId;
 import com.nexa.api.tenantmanagement.domain.model.access.Surface;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
 import com.nexa.api.tenantmanagement.domain.model.identity.UserId;
@@ -30,13 +32,18 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 	static final String ACCESS_CONTEXT_ATTRIBUTE = CurrentAccessContext.class.getName();
 
 	private final ResolveCurrentAccessContextUseCase accessContext;
+	private final ValidateAccessSessionUseCase accessSession;
 	private final AuthenticationEntryPoint authenticationEntryPoint;
+	private final AuthenticationEntryPoint accessTokenInvalidEntryPoint;
 	private final AccessDeniedHandler accessDeniedHandler;
 
 	CurrentAccessContextFilter(ResolveCurrentAccessContextUseCase accessContext,
-			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) {
+			ValidateAccessSessionUseCase accessSession, AuthenticationEntryPoint authenticationEntryPoint,
+			AuthenticationEntryPoint accessTokenInvalidEntryPoint, AccessDeniedHandler accessDeniedHandler) {
 		this.accessContext = Objects.requireNonNull(accessContext, "Access context use case is required");
+		this.accessSession = Objects.requireNonNull(accessSession, "Access session use case is required");
 		this.authenticationEntryPoint = Objects.requireNonNull(authenticationEntryPoint, "Authentication entry point is required");
+		this.accessTokenInvalidEntryPoint = Objects.requireNonNull(accessTokenInvalidEntryPoint, "Access token entry point is required");
 		this.accessDeniedHandler = Objects.requireNonNull(accessDeniedHandler, "Access denied handler is required");
 	}
 
@@ -56,6 +63,7 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		WorkspaceId workspaceId;
 		String membershipIdClaim;
 		String roleClaim;
+		String sessionIdClaim;
 		try {
 			surface = Surface.valueOf(requiredClaim(jwt, "surface").toUpperCase(java.util.Locale.ROOT));
 			userId = new UserId(jwt.getSubject());
@@ -63,10 +71,21 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 			workspaceId = new WorkspaceId(requiredClaim(jwt, "workspace_id"));
 			membershipIdClaim = requiredClaim(jwt, "membership_id");
 			roleClaim = requiredClaim(jwt, "role");
+			sessionIdClaim = requiredClaim(jwt, "sid");
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			authenticationEntryPoint.commence(request, response,
 				new BadCredentialsException("The access token claims are invalid", exception));
+			return;
+		}
+
+		try {
+			accessSession.validate(new SessionId(sessionIdClaim), new com.nexa.api.iam.domain.model.useraccount.UserAccountId(jwt.getSubject()),
+					com.nexa.api.iam.domain.model.access.ClientSurface.valueOf(surface.name()));
+		} catch (RuntimeException exception) {
+			SecurityContextHolder.clearContext();
+			accessTokenInvalidEntryPoint.commence(request, response,
+					new BadCredentialsException("The access token session is invalid", exception));
 			return;
 		}
 

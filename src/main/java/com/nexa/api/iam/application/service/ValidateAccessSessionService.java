@@ -1,0 +1,34 @@
+package com.nexa.api.iam.application.service;
+
+import com.nexa.api.iam.application.exception.SessionNotFoundException;
+import com.nexa.api.iam.application.model.ValidatedAccessSession;
+import com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase;
+import com.nexa.api.iam.application.port.out.SessionPort;
+import com.nexa.api.iam.domain.model.access.ClientSurface;
+import com.nexa.api.iam.domain.model.session.SessionId;
+import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
+
+import java.time.Clock;
+import java.util.Objects;
+
+public final class ValidateAccessSessionService implements ValidateAccessSessionUseCase {
+	private final SessionPort sessions;
+	private final Clock clock;
+
+	public ValidateAccessSessionService(SessionPort sessions, Clock clock) {
+		this.sessions = Objects.requireNonNull(sessions, "Session port is required");
+		this.clock = Objects.requireNonNull(clock, "Clock is required");
+	}
+
+	@Override
+	public ValidatedAccessSession validate(SessionId sessionId, UserAccountId userId, ClientSurface surface) {
+		var record = sessions.findBySessionId(Objects.requireNonNull(sessionId, "Session id is required"))
+				.orElseThrow(SessionNotFoundException::new);
+		if (!record.session().userAccountId().equals(userId) || record.session().surface() != surface
+				|| !record.session().isActive(clock.instant())
+				|| sessions.isFamilyRevoked(record.session().refreshTokenFamilyId())) {
+			throw new SessionNotFoundException();
+		}
+		return new ValidatedAccessSession(record.session(), userId, surface);
+	}
+}

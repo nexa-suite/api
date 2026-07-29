@@ -9,3 +9,5 @@ spring:
 nexa:
   security:
     allow-ephemeral-keys: true
+    issuer: http://test.local
+    audience: nexa-test

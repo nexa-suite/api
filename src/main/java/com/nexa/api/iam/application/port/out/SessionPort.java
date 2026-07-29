@@ -7,6 +7,8 @@ import com.nexa.api.iam.application.model.SessionRecord;
 import com.nexa.api.iam.domain.model.session.AuthenticationSession;
 import com.nexa.api.iam.domain.model.session.RefreshTokenFamilyId;
 import com.nexa.api.iam.domain.model.session.SessionId;
+import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.iam.domain.model.access.ClientSurface;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -15,6 +17,8 @@ public interface SessionPort {
 	SessionRecord start(AuthenticationSession session, AuthenticationSubject subject, IssuedAuthenticationTokens tokens);
 
 	Optional<SessionRecord> findByAccessToken(String accessToken);
+
+	default Optional<SessionRecord> findBySessionId(SessionId sessionId) { return Optional.empty(); }
 
 	Optional<SessionRecord> findByRefreshToken(String refreshToken);
 
@@ -28,5 +32,11 @@ public interface SessionPort {
 
 	void revoke(SessionId sessionId, Instant revokedAt);
 
+	default void revoke(SessionId sessionId, UserAccountId userId, ClientSurface surface, Instant revokedAt) {
+		revoke(sessionId, revokedAt);
+	}
+
 	void revokeFamily(RefreshTokenFamilyId familyId, Instant revokedAt);
+
+	default boolean isFamilyRevoked(RefreshTokenFamilyId familyId) { return false; }
 }

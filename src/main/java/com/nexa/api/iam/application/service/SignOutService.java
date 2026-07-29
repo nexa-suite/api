@@ -19,6 +19,12 @@ public final class SignOutService implements SignOutUseCase {
 	@Override
 	public void signOut(SignOutCommand command) {
 		Objects.requireNonNull(command, "Sign-out command is required");
-		sessions.findByAccessToken(command.accessToken()).ifPresent(record -> sessions.revoke(record.session().id(), clock.instant()));
+		if (command.hasVerifiedIdentity()) {
+			sessions.revoke(command.sessionId(), command.userId(), command.surface(), clock.instant());
+			return;
+		}
+		// Compatibility path for existing application-level callers. HTTP presentation uses verified JWT identity.
+		sessions.findByAccessToken(command.accessToken()).ifPresent(record ->
+			sessions.revoke(record.session().id(), record.subject().userAccountId(), record.subject().surface(), clock.instant()));
 	}
 }

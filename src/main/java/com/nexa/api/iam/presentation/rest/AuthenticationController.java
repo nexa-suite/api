@@ -13,6 +13,8 @@ import com.nexa.api.iam.application.port.in.RefreshSessionUseCase;
 import com.nexa.api.iam.application.port.in.SignInUseCase;
 import com.nexa.api.iam.application.port.in.SignOutUseCase;
 import com.nexa.api.iam.domain.model.access.ClientSurface;
+import com.nexa.api.iam.domain.model.session.SessionId;
+import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -40,10 +42,15 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import java.time.Duration;
 import java.time.Clock;
 import java.util.Locale;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -77,9 +84,10 @@ public class AuthenticationController {
 			@ApiResponse(responseCode = "400", description = "Invalid request", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
 			@ApiResponse(responseCode = "401", description = "Authentication failed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
-	public AuthenticationResponse signIn(@Valid @RequestBody SignInRequest request, HttpServletResponse response) {
+	public AuthenticationResponse signIn(@Valid @RequestBody SignInRequest request, HttpServletRequest httpRequest,
+			HttpServletResponse response) {
 		AuthenticationResult result = signIn.signIn(new SignInCommand(new LoginIdentifier(request.identifier()), request.password(),
-				request.workspaceSlug(), request.surface()));
+				request.workspaceSlug(), request.surface(), clientFingerprint(httpRequest)));
 		writeRefreshCookie(response, result.surface(), result.refreshToken(), result.refreshTokenExpiresAt());
 		return AuthenticationResponse.from(result);
 	}
@@ -106,10 +114,16 @@ public class AuthenticationController {
 	@Operation(summary = "Revoke the current session")
 	@ApiResponses({@ApiResponse(responseCode = "204", description = "Session revoked and cookie cleared"),
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
-	public ResponseEntity<Void> signOut(@RequestHeader(name = "Authorization", required = false) String authorization,
+	public ResponseEntity<Void> signOut(Authentication authentication,
 			@RequestHeader(name = "X-Nexa-Surface", required = false) String surface, HttpServletResponse response) {
-		if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
-			signOut.signOut(new SignOutCommand(authorization.substring(7)));
+		if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {
+			var jwt = jwtAuthentication.getToken();
+			try {
+				signOut.signOut(new SignOutCommand(new SessionId(required(jwt.getClaimAsString("sid"))),
+						new UserAccountId(required(jwt.getSubject())), parseSurface(required(jwt.getClaimAsString("surface")))));
+			} catch (RuntimeException ignored) {
+				// Sign-out remains idempotent; cookie is still cleared.
+			}
 		}
 		if (surface != null && !surface.isBlank()) clearRefreshCookie(response, parseSurface(surface));
 		return ResponseEntity.noContent().build();
@@ -144,6 +158,21 @@ public class AuthenticationController {
 	private static ClientSurface parseSurface(String value) {
 		try { return ClientSurface.valueOf(value.trim().toUpperCase(Locale.ROOT)); }
 		catch (RuntimeException exception) { throw new IllegalArgumentException("Surface is invalid"); }
+	}
+
+	private static String required(String value) {
+		if (value == null || value.isBlank()) throw new IllegalArgumentException("Verified claim is required");
+		return value;
+	}
+
+	private static String clientFingerprint(HttpServletRequest request) {
+		String material = request.getRemoteAddr() + "|" + request.getHeader("User-Agent");
+		try {
+			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+					.digest(material.getBytes(StandardCharsets.UTF_8)));
+		} catch (Exception exception) {
+			return "unknown";
+		}
 	}
 
 	public record SignInRequest(@NotBlank String identifier, @NotBlank String password, @NotBlank String workspaceSlug,
