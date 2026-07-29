@@ -37,6 +37,10 @@ public final class RefreshSessionService implements RefreshSessionUseCase {
 		Objects.requireNonNull(command, "Refresh command is required");
 		SessionRecord current = sessions.findByRefreshToken(command.refreshToken()).orElseThrow(InvalidRefreshTokenException::new);
 		Instant now = clock.instant();
+		if (current.session().revokedAt() != null) {
+			sessions.revokeFamily(current.session().refreshTokenFamilyId(), now);
+			throw new RefreshTokenReuseDetectedException();
+		}
 		if (!current.session().isActive(now)) throw new InvalidRefreshTokenException();
 		if (command.surface() != null && command.surface() != current.subject().surface()) throw new InvalidRefreshTokenException();
 		AccessPolicy policy = accessPolicies.findFor(current.subject().userAccountId(), current.subject().policy().workspaceSlug(), current.subject().surface())
