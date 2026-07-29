@@ -5,6 +5,28 @@ The project uses Semantic Versioning.
 
 ## [Unreleased]
 
+### Documentation
+
+- Aligned the README, suite map and runtime diagram with the tagged `v0.3.0` API foundation.
+- Made non-implemented persistence, identity, tenant, AI, IoT, cloud and mobile scope explicit.
+- Added a local repository map and a release-notes index.
+
+## [0.4.0] - 2026-07-28
+
+### Added
+
+- Catalog query Application ports, immutable models, seed adapter and explicit projections.
+- `GET /api/v1/catalog-items` with bounded search, filters, pagination and sorting.
+- `GET /api/v1/catalog-items/{catalogItemId}` for active catalog detail.
+- Explicit REST DTOs, Problem Details, local OpenAPI and deny-by-default security handlers.
+- Modern Docker image and canonical dual-runtime Compose profiles.
+- ADRs for the query contract, security boundary and seed-only runtime.
+
+### Security
+
+- Anonymous catalog access returns `401`; authenticated access without an approved rule returns `403`.
+- Health/info remain public; local OpenAPI is profile-gated.
+
 ## [0.3.0] - 2026-07-28
 
 ### Added
@@ -47,7 +69,8 @@ The project uses Semantic Versioning.
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nexa-suite/api/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nexa-suite/api/releases/tag/v0.1.0
