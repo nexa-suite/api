@@ -1,0 +1,126 @@
+name: nexa-modern
+
+services:
+  modern-postgres:
+    image: postgres:18.4-alpine
+    container_name: nexa-modern-postgres
+    environment:
+      POSTGRES_DB: ${NEXA_MODERN_POSTGRES_DB:?Set NEXA_MODERN_POSTGRES_DB in api/.env.local}
+      POSTGRES_USER: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in api/.env.local}
+      POSTGRES_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
+    volumes:
+      - nexa-modern-postgres-data:/var/lib/postgresql/data
+    networks:
+      - modern-data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 20
+
+  modern-api:
+    build:
+      context: ../../../api
+      dockerfile: Dockerfile
+    image: nexa/modern-api:local
+    container_name: nexa-modern-api
+    environment:
+      SPRING_PROFILES_ACTIVE: ${NEXA_MODERN_SPRING_PROFILE:-local}
+      SERVER_PORT: "8080"
+      NEXA_DATABASE_URL: jdbc:postgresql://modern-postgres:5432/${NEXA_MODERN_POSTGRES_DB:?Set NEXA_MODERN_POSTGRES_DB in api/.env.local}
+      NEXA_DATABASE_USERNAME: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in api/.env.local}
+      NEXA_DATABASE_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
+      NEXA_FLYWAY_ENABLED: "true"
+      NEXA_SECURITY_ISSUER: ${NEXA_SECURITY_ISSUER:-http://localhost:8080}
+      NEXA_SECURITY_AUDIENCE: ${NEXA_SECURITY_AUDIENCE:-nexa-local}
+      NEXA_ACCESS_TOKEN_TTL: ${NEXA_ACCESS_TOKEN_TTL:-PT15M}
+      NEXA_REFRESH_TOKEN_TTL: ${NEXA_REFRESH_TOKEN_TTL:-P30D}
+      NEXA_BCRYPT_STRENGTH: ${NEXA_BCRYPT_STRENGTH:-12}
+      NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300}
+      NEXA_SECURITY_RSA_PUBLIC_KEY: /run/secrets/nexa_access_token_public
+      NEXA_SECURITY_RSA_PRIVATE_KEY: /run/secrets/nexa_access_token_private
+      NEXA_DEV_BOOTSTRAP_ENABLED: ${NEXA_DEV_BOOTSTRAP_ENABLED:-false}
+      NEXA_DEV_TENANT_NAME: ${NEXA_DEV_TENANT_NAME:-}
+      NEXA_DEV_TENANT_SLUG: ${NEXA_DEV_TENANT_SLUG:-}
+      NEXA_DEV_WORKSPACE_NAME: ${NEXA_DEV_WORKSPACE_NAME:-}
+      NEXA_DEV_WORKSPACE_SLUG: ${NEXA_DEV_WORKSPACE_SLUG:-}
+      NEXA_DEV_OWNER_EMAIL: ${NEXA_DEV_OWNER_EMAIL:-}
+      NEXA_DEV_OWNER_PASSWORD: ${NEXA_DEV_OWNER_PASSWORD:-}
+      NEXA_DEV_SALES_EMAIL: ${NEXA_DEV_SALES_EMAIL:-}
+      NEXA_DEV_SALES_PASSWORD: ${NEXA_DEV_SALES_PASSWORD:-}
+      NEXA_DEV_WAREHOUSE_EMAIL: ${NEXA_DEV_WAREHOUSE_EMAIL:-}
+      NEXA_DEV_WAREHOUSE_PASSWORD: ${NEXA_DEV_WAREHOUSE_PASSWORD:-}
+      NEXA_DEV_LOGISTICS_EMAIL: ${NEXA_DEV_LOGISTICS_EMAIL:-}
+      NEXA_DEV_LOGISTICS_PASSWORD: ${NEXA_DEV_LOGISTICS_PASSWORD:-}
+      NEXA_DEV_BUYER_EMAIL: ${NEXA_DEV_BUYER_EMAIL:-}
+      NEXA_DEV_BUYER_PASSWORD: ${NEXA_DEV_BUYER_PASSWORD:-}
+    volumes:
+      - ../../.local-keys/access-token-public.pem:/run/secrets/nexa_access_token_public:ro
+      - ../../.local-keys/access-token-private.pem:/run/secrets/nexa_access_token_private:ro
+    depends_on:
+      modern-postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      modern-edge:
+        aliases: [api]
+      modern-data:
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+
+  modern-platform:
+    build:
+      context: ../../../platform
+      dockerfile: Dockerfile
+    image: nexa/modern-platform:local
+    container_name: nexa-modern-platform
+    depends_on:
+      modern-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4200:80"
+    networks:
+      - modern-edge
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 12
+
+  modern-portal:
+    build:
+      context: ../../../portal
+      dockerfile: Dockerfile
+    image: nexa/modern-portal:local
+    container_name: nexa-modern-portal
+    depends_on:
+      modern-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4300:80"
+    networks:
+      - modern-edge
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 12
+
+networks:
+  modern-edge:
+    name: nexa-modern-edge
+  modern-data:
+    name: nexa-modern-data
+    internal: true
+
+volumes:
+  nexa-modern-postgres-data:
+    name: nexa-modern-postgres-data

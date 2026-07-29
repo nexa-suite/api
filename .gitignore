@@ -3,6 +3,9 @@ target/
 .env.local
 .local-keys/
 *.pem
+.DS_Store
+._*
+__MACOSX/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

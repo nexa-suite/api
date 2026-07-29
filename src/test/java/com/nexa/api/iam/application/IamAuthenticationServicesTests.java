@@ -93,6 +93,8 @@ class IamAuthenticationServicesTests {
 		assertThatThrownBy(() -> refresh.refresh(new RefreshSessionCommand(first.refreshToken())))
 				.isInstanceOf(RefreshTokenReuseDetectedException.class);
 		assertThat(fixture.sessions.revokedFamilies).containsExactly(firstFamily(fixture));
+		assertThatThrownBy(() -> refresh.refresh(new RefreshSessionCommand(rotated.refreshToken())))
+				.isInstanceOf(RefreshTokenReuseDetectedException.class);
 	}
 
 	@Test

@@ -12,4 +12,4 @@ if [ ! -f "$env_file" ]; then
   exit 1
 fi
 
-exec docker compose --env-file "$env_file" -f "$compose_file" up --build -d
+exec docker compose --env-file "$env_file" -f "$compose_file" down
