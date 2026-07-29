@@ -5,6 +5,7 @@ import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 public interface SalesUseCase {
 	SalesPage<ClientAccountView> clientAccounts(CurrentAccessContext context, String search, String status, int page, int size);
@@ -16,11 +17,12 @@ public interface SalesUseCase {
 	SalesPage<PurchaseRequestView> purchaseRequests(CurrentAccessContext context, PurchaseRequestFilter filter);
 	PurchaseRequestView purchaseRequest(CurrentAccessContext context, String id);
 	PurchaseRequestView createPurchaseRequest(CurrentAccessContext context, String clientAccountId, String priority,
-			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment);
+			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment, List<RequestedLine> lines);
 	PurchaseRequestView updatePurchaseRequest(CurrentAccessContext context, String id, String priority, LocalDate deliveryDate,
 			String deliveryProfile, String paymentOption, String comment, long version);
 	PurchaseRequestView addLine(CurrentAccessContext context, String id, String catalogItemId, BigDecimal quantity, String unit, String notes, long version);
 	PurchaseRequestView updateLine(CurrentAccessContext context, String id, String lineId, BigDecimal quantity, String notes, long version);
 	PurchaseRequestView deleteLine(CurrentAccessContext context, String id, String lineId, long version);
 	PurchaseRequestView transition(CurrentAccessContext context, String id, String action, String reviewNote, long version, String idempotencyKey);
+	record RequestedLine(String catalogItemId, BigDecimal quantity, String unit, String notes) { }
 }

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @Profile("!test")
@@ -39,7 +40,7 @@ public class SalesController {
 	@GetMapping("/api/v1/purchase-requests/{id}")
 	public ResponseEntity<PurchaseRequestView> request(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) { var value=sales.purchaseRequest(context,id); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
 	@PostMapping("/api/v1/purchase-requests")
-	public ResponseEntity<PurchaseRequestView> createRequest(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @RequestBody RequestDraft body) { var value=sales.createPurchaseRequest(context,body.clientAccountId(),body.priority(),body.requestedDeliveryDate(),body.deliveryProfileSnapshot(),body.paymentOption(),body.comment()); return ResponseEntity.status(201).eTag(etag(value.version())).body(value); }
+	public ResponseEntity<PurchaseRequestView> createRequest(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @RequestBody RequestDraft body) { var lines=body.lines()==null?List.<com.nexa.api.sales.application.port.in.SalesUseCase.RequestedLine>of():body.lines().stream().map(line->new com.nexa.api.sales.application.port.in.SalesUseCase.RequestedLine(line.catalogItemId(),line.quantity(),line.unit(),line.notes())).toList(); var value=sales.createPurchaseRequest(context,body.clientAccountId(),body.priority(),body.requestedDeliveryDate(),body.deliveryProfileSnapshot(),body.paymentOption(),body.comment(),lines); return ResponseEntity.status(201).eTag(etag(value.version())).body(value); }
 	@PatchMapping("/api/v1/purchase-requests/{id}")
 	public ResponseEntity<PurchaseRequestView> updateRequest(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id, @RequestHeader(name="If-Match",required=false) String ifMatch, @RequestBody RequestPatch body) { var value=sales.updatePurchaseRequest(context,id,body.priority(),body.requestedDeliveryDate(),body.deliveryProfileSnapshot(),body.paymentOption(),body.comment(),version(ifMatch)); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
 	@PostMapping("/api/v1/purchase-requests/{id}/lines")
@@ -60,7 +61,7 @@ public class SalesController {
 	private static long version(String value){if(value==null||value.isBlank())throw new com.nexa.api.sales.application.exception.SalesPreconditionRequiredException();try{return Long.parseLong(value.replace("\"","").trim());}catch(NumberFormatException e){throw new com.nexa.api.sales.application.exception.SalesPreconditionRequiredException();}}
 	private static String etag(long v){return "\""+v+"\"";}
 	public record BuyerMembership(String membershipId){}
-	public record RequestDraft(String clientAccountId,String priority,LocalDate requestedDeliveryDate,String deliveryProfileSnapshot,String paymentOption,String comment){}
+	public record RequestDraft(String clientAccountId,String priority,LocalDate requestedDeliveryDate,String deliveryProfileSnapshot,String paymentOption,String comment,List<LineCommand> lines){}
 	public record RequestPatch(String priority,LocalDate requestedDeliveryDate,String deliveryProfileSnapshot,String paymentOption,String comment){}
 	public record LineCommand(String catalogItemId,BigDecimal quantity,String unit,String notes){}
 	public record LinePatch(BigDecimal quantity,String notes){}

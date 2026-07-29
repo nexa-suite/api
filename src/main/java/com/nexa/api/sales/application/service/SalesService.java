@@ -69,15 +69,23 @@ public class SalesService implements SalesUseCase {
 	}
 	@Override @Transactional
 	public PurchaseRequestView createPurchaseRequest(CurrentAccessContext context, String clientAccountId, String priority,
-			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment) {
+			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment, java.util.List<com.nexa.api.sales.application.port.in.SalesUseCase.RequestedLine> requestedLines) {
 		String buyerAccount = buyerAccount(context);
 		String effectiveAccount = buyerAccount != null ? buyerAccount : requiredClientAccount(context, clientAccountId);
 		if (buyerAccount != null && clientAccountId != null && !clientAccountId.isBlank() && !buyerAccount.equals(clientAccountId)) throw new SalesResourceNotFoundException("client-account");
 		UUID id = UUID.randomUUID();
 		String code = "PR-" + id.toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+		java.util.List<PurchaseRequestLineView> snapshots = new java.util.ArrayList<>();
+		for (var requested : requestedLines == null ? java.util.List.<com.nexa.api.sales.application.port.in.SalesUseCase.RequestedLine>of() : requestedLines) {
+			var snapshot = port.findActiveCatalogItem(requested.catalogItemId()).orElseThrow(() -> new SalesResourceNotFoundException("catalog-item"));
+			if (requested.quantity() == null || requested.quantity().signum() <= 0) throw new IllegalArgumentException("Quantity must be greater than zero");
+			snapshots.add(new PurchaseRequestLineView(UUID.randomUUID().toString(), snapshot.catalogItemId(), snapshot.itemName(), snapshot.presentation(), requested.quantity(), requested.unit() == null ? "unit" : requested.unit(), snapshot.price().amount(), snapshot.price().currency(), requested.notes(), 0));
+		}
+		if (snapshots.isEmpty()) throw new IllegalArgumentException("Purchase request requires a line");
 		PurchaseRequestView draft = new PurchaseRequestView(id.toString(), code, effectiveAccount, context.membershipId().toString(),
-				"DRAFT", priority == null ? "NORMAL" : priority, deliveryDate, deliveryProfile, paymentOption, comment, null, java.util.List.of(), 0);
+				"DRAFT", priority == null ? "NORMAL" : priority, deliveryDate, deliveryProfile, paymentOption, comment, null, snapshots, 0);
 		port.insertPurchaseRequest(draft, context.tenantId().toString(), context.workspaceId().toString(), id, now());
+		for (var line : snapshots) port.insertLine(id.toString(), line, UUID.fromString(line.id()), now());
 		return purchaseRequest(context, id.toString());
 	}
 	@Override @Transactional
