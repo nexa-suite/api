@@ -21,6 +21,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.security.access.AccessDeniedException;
+import com.nexa.api.tenantmanagement.domain.model.administration.OrganizationAdministrationInvariantViolation;
+import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
+import com.nexa.api.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
 
 import java.util.List;
 import java.util.Map;
@@ -42,6 +45,23 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(AccessDeniedException.class)
 	public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
+	}
+
+	@ExceptionHandler(PreconditionRequiredException.class)
+	public ResponseEntity<ProblemDetail> handlePrecondition(PreconditionRequiredException exception, HttpServletRequest request) {
+		return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
+	}
+
+	@ExceptionHandler(ConcurrencyConflictException.class)
+	public ResponseEntity<ProblemDetail> handleConcurrency(ConcurrencyConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request);
+	}
+
+	@ExceptionHandler(OrganizationAdministrationInvariantViolation.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationInvariant(OrganizationAdministrationInvariantViolation exception, HttpServletRequest request) {
+		ApiErrorCode code = exception.getMessage() != null && exception.getMessage().contains("Cross-surface")
+				? ApiErrorCode.ROLE_TRANSITION_NOT_ALLOWED : ApiErrorCode.LAST_ACTIVE_OWNER_REQUIRED;
+		return response(HttpStatus.CONFLICT, code, "Organization membership policy prevents this change", request);
 	}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)

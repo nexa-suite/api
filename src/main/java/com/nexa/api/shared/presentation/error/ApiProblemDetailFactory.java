@@ -51,6 +51,10 @@ public final class ApiProblemDetailFactory {
 			case ORIGIN_NOT_ALLOWED -> "Origin not allowed";
 			case CATALOG_ITEM_NOT_FOUND -> "Catalog item not found";
 			case INVALID_CATALOG_QUERY -> "Invalid catalog query";
+			case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
+			case LAST_ACTIVE_OWNER_REQUIRED -> "Last active owner required";
+			case CONCURRENCY_CONFLICT -> "Concurrency conflict";
+			case PRECONDITION_REQUIRED -> "Precondition required";
 			case INTERNAL_ERROR -> "Internal server error";
 		};
 	}
