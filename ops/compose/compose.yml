@@ -34,8 +34,8 @@ services:
       NEXA_DATABASE_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in .env.local}
       NEXA_FLYWAY_ENABLED: "true"
       NEXA_DEV_BOOTSTRAP_ENABLED: ${NEXA_DEV_BOOTSTRAP_ENABLED:-false}
-      NEXA_SECURITY_RSA_PUBLIC_KEY: ${NEXA_SECURITY_RSA_PUBLIC_KEY:-/run/secrets/nexa_access_token_public}
-      NEXA_SECURITY_RSA_PRIVATE_KEY: ${NEXA_SECURITY_RSA_PRIVATE_KEY:-/run/secrets/nexa_access_token_private}
+      NEXA_SECURITY_RSA_PUBLIC_KEY: /run/secrets/nexa_access_token_public
+      NEXA_SECURITY_RSA_PRIVATE_KEY: /run/secrets/nexa_access_token_private
     volumes:
       - ${NEXA_SECURITY_RSA_PUBLIC_KEY_FILE:-../../.local-keys/access-token-public.pem}:/run/secrets/nexa_access_token_public:ro
       - ${NEXA_SECURITY_RSA_PRIVATE_KEY_FILE:-../../.local-keys/access-token-private.pem}:/run/secrets/nexa_access_token_private:ro

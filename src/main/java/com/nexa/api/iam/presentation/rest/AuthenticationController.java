@@ -28,6 +28,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -58,13 +60,14 @@ public class AuthenticationController {
 	private final Clock clock;
 
 	public AuthenticationController(SignInUseCase signIn, RefreshSessionUseCase refresh, SignOutUseCase signOut,
-			CurrentSessionUseCase currentSession, @Value("${nexa.security.refresh-cookie-secure:false}") boolean secureCookie,
-			Clock clock) {
+			CurrentSessionUseCase currentSession, @Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie,
+			Environment environment, Clock clock) {
 		this.signIn = signIn;
 		this.refresh = refresh;
 		this.signOut = signOut;
 		this.currentSession = currentSession;
-		this.secureCookie = secureCookie;
+		this.secureCookie = environment.acceptsProfiles(Profiles.of("local")) && !configuredSecureCookie
+				? false : true;
 		this.clock = clock;
 	}
 

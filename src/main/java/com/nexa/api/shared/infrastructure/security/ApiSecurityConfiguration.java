@@ -14,6 +14,7 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -28,7 +29,8 @@ public class ApiSecurityConfiguration {
 	@Bean
 	SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, Environment environment,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
-			ObjectMapper objectMapper, JwtAuthenticationConverter jwtAuthenticationConverter) throws Exception {
+			ObjectMapper objectMapper, JwtAuthenticationConverter jwtAuthenticationConverter,
+			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter) throws Exception {
 		boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
 		Set<String> allowedOrigins = allowedOrigins(environment);
 		http.csrf(AbstractHttpConfigurer::disable)
@@ -49,7 +51,9 @@ public class ApiSecurityConfiguration {
 						"/api/v1/authentication/sign-out").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();
 					authorize.anyRequest().denyAll();
-				});
+					});
+		CurrentAccessContextFilter accessFilter = currentAccessContextFilter.getIfAvailable();
+		if (accessFilter != null) http.addFilterAfter(accessFilter, BearerTokenAuthenticationFilter.class);
 		return http.build();
 	}
 
@@ -79,5 +83,13 @@ public class ApiSecurityConfiguration {
 	@Bean
 	ProblemDetailAccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper) {
 		return new ProblemDetailAccessDeniedHandler(objectMapper);
+	}
+
+	@Bean
+	@org.springframework.context.annotation.Profile("!test")
+	CurrentAccessContextFilter currentAccessContextFilter(
+			com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase accessContext,
+			AuthenticationEntryPoint authenticationEntryPoint) {
+		return new CurrentAccessContextFilter(accessContext, authenticationEntryPoint);
 	}
 }

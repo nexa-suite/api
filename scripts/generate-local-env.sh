@@ -11,6 +11,8 @@ random_password() {
 
 umask 077
 cat > "${env_file}" <<EOF
+NEXA_POSTGRES_PASSWORD=$(random_password)
+NEXA_SECURITY_JWT_SIGNING_KEY=$(random_password)
 NEXA_DATABASE_URL=jdbc:postgresql://localhost:5432/nexa
 NEXA_DATABASE_USERNAME=nexa
 NEXA_DATABASE_PASSWORD=$(random_password)
@@ -25,19 +27,19 @@ NEXA_SECURITY_RSA_PRIVATE_KEY=./.local-keys/access-token-private.pem
 NEXA_BCRYPT_STRENGTH=12
 NEXA_REFRESH_TOKEN_TTL=P30D
 NEXA_DEV_BOOTSTRAP_ENABLED=true
-NEXA_DEV_TENANT_NAME="Nexa Local"
-NEXA_DEV_TENANT_SLUG=nexa-local
-NEXA_DEV_WORKSPACE_NAME="Nexa Local Workspace"
-NEXA_DEV_WORKSPACE_SLUG=nexa-local
-NEXA_DEV_OWNER_EMAIL=owner@nexa.local
+NEXA_DEV_TENANT_NAME="ICISA"
+NEXA_DEV_TENANT_SLUG=icisa
+NEXA_DEV_WORKSPACE_NAME="ICISA Workspace"
+NEXA_DEV_WORKSPACE_SLUG=icisa
+NEXA_DEV_OWNER_EMAIL=carlos.rios@icisa.pe
 NEXA_DEV_OWNER_PASSWORD=$(random_password)
-NEXA_DEV_SALES_EMAIL=sales@nexa.local
+NEXA_DEV_SALES_EMAIL=valeria.sanchez@icisa.pe
 NEXA_DEV_SALES_PASSWORD=$(random_password)
-NEXA_DEV_WAREHOUSE_EMAIL=warehouse@nexa.local
+NEXA_DEV_WAREHOUSE_EMAIL=roberto.garcia@icisa.pe
 NEXA_DEV_WAREHOUSE_PASSWORD=$(random_password)
-NEXA_DEV_LOGISTICS_EMAIL=logistics@nexa.local
+NEXA_DEV_LOGISTICS_EMAIL=logistics@icisa.pe
 NEXA_DEV_LOGISTICS_PASSWORD=$(random_password)
-NEXA_DEV_BUYER_EMAIL=buyer@nexa.local
+NEXA_DEV_BUYER_EMAIL=elena.litano@icisa.pe
 NEXA_DEV_BUYER_PASSWORD=$(random_password)
 EOF
 

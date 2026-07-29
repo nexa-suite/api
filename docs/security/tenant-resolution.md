@@ -29,8 +29,8 @@ These checks are equality checks against typed UUID value objects. Slugs are hum
 
 Missing, mismatched or inactive tenant/workspace membership is intentionally indistinguishable at the application boundary. `ResolveCurrentAccessContextService` raises the generic `InaccessibleTenantException` with no tenant existence, membership or status detail. This prevents cross-tenant enumeration and avoids leaking whether a requested tenant or workspace exists.
 
-Surface or permission failures are policy denials (`AccessPolicyViolation`) and must be mapped by a future Presentation adapter to the approved API error contract. This task does not add an HTTP mapping or change the current IAM implementation.
+The runtime bearer filter resolves this context after JWT verification and before API authorization. It replaces JWT permission authorities with the permissions calculated from the active database membership, and rejects missing, mismatched or inactive context with the generic `401` Problem Details contract.
 
-## Integration requirements for future adapters
+## Integration requirements for downstream bounded contexts
 
-Future JWT/Spring adapters may translate external claims into `UserId` and requested scope, but JWT parsing remains Infrastructure/IAM responsibility. Future controllers must resolve `CurrentAccessContext` before invoking tenant-owned use cases. Domain and application code must remain free of Spring, JPA, JWT, SQL and transport imports.
+The JWT/Spring adapter translates verified claims into `UserId` and requested scope, while JWT parsing remains Infrastructure/IAM responsibility. Tenant-owned controllers and application services must consume the verified `CurrentAccessContext` before accessing scoped resources. Domain and application code remain free of Spring, JPA, JWT, SQL and transport imports.
