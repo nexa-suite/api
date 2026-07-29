@@ -54,11 +54,15 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		UserId userId;
 		TenantId tenantId;
 		WorkspaceId workspaceId;
+		String membershipIdClaim;
+		String roleClaim;
 		try {
 			surface = Surface.valueOf(requiredClaim(jwt, "surface").toUpperCase(java.util.Locale.ROOT));
 			userId = new UserId(jwt.getSubject());
 			tenantId = new TenantId(requiredClaim(jwt, "tenant_id"));
 			workspaceId = new WorkspaceId(requiredClaim(jwt, "workspace_id"));
+			membershipIdClaim = requiredClaim(jwt, "membership_id");
+			roleClaim = requiredClaim(jwt, "role");
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			authenticationEntryPoint.commence(request, response,
@@ -69,6 +73,10 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		CurrentAccessContext resolved;
 		try {
 			resolved = accessContext.resolve(new CurrentAccessRequest(userId, tenantId, workspaceId, surface));
+			if (!resolved.membershipId().toString().equals(membershipIdClaim)
+					|| !resolved.role().name().equals(roleClaim)) {
+				throw new IllegalStateException("JWT access claims do not match the active workspace membership");
+			}
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			accessDeniedHandler.handle(request, response,
