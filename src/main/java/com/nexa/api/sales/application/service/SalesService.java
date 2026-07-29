@@ -15,7 +15,7 @@ import java.time.LocalDate;
 import java.time.Instant;
 import java.util.UUID;
 
-public final class SalesService implements SalesUseCase {
+public class SalesService implements SalesUseCase {
 	private final SalesPort port;
 	public SalesService(SalesPort port) { this.port = port; }
 
