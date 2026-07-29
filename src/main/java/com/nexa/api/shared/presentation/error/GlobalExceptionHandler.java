@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.validation.BindException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -40,6 +41,25 @@ public final class GlobalExceptionHandler {
 				.map(error -> Map.of("field", error.getPropertyPath().toString(), "message", "Invalid value"))
 				.toList());
 		return ResponseEntity.badRequest().body(problem);
+	}
+
+	@ExceptionHandler(BindException.class)
+	public ResponseEntity<ProblemDetail> handleBinding(BindException exception, HttpServletRequest request) {
+		ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Request validation failed", request);
+		ApiProblemDetailFactory.addValidationErrors(problem, exception.getBindingResult().getFieldErrors().stream()
+				.map(error -> Map.of("field", error.getField(), "message", "Invalid value"))
+				.toList());
+		return ResponseEntity.badRequest().body(problem);
+	}
+
+	@ExceptionHandler(ApiResourceNotFoundException.class)
+	public ResponseEntity<ProblemDetail> handleApiNotFound(ApiResourceNotFoundException exception, HttpServletRequest request) {
+		return response(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found", request);
+	}
+
+	@ExceptionHandler(IllegalArgumentException.class)
+	public ResponseEntity<ProblemDetail> handleDomainValidation(RuntimeException exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.INVALID_REQUEST, "Request parameters are invalid", request);
 	}
 
 	@ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class, MethodArgumentTypeMismatchException.class})
