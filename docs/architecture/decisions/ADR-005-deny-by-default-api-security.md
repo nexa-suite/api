@@ -14,7 +14,7 @@ Every reachable business endpoint must have authenticated, active membership and
 - Anonymous business access returns `401` Problem Details.
 - Authenticated access without an approved authorization rule returns `403` Problem Details.
 - Form login, HTTP Basic, CSRF state, logout and sessions are disabled for this stateless API foundation.
-- After JWT verification, every bearer request is revalidated against the active user, tenant, workspace and membership rows; DB-derived permissions replace token permissions for the request.
+- After JWT verification, every bearer request is revalidated against the active user, tenant, workspace and membership rows, including membership and role claim equality; DB-derived permissions replace token permissions for the request. A valid bearer token with an invalid active context returns `403 ACCESS_CONTEXT_INVALID`.
 
 ## Consequences
 

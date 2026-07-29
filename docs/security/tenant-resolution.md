@@ -29,7 +29,7 @@ These checks are equality checks against typed UUID value objects. Slugs are hum
 
 Missing, mismatched or inactive tenant/workspace membership is intentionally indistinguishable at the application boundary. `ResolveCurrentAccessContextService` raises the generic `InaccessibleTenantException` with no tenant existence, membership or status detail. This prevents cross-tenant enumeration and avoids leaking whether a requested tenant or workspace exists.
 
-The runtime bearer filter resolves this context after JWT verification and before API authorization. It replaces JWT permission authorities with the permissions calculated from the active database membership, and rejects missing, mismatched or inactive context with the generic `401` Problem Details contract.
+The runtime bearer filter resolves this context after JWT verification and before API authorization. It verifies the token subject, tenant, workspace, membership and role against the active database membership, then replaces JWT permission authorities with the permissions calculated from that membership. A malformed access token returns generic `401`; a valid bearer token whose active context is missing, inactive or mismatched returns `403 ACCESS_CONTEXT_INVALID`.
 
 ## Integration requirements for downstream bounded contexts
 
