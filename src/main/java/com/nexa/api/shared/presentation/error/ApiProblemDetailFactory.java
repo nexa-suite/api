@@ -41,6 +41,16 @@ public final class ApiProblemDetailFactory {
 			case METHOD_NOT_ALLOWED -> "Method not allowed";
 			case UNAUTHORIZED -> "Authentication required";
 			case FORBIDDEN -> "Access denied";
+			case AUTHENTICATION_REQUIRED -> "Authentication required";
+			case AUTHENTICATION_FAILED -> "Authentication failed";
+			case REFRESH_SESSION_INVALID -> "Refresh session invalid";
+			case ACCESS_CONTEXT_INVALID -> "Access context invalid";
+			case WORKSPACE_ACCESS_DENIED -> "Workspace access denied";
+			case SURFACE_ACCESS_DENIED -> "Surface access denied";
+			case PERMISSION_DENIED -> "Permission denied";
+			case ORIGIN_NOT_ALLOWED -> "Origin not allowed";
+			case CATALOG_ITEM_NOT_FOUND -> "Catalog item not found";
+			case INVALID_CATALOG_QUERY -> "Invalid catalog query";
 			case INTERNAL_ERROR -> "Internal server error";
 		};
 	}

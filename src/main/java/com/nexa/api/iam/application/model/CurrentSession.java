@@ -11,10 +11,13 @@ import java.util.Set;
 
 public record CurrentSession(SessionId sessionId, UserAccountId userAccountId, EmailAddress email,
 		ClientSurface surface, String role, Set<String> permissions, AuthenticationSessionStatus status,
-		Instant createdAt, Instant expiresAt) {
+		Instant createdAt, Instant expiresAt, String displayName, String preferredLanguage,
+		String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId) {
 	public static CurrentSession from(SessionRecord record) {
+		var policy = record.subject().policy();
 		return new CurrentSession(record.session().id(), record.subject().userAccountId(), record.subject().email(),
-			record.subject().surface(), record.subject().policy().role(), record.subject().policy().permissions(),
-			record.session().status(), record.session().createdAt(), record.session().expiresAt());
+			record.subject().surface(), policy.role(), policy.permissions(), record.session().status(),
+			record.session().createdAt(), record.session().expiresAt(), policy.displayName(), policy.preferredLanguage(),
+			policy.tenantId(), policy.tenantSlug(), policy.workspaceId(), policy.workspaceSlug(), policy.membershipId());
 	}
 }

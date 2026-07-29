@@ -9,7 +9,13 @@ import java.util.Set;
 /**
  * Policy resolved for a user and client surface. Role vocabulary remains owned by the policy provider.
  */
-public record AccessPolicy(ClientSurface surface, String role, Set<String> permissions) {
+public record AccessPolicy(ClientSurface surface, String role, Set<String> permissions,
+		String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
+		String displayName, String preferredLanguage) {
+	public AccessPolicy(ClientSurface surface, String role, Set<String> permissions) {
+		this(surface, role, permissions, null, null, null, null, null, null, null);
+	}
+
 	public AccessPolicy {
 		Objects.requireNonNull(surface, "Client surface is required");
 		if (role == null || role.isBlank()) throw new IllegalArgumentException("Role is required");

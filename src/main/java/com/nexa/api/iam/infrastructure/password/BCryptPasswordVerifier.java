@@ -3,6 +3,8 @@ package com.nexa.api.iam.infrastructure.password;
 import com.nexa.api.iam.application.port.out.PasswordVerificationPort;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.Objects;
 
@@ -11,10 +13,11 @@ public final class BCryptPasswordVerifier implements PasswordVerificationPort {
 	private final BCryptPasswordEncoder encoder;
 
 	public BCryptPasswordVerifier() {
-		this(new BCryptPasswordEncoder());
+		this(new BCryptPasswordEncoder(12));
 	}
 
-	public BCryptPasswordVerifier(int strength) {
+	@Autowired
+	public BCryptPasswordVerifier(@Value("${nexa.security.bcrypt-strength:12}") int strength) {
 		this(new BCryptPasswordEncoder(strength));
 	}
 

@@ -38,12 +38,14 @@ public final class RefreshSessionService implements RefreshSessionUseCase {
 		SessionRecord current = sessions.findByRefreshToken(command.refreshToken()).orElseThrow(InvalidRefreshTokenException::new);
 		Instant now = clock.instant();
 		if (!current.session().isActive(now)) throw new InvalidRefreshTokenException();
-		AccessPolicy policy = accessPolicies.findFor(current.subject().userAccountId(), current.subject().surface())
+		if (command.surface() != null && command.surface() != current.subject().surface()) throw new InvalidRefreshTokenException();
+		AccessPolicy policy = accessPolicies.findFor(current.subject().userAccountId(), current.subject().policy().workspaceSlug(), current.subject().surface())
 				.orElseThrow(InvalidRefreshTokenException::new);
 		AuthenticationSubject subject = new AuthenticationSubject(current.subject().userAccountId(), current.subject().email(),
 				current.subject().surface(), policy);
-		IssuedAuthenticationTokens tokens = tokenIssuer.issue(subject, now);
-		var replacementSession = com.nexa.api.iam.domain.model.session.AuthenticationSession.start(current.session().id(),
+		var replacementSessionId = com.nexa.api.iam.domain.model.session.SessionId.random();
+		IssuedAuthenticationTokens tokens = tokenIssuer.issue(subject, now, replacementSessionId);
+		var replacementSession = com.nexa.api.iam.domain.model.session.AuthenticationSession.start(replacementSessionId,
 				current.session().userAccountId(), current.session().surface(), current.session().refreshTokenFamilyId(),
 				current.session().createdAt(), tokens.refreshTokenExpiresAt());
 		SessionRecord replacement = new SessionRecord(replacementSession, subject, tokens);

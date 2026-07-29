@@ -55,15 +55,13 @@ class AccessPolicyTests {
 				.containsExactlyInAnyOrder(Permission.values());
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.SALES))
 				.containsExactlyInAnyOrder(
-						Permission.CATALOG_READ, Permission.CATALOG_WRITE,
-						Permission.SALES_READ, Permission.SALES_WRITE,
-						Permission.ORDERS_READ, Permission.ORDERS_WRITE,
-						Permission.DOCUMENTS_READ, Permission.DOCUMENTS_WRITE);
+						Permission.CATALOG_READ, Permission.TENANT_READ, Permission.SALES_READ,
+						Permission.SALES_WRITE, Permission.INVOICING_READ, Permission.LOGISTICS_READ);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.BUYER))
-				.containsExactlyInAnyOrder(Permission.PORTAL_READ, Permission.PORTAL_WRITE,
-						Permission.REQUESTS_READ, Permission.REQUESTS_WRITE, Permission.DOCUMENTS_READ);
-		assertThat(PermissionPolicy.allows(MembershipRole.WAREHOUSE, Permission.INVENTORY_WRITE)).isTrue();
-		assertThat(PermissionPolicy.allows(MembershipRole.LOGISTICS, Permission.MEMBERSHIP_WRITE)).isFalse();
+				.containsExactlyInAnyOrder(Permission.CATALOG_READ, Permission.SALES_BUYER_READ,
+						Permission.SALES_BUYER_WRITE, Permission.LOGISTICS_BUYER_READ, Permission.INVOICING_BUYER_READ);
+		assertThat(PermissionPolicy.allows(MembershipRole.WAREHOUSE, Permission.WAREHOUSE_WRITE)).isTrue();
+		assertThat(PermissionPolicy.allows(MembershipRole.LOGISTICS, Permission.TENANT_MANAGE)).isFalse();
 	}
 
 	@Test

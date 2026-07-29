@@ -47,13 +47,14 @@ public final class SignInService implements SignInUseCase {
 		if (!stored.account().canAuthenticate() || !passwordVerifier.matches(command.password(), stored.passwordHash())) {
 			throw new InvalidCredentialsException();
 		}
-		AccessPolicy policy = accessPolicies.findFor(stored.account().id(), command.surface())
+		AccessPolicy policy = accessPolicies.findFor(stored.account().id(), command.workspaceSlug(), command.surface())
 				.orElseThrow(InvalidCredentialsException::new);
 		AuthenticationSubject subject = new AuthenticationSubject(stored.account().id(), stored.account().email(),
 				command.surface(), policy);
 		Instant now = clock.instant();
-		IssuedAuthenticationTokens tokens = tokenIssuer.issue(subject, now);
-		AuthenticationSession session = AuthenticationSession.start(SessionId.random(), stored.account().id(), command.surface(),
+		SessionId sessionId = SessionId.random();
+		IssuedAuthenticationTokens tokens = tokenIssuer.issue(subject, now, sessionId);
+		AuthenticationSession session = AuthenticationSession.start(sessionId, stored.account().id(), command.surface(),
 				RefreshTokenFamilyId.random(), tokens.issuedAt(), tokens.refreshTokenExpiresAt());
 		SessionRecord record = sessions.start(session, subject, tokens);
 		return AuthenticationResult.from(Objects.requireNonNull(record, "Started session is required"));

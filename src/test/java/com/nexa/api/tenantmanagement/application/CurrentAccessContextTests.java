@@ -40,7 +40,7 @@ class CurrentAccessContextTests {
 		assertThat(context.tenantId()).isEqualTo(verified.membership().tenantId());
 		assertThat(context.workspaceId()).isEqualTo(verified.membership().workspaceId());
 		assertThat(context.role()).isEqualTo(MembershipRole.BUYER);
-		assertThat(context.allows(Permission.REQUESTS_WRITE)).isTrue();
+		assertThat(context.allows(Permission.SALES_BUYER_WRITE)).isTrue();
 		assertThat(context.allows(Permission.WAREHOUSE_WRITE)).isFalse();
 	}
 
@@ -56,7 +56,7 @@ class CurrentAccessContextTests {
 				.isInstanceOf(AccessPolicyViolation.class);
 		assertThatThrownBy(() -> context.requireSurface(Surface.PORTAL))
 				.isInstanceOf(AccessPolicyViolation.class);
-		assertThatThrownBy(() -> context.requirePermission(Permission.MEMBERSHIP_WRITE))
+		assertThatThrownBy(() -> context.requirePermission(Permission.TENANT_MANAGE))
 				.isInstanceOf(AccessPolicyViolation.class);
 		assertThatThrownBy(() -> context.requireAccess(verified.membership().tenantId(),
 					verified.membership().workspaceId(), Surface.PLATFORM, Permission.WAREHOUSE_READ))
