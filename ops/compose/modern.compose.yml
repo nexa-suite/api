@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in api/.env.local}
       POSTGRES_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
     volumes:
-      - nexa-modern-postgres-data:/var/lib/postgresql/data
+      - nexa-modern-postgres-data:/var/lib/postgresql
     networks:
       - modern-data
     healthcheck:
