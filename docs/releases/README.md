@@ -4,8 +4,9 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 
 | Release | Summary |
 |---|---|
+| [v0.4.0](./v0.4.0.md) | Catalog query REST contract, secure boundary and modern runtime |
 | [v0.3.0](./v0.3.0.md) | Catalog Management domain foundation and seed mapping |
 | [v0.2.0](./v0.2.0.md) | Spring Boot runtime foundation, correlation and seed integrity |
 | [v0.1.0](./v0.1.0.md) | Initial modular monolith repository baseline |
 
-The current tagged release is `v0.3.0`. The worktree may contain untagged catalog query/OpenAPI changes; those remain unreleased until validation and tagging. Documentation changes are tracked in the [changelog](../../CHANGELOG.md) and are not a release or tag.
+The current release is `v0.4.0`. Release evidence is limited to the validated seed-backed query slice; tenant authorization and persistence remain future decisions.
