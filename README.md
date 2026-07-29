@@ -6,11 +6,11 @@
 
 Business and integration API foundation for Nexa Suite, implemented as a Spring Boot modular monolith.
 
-[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.3.0](https://img.shields.io/badge/release-v0.3.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.3.0)
+[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.4.0](https://img.shields.io/badge/release-v0.4.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.4.0)
 
 [Changelog](./CHANGELOG.md) · [Release notes](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
 
-**Current repository:** API · **Current release:** `v0.3.0`
+**Current repository:** API · **Current release:** `v0.4.0`
 
 [Website](https://github.com/nexa-suite/website) · [Platform](https://github.com/nexa-suite/platform) · [Portal](https://github.com/nexa-suite/portal) · [API](https://github.com/nexa-suite/api) · [Mobile](https://github.com/nexa-suite/mobile)
 
@@ -20,20 +20,20 @@ Business and integration API foundation for Nexa Suite, implemented as a Spring 
 
 ## What is implemented
 
-The tagged `v0.3.0` release establishes the Catalog Management domain foundation and a seed anticorruption mapping. It also includes correlation IDs, safe Problem Details handling and automated tests. The `v0.3.0` tag does not expose a catalog REST endpoint.
+`v0.4.0` exposes the read-only Catalog Management query contract over REST, backed by the checksum-validated 50-item seed. It includes bounded pagination, filtering and sorting, explicit transport DTOs, local OpenAPI, Problem Details and deny-by-default security tests.
 
 The API is the future business authority for approved client contracts. The tagged release is intentionally smaller than the complete Nexa domain: there is no persistence, tenant identity, multi-tenant authorization or external integration in this release.
 
-The current worktree also contains untagged catalog query, security and OpenAPI changes under active development. They are not release evidence for `v0.3.0` until independently validated and tagged.
+The catalog business routes remain runtime-denied until identity, membership and tenant authorization are approved. Health/info are public; local OpenAPI is enabled only with the `local` profile.
 
 ## Product boundaries
 
 ```mermaid
 flowchart LR
-    Website["Website<br/>Static public site<br/>v0.1.0"]
-    Platform["Platform<br/>Angular shell<br/>v0.2.1"]
-    Portal["Buyer Portal<br/>Angular shell<br/>v0.2.1"]
-    API["API<br/>Spring Boot foundation<br/>v0.3.0"]
+    Website["Website<br/>Static public site<br/>v1.0.0"]
+    Platform["Platform<br/>Angular shell<br/>v0.3.0"]
+    Portal["Buyer Portal<br/>Angular shell<br/>v0.3.0"]
+    API["API<br/>Catalog query contract<br/>v0.4.0"]
 
     Website -. "product navigation" .-> Platform
     Website -. "product navigation" .-> Portal
@@ -41,7 +41,7 @@ flowchart LR
     Portal -. "future approved HTTP contract" .-> API
 ```
 
-The diagram describes product boundaries, not a claim of deployed integration. Mobile is not part of this runtime map: `mobile v0.1.0` is documentation-only. PostgreSQL, AI, IoT and cloud services are not implemented in this repository release.
+The diagram describes product boundaries, not a claim of deployed integration. Mobile is not part of this runtime map: `mobile v0.1.1` is documentation-only. PostgreSQL, AI, IoT and cloud services are not implemented in the modern API runtime.
 
 ![Nexa Suite repository map](./docs/assets/repository-map/nexa-suite-map.svg)
 
@@ -49,17 +49,17 @@ The diagram describes product boundaries, not a claim of deployed integration. M
 
 | Repository | Current release | Responsibility | Evidence status |
 |---|---:|---|---|
-| [Website](https://github.com/nexa-suite/website) | `v0.1.0` | Static public product discovery | Released static site |
-| [Platform](https://github.com/nexa-suite/platform) | `v0.2.1` | Internal operations shell | Angular shell; integrations planned |
-| [Portal](https://github.com/nexa-suite/portal) | `v0.2.1` | Buyer self-service shell | Angular shell; integrations planned |
-| **API** | **`v0.3.0`** | Business and integration authority | Catalog domain foundation |
-| [Mobile](https://github.com/nexa-suite/mobile) | `v0.1.0` | Future native clients | Documentation-only |
+| [Website](https://github.com/nexa-suite/website) | `v1.0.0` | Static public product discovery | Released static site |
+| [Platform](https://github.com/nexa-suite/platform) | `v0.3.0` | Internal operations shell | Angular shell; runtime image |
+| [Portal](https://github.com/nexa-suite/portal) | `v0.3.0` | Buyer self-service shell | Angular shell; runtime image |
+| **API** | **`v0.4.0`** | Business and integration authority | Catalog query contract |
+| [Mobile](https://github.com/nexa-suite/mobile) | `v0.1.1` | Future native clients | Documentation-only |
 
 ## Bounded contexts
 
 | Area | Current maturity |
 |---|---|
-| Catalog Management | Domain foundation in `v0.3.0` |
+| Catalog Management | Query contract in `v0.4.0` |
 | IAM | Planned |
 | Tenant Management | Planned |
 | Sales | Planned |
@@ -74,6 +74,10 @@ Each future bounded context keeps Presentation, Application, Domain and Infrastr
 ## Tech stack
 
 Java 26, Spring Boot 4.1.0, Spring MVC, Bean Validation, Actuator, Spring Boot Test, Maven Wrapper and jar packaging.
+
+## Runtime
+
+The canonical dual runtime is [ops/compose/compose.yml](./ops/compose/compose.yml). Modern API, Platform and Portal run without PostgreSQL. Legacy services remain isolated under the `legacy` profile and require local secrets.
 
 ## Getting started
 
@@ -101,6 +105,9 @@ docs/releases/                                           # Versioned release not
 - [Catalog Management domain](./docs/domain/catalog-management.md)
 - [Client and automation compatibility](./docs/architecture/client-and-automation-compatibility.md)
 - [ADR-003: Catalog domain foundation](./docs/architecture/decisions/ADR-003-catalog-domain-foundation.md)
+- [ADR-004: Catalog query contract](./docs/architecture/decisions/ADR-004-catalog-query-contract.md)
+- [ADR-005: Deny-by-default API security](./docs/architecture/decisions/ADR-005-deny-by-default-api-security.md)
+- [ADR-006: Seed-only query runtime](./docs/architecture/decisions/ADR-006-seed-only-query-runtime.md)
 - [Local OpenAPI instructions](./docs/openapi/README.md)
 - [Release notes index](./docs/releases/)
 - [Release policy](./.github/RELEASE_POLICY.md)
