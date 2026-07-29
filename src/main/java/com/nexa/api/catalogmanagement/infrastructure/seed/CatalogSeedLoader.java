@@ -1,5 +1,6 @@
 package com.nexa.api.catalogmanagement.infrastructure.seed;
 
+import com.nexa.api.catalogmanagement.domain.model.catalogitem.CatalogItem;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.core.io.ClassPathResource;
@@ -13,9 +14,11 @@ import java.util.List;
 public final class CatalogSeedLoader {
 	private static final String RESOURCE_PATH = "seed/catalog/catalog-items.v1.json";
 	private final ObjectMapper objectMapper;
+	private final CatalogSeedDomainMapper domainMapper;
 
 	public CatalogSeedLoader(ObjectMapper objectMapper) {
 		this.objectMapper = objectMapper;
+		this.domainMapper = new CatalogSeedDomainMapper();
 	}
 
 	public List<CatalogSeedItemRecord> load() {
@@ -31,5 +34,9 @@ public final class CatalogSeedLoader {
 		} catch (IOException exception) {
 			throw new UncheckedIOException("Unable to read catalog seed resource", exception);
 		}
+	}
+
+	public List<CatalogItem> loadDomainCatalog() {
+		return load().stream().map(domainMapper::map).toList();
 	}
 }
