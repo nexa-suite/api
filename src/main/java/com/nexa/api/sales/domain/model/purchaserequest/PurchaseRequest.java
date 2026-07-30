@@ -26,6 +26,27 @@ public final class PurchaseRequest {
 		this.buyerMembershipId = Objects.requireNonNull(buyerMembershipId);
 	}
 	public static PurchaseRequest draft(PurchaseRequestId id, String clientAccountId, BuyerMembershipId buyerMembershipId) { return new PurchaseRequest(id, clientAccountId, buyerMembershipId); }
+	public static PurchaseRequest rehydrate(PurchaseRequestId id, String clientAccountId, BuyerMembershipId buyerMembershipId,
+			PurchaseRequestStatus status, PurchaseRequestPriority priority, RequestedDeliveryDate deliveryDate,
+			DeliveryProfileSnapshot deliveryProfile, PaymentOption paymentOption, RequestComment comment, String reviewNote,
+			List<PurchaseRequestLine> lines) {
+		PurchaseRequest request = new PurchaseRequest(id, clientAccountId, buyerMembershipId);
+		request.status = Objects.requireNonNull(status);
+		request.priority = priority == null ? PurchaseRequestPriority.NORMAL : priority;
+		request.requestedDeliveryDate = deliveryDate;
+		request.deliveryProfile = deliveryProfile;
+		request.paymentOption = paymentOption;
+		request.comment = comment;
+		request.reviewNote = reviewNote;
+		if (lines == null) throw new SalesInvariantViolation("Purchase request lines are required for rehydration");
+		for (PurchaseRequestLine line : lines) {
+			if (request.lines.stream().anyMatch(existing -> existing.catalogItem().catalogItemId().equals(line.catalogItem().catalogItemId()))) {
+				throw new SalesInvariantViolation("Catalog item already exists in request");
+			}
+			request.lines.add(Objects.requireNonNull(line));
+		}
+		return request;
+	}
 	public void updateDetails(PurchaseRequestPriority priority, RequestedDeliveryDate deliveryDate, DeliveryProfileSnapshot deliveryProfile, PaymentOption paymentOption, RequestComment comment) {
 		ensureEditable(); this.priority = priority == null ? PurchaseRequestPriority.NORMAL : priority; this.requestedDeliveryDate = deliveryDate; this.deliveryProfile = deliveryProfile; this.paymentOption = paymentOption; this.comment = comment;
 	}
@@ -42,6 +63,7 @@ public final class PurchaseRequest {
 	public void requestAdjustment(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.NEEDS_ADJUSTMENT); reviewNote = note == null ? null : note.trim(); }
 	public void approve(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.APPROVED); reviewNote = note == null ? null : note.trim(); }
 	public void reject(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.REJECTED); reviewNote = note == null ? null : note.trim(); }
+	public void convertToOrder() { transition(PurchaseRequestStatus.APPROVED, PurchaseRequestStatus.CONVERTED_TO_ORDER); }
 	public void cancel() { if (status != PurchaseRequestStatus.DRAFT && status != PurchaseRequestStatus.SUBMITTED && status != PurchaseRequestStatus.NEEDS_ADJUSTMENT) throw new SalesInvariantViolation("Purchase request cannot be cancelled"); status = PurchaseRequestStatus.CANCELLED; }
 	public PurchaseRequestId id() { return id; }
 	public String clientAccountId() { return clientAccountId; }

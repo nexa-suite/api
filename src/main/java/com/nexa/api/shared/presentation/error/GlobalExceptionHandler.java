@@ -31,6 +31,10 @@ import com.nexa.api.sales.application.exception.SalesConcurrencyConflictExceptio
 import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
+import com.nexa.api.sales.domain.model.salesorder.SalesOrderInvariantViolation;
+import com.nexa.api.sales.application.exception.SalesOrderRejectionReasonRequiredException;
+import com.nexa.api.sales.application.exception.SalesOrderTransitionException;
+import com.nexa.api.shared.application.changefeed.ChangeFeedCapacityException;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -88,6 +92,7 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleSalesNotFound(SalesResourceNotFoundException exception, HttpServletRequest request) {
 		ApiErrorCode code = switch (exception.getMessage()) {
 			case "purchase-request" -> ApiErrorCode.PURCHASE_REQUEST_NOT_FOUND;
+			case "sales-order" -> ApiErrorCode.SALES_ORDER_NOT_FOUND;
 			case "catalog-item" -> ApiErrorCode.CATALOG_ITEM_NOT_FOUND;
 			default -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
 		};
@@ -112,8 +117,16 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleSalesPrecondition(SalesPreconditionRequiredException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request); }
 	@ExceptionHandler(IdempotencyKeyRequiredException.class)
 	public ResponseEntity<ProblemDetail> handleIdempotency(IdempotencyKeyRequiredException exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request); }
-	@ExceptionHandler(PurchaseRequestTransitionException.class)
-	public ResponseEntity<ProblemDetail> handleTransition(PurchaseRequestTransitionException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_TRANSITION_INVALID, "Purchase request transition is not allowed", request); }
+		@ExceptionHandler(PurchaseRequestTransitionException.class)
+		public ResponseEntity<ProblemDetail> handleTransition(PurchaseRequestTransitionException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_TRANSITION_INVALID, "Purchase request transition is not allowed", request); }
+		@ExceptionHandler(SalesOrderTransitionException.class)
+		public ResponseEntity<ProblemDetail> handleSalesOrderTransition(SalesOrderTransitionException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.SALES_ORDER_TRANSITION_INVALID, "Sales order transition is not allowed", request); }
+		@ExceptionHandler(SalesOrderRejectionReasonRequiredException.class)
+		public ResponseEntity<ProblemDetail> handleSalesOrderRejectionReason(SalesOrderRejectionReasonRequiredException exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.SALES_ORDER_REJECTION_REASON_REQUIRED, "Sales order rejection reason is required", request); }
+		@ExceptionHandler(SalesOrderInvariantViolation.class)
+		public ResponseEntity<ProblemDetail> handleSalesOrderInvariant(SalesOrderInvariantViolation exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.SALES_ORDER_INVALID, "Sales order is invalid", request); }
+		@ExceptionHandler(ChangeFeedCapacityException.class)
+		public ResponseEntity<ProblemDetail> handleChangeFeedCapacity(ChangeFeedCapacityException exception, HttpServletRequest request) { return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.CHANGE_FEED_CAPACITY, "Change feed capacity is temporarily exhausted", request); }
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	public ResponseEntity<ProblemDetail> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {

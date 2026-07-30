@@ -67,9 +67,14 @@ public final class ApiProblemDetailFactory {
 			case PURCHASE_REQUEST_NOT_FOUND -> "Purchase request not found";
 			case PURCHASE_REQUEST_TRANSITION_INVALID -> "Purchase request transition invalid";
 			case PURCHASE_REQUEST_LINE_INVALID -> "Purchase request line invalid";
-			case PURCHASE_REQUEST_CLIENT_SCOPE_INVALID -> "Purchase request client scope invalid";
-			case IDEMPOTENCY_KEY_REQUIRED -> "Idempotency key required";
-			case INTERNAL_ERROR -> "Internal server error";
+				case PURCHASE_REQUEST_CLIENT_SCOPE_INVALID -> "Purchase request client scope invalid";
+				case IDEMPOTENCY_KEY_REQUIRED -> "Idempotency key required";
+				case SALES_ORDER_NOT_FOUND -> "Sales order not found";
+				case SALES_ORDER_TRANSITION_INVALID -> "Sales order transition invalid";
+				case SALES_ORDER_REJECTION_REASON_REQUIRED -> "Sales order rejection reason required";
+				case SALES_ORDER_INVALID -> "Sales order invalid";
+				case CHANGE_FEED_CAPACITY -> "Change feed capacity unavailable";
+				case INTERNAL_ERROR -> "Internal server error";
 		};
 	}
 }

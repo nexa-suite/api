@@ -2,7 +2,7 @@ package com.nexa.api.sales.presentation.purchaserequest.request;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.FutureOrPresent;
-import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDate;
@@ -15,4 +15,4 @@ public record CreatePurchaseRequestRequest(
 		@Size(max = 2000) String deliveryProfileSnapshot,
 		@Size(max = 80) String paymentOption,
 		@Size(max = 2000) String comment,
-		@NotEmpty @Valid List<PurchaseRequestLineRequest> lines) { }
+			@Valid @Size(max = 100) List<PurchaseRequestLineRequest> lines) { }
