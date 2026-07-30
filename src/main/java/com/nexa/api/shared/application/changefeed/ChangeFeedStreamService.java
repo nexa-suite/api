@@ -72,8 +72,8 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 
 	private void sendBatch(SseEmitter emitter, AtomicLong cursor, List<ChangeEventView> events) throws IOException {
 		for (ChangeEventView event : events) {
-			emitter.send(SseEmitter.event().id(Long.toString(event.id())).name(event.eventType()).data(event.payload(), MediaType.APPLICATION_JSON));
-			cursor.set(event.id());
+			emitter.send(SseEmitter.event().id(Long.toString(event.sequence())).name(event.eventType()).data(event.dataJson(), MediaType.APPLICATION_JSON));
+			cursor.set(event.sequence());
 		}
 	}
 	private void sendResync(SseEmitter emitter) throws IOException { emitter.send(SseEmitter.event().name("resync-required").data("{\"reason\":\"replay-window-expired\"}", MediaType.APPLICATION_JSON)); }

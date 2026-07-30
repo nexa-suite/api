@@ -80,3 +80,7 @@ CREATE TRIGGER purchase_request_event_append_only
 CREATE TRIGGER idempotency_record_append_only
     BEFORE UPDATE OR DELETE ON sales.idempotency_record
     FOR EACH ROW EXECUTE FUNCTION sales.prevent_append_only_mutation();
+
+CREATE TRIGGER membership_admin_event_append_only
+    BEFORE UPDATE OR DELETE ON tenant_management.membership_admin_event
+    FOR EACH ROW EXECUTE FUNCTION sales.prevent_append_only_mutation();
