@@ -24,11 +24,20 @@ CREATE TABLE sales.sales_order (
     updated_at TIMESTAMPTZ NOT NULL,
     confirmed_at TIMESTAMPTZ,
     version BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT uq_sales_order_scope_id UNIQUE (tenant_id, workspace_id, id),
     CONSTRAINT uq_sales_order_scope_number UNIQUE (tenant_id, workspace_id, number),
     CONSTRAINT uq_sales_order_source_request UNIQUE (tenant_id, workspace_id, source_purchase_request_id),
-    CONSTRAINT fk_sales_order_client FOREIGN KEY (client_account_id) REFERENCES sales.client_account(id),
-    CONSTRAINT fk_sales_order_buyer FOREIGN KEY (buyer_membership_id) REFERENCES tenant_management.workspace_membership(id),
-    CONSTRAINT fk_sales_order_source_request FOREIGN KEY (source_purchase_request_id) REFERENCES sales.purchase_request(id),
+    CONSTRAINT fk_sales_order_scope_workspace
+        FOREIGN KEY (tenant_id, workspace_id) REFERENCES tenant_management.workspace (tenant_id, id),
+    CONSTRAINT fk_sales_order_client
+        FOREIGN KEY (tenant_id, workspace_id, client_account_id)
+        REFERENCES sales.client_account (tenant_id, workspace_id, id),
+    CONSTRAINT fk_sales_order_buyer
+        FOREIGN KEY (workspace_id, buyer_membership_id)
+        REFERENCES tenant_management.workspace_membership (workspace_id, id),
+    CONSTRAINT fk_sales_order_source_request
+        FOREIGN KEY (tenant_id, workspace_id, source_purchase_request_id)
+        REFERENCES sales.purchase_request (tenant_id, workspace_id, id),
     CONSTRAINT ck_sales_order_status CHECK (status IN ('PENDING','CONFIRMED','REJECTED','CANCELLED')),
     CONSTRAINT ck_sales_order_currency CHECK (currency ~ '^[A-Z]{3}$'),
     CONSTRAINT ck_sales_order_rejection_reason CHECK (status <> 'REJECTED' OR (rejection_reason IS NOT NULL AND length(trim(rejection_reason)) > 0))
@@ -45,7 +54,7 @@ CREATE TABLE sales.sales_order_line (
     unit_price_currency VARCHAR(3) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_sales_order_line_catalog UNIQUE (sales_order_id, catalog_item_id),
-    CONSTRAINT fk_sales_order_line_order FOREIGN KEY (sales_order_id) REFERENCES sales.sales_order(id) ON DELETE CASCADE,
+    CONSTRAINT fk_sales_order_line_order FOREIGN KEY (sales_order_id) REFERENCES sales.sales_order(id),
     CONSTRAINT ck_sales_order_line_currency CHECK (unit_price_currency ~ '^[A-Z]{3}$')
 );
 
@@ -60,7 +69,11 @@ CREATE TABLE sales.sales_order_event (
     to_status VARCHAR(16) NOT NULL,
     reason VARCHAR(2000),
     occurred_at TIMESTAMPTZ NOT NULL,
-    CONSTRAINT fk_sales_order_event_order FOREIGN KEY (sales_order_id) REFERENCES sales.sales_order(id) ON DELETE CASCADE
+    CONSTRAINT fk_sales_order_event_order FOREIGN KEY (tenant_id, workspace_id, sales_order_id)
+        REFERENCES sales.sales_order (tenant_id, workspace_id, id),
+    CONSTRAINT fk_sales_order_event_actor
+        FOREIGN KEY (workspace_id, actor_membership_id)
+        REFERENCES tenant_management.workspace_membership (workspace_id, id)
 );
 
 CREATE INDEX ix_sales_order_scope_status ON sales.sales_order (tenant_id, workspace_id, status, created_at DESC);
@@ -69,3 +82,32 @@ CREATE INDEX ix_sales_order_line_order ON sales.sales_order_line (sales_order_id
 CREATE TRIGGER sales_order_event_append_only
     BEFORE UPDATE OR DELETE ON sales.sales_order_event
     FOR EACH ROW EXECUTE FUNCTION sales.prevent_append_only_mutation();
+
+CREATE TRIGGER sales_order_line_append_only
+    BEFORE UPDATE OR DELETE ON sales.sales_order_line
+    FOR EACH ROW EXECUTE FUNCTION sales.prevent_append_only_mutation();
+
+CREATE OR REPLACE FUNCTION sales.prevent_sales_order_snapshot_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'DELETE'
+        OR NEW.tenant_id <> OLD.tenant_id
+        OR NEW.workspace_id <> OLD.workspace_id
+        OR NEW.number <> OLD.number
+        OR NEW.client_account_id <> OLD.client_account_id
+        OR NEW.buyer_membership_id <> OLD.buyer_membership_id
+        OR NEW.source_purchase_request_id <> OLD.source_purchase_request_id
+        OR NEW.currency <> OLD.currency
+        OR NEW.total_amount <> OLD.total_amount
+    THEN
+        RAISE EXCEPTION 'Sales order snapshot is immutable';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER sales_order_snapshot_immutable
+    BEFORE UPDATE OR DELETE ON sales.sales_order
+    FOR EACH ROW EXECUTE FUNCTION sales.prevent_sales_order_snapshot_mutation();

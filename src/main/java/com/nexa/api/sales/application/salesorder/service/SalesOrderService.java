@@ -20,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
-public final class SalesOrderService implements SalesOrderUseCase {
+public class SalesOrderService implements SalesOrderUseCase {
 	private final SalesOrderPersistencePort persistence;
 	private final ClientAccountPersistencePort accounts;
 
