@@ -1,4 +1,4 @@
-# ADR-006: Access and refresh token strategy
+# ADR-010: Access and refresh token strategy
 
 Status: Accepted
 

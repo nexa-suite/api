@@ -21,6 +21,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/purchase-requests")
@@ -48,5 +49,10 @@ public class PurchaseRequestQueryController {
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Purchase Request returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Purchase Request not found")})
 	public ResponseEntity<PurchaseRequestDetailResponse> detail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
 		var value = sales.detail(context, id); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	}
+
+	@GetMapping("/{id}/events")
+	public List<com.nexa.api.sales.presentation.purchaserequest.response.PurchaseRequestEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
+		return sales.events(context, id).stream().map(mapper::event).toList();
 	}
 }

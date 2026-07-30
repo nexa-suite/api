@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.7.0] - 2026-07-30
+
+### Added
+
+- Atomic, idempotent Purchase Request to Sales Order conversion from `APPROVED` requests only.
+- Tenant/workspace/year Sales Order sequence, immutable order snapshots, lifecycle events and fulfillment-candidate query.
+- Secure PostgreSQL change feed with bounded SSE replay and session/context revalidation.
+
+### Changed
+
+- Added strict commercial filters, server-side snapshots, event identifiers and Purchase Request event timeline queries.
+- Added API CI, CodeQL and Dependabot configuration.
+
+### Security
+
+- Buyer reads remain client-account scoped; Sales Order mutations require `sales:write` and internal commercial roles.
+- Change-feed events expose no sensitive payload and are filtered by tenant, workspace and buyer scope.
+
 ## [0.6.0] - 2026-07-30
 
 This release consolidates previously unreleased Identity, tenant, security and commercial vertical work. Intermediate planned versions were never published.
@@ -84,7 +102,8 @@ This release consolidates previously unreleased Identity, tenant, security and c
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0

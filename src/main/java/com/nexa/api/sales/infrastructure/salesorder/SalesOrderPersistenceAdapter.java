@@ -76,7 +76,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort {
 				com.nexa.api.sales.domain.model.purchaserequest.PaymentOption.from(pr.paymentOption()), pr.notes(), currency, total),
 				new SalesOrderId(orderId.toString()), new SalesOrderNumber(String.format("SO-%04d-%06d", year, sequence)),
 				new BuyerMembershipId(actor), Instant.ofEpochMilli(nowEpochMillis));
-		jdbc.update("insert into sales.sales_order (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,buyer_membership_id,source_purchase_request_id,priority,requested_delivery_date,delivery_snapshot,payment_option,notes,currency,total_amount,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?,0)",
+		jdbc.update("insert into sales.sales_order (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,buyer_membership_id,source_purchase_request_id,priority,requested_delivery_date,delivery_snapshot,payment_option,notes,currency,total_amount,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?,0)",
 				orderId, tenant, workspace, order.number().value(), uuid(pr.clientAccountId()), actor, uuid(pr.buyerMembershipId()), request, order.priority().name(), order.requestedDeliveryDate(), order.deliverySnapshot(), order.paymentOption() == null ? null : order.paymentOption().name(), order.notes(), order.currency(), order.totalSnapshot(), timestamp(nowEpochMillis), timestamp(nowEpochMillis));
 		for (SalesOrderLine line : lines) jdbc.update("insert into sales.sales_order_line (id,sales_order_id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
 				UUID.randomUUID(), orderId, line.catalogItemId(), line.itemNameSnapshot(), line.presentationSnapshot(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), timestamp(nowEpochMillis));
@@ -144,15 +144,21 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort {
 		jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,from_status,to_status,reason,occurred_at) values (?,?,?,?,?,'ORDER_STATUS_CHANGED','PENDING',?,?,?)",
 				UUID.randomUUID(), orderId, tenant, workspace, actor, status, reason, timestamp(nowEpochMillis));
 		String client = jdbc.queryForObject("select client_account_id from sales.sales_order where id=?", String.class, orderId);
-		changeFeed.append(tenantId, workspaceId, client, "sales_order", id, "sales.sales-order." + action + "ed", "{\"status\":\"" + status + "\"}", nowEpochMillis);
+		String eventType = switch (action) {
+			case "confirm" -> "sales.sales-order.confirmed";
+			case "reject" -> "sales.sales-order.rejected";
+			case "cancel" -> "sales.sales-order.cancelled";
+			default -> throw new com.nexa.api.sales.application.exception.SalesOrderTransitionException();
+		};
+		changeFeed.append(tenantId, workspaceId, client, "sales_order", id, eventType, "{\"status\":\"" + status + "\"}", nowEpochMillis);
 		return find(tenantId, workspaceId, null, id).orElseThrow();
 	}
 
 	@Override
 	public List<SalesOrderEventView> events(String tenantId, String workspaceId, String buyerAccountId, String id) {
 		find(tenantId, workspaceId, buyerAccountId, id).orElseThrow(() -> new SalesResourceNotFoundException("sales-order"));
-		return jdbc.query("select event_type,from_status,to_status,reason,actor_membership_id,occurred_at from sales.sales_order_event where tenant_id=? and workspace_id=? and sales_order_id=? order by occurred_at,id",
-				(rs, row) -> new SalesOrderEventView(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getObject(5).toString(), rs.getTimestamp(6).toInstant()), uuid(tenantId), uuid(workspaceId), uuid(id));
+		return jdbc.query("select id,event_type,from_status,to_status,reason,actor_membership_id,occurred_at from sales.sales_order_event where tenant_id=? and workspace_id=? and sales_order_id=? order by occurred_at,id",
+				(rs, row) -> new SalesOrderEventView(rs.getObject(1).toString(), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getObject(6).toString(), rs.getTimestamp(7).toInstant()), uuid(tenantId), uuid(workspaceId), uuid(id));
 	}
 
 	@Override

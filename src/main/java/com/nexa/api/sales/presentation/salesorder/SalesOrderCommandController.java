@@ -7,6 +7,8 @@ import com.nexa.api.sales.presentation.salesorder.request.ConversionNoteRequest;
 import com.nexa.api.sales.presentation.salesorder.request.RejectSalesOrderRequest;
 import com.nexa.api.sales.presentation.salesorder.response.SalesOrderResponse;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -25,9 +27,15 @@ public final class SalesOrderCommandController {
 	public SalesOrderCommandController(SalesOrderUseCase sales, SalesOrderHttpMapper mapper) { this.sales = sales; this.mapper = mapper; }
 
 	@PostMapping("/api/v1/purchase-requests/{purchaseRequestId}/order-conversions")
+	@ApiResponses({
+			@ApiResponse(responseCode = "201", description = "Sales Order created"),
+			@ApiResponse(responseCode = "400", description = "Invalid conversion request"),
+			@ApiResponse(responseCode = "401", description = "Authentication required"),
+			@ApiResponse(responseCode = "403", description = "Sales or owner access required"),
+			@ApiResponse(responseCode = "409", description = "Stale version or idempotency conflict")})
 	public ResponseEntity<SalesOrderResponse> convert(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
-			@PathVariable String purchaseRequestId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
-			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+			@PathVariable String purchaseRequestId, @RequestHeader(name = "If-Match") String ifMatch,
+			@RequestHeader(name = "Idempotency-Key") String idempotencyKey,
 			@Valid @RequestBody(required = false) ConversionNoteRequest request) {
 		var value = sales.convert(context, purchaseRequestId, SalesHttpHeaders.requireVersion(ifMatch), idempotencyKey, request == null ? null : request.note());
 		return ResponseEntity.status(201).eTag(SalesHttpHeaders.etag(value.version())).body(mapper.response(value));

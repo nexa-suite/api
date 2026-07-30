@@ -43,8 +43,8 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 	}
 
 	public SseEmitter open(CurrentAccessContext initial, Jwt jwt, String lastEventId) {
-		if (activeStreams.incrementAndGet() > 100) { activeStreams.decrementAndGet(); throw new ChangeFeedCapacityException(); }
 		long last = parseLastEventId(lastEventId);
+		if (activeStreams.incrementAndGet() > 100) { activeStreams.decrementAndGet(); throw new ChangeFeedCapacityException(); }
 		SseEmitter emitter = new SseEmitter(MAX_STREAM_MILLIS + 5_000);
 		AtomicBoolean closed = new AtomicBoolean(); AtomicLong cursor = new AtomicLong(last); long started = System.currentTimeMillis();
 		Runnable release = () -> { if (closed.compareAndSet(false, true)) activeStreams.decrementAndGet(); };
@@ -84,7 +84,11 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		CurrentAccessContext resolved = accessContext.resolve(new CurrentAccessRequest(new UserId(jwt.getSubject()),
 				new com.nexa.api.tenantmanagement.domain.model.identity.TenantId(required(jwt, "tenant_id")),
 				new com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId(required(jwt, "workspace_id")), surface));
-		if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.role().equals(expected.role())) throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Change feed access context changed");
+		if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.role().equals(expected.role())
+				|| !resolved.tenantId().equals(expected.tenantId()) || !resolved.workspaceId().equals(expected.workspaceId())
+				|| !resolved.surface().equals(expected.surface())) {
+			throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Change feed access context changed");
+		}
 		return resolved;
 	}
 	private String clientAccount(CurrentAccessContext context) { return context.role().name().equals("BUYER") ? accounts.findForBuyer(scope(context), workspace(context), context.membershipId().toString()).map(ClientAccountView::id).orElseThrow() : null; }

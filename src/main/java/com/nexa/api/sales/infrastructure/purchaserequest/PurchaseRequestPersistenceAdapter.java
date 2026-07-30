@@ -2,6 +2,7 @@ package com.nexa.api.sales.infrastructure.purchaserequest;
 
 import com.nexa.api.sales.application.model.SalesPage;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestFilter;
+import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestEventView;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestLineView;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestView;
 import com.nexa.api.sales.application.purchaserequest.port.PurchaseRequestPersistencePort;
@@ -65,6 +66,13 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 	}
 
 	@Override
+	public List<PurchaseRequestEventView> events(String tenant, String workspace, String buyerAccount, String id) {
+		find(tenant, workspace, buyerAccount, id).orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("purchase-request"));
+		return jdbc.query("select id,event_type,from_status,to_status,actor_membership_id,occurred_at from sales.purchase_request_event where tenant_id=? and workspace_id=? and purchase_request_id=? order by occurred_at,id",
+				(rs, row) -> new PurchaseRequestEventView(rs.getObject(1).toString(), rs.getString(2), rs.getString(3), rs.getString(4), rs.getObject(5).toString(), rs.getTimestamp(6).toInstant()), uuid(tenant), uuid(workspace), uuid(id));
+	}
+
+	@Override
 	public void insert(PurchaseRequestView request, String tenant, String workspace, UUID id, long epoch) {
 		Timestamp now = timestamp(epoch);
 		jdbc.update("insert into sales.purchase_request (id,tenant_id,workspace_id,client_account_id,buyer_membership_id,code,status,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
@@ -108,7 +116,15 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 	public int transition(String tenant, String workspace, String buyerAccount, String id, String from, String to,
 			String note, String actor, long version) {
 		String scope = buyerAccount == null ? "" : " and client_account_id=?";
-		List<Object> args = new ArrayList<>(List.of(to, note, to, uuid(actor), to, to, uuid(tenant), uuid(workspace)));
+		List<Object> args = new ArrayList<>();
+		args.add(to);
+		args.add(note);
+		args.add(to);
+		args.add(uuid(actor));
+		args.add(to);
+		args.add(to);
+		args.add(uuid(tenant));
+		args.add(uuid(workspace));
 		if (buyerAccount != null) args.add(uuid(buyerAccount));
 		args.add(uuid(id)); args.add(from); args.add(version);
 		return jdbc.update("update sales.purchase_request set status=?,review_note=?,reviewed_by_membership_id=case when ? in ('IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED','REJECTED') then ? else reviewed_by_membership_id end,submitted_at=case when ?='SUBMITTED' then current_timestamp else submitted_at end,reviewed_at=case when ? in ('IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED','REJECTED') then current_timestamp else reviewed_at end,updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=?" + scope + " and id=? and status=? and version=?", args.toArray());

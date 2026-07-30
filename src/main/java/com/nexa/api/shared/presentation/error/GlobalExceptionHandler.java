@@ -104,6 +104,7 @@ public final class GlobalExceptionHandler {
 	}
 	@ExceptionHandler(DataIntegrityViolationException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
+		LOGGER.warn("Data integrity constraint rejected request {}", request.getRequestURI(), exception.getMostSpecificCause());
 		String message = exception.getMostSpecificCause() == null ? "" : String.valueOf(exception.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
 		ApiErrorCode code = message.contains("code") ? ApiErrorCode.CLIENT_ACCOUNT_CODE_CONFLICT
 				: message.contains("tax") ? ApiErrorCode.CLIENT_ACCOUNT_TAX_ID_CONFLICT

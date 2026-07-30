@@ -67,8 +67,6 @@ public class LocalDevelopmentBootstrap {
 					UUID.randomUUID(), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
 			List<UUID> accounts = jdbc.query("select id from sales.client_account where tenant_id=? and workspace_id=? and code=?", (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, seed.code());
 			if (accounts.isEmpty() || !seed.portalAccess()) continue;
-			String buyerEmail = environment.getProperty("NEXA_DEV_BUYER_EMAIL", "").trim();
-			if (!seed.contactEmail().equalsIgnoreCase(buyerEmail)) continue;
 			jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing", accounts.get(0), membershipId, tenantId, workspaceId, timestamp(now));
 		}
 	}

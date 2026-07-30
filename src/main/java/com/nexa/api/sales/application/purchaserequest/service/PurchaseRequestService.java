@@ -81,6 +81,11 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	}
 
 	@Override
+	public List<com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestEventView> events(CurrentAccessContext context, String id) {
+		return persistence.events(scope(context), workspace(context), buyerAccount(context), id);
+	}
+
+	@Override
 	@Transactional
 	public PurchaseRequestView create(CurrentAccessContext context, String requestedClientAccountId, String priority,
 			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment, List<RequestedLine> requestedLines) {
