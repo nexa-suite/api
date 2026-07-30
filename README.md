@@ -6,11 +6,11 @@
 
 Business and integration API foundation for Nexa Suite, implemented as a Spring Boot modular monolith.
 
-[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.4.0](https://img.shields.io/badge/release-v0.4.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.4.0)
+[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.6.0](https://img.shields.io/badge/release-v0.6.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.6.0)
 
 [Changelog](./CHANGELOG.md) · [Release notes](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
 
-**Current repository:** API · **Current release:** `v0.4.0`
+**Current repository:** API · **Current release:** `v0.6.0`
 
 [Website](https://github.com/nexa-suite/website) · [Platform](https://github.com/nexa-suite/platform) · [Portal](https://github.com/nexa-suite/portal) · [API](https://github.com/nexa-suite/api) · [Mobile](https://github.com/nexa-suite/mobile)
 
@@ -20,28 +20,28 @@ Business and integration API foundation for Nexa Suite, implemented as a Spring 
 
 ## What is implemented
 
-`v0.4.0` exposes the read-only Catalog Management query contract over REST, backed by the checksum-validated 50-item seed. It includes bounded pagination, filtering and sorting, explicit transport DTOs, local OpenAPI, Problem Details and deny-by-default security tests.
+`v0.6.0` consolidates RS256 identity sessions, refresh-token rotation, tenant/workspace membership verification, Organization Administration, Client Accounts, Purchase Requests and secured Catalog Management reads over the existing checksum-validated 50-item seed. It includes Flyway-managed PostgreSQL schemas, idempotency, optimistic concurrency, Problem Details and local OpenAPI.
 
-The API is the future business authority for approved client contracts. The tagged release is intentionally smaller than the complete Nexa domain: there is no persistence, tenant identity, multi-tenant authorization or external integration in this release.
+The API is the business authority for the approved identity, workspace, Catalog and commercial request slice. Sales Order persistence/HTTP, warehouse, logistics, invoicing, cache and external integrations remain outside this release.
 
-The catalog business routes remain runtime-denied until identity, membership and tenant authorization are approved. Health/info are public; local OpenAPI is enabled only with the `local` profile.
+Catalog routes require a valid RS256 access token, active membership and `catalog:read`. Health/info are public; local OpenAPI is enabled only with the `local` profile.
 
 ## Product boundaries
 
 ```mermaid
 flowchart LR
     Website["Website<br/>Static public site<br/>v1.0.0"]
-    Platform["Platform<br/>Angular shell<br/>v0.3.0"]
-    Portal["Buyer Portal<br/>Angular shell<br/>v0.3.0"]
-    API["API<br/>Catalog query contract<br/>v0.4.0"]
+    Platform["Platform<br/>Angular secured surface<br/>v0.5.0"]
+    Portal["Buyer Portal<br/>Angular secured surface<br/>v0.5.0"]
+    API["API<br/>IAM, tenant scope and commercial requests<br/>v0.6.0"]
 
     Website -. "product navigation" .-> Platform
     Website -. "product navigation" .-> Portal
-    Platform -. "future approved HTTP contract" .-> API
-    Portal -. "future approved HTTP contract" .-> API
+    Platform -->|"secured IAM and Catalog read contract"| API
+    Portal -->|"secured IAM and Catalog read contract"| API
 ```
 
-The diagram describes product boundaries, not a claim of deployed integration. Mobile is not part of this runtime map: `mobile v0.1.1` is documentation-only. PostgreSQL, AI, IoT and cloud services are not implemented in the modern API runtime.
+The diagram shows the approved secured vertical slice; it is not a public deployment claim. Mobile is not part of this runtime map: `mobile v0.1.1` is documentation-only. AI, IoT and cloud services remain future scope.
 
 ![Nexa Suite repository map](./docs/assets/repository-map/nexa-suite-map.svg)
 
@@ -50,19 +50,19 @@ The diagram describes product boundaries, not a claim of deployed integration. M
 | Repository | Current release | Responsibility | Evidence status |
 |---|---:|---|---|
 | [Website](https://github.com/nexa-suite/website) | `v1.0.0` | Static public product discovery | Released static site |
-| [Platform](https://github.com/nexa-suite/platform) | `v0.3.0` | Internal operations shell | Angular shell; runtime image |
-| [Portal](https://github.com/nexa-suite/portal) | `v0.3.0` | Buyer self-service shell | Angular shell; runtime image |
-| **API** | **`v0.4.0`** | Business and integration authority | Catalog query contract |
+| [Platform](https://github.com/nexa-suite/platform) | `v0.5.0` | Internal operations shell | Secured Angular commercial surface |
+| [Portal](https://github.com/nexa-suite/portal) | `v0.5.0` | Buyer self-service shell | Secured Angular commercial surface |
+| **API** | **`v0.6.0`** | Business and integration authority | IAM, tenant scope, Catalog and Sales requests |
 | [Mobile](https://github.com/nexa-suite/mobile) | `v0.1.1` | Future native clients | Documentation-only |
 
 ## Bounded contexts
 
 | Area | Current maturity |
 |---|---|
-| Catalog Management | Query contract in `v0.4.0` |
-| IAM | Planned |
-| Tenant Management | Planned |
-| Sales | Planned |
+| Catalog Management | Secured read contract in `v0.6.0` |
+| IAM | RS256 sessions and refresh rotation |
+| Tenant Management | Workspace membership and surface policy |
+| Sales | Client Accounts and Purchase Requests; Sales Order readiness only |
 | Warehouse | Planned |
 | Logistics | Planned |
 | Invoicing | Planned |
@@ -73,7 +73,7 @@ Each future bounded context keeps Presentation, Application, Domain and Infrastr
 
 ## Tech stack
 
-Java 26, Spring Boot 4.1.0, Spring MVC, Bean Validation, Actuator, Spring Boot Test, Maven Wrapper and jar packaging.
+Java 26, Spring Boot 4.1.0, Spring MVC, Spring Security resource server, JPA infrastructure, Flyway, PostgreSQL 18.4, Bean Validation, Actuator, Maven Wrapper and jar packaging.
 
 ## Runtime
 
@@ -109,9 +109,11 @@ docs/releases/                                           # Versioned release not
 - [ADR-005: Deny-by-default API security](./docs/architecture/decisions/ADR-005-deny-by-default-api-security.md)
 - [ADR-006: Seed-only query runtime](./docs/architecture/decisions/ADR-006-seed-only-query-runtime.md)
 - [Local OpenAPI instructions](./docs/openapi/README.md)
+- [Authentication contract](./docs/security/authentication.md)
+- [Authorization contract](./docs/security/authorization.md)
 - [Release notes index](./docs/releases/)
 - [Release policy](./.github/RELEASE_POLICY.md)
 
 ## Roadmap boundary
 
-New vertical slices require an explicit contract, identity and tenant decision, persistence evidence and runtime validation. Documentation must keep planned PostgreSQL, AI, IoT, cloud and mobile work separate from the current implementation.
+New vertical slices require an explicit contract, identity and tenant decision, persistence evidence and runtime validation. Catalog content remains shared local reference data; tenant-specific assortment, pricing and stock are not claimed.

@@ -3,13 +3,28 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
-## [Unreleased]
+## [0.6.0] - 2026-07-30
 
-### Documentation
+This release consolidates previously unreleased Identity, tenant, security and commercial vertical work. Intermediate planned versions were never published.
 
-- Aligned the README, suite map and runtime diagram with the tagged `v0.3.0` API foundation.
-- Made non-implemented persistence, identity, tenant, AI, IoT, cloud and mobile scope explicit.
-- Added a local repository map and a release-notes index.
+### Added
+
+- IAM and session lifecycle, PostgreSQL identity and tenant persistence, Organization Administration, Client Accounts and Purchase Requests.
+- Audit events, idempotency, optimistic concurrency control and authentication throttling.
+- OpenAPI contracts, Docker Modern stack and Sales Order domain readiness without persistence or HTTP.
+
+### Changed
+
+- Catalog now requires authenticated permission; bearer authentication revalidates persistent sessions; tenant/workspace access uses verified membership.
+- Sales Presentation contracts, Application models, domain packages and persistence adapters are separated by responsibility.
+
+### Fixed
+
+- Access JWT use after logout, refresh-family reuse behavior, dynamic route aliases, canonical Flyway drift handling, changelog links and duplicate Sales Order concepts.
+
+### Security
+
+- Session revocation, durable throttling, CSRF/Origin controls, security headers, server-authoritative price snapshots, tenant/client isolation and secret-safe local verification.
 
 ## [0.4.0] - 2026-07-28
 
@@ -69,7 +84,8 @@ The project uses Semantic Versioning.
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nexa-suite/api/compare/v0.1.0...v0.2.0

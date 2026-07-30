@@ -6,7 +6,7 @@ COPY pom.xml ./
 RUN mvn -B -ntp dependency:go-offline
 
 COPY src ./src
-RUN mvn -B -ntp package -DskipTests
+RUN mvn -B -ntp package
 
 FROM eclipse-temurin:26-jre
 

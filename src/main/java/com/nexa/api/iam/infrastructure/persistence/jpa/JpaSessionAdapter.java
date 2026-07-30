@@ -1,0 +1,170 @@
+package com.nexa.api.iam.infrastructure.persistence.jpa;
+
+import com.nexa.api.iam.application.model.AccessPolicy;
+import com.nexa.api.iam.application.model.AuthenticationSubject;
+import com.nexa.api.iam.application.model.IssuedAuthenticationTokens;
+import com.nexa.api.iam.application.model.RefreshRotation;
+import com.nexa.api.iam.application.model.SessionRecord;
+import com.nexa.api.iam.application.port.out.AccessPolicyPort;
+import com.nexa.api.iam.application.port.out.SessionPort;
+import com.nexa.api.iam.domain.model.access.ClientSurface;
+import com.nexa.api.iam.domain.model.session.AuthenticationSession;
+import com.nexa.api.iam.domain.model.session.RefreshTokenFamilyId;
+import com.nexa.api.iam.domain.model.session.SessionId;
+import com.nexa.api.iam.domain.model.useraccount.EmailAddress;
+import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.tenantmanagement.infrastructure.persistence.jpa.WorkspaceJpaRepository;
+import com.nexa.api.tenantmanagement.infrastructure.persistence.jpa.WorkspaceMembershipJpaRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.stereotype.Repository;
+import org.springframework.context.annotation.Profile;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.Optional;
+import java.util.UUID;
+
+@Repository
+@Profile("!test")
+public class JpaSessionAdapter implements SessionPort {
+	private final RefreshSessionJpaRepository sessions;
+	private final UserAccountJpaRepository users;
+	private final AccessPolicyPort accessPolicies;
+	private final WorkspaceMembershipJpaRepository memberships;
+	private final WorkspaceJpaRepository workspaces;
+	private final JwtDecoder decoder;
+	private final Duration accessTokenTtl;
+
+	public JpaSessionAdapter(RefreshSessionJpaRepository sessions, UserAccountJpaRepository users, AccessPolicyPort accessPolicies,
+			WorkspaceMembershipJpaRepository memberships, WorkspaceJpaRepository workspaces, JwtDecoder decoder,
+			@Value("${nexa.security.access-token-ttl:PT15M}") Duration accessTokenTtl) {
+		this.sessions = sessions;
+		this.users = users;
+		this.accessPolicies = accessPolicies;
+		this.memberships = memberships;
+		this.workspaces = workspaces;
+		this.decoder = decoder;
+		this.accessTokenTtl = accessTokenTtl;
+	}
+
+	@Override
+	@Transactional
+	public SessionRecord start(AuthenticationSession session, AuthenticationSubject subject, IssuedAuthenticationTokens tokens) {
+		sessions.save(RefreshSessionJpaEntity.from(new SessionRecord(session, subject, tokens), sha256(tokens.refreshToken())));
+		return new SessionRecord(session, subject, tokens);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Optional<SessionRecord> findByAccessToken(String accessToken) {
+		try {
+			var jwt = decoder.decode(accessToken);
+			String value = jwt.getClaimAsString("sid");
+			if (value == null) return Optional.empty();
+			return sessions.findById(UUID.fromString(value)).flatMap(entity -> toRecord(entity, accessToken, null, jwt.getIssuedAt(), jwt.getExpiresAt()));
+		} catch (RuntimeException exception) {
+			return Optional.empty();
+		}
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Optional<SessionRecord> findBySessionId(SessionId sessionId) {
+		try {
+			return sessions.findById(UUID.fromString(sessionId.value())).flatMap(entity ->
+				toRecord(entity, null, null, entity.getCreatedAt(), entity.getCreatedAt().plus(accessTokenTtl)));
+		} catch (RuntimeException exception) {
+			return Optional.empty();
+		}
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Optional<SessionRecord> findByRefreshToken(String refreshToken) {
+		return sessions.findByTokenHash(sha256(refreshToken)).flatMap(entity -> toRecord(entity, null, refreshToken, null, null));
+	}
+
+	@Override
+	@Transactional
+	public RefreshRotation rotateRefreshToken(String presentedRefreshToken, SessionRecord replacement, Instant rotatedAt) {
+		Optional<RefreshSessionJpaEntity> current = sessions.findByTokenHashForUpdate(sha256(presentedRefreshToken));
+		if (current.isEmpty()) return RefreshRotation.invalid();
+		RefreshSessionJpaEntity entity = current.get();
+		if (entity.getRevokedAt() != null) return RefreshRotation.reused();
+		if (!entity.getExpiresAt().isAfter(rotatedAt)) return RefreshRotation.invalid();
+		entity.rotateTo(UUID.fromString(replacement.session().id().value()), rotatedAt);
+		sessions.save(entity);
+		sessions.save(RefreshSessionJpaEntity.from(replacement, sha256(replacement.refreshToken())));
+		return RefreshRotation.rotated(replacement);
+	}
+
+	@Override
+	@Transactional
+	public void revoke(SessionId sessionId, Instant revokedAt) {
+		sessions.findById(UUID.fromString(sessionId.value())).ifPresent(entity -> entity.revoke(revokedAt));
+	}
+
+	@Override
+	@Transactional
+	public void revoke(SessionId sessionId, UserAccountId userId, ClientSurface surface, Instant revokedAt) {
+		sessions.findById(UUID.fromString(sessionId.value())).ifPresent(entity -> {
+			if (entity.getUserId().equals(UUID.fromString(userId.value())) && entity.getSurface().equals(surface.name())) {
+				entity.revoke(revokedAt);
+			}
+		});
+	}
+
+	@Override
+	@Transactional
+	public void revokeFamily(RefreshTokenFamilyId familyId, Instant revokedAt) {
+		sessions.findByFamilyId(UUID.fromString(familyId.value())).forEach(entity -> entity.revokeFamily(revokedAt));
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public boolean isFamilyRevoked(RefreshTokenFamilyId familyId) {
+		return sessions.findByFamilyId(UUID.fromString(familyId.value())).stream()
+				.anyMatch(entity -> entity.getFamilyRevokedAt() != null);
+	}
+
+	private Optional<SessionRecord> toRecord(RefreshSessionJpaEntity entity, String accessToken, String refreshToken,
+			Instant accessIssuedAt, Instant accessExpiresAt) {
+		try {
+			UserAccountId userId = new UserAccountId(entity.getUserId().toString());
+			ClientSurface surface = ClientSurface.valueOf(entity.getSurface());
+			var membership = memberships.findById(entity.getMembershipId()).orElse(null);
+			if (membership == null) return Optional.empty();
+			var workspace = workspaces.findById(membership.getWorkspaceId()).orElse(null);
+			if (workspace == null) return Optional.empty();
+			AccessPolicy policy = accessPolicies.findFor(userId, workspace.getSlug(), surface).orElse(null);
+			if (policy == null) return Optional.empty();
+			var user = users.findById(entity.getUserId()).orElse(null);
+			if (user == null) return Optional.empty();
+			var subject = new AuthenticationSubject(userId, new EmailAddress(user.getEmail()), surface, policy);
+			var session = AuthenticationSession.start(new SessionId(entity.getId().toString()), userId, surface,
+					new RefreshTokenFamilyId(entity.getFamilyId().toString()), entity.getCreatedAt(), entity.getExpiresAt());
+			if (entity.getRevokedAt() != null) session.revoke(entity.getRevokedAt());
+			Instant issued = accessIssuedAt == null ? entity.getCreatedAt() : accessIssuedAt;
+			Instant expires = accessExpiresAt == null ? issued.plus(accessTokenTtl) : accessExpiresAt;
+			var tokens = new IssuedAuthenticationTokens(accessToken == null ? "persisted-access-token" : accessToken,
+					refreshToken == null ? "persisted-refresh-token" : refreshToken, issued, expires, entity.getExpiresAt());
+			return Optional.of(new SessionRecord(session, subject, tokens));
+		} catch (RuntimeException exception) {
+			return Optional.empty();
+		}
+	}
+
+	private static String sha256(String value) {
+		try {
+			byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+			return HexFormat.of().formatHex(digest);
+		} catch (Exception exception) {
+			throw new IllegalStateException("Unable to hash session token", exception);
+		}
+	}
+}

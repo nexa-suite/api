@@ -1,0 +1,17 @@
+package com.nexa.api.tenantmanagement.infrastructure;
+
+import com.nexa.api.tenantmanagement.application.port.in.OrganizationAdministrationUseCase;
+import com.nexa.api.tenantmanagement.application.port.out.OrganizationAdministrationPort;
+import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+
+@Configuration(proxyBeanMethods = false)
+@Profile("!test")
+public class OrganizationAdministrationRuntimeConfiguration {
+	@Bean
+	OrganizationAdministrationUseCase organizationAdministrationUseCase(OrganizationAdministrationPort port) {
+		return new OrganizationAdministrationService(port);
+	}
+}
