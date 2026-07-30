@@ -1,6 +1,24 @@
 name: nexa
 
 services:
+  modern-postgres:
+    profiles: [modern]
+    image: postgres:18.4-alpine
+    container_name: nexa-modern-postgres
+    environment:
+      POSTGRES_DB: ${NEXA_MODERN_POSTGRES_DB:?Set NEXA_MODERN_POSTGRES_DB in .env.local}
+      POSTGRES_USER: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in .env.local}
+      POSTGRES_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in .env.local}
+    volumes:
+      - nexa-modern-postgres-data:/var/lib/postgresql/data
+    networks: [modern-data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 20
+
   modern-api:
     profiles: [modern]
     build:
@@ -9,12 +27,27 @@ services:
     image: nexa/modern-api:local
     container_name: nexa-modern-api
     environment:
+      SPRING_PROFILES_ACTIVE: ${NEXA_MODERN_SPRING_PROFILE:-local}
       SERVER_PORT: "8080"
+      NEXA_DATABASE_URL: jdbc:postgresql://modern-postgres:5432/${NEXA_MODERN_POSTGRES_DB:?Set NEXA_MODERN_POSTGRES_DB in .env.local}
+      NEXA_DATABASE_USERNAME: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in .env.local}
+      NEXA_DATABASE_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in .env.local}
+      NEXA_FLYWAY_ENABLED: "true"
+      NEXA_DEV_BOOTSTRAP_ENABLED: ${NEXA_DEV_BOOTSTRAP_ENABLED:-false}
+      NEXA_SECURITY_RSA_PUBLIC_KEY: /run/secrets/nexa_access_token_public
+      NEXA_SECURITY_RSA_PRIVATE_KEY: /run/secrets/nexa_access_token_private
+    volumes:
+      - ${NEXA_SECURITY_RSA_PUBLIC_KEY_FILE:-../../.local-keys/access-token-public.pem}:/run/secrets/nexa_access_token_public:ro
+      - ${NEXA_SECURITY_RSA_PRIVATE_KEY_FILE:-../../.local-keys/access-token-private.pem}:/run/secrets/nexa_access_token_private:ro
+    depends_on:
+      modern-postgres:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
     networks:
-      modern:
+      modern-edge:
         aliases: [api]
+      modern-data:
     healthcheck:
       test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
       interval: 10s
@@ -34,7 +67,7 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:4200:80"
-    networks: [modern]
+    networks: [modern-edge]
     healthcheck:
       test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
       interval: 10s
@@ -54,7 +87,7 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:4300:80"
-    networks: [modern]
+    networks: [modern-edge]
     healthcheck:
       test: ["CMD", "/usr/local/bin/nexa-healthcheck"]
       interval: 10s
@@ -146,11 +179,16 @@ services:
     networks: [legacy]
 
 networks:
-  modern:
-    name: nexa-modern-network
+  modern-edge:
+    name: nexa-modern-edge
+  modern-data:
+    name: nexa-modern-data
+    internal: true
   legacy:
     name: nexa-legacy-network
 
 volumes:
+  nexa-modern-postgres-data:
+    name: nexa-modern-postgres-data
   nexa-legacy-postgres-data:
     name: nexa-legacy-postgres-data

@@ -1,10 +1,10 @@
 # ADR-005: Deny-by-default API security
 
-Status: Accepted for API `v0.4.0`
+Status: Accepted for API `v0.5.0`
 
 ## Context
 
-Catalog query is implemented before identity and tenant membership are approved. A reachable business endpoint must not become an accidental anonymous or authenticated bypass.
+Every reachable business endpoint must have authenticated, active membership and explicit authorization evidence. A reachable business endpoint must not become an accidental anonymous or cross-tenant bypass.
 
 ## Decision
 
@@ -14,7 +14,8 @@ Catalog query is implemented before identity and tenant membership are approved.
 - Anonymous business access returns `401` Problem Details.
 - Authenticated access without an approved authorization rule returns `403` Problem Details.
 - Form login, HTTP Basic, CSRF state, logout and sessions are disabled for this stateless API foundation.
+- After JWT verification, every bearer request is revalidated against the active user, tenant, workspace and membership rows, including membership and role claim equality; DB-derived permissions replace token permissions for the request. A valid bearer token with an invalid active context returns `403 ACCESS_CONTEXT_INVALID`.
 
 ## Consequences
 
-The catalog use case is independently testable with filters disabled in unit/presentation tests, while runtime evidence remains explicitly blocked until identity, membership and tenant authorization are approved.
+The catalog use case remains independently testable with filters disabled in unit/presentation tests. Runtime catalog access requires the verified membership filter and `catalog:read` authority; catalog content is still shared local reference data.

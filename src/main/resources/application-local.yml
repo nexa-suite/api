@@ -8,3 +8,20 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
+
+server:
+  forward-headers-strategy: framework
+
+nexa:
+  security:
+    issuer: ${NEXA_SECURITY_ISSUER:http://localhost:8080}
+    audience: ${NEXA_SECURITY_AUDIENCE:nexa-local}
+    access-token-ttl: ${NEXA_ACCESS_TOKEN_TTL:PT15M}
+    refresh-token-ttl: ${NEXA_REFRESH_TOKEN_TTL:P30D}
+    rsa-public-key: ${NEXA_SECURITY_RSA_PUBLIC_KEY:./.local-keys/access-token-public.pem}
+    rsa-private-key: ${NEXA_SECURITY_RSA_PRIVATE_KEY:./.local-keys/access-token-private.pem}
+    allowed-origins: ${NEXA_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4300}
+    refresh-cookie-secure: ${NEXA_REFRESH_COOKIE_SECURE:false}
+    bcrypt-strength: ${NEXA_BCRYPT_STRENGTH:12}
+  dev-bootstrap:
+    enabled: ${NEXA_DEV_BOOTSTRAP_ENABLED:false}

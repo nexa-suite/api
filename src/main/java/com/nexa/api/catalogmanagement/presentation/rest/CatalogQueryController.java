@@ -11,6 +11,7 @@ import com.nexa.api.catalogmanagement.presentation.rest.response.CatalogPageResp
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
@@ -40,6 +41,7 @@ public class CatalogQueryController {
 
 	@GetMapping
 	@Operation(summary = "List active catalog items")
+	@SecurityRequirement(name = "bearerAuth")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Catalog page returned"),
 			@ApiResponse(responseCode = "400", description = "Invalid query parameters"),
 			@ApiResponse(responseCode = "401", description = "Authentication required"),
@@ -50,6 +52,7 @@ public class CatalogQueryController {
 
 	@GetMapping("/{catalogItemId}")
 	@Operation(summary = "Get an active catalog item")
+	@SecurityRequirement(name = "bearerAuth")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Catalog item returned"),
 			@ApiResponse(responseCode = "400", description = "Invalid catalog item ID"),
 			@ApiResponse(responseCode = "401", description = "Authentication required"),
