@@ -18,7 +18,7 @@ class SalesOrderTests {
 	@Test void createsOnlyFromApprovedSnapshotAndSupportsCommercialTransitions() {
 		var line = new SalesOrderLine("CAT-001", "Frozen item", BigDecimal.ONE, BigDecimal.TEN, "PEN");
 		var snapshot = new ApprovedPurchaseRequestSnapshot(new TenantId(UUID.randomUUID()), new WorkspaceId(UUID.randomUUID()), new ClientAccountId("CLI-001"), new PurchaseRequestId("PR-001"), List.of(line), BigDecimal.TEN);
-		var order = SalesOrder.fromApprovedSnapshot(snapshot, new SalesOrderId("SO-001"), new SalesOrderNumber("SO-001"), Instant.EPOCH);
+		var order = SalesOrder.fromApprovedSnapshot(snapshot, new SalesOrderId("SO-001"), new SalesOrderNumber("SO-2026-000001"), Instant.EPOCH);
 		order.confirm(Instant.EPOCH.plusSeconds(1));
 		assertThat(order.status()).isEqualTo(SalesOrderStatus.CONFIRMED);
 		assertThat(order.sourcePurchaseRequestId().value()).isEqualTo("PR-001");
@@ -26,7 +26,7 @@ class SalesOrderTests {
 	@Test void terminalCommercialStatesCannotBeReused() {
 		var line = new SalesOrderLine("CAT-001", "Frozen item", BigDecimal.ONE, BigDecimal.TEN, "PEN");
 		var snapshot = new ApprovedPurchaseRequestSnapshot(new TenantId(UUID.randomUUID()), new WorkspaceId(UUID.randomUUID()), new ClientAccountId("CLI-001"), new PurchaseRequestId("PR-001"), List.of(line), BigDecimal.TEN);
-		var order = SalesOrder.fromApprovedSnapshot(snapshot, new SalesOrderId("SO-001"), new SalesOrderNumber("SO-001"), Instant.EPOCH);
+		var order = SalesOrder.fromApprovedSnapshot(snapshot, new SalesOrderId("SO-001"), new SalesOrderNumber("SO-2026-000002"), Instant.EPOCH);
 		order.reject();
 		assertThatThrownBy(() -> order.confirm(Instant.now())).isInstanceOf(SalesOrderInvariantViolation.class);
 	}

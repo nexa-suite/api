@@ -15,8 +15,9 @@ public interface PurchaseRequestPersistencePort {
 	void insertLine(String requestId, PurchaseRequestLineView line, UUID id, long nowEpochMillis);
 	int update(String tenantId, String workspaceId, String buyerAccountId, String id, String priority, LocalDate requestedDeliveryDate,
 			String deliveryProfileSnapshot, String paymentOption, String comment, long version);
-	int updateLine(String requestId, String lineId, BigDecimal quantity, String notes, long version);
-	int deleteLine(String requestId, String lineId, long version);
+	int updateLine(String tenantId, String workspaceId, String buyerAccountId, String requestId, String lineId,
+			BigDecimal quantity, String notes, long version);
+	int deleteLine(String tenantId, String workspaceId, String buyerAccountId, String requestId, String lineId, long version);
 	int transition(String tenantId, String workspaceId, String buyerAccountId, String id, String fromStatus, String toStatus,
 			String reviewNote, String actorMembershipId, long version);
 }
