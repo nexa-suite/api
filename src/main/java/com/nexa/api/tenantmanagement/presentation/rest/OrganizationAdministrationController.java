@@ -8,6 +8,8 @@ import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +19,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1")
 @Profile("!test")
+@Tag(name = "Organization Administration")
+@SecurityRequirement(name = "bearerAuth")
 public class OrganizationAdministrationController {
 	private final OrganizationAdministrationUseCase administration;
 	public OrganizationAdministrationController(OrganizationAdministrationUseCase administration) { this.administration = administration; }

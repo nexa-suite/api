@@ -68,9 +68,9 @@ public class ApiSecurityConfiguration {
 	CorsConfigurationSource corsConfigurationSource(Environment environment) {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
-		configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Correlation-Id", "X-Nexa-Surface"));
-		configuration.setExposedHeaders(List.of("X-Correlation-Id"));
+		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Nexa-Surface"));
+		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-Id"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/**", configuration);

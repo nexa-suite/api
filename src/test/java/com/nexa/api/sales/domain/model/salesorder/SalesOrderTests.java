@@ -1,7 +1,7 @@
 package com.nexa.api.sales.domain.model.salesorder;
 
-import com.nexa.api.sales.domain.ClientAccountId;
-import com.nexa.api.sales.domain.PurchaseRequestId;
+import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import org.junit.jupiter.api.Test;

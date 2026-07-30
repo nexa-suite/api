@@ -6,11 +6,11 @@
 
 Business and integration API foundation for Nexa Suite, implemented as a Spring Boot modular monolith.
 
-[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.5.0](https://img.shields.io/badge/release-v0.5.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.5.0)
+[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.6.0](https://img.shields.io/badge/release-v0.6.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.6.0)
 
 [Changelog](./CHANGELOG.md) · [Release notes](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
 
-**Current repository:** API · **Current release:** `v0.5.0`
+**Current repository:** API · **Current release:** `v0.6.0`
 
 [Website](https://github.com/nexa-suite/website) · [Platform](https://github.com/nexa-suite/platform) · [Portal](https://github.com/nexa-suite/portal) · [API](https://github.com/nexa-suite/api) · [Mobile](https://github.com/nexa-suite/mobile)
 
@@ -20,9 +20,9 @@ Business and integration API foundation for Nexa Suite, implemented as a Spring 
 
 ## What is implemented
 
-`v0.5.0` adds RS256 identity sessions, refresh-token rotation, tenant/workspace membership verification, canonical role permissions and secured Catalog Management reads over the existing checksum-validated 50-item seed. It includes Flyway-managed PostgreSQL schemas, local bootstrap gating, Problem Details and local OpenAPI.
+`v0.6.0` consolidates RS256 identity sessions, refresh-token rotation, tenant/workspace membership verification, Organization Administration, Client Accounts, Purchase Requests and secured Catalog Management reads over the existing checksum-validated 50-item seed. It includes Flyway-managed PostgreSQL schemas, idempotency, optimistic concurrency, Problem Details and local OpenAPI.
 
-The API is the business authority for the approved identity, workspace and Catalog read slice. The tagged release is intentionally smaller than the complete Nexa domain: sales, warehouse, logistics, invoicing and external integrations remain future bounded contexts.
+The API is the business authority for the approved identity, workspace, Catalog and commercial request slice. Sales Order persistence/HTTP, warehouse, logistics, invoicing, cache and external integrations remain outside this release.
 
 Catalog routes require a valid RS256 access token, active membership and `catalog:read`. Health/info are public; local OpenAPI is enabled only with the `local` profile.
 
@@ -30,10 +30,10 @@ Catalog routes require a valid RS256 access token, active membership and `catalo
 
 ```mermaid
 flowchart LR
-    Website["Website<br/>Static public site<br/>v1.0.1"]
-    Platform["Platform<br/>Angular secured surface<br/>v0.4.0"]
-    Portal["Buyer Portal<br/>Angular secured surface<br/>v0.4.0"]
-    API["API<br/>IAM, tenant scope and catalog<br/>v0.5.0"]
+    Website["Website<br/>Static public site<br/>v1.0.0"]
+    Platform["Platform<br/>Angular secured surface<br/>v0.5.0"]
+    Portal["Buyer Portal<br/>Angular secured surface<br/>v0.5.0"]
+    API["API<br/>IAM, tenant scope and commercial requests<br/>v0.6.0"]
 
     Website -. "product navigation" .-> Platform
     Website -. "product navigation" .-> Portal
@@ -41,7 +41,7 @@ flowchart LR
     Portal -->|"secured IAM and Catalog read contract"| API
 ```
 
-The diagram shows the approved secured vertical slice; it is not a public deployment claim. Mobile is not part of this runtime map: `mobile v0.1.2` is documentation-only. AI, IoT and cloud services remain future scope.
+The diagram shows the approved secured vertical slice; it is not a public deployment claim. Mobile is not part of this runtime map: `mobile v0.1.1` is documentation-only. AI, IoT and cloud services remain future scope.
 
 ![Nexa Suite repository map](./docs/assets/repository-map/nexa-suite-map.svg)
 
@@ -49,20 +49,20 @@ The diagram shows the approved secured vertical slice; it is not a public deploy
 
 | Repository | Current release | Responsibility | Evidence status |
 |---|---:|---|---|
-| [Website](https://github.com/nexa-suite/website) | `v1.0.1` | Static public product discovery | Released static site |
-| [Platform](https://github.com/nexa-suite/platform) | `v0.4.0` | Internal operations shell | Secured Angular surface |
-| [Portal](https://github.com/nexa-suite/portal) | `v0.4.0` | Buyer self-service shell | Secured Angular surface |
-| **API** | **`v0.5.0`** | Business and integration authority | IAM, tenant scope and Catalog read |
-| [Mobile](https://github.com/nexa-suite/mobile) | `v0.1.2` | Future native clients | Documentation-only |
+| [Website](https://github.com/nexa-suite/website) | `v1.0.0` | Static public product discovery | Released static site |
+| [Platform](https://github.com/nexa-suite/platform) | `v0.5.0` | Internal operations shell | Secured Angular commercial surface |
+| [Portal](https://github.com/nexa-suite/portal) | `v0.5.0` | Buyer self-service shell | Secured Angular commercial surface |
+| **API** | **`v0.6.0`** | Business and integration authority | IAM, tenant scope, Catalog and Sales requests |
+| [Mobile](https://github.com/nexa-suite/mobile) | `v0.1.1` | Future native clients | Documentation-only |
 
 ## Bounded contexts
 
 | Area | Current maturity |
 |---|---|
-| Catalog Management | Secured read contract in `v0.5.0` |
+| Catalog Management | Secured read contract in `v0.6.0` |
 | IAM | RS256 sessions and refresh rotation |
 | Tenant Management | Workspace membership and surface policy |
-| Sales | Planned |
+| Sales | Client Accounts and Purchase Requests; Sales Order readiness only |
 | Warehouse | Planned |
 | Logistics | Planned |
 | Invoicing | Planned |
