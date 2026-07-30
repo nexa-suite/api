@@ -30,7 +30,9 @@ import com.nexa.api.sales.application.exception.PurchaseRequestTransitionExcepti
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
+import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.List;
 import java.util.Map;
@@ -84,8 +86,24 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(SalesResourceNotFoundException.class)
 	public ResponseEntity<ProblemDetail> handleSalesNotFound(SalesResourceNotFoundException exception, HttpServletRequest request) {
-		ApiErrorCode code = "purchase-request".equals(exception.getMessage()) ? ApiErrorCode.PURCHASE_REQUEST_NOT_FOUND : ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
+		ApiErrorCode code = switch (exception.getMessage()) {
+			case "purchase-request" -> ApiErrorCode.PURCHASE_REQUEST_NOT_FOUND;
+			case "catalog-item" -> ApiErrorCode.CATALOG_ITEM_NOT_FOUND;
+			default -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
+		};
 		return response(HttpStatus.NOT_FOUND, code, "Resource not found", request);
+	}
+	@ExceptionHandler(SalesInvariantViolation.class)
+	public ResponseEntity<ProblemDetail> handleSalesInvariant(SalesInvariantViolation exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.PURCHASE_REQUEST_LINE_INVALID, "Sales request is invalid", request);
+	}
+	@ExceptionHandler(DataIntegrityViolationException.class)
+	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
+		String message = exception.getMostSpecificCause() == null ? "" : String.valueOf(exception.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
+		ApiErrorCode code = message.contains("code") ? ApiErrorCode.CLIENT_ACCOUNT_CODE_CONFLICT
+				: message.contains("tax") ? ApiErrorCode.CLIENT_ACCOUNT_TAX_ID_CONFLICT
+				: message.contains("membership") ? ApiErrorCode.BUYER_MEMBERSHIP_ALREADY_ASSIGNED : ApiErrorCode.INVALID_REQUEST;
+		return response(HttpStatus.CONFLICT, code, "Sales resource conflicts with existing data", request);
 	}
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
@@ -151,7 +169,7 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(Exception.class)
 	public ResponseEntity<ProblemDetail> handleUnexpected(Exception exception, HttpServletRequest request) {
-		LOGGER.error("Unexpected API exception correlationId={}", ApiProblemDetailFactory.correlationId(request));
+		LOGGER.error("Unexpected API exception correlationId={}", ApiProblemDetailFactory.correlationId(request), exception);
 		return response(HttpStatus.INTERNAL_SERVER_ERROR, ApiErrorCode.INTERNAL_ERROR, "Internal server error", request);
 	}
 

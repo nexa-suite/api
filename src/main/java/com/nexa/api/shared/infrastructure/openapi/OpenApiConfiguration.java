@@ -14,9 +14,11 @@ public class OpenApiConfiguration {
 	@Bean
 	OpenAPI nexaOpenAPI() {
 		return new OpenAPI()
-				.info(new Info().title("Nexa API").version("0.5.0").description(
-						"Local API contract for secured identity, tenant workspace access and catalog reads. "
-								+ "There is no public sign-up, user-management or catalog-write endpoint in this release."))
+				.info(new Info().title("Nexa API").version("0.6.0").description(
+						"Local API contract for secured identity, tenant/workspace administration, Catalog reads and "
+								+ "Sales Client Accounts and Purchase Requests. Bearer authentication revalidates the "
+								+ "persistent session; refresh and sign-out require the surface refresh cookie and Origin policy. "
+								+ "Sales Order, Warehouse, Logistics and Invoicing HTTP endpoints are intentionally absent."))
 				.components(new Components()
 						.addSecuritySchemes("bearerAuth", new SecurityScheme().type(SecurityScheme.Type.HTTP)
 								.scheme("bearer").bearerFormat("JWT").description("RS256 access token"))

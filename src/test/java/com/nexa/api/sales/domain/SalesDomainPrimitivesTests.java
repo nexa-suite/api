@@ -1,5 +1,12 @@
 package com.nexa.api.sales.domain;
 
+import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
+import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestStatus;
+import com.nexa.api.sales.domain.model.salesorder.SalesOrderId;
+import com.nexa.api.sales.domain.model.salesorder.SalesOrderStatus;
+import com.nexa.api.sales.domain.model.salesorder.SalesOrderInvariantViolation;
+import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -15,10 +22,10 @@ class SalesDomainPrimitivesTests {
 
 	@Test
 	void identifiersRejectMissingUnsafeAndOversizedValues() {
-		assertThatThrownBy(() -> new PurchaseRequestId(null)).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new SalesOrderId(" ")).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new ClientAccountId("CLI_001")).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new PurchaseRequestId("A".repeat(65))).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> new PurchaseRequestId(null)).isInstanceOf(SalesInvariantViolation.class);
+		assertThatThrownBy(() -> new SalesOrderId(" ")).isInstanceOf(SalesOrderInvariantViolation.class);
+		assertThatThrownBy(() -> new ClientAccountId("CLI_001")).isInstanceOf(SalesInvariantViolation.class);
+		assertThatThrownBy(() -> new PurchaseRequestId("A".repeat(65))).isInstanceOf(SalesInvariantViolation.class);
 	}
 
 	@Test
@@ -33,9 +40,9 @@ class SalesDomainPrimitivesTests {
 			PurchaseRequestStatus.CANCELLED,
 			PurchaseRequestStatus.CONVERTED_TO_ORDER);
 		assertThat(SalesOrderStatus.values()).containsExactly(
-			SalesOrderStatus.DRAFT,
+			SalesOrderStatus.PENDING,
 			SalesOrderStatus.CONFIRMED,
-			SalesOrderStatus.COMPLETED,
+			SalesOrderStatus.REJECTED,
 			SalesOrderStatus.CANCELLED);
 	}
 }
