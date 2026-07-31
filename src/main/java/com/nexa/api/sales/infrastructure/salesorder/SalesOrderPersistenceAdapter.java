@@ -86,8 +86,8 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort {
 				UUID.randomUUID(), request, tenant, workspace, actor, timestamp(nowEpochMillis));
 		jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,to_status,reason,occurred_at) values (?,?,?,?,?,'ORDER_CREATED','PENDING',?,?)",
 				UUID.randomUUID(), orderId, tenant, workspace, actor, note, timestamp(nowEpochMillis));
-		changeFeed.append(tenantId, workspaceId, pr.clientAccountId(), "purchase_request", purchaseRequestId, "sales.purchase-request.converted", "{\"status\":\"CONVERTED_TO_ORDER\"}", nowEpochMillis);
-		changeFeed.append(tenantId, workspaceId, pr.clientAccountId(), "sales_order", orderId.toString(), "sales.sales-order.created", "{\"status\":\"PENDING\"}", nowEpochMillis);
+		changeFeed.append(tenantId, workspaceId, pr.clientAccountId(), "purchase_request", purchaseRequestId, "sales.purchase-request.converted", "CONVERTED_TO_ORDER", nowEpochMillis);
+		changeFeed.append(tenantId, workspaceId, pr.clientAccountId(), "sales_order", orderId.toString(), "sales.sales-order.created", "PENDING", nowEpochMillis);
 		jdbc.update("insert into sales.idempotency_record (id,tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,resource_id,response_version,created_at) values (?,?,?,?,?,?,?,?,?)",
 				UUID.randomUUID(), tenant, workspace, actor, "purchase-request-order-conversion", idempotencyKey, orderId, 0, timestamp(nowEpochMillis));
 		return new ConversionResult(find(tenantId, workspaceId, null, orderId.toString()).orElseThrow());
@@ -150,7 +150,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort {
 			case "cancel" -> "sales.sales-order.cancelled";
 			default -> throw new com.nexa.api.sales.application.exception.SalesOrderTransitionException();
 		};
-		changeFeed.append(tenantId, workspaceId, client, "sales_order", id, eventType, "{\"status\":\"" + status + "\"}", nowEpochMillis);
+		changeFeed.append(tenantId, workspaceId, client, "sales_order", id, eventType, status, nowEpochMillis);
 		return find(tenantId, workspaceId, null, id).orElseThrow();
 	}
 

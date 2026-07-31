@@ -122,7 +122,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 				scope(context), workspace(context), id, now());
 		for (PurchaseRequestLineView line : snapshots) persistence.insertLine(id.toString(), line, UUID.fromString(line.id()), now());
 		changeFeed.append(scope(context), workspace(context), account, "purchase_request", id.toString(),
-				"sales.purchase-request.created", "{\"status\":\"DRAFT\"}", now());
+				"sales.purchase-request.created", "DRAFT", now());
 		return detail(context, id.toString());
 	}
 
@@ -143,7 +143,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			throw new SalesConcurrencyConflictException();
 		}
 		PurchaseRequestView result = detail(context, id);
-		appendChange(context, result, "sales.purchase-request.updated", "{}");
+		appendChange(context, result, "sales.purchase-request.updated", null);
 		return result;
 	}
 
@@ -165,7 +165,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 				null, null, null, null, null, version) == 0) throw new SalesConcurrencyConflictException();
 		persistence.insertLine(id, line, lineId, now());
 		PurchaseRequestView result = detail(context, id);
-		appendChange(context, result, "sales.purchase-request.updated", "{}");
+		appendChange(context, result, "sales.purchase-request.updated", null);
 		return result;
 	}
 
@@ -179,7 +179,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			throw new SalesConcurrencyConflictException();
 		}
 		PurchaseRequestView result = detail(context, id);
-		appendChange(context, result, "sales.purchase-request.updated", "{}");
+		appendChange(context, result, "sales.purchase-request.updated", null);
 		return result;
 	}
 
@@ -191,7 +191,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			throw new SalesConcurrencyConflictException();
 		}
 		PurchaseRequestView result = detail(context, id);
-		appendChange(context, result, "sales.purchase-request.updated", "{}");
+		appendChange(context, result, "sales.purchase-request.updated", null);
 		return result;
 	}
 
@@ -226,7 +226,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PurchaseRequestView result = detail(context, id);
 		events.append(UUID.randomUUID(), id, scope(context), workspace(context), context.membershipId().toString(),
 				target, current.status(), target, now());
-		appendChange(context, result, eventType(normalized), "{\"status\":\"" + target + "\"}");
+		appendChange(context, result, eventType(normalized), target);
 		if ("submit".equals(normalized)) {
 			idempotency.save(scope(context), workspace(context), context.membershipId().toString(),
 					"purchase-request-submission", idempotencyKey, id, result.version(), UUID.randomUUID(), now());
@@ -276,8 +276,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 				new RequestComment(view.comment()), view.reviewNote(), lines);
 	}
 
-	private void appendChange(CurrentAccessContext context, PurchaseRequestView view, String eventType, String payload) {
-		changeFeed.append(scope(context), workspace(context), view.clientAccountId(), "purchase_request", view.id(), eventType, payload, now());
+	private void appendChange(CurrentAccessContext context, PurchaseRequestView view, String eventType, String publicStatus) {
+		changeFeed.append(scope(context), workspace(context), view.clientAccountId(), "purchase_request", view.id(), eventType, publicStatus, now());
 	}
 
 	private static String eventType(String action) {

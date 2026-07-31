@@ -49,11 +49,12 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		AtomicBoolean closed = new AtomicBoolean(); AtomicLong cursor = new AtomicLong(last); long started = System.currentTimeMillis();
 		Runnable release = () -> { if (closed.compareAndSet(false, true)) activeStreams.decrementAndGet(); };
 		emitter.onCompletion(release); emitter.onTimeout(() -> { release.run(); emitter.complete(); }); emitter.onError(ignored -> release.run());
+		ChangeEventAudience audience = audience(initial);
 		try {
 			CurrentAccessContext verified = verify(jwt, initial);
 			String clientAccount = clientAccount(verified);
-			if (isTooOld(verified, clientAccount, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
-			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, last, MAX_REPLAY));
+			if (isTooOld(verified, clientAccount, audience, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
+			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audience, last, MAX_REPLAY));
 		} catch (RuntimeException | IOException exception) {
 			release.run(); emitter.completeWithError(exception); return emitter;
 		}
@@ -62,8 +63,8 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 			if (System.currentTimeMillis() - started >= MAX_STREAM_MILLIS) { release.run(); emitter.complete(); return; }
 			try {
 				CurrentAccessContext verified = verify(jwt, initial); String clientAccount = clientAccount(verified); long position = cursor.get();
-				if (isTooOld(verified, clientAccount, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
-				sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, position, MAX_REPLAY));
+				if (isTooOld(verified, clientAccount, audience, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
+				sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audience, position, MAX_REPLAY));
 				emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
 			} catch (RuntimeException | IOException exception) { release.run(); emitter.completeWithError(exception); }
 		}, 15, 15, TimeUnit.SECONDS);
@@ -77,7 +78,16 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		}
 	}
 	private void sendResync(SseEmitter emitter) throws IOException { emitter.send(SseEmitter.event().name("resync-required").data("{\"reason\":\"replay-window-expired\"}", MediaType.APPLICATION_JSON)); }
-	private boolean isTooOld(CurrentAccessContext context, String clientAccount, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount); return last > 0 && minimum > 0 && last < minimum - 1; }
+	private boolean isTooOld(CurrentAccessContext context, String clientAccount, ChangeEventAudience audience, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount, audience); return last > 0 && minimum > 0 && last < minimum - 1; }
+	private static ChangeEventAudience audience(CurrentAccessContext context) {
+		return switch (context.role()) {
+			case COMPANY_OWNER -> ChangeEventAudience.OWNER;
+			case SALES -> ChangeEventAudience.SALES;
+			case WAREHOUSE -> ChangeEventAudience.WAREHOUSE;
+			case LOGISTICS -> ChangeEventAudience.LOGISTICS;
+			case BUYER -> ChangeEventAudience.BUYER;
+		};
+	}
 	private CurrentAccessContext verify(Jwt jwt, CurrentAccessContext expected) {
 		Surface surface = Surface.valueOf(required(jwt, "surface").toUpperCase(Locale.ROOT));
 		accessSession.validate(new SessionId(required(jwt, "sid")), new UserAccountId(jwt.getSubject()), ClientSurface.valueOf(surface.name()));

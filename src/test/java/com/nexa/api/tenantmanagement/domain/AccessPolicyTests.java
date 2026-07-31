@@ -52,14 +52,31 @@ class AccessPolicyTests {
 	@Test
 	void onePermissionPolicyMapsRequiredCapabilitiesByMembershipRole() {
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.COMPANY_OWNER))
-				.containsExactlyInAnyOrder(Permission.values());
+				.containsExactlyInAnyOrder(
+						Permission.TENANT_READ, Permission.TENANT_MANAGE,
+						Permission.IAM_USER_READ, Permission.IAM_USER_MANAGE,
+						Permission.OWNER_DASHBOARD_READ);
+		assertThat(PermissionPolicy.permissionsFor(MembershipRole.COMPANY_OWNER))
+				.doesNotContain(Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE,
+						Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
+						Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.SALES))
 				.containsExactlyInAnyOrder(
-						Permission.CATALOG_READ, Permission.TENANT_READ, Permission.SALES_READ,
-						Permission.SALES_WRITE, Permission.INVOICING_READ, Permission.LOGISTICS_READ);
+						Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE,
+						Permission.DOCUMENTS_SALES_READ, Permission.DOCUMENTS_SALES_WRITE);
+		assertThat(PermissionPolicy.permissionsFor(MembershipRole.WAREHOUSE))
+				.containsExactlyInAnyOrder(
+						Permission.CATALOG_READ, Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
+						Permission.FULFILLMENT_READ, Permission.DOCUMENTS_OPERATIONS_READ);
+		assertThat(PermissionPolicy.permissionsFor(MembershipRole.LOGISTICS))
+				.containsExactlyInAnyOrder(
+						Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE,
+						Permission.FULFILLMENT_READ, Permission.DOCUMENTS_OPERATIONS_READ,
+						Permission.DOCUMENTS_OPERATIONS_WRITE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.BUYER))
 				.containsExactlyInAnyOrder(Permission.CATALOG_READ, Permission.SALES_BUYER_READ,
-						Permission.SALES_BUYER_WRITE, Permission.LOGISTICS_BUYER_READ, Permission.INVOICING_BUYER_READ);
+						Permission.SALES_BUYER_WRITE, Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ,
+						Permission.DOCUMENTS_BUYER_READ, Permission.PROFILE_BUYER_WRITE);
 		assertThat(PermissionPolicy.allows(MembershipRole.WAREHOUSE, Permission.WAREHOUSE_WRITE)).isTrue();
 		assertThat(PermissionPolicy.allows(MembershipRole.LOGISTICS, Permission.TENANT_MANAGE)).isFalse();
 	}

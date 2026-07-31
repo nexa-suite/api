@@ -112,8 +112,14 @@ BEGIN
         OR NEW.workspace_id <> OLD.workspace_id
         OR NEW.number <> OLD.number
         OR NEW.client_account_id <> OLD.client_account_id
+        OR NEW.created_by_membership_id <> OLD.created_by_membership_id
         OR NEW.buyer_membership_id <> OLD.buyer_membership_id
         OR NEW.source_purchase_request_id <> OLD.source_purchase_request_id
+        OR NEW.priority <> OLD.priority
+        OR NEW.requested_delivery_date IS DISTINCT FROM OLD.requested_delivery_date
+        OR NEW.delivery_snapshot IS DISTINCT FROM OLD.delivery_snapshot
+        OR NEW.payment_option IS DISTINCT FROM OLD.payment_option
+        OR NEW.notes IS DISTINCT FROM OLD.notes
         OR NEW.currency <> OLD.currency
         OR NEW.total_amount <> OLD.total_amount
     THEN

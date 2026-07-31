@@ -67,9 +67,8 @@ public class SalesOrderService implements SalesOrderUseCase {
 
 	@Override
 	public SalesPage<FulfillmentCandidateView> fulfillmentCandidates(CurrentAccessContext context, SalesOrderFilter filter) {
-		if (context.role() == MembershipRole.WAREHOUSE) context.requirePermission(Permission.WAREHOUSE_READ);
-		else if (context.role() == MembershipRole.LOGISTICS) context.requirePermission(Permission.LOGISTICS_READ);
-		else throw new AccessPolicyViolation("Only warehouse or logistics can read fulfillment candidates");
+		if (context.role() != MembershipRole.WAREHOUSE && context.role() != MembershipRole.LOGISTICS) throw new AccessPolicyViolation("Only warehouse or logistics can read fulfillment candidates");
+		context.requirePermission(Permission.FULFILLMENT_READ);
 		return persistence.fulfillmentCandidates(scope(context), workspace(context), filter);
 	}
 
