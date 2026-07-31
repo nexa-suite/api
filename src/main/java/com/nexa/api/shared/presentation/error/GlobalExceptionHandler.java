@@ -35,6 +35,7 @@ import com.nexa.api.sales.domain.model.salesorder.SalesOrderInvariantViolation;
 import com.nexa.api.sales.application.exception.SalesOrderRejectionReasonRequiredException;
 import com.nexa.api.sales.application.exception.SalesOrderTransitionException;
 import com.nexa.api.shared.application.changefeed.ChangeFeedCapacityException;
+import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -128,6 +129,12 @@ public final class GlobalExceptionHandler {
 		public ResponseEntity<ProblemDetail> handleSalesOrderInvariant(SalesOrderInvariantViolation exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.SALES_ORDER_INVALID, "Sales order is invalid", request); }
 		@ExceptionHandler(ChangeFeedCapacityException.class)
 		public ResponseEntity<ProblemDetail> handleChangeFeedCapacity(ChangeFeedCapacityException exception, HttpServletRequest request) { return response(HttpStatus.TOO_MANY_REQUESTS, ApiErrorCode.CHANGE_FEED_CONNECTION_LIMIT, "Change feed connection limit reached", request); }
+		@ExceptionHandler(WarehouseOperationsService.WarehouseException.class)
+		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationsService.WarehouseException exception, HttpServletRequest request) {
+			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT" -> HttpStatus.CONFLICT; case "INVENTORY_SHORTAGE" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+			return response(status, code, "Warehouse operation could not be completed", request);
+		}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	public ResponseEntity<ProblemDetail> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {

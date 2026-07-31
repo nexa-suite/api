@@ -25,11 +25,12 @@ class ModernPostgresMigrationTests {
 				.locations("classpath:db/migration").cleanDisabled(false).load().migrate();
 
 		try (var connection = POSTGRES.createConnection("")) {
-			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management", "sales", "integration");
+			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management", "sales", "integration", "warehouse");
 			assertThat(tables(connection, "iam")).containsExactlyInAnyOrder("user_account", "password_credential", "refresh_session", "authentication_failure");
 			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership", "membership_admin_event");
 			assertThat(tables(connection, "sales")).containsExactlyInAnyOrder("client_account", "client_account_membership", "purchase_request", "purchase_request_line", "purchase_request_event", "idempotency_record", "sales_order_sequence", "sales_order", "sales_order_line", "sales_order_event");
 			assertThat(tables(connection, "integration")).containsExactly("change_event");
+			assertThat(tables(connection, "warehouse")).containsExactlyInAnyOrder("warehouse", "storage_zone", "inventory_lot", "stock_movement", "inventory_event", "inventory_reservation", "inventory_reservation_line", "inventory_reservation_allocation", "reservation_shortage", "command_idempotency");
 			assertThat(columns(connection, "integration", "change_event")).containsExactlyInAnyOrder(
 				"sequence", "event_id", "tenant_id", "workspace_id", "client_account_id", "aggregate_type",
 				"aggregate_id", "event_type", "aggregate_version", "public_status", "audiences", "occurred_at", "expires_at");

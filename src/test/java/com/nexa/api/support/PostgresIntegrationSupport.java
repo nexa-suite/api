@@ -45,7 +45,9 @@ public abstract class PostgresIntegrationSupport {
 			.withPassword("test-only-password");
 
 	static {
-		POSTGRES.start();
+		if (Boolean.getBoolean("nexa.integration.enabled")) {
+			POSTGRES.start();
+		}
 	}
 
 	@Autowired

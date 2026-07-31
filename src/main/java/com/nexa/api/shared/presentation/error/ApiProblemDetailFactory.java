@@ -75,6 +75,20 @@ public final class ApiProblemDetailFactory {
 				case SALES_ORDER_INVALID -> "Sales order invalid";
 				case CHANGE_FEED_CAPACITY -> "Change feed capacity unavailable";
 				case CHANGE_FEED_CONNECTION_LIMIT -> "Change feed connection limit";
+				case WAREHOUSE_NOT_FOUND -> "Warehouse not found";
+				case STORAGE_ZONE_NOT_FOUND -> "Storage zone not found";
+				case INVENTORY_LOT_NOT_FOUND -> "Inventory lot not found";
+				case INVENTORY_LOT_NOT_ALLOCATABLE -> "Inventory lot is not allocatable";
+				case INVENTORY_UNIT_MISMATCH -> "Inventory unit mismatch";
+				case INSUFFICIENT_AVAILABLE_STOCK -> "Insufficient available stock";
+				case INVENTORY_SHORTAGE -> "Inventory shortage";
+				case INVENTORY_RESERVATION_NOT_FOUND -> "Inventory reservation not found";
+				case INVENTORY_RESERVATION_ALREADY_EXISTS -> "Inventory reservation already exists";
+				case INVENTORY_RESERVATION_TRANSITION_INVALID -> "Inventory reservation transition invalid";
+				case INVENTORY_RESERVATION_EXPIRED -> "Inventory reservation expired";
+				case FULFILLMENT_CANDIDATE_NOT_ELIGIBLE -> "Fulfillment candidate not eligible";
+				case DISPATCH_READINESS_CANDIDATE_NOT_FOUND -> "Dispatch readiness candidate not found";
+				case INVALID_INVENTORY_SORT -> "Invalid inventory sort";
 				case INTERNAL_ERROR -> "Internal server error";
 		};
 	}
