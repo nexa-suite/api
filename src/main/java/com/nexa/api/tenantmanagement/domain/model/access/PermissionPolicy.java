@@ -16,19 +16,16 @@ public final class PermissionPolicy {
 					Permission.IAM_USER_READ, Permission.IAM_USER_MANAGE,
 					Permission.OWNER_DASHBOARD_READ),
 			MembershipRole.SALES, Set.of(
-					Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE,
-					Permission.DOCUMENTS_SALES_READ, Permission.DOCUMENTS_SALES_WRITE),
+					Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE),
 			MembershipRole.WAREHOUSE, Set.of(
 					Permission.CATALOG_READ, Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
-					Permission.FULFILLMENT_READ, Permission.DOCUMENTS_OPERATIONS_READ),
+					Permission.FULFILLMENT_READ),
 			MembershipRole.LOGISTICS, Set.of(
 					Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE,
-					Permission.FULFILLMENT_READ, Permission.DOCUMENTS_OPERATIONS_READ,
-					Permission.DOCUMENTS_OPERATIONS_WRITE),
+					Permission.FULFILLMENT_READ),
 			MembershipRole.BUYER, Set.of(
 					Permission.CATALOG_READ, Permission.SALES_BUYER_READ, Permission.SALES_BUYER_WRITE,
-					Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ,
-					Permission.DOCUMENTS_BUYER_READ, Permission.PROFILE_BUYER_WRITE));
+					Permission.ORDERS_BUYER_READ));
 
 	private PermissionPolicy() {
 	}

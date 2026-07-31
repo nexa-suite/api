@@ -22,7 +22,7 @@ public class ChangeFeedQueryAdapter implements ChangeFeedQueryPort {
 		String scope = clientAccountId == null ? "" : " and client_account_id=?";
 		List<Object> args = new ArrayList<>(List.of(UUID.fromString(tenantId), UUID.fromString(workspaceId), audience.name()));
 		if (clientAccountId != null) args.add(UUID.fromString(clientAccountId));
-		Long value = jdbc.queryForObject("select coalesce(min(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=? and ?=any(audiences)" + scope, Long.class, args.toArray());
+		Long value = jdbc.queryForObject("select coalesce(min(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=? and ?=any(audiences) and (expires_at is null or expires_at > current_timestamp)" + scope, Long.class, args.toArray());
 		return value == null ? 0 : value;
 	}
 
@@ -32,7 +32,7 @@ public class ChangeFeedQueryAdapter implements ChangeFeedQueryPort {
 		List<Object> args = new ArrayList<>(List.of(UUID.fromString(tenantId), UUID.fromString(workspaceId), audience.name(), lastEventId));
 		if (clientAccountId != null) args.add(UUID.fromString(clientAccountId));
 		args.add(Math.min(100, Math.max(1, limit)));
-		return jdbc.query("select \"sequence\",event_id,aggregate_type,aggregate_id,event_type,aggregate_version,public_status,occurred_at from integration.change_event where tenant_id=? and workspace_id=? and ?=any(audiences) and \"sequence\">?" + scope + " order by \"sequence\" asc limit ?",
+		return jdbc.query("select \"sequence\",event_id,aggregate_type,aggregate_id,event_type,aggregate_version,public_status,occurred_at from integration.change_event where tenant_id=? and workspace_id=? and ?=any(audiences) and (expires_at is null or expires_at > current_timestamp) and \"sequence\">?" + scope + " order by \"sequence\" asc limit ?",
 				(rs, row) -> new ChangeEventView(rs.getLong(1), rs.getObject(2).toString(), rs.getString(3), rs.getObject(4).toString(), rs.getString(5), rs.getObject(6) == null ? null : rs.getLong(6), rs.getString(7), rs.getTimestamp(8).toInstant()), args.toArray());
 	}
 }

@@ -1,6 +1,7 @@
 package com.nexa.api.shared.application.changefeed;
 
 import java.util.EnumSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -12,50 +13,40 @@ public final class ChangeEventAudiences {
 	private ChangeEventAudiences() {
 	}
 
-	public static Set<ChangeEventAudience> forEvent(String eventType, boolean clientAccountScoped) {
+	private static final Map<String, Set<ChangeEventAudience>> INTERNAL = Map.ofEntries(
+			Map.entry("organization.membership.role-changed", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("organization.membership.suspended", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("organization.membership.reactivated", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("organization.workspace.updated", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("sales.client-account.created", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.client-account.updated", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.client-account.suspended", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.client-account.activated", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.client-account.buyer-associated", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.created", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.updated", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.submitted", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.review-started", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.adjustment-requested", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.approved", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.rejected", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.cancelled", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.purchase-request.converted", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.sales-order.created", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.sales-order.rejected", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.sales-order.cancelled", EnumSet.of(ChangeEventAudience.SALES)),
+			Map.entry("sales.sales-order.confirmed", EnumSet.of(ChangeEventAudience.SALES, ChangeEventAudience.BUYER,
+					ChangeEventAudience.WAREHOUSE, ChangeEventAudience.LOGISTICS)));
+
+	public static Set<ChangeEventAudience> forEvent(String eventType, boolean explicitBuyerVisibility) {
 		if (eventType == null || eventType.isBlank()) {
 			throw new IllegalArgumentException("Event type is required");
 		}
-		if (eventType.startsWith("organization.membership.") || eventType.startsWith("organization.workspace.")) {
-			return EnumSet.of(ChangeEventAudience.OWNER);
-		}
-		if (eventType.startsWith("sales.client-account.")) {
-			return EnumSet.of(ChangeEventAudience.SALES);
-		}
-		if (eventType.startsWith("sales.purchase-request.")) {
-			return scoped(EnumSet.of(ChangeEventAudience.SALES), clientAccountScoped);
-		}
-		if ("sales.sales-order.confirmed".equals(eventType)) {
-			return scoped(EnumSet.of(ChangeEventAudience.SALES, ChangeEventAudience.WAREHOUSE,
-					ChangeEventAudience.LOGISTICS), clientAccountScoped);
-		}
-		if (eventType.startsWith("sales.sales-order.")) {
-			return scoped(EnumSet.of(ChangeEventAudience.SALES), clientAccountScoped);
-		}
-		if (eventType.startsWith("warehouse.reservation.")) {
-			return EnumSet.of(ChangeEventAudience.WAREHOUSE, ChangeEventAudience.LOGISTICS, ChangeEventAudience.SALES);
-		}
-		if (eventType.startsWith("warehouse.inventory.") || eventType.startsWith("warehouse.lot.")
-				|| eventType.startsWith("warehouse.stock.")) {
-			return EnumSet.of(ChangeEventAudience.WAREHOUSE, ChangeEventAudience.LOGISTICS);
-		}
-		if (eventType.startsWith("logistics.dispatch.")) {
-			return scoped(EnumSet.of(ChangeEventAudience.LOGISTICS, ChangeEventAudience.WAREHOUSE,
-					ChangeEventAudience.SALES), clientAccountScoped);
-		}
-		if (eventType.startsWith("invoicing.")) {
-			return scoped(EnumSet.of(ChangeEventAudience.SALES), clientAccountScoped);
-		}
-		if (eventType.startsWith("documents.")) {
-			return scoped(EnumSet.of(ChangeEventAudience.SALES, ChangeEventAudience.LOGISTICS), clientAccountScoped);
-		}
-		throw new IllegalArgumentException("No audience mapping for event type " + eventType);
-	}
-
-	private static Set<ChangeEventAudience> scoped(EnumSet<ChangeEventAudience> audiences, boolean clientAccountScoped) {
-		if (clientAccountScoped) {
-			audiences.add(ChangeEventAudience.BUYER);
-		}
-		return audiences;
+		Set<ChangeEventAudience> audiences = INTERNAL.get(eventType);
+		if (audiences == null) throw new IllegalStateException("No audience mapping for event type " + eventType);
+		if (!explicitBuyerVisibility) return audiences;
+		EnumSet<ChangeEventAudience> result = EnumSet.copyOf(audiences);
+		if (audiences.contains(ChangeEventAudience.SALES)) result.add(ChangeEventAudience.BUYER);
+		return Set.copyOf(result);
 	}
 }

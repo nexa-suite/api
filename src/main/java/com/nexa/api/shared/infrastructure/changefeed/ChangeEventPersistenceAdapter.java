@@ -21,8 +21,9 @@ public class ChangeEventPersistenceAdapter implements ChangeEventPersistencePort
 
 	@Override
 	public void append(String tenantId, String workspaceId, String clientAccountId, String aggregateType,
-			String aggregateId, String eventType, String publicStatus, long occurredAtEpochMillis) {
-		String audiences = ChangeEventAudiences.forEvent(eventType, clientAccountId != null).stream()
+			String aggregateId, String eventType, String publicStatus, long occurredAtEpochMillis,
+			boolean explicitBuyerVisibility) {
+		String audiences = ChangeEventAudiences.forEvent(eventType, explicitBuyerVisibility).stream()
 				.map(ChangeEventAudience::name).sorted().collect(Collectors.joining(",", "{", "}"));
 		jdbc.update("insert into integration.change_event (event_id,tenant_id,workspace_id,client_account_id,aggregate_type,aggregate_id,event_type,public_status,audiences,occurred_at,expires_at) values (?,?,?,?,?,?,?,?,?::text[],?,?)",
 				UUID.randomUUID(), UUID.fromString(tenantId), UUID.fromString(workspaceId), clientAccountId == null ? null : UUID.fromString(clientAccountId),
@@ -33,6 +34,6 @@ public class ChangeEventPersistenceAdapter implements ChangeEventPersistencePort
 
 	@Scheduled(fixedDelayString = "${nexa.change-feed.cleanup-delay-ms:3600000}", initialDelayString = "${nexa.change-feed.cleanup-initial-delay-ms:3600000}")
 	void removeExpiredBatch() {
-		jdbc.update("delete from integration.change_event where \"sequence\" in (select \"sequence\" from integration.change_event where expires_at < current_timestamp order by expires_at, \"sequence\" limit 1000)");
+		jdbc.queryForObject("select integration.purge_expired_change_events(?)", Long.class, 1000);
 	}
 }

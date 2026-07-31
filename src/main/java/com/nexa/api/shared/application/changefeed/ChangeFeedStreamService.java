@@ -32,6 +32,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 	private final ResolveCurrentAccessContextUseCase accessContext;
 	private final ValidateAccessSessionUseCase accessSession;
 	private final ClientAccountPersistencePort accounts;
+	private final ChangeFeedConnectionRegistry connections;
 	private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
 		Thread thread = new Thread(runnable, "nexa-change-feed"); thread.setDaemon(true); return thread;
 	});
@@ -39,19 +40,29 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 
 	public ChangeFeedStreamService(ChangeFeedQueryPort feed, ResolveCurrentAccessContextUseCase accessContext,
 			ValidateAccessSessionUseCase accessSession, ClientAccountPersistencePort accounts) {
+		this(feed, accessContext, accessSession, accounts, new ChangeFeedConnectionRegistry(100, 2, 3, 50));
+	}
+
+	public ChangeFeedStreamService(ChangeFeedQueryPort feed, ResolveCurrentAccessContextUseCase accessContext,
+			ValidateAccessSessionUseCase accessSession, ClientAccountPersistencePort accounts,
+			ChangeFeedConnectionRegistry connections) {
 		this.feed = feed; this.accessContext = accessContext; this.accessSession = accessSession; this.accounts = accounts;
+		this.connections = connections;
 	}
 
 	public SseEmitter open(CurrentAccessContext initial, Jwt jwt, String lastEventId) {
 		long last = parseLastEventId(lastEventId);
-		if (activeStreams.incrementAndGet() > 100) { activeStreams.decrementAndGet(); throw new ChangeFeedCapacityException(); }
+		CurrentAccessContext verified = verify(jwt, initial);
+		ChangeFeedConnectionRegistry.Lease lease = connections.reserve(required(jwt, "sid"),
+				verified.userId().toString() + ":" + verified.surface(), verified.tenantId() + ":" + verified.workspaceId());
+		if (activeStreams.incrementAndGet() > 100) { activeStreams.decrementAndGet(); lease.close(); throw new ChangeFeedCapacityException(); }
 		SseEmitter emitter = new SseEmitter(MAX_STREAM_MILLIS + 5_000);
 		AtomicBoolean closed = new AtomicBoolean(); AtomicLong cursor = new AtomicLong(last); long started = System.currentTimeMillis();
-		Runnable release = () -> { if (closed.compareAndSet(false, true)) activeStreams.decrementAndGet(); };
+		Runnable release = () -> { if (closed.compareAndSet(false, true)) { activeStreams.decrementAndGet(); lease.close(); } };
 		emitter.onCompletion(release); emitter.onTimeout(() -> { release.run(); emitter.complete(); }); emitter.onError(ignored -> release.run());
 		ChangeEventAudience audience = audience(initial);
 		try {
-			CurrentAccessContext verified = verify(jwt, initial);
+			verified = verify(jwt, initial);
 			String clientAccount = clientAccount(verified);
 			if (isTooOld(verified, clientAccount, audience, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
 			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audience, last, MAX_REPLAY));
@@ -62,9 +73,9 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 			if (closed.get()) return;
 			if (System.currentTimeMillis() - started >= MAX_STREAM_MILLIS) { release.run(); emitter.complete(); return; }
 			try {
-				CurrentAccessContext verified = verify(jwt, initial); String clientAccount = clientAccount(verified); long position = cursor.get();
-				if (isTooOld(verified, clientAccount, audience, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
-				sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audience, position, MAX_REPLAY));
+				CurrentAccessContext current = verify(jwt, initial); String clientAccount = clientAccount(current); long position = cursor.get();
+				if (isTooOld(current, clientAccount, audience, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
+				sendBatch(emitter, cursor, feed.after(scope(current), workspace(current), clientAccount, audience, position, MAX_REPLAY));
 				emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
 			} catch (RuntimeException | IOException exception) { release.run(); emitter.completeWithError(exception); }
 		}, 15, 15, TimeUnit.SECONDS);

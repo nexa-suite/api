@@ -122,7 +122,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 				scope(context), workspace(context), id, now());
 		for (PurchaseRequestLineView line : snapshots) persistence.insertLine(id.toString(), line, UUID.fromString(line.id()), now());
 		changeFeed.append(scope(context), workspace(context), account, "purchase_request", id.toString(),
-				"sales.purchase-request.created", "DRAFT", now());
+				"sales.purchase-request.created", "DRAFT", now(), true);
 		return detail(context, id.toString());
 	}
 
@@ -277,7 +277,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	}
 
 	private void appendChange(CurrentAccessContext context, PurchaseRequestView view, String eventType, String publicStatus) {
-		changeFeed.append(scope(context), workspace(context), view.clientAccountId(), "purchase_request", view.id(), eventType, publicStatus, now());
+		changeFeed.append(scope(context), workspace(context), view.clientAccountId(), "purchase_request", view.id(), eventType, publicStatus, now(), view.clientAccountId() != null);
 	}
 
 	private static String eventType(String action) {

@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
@@ -69,7 +70,6 @@ public class JpaAuthenticationThrottleAdapter implements AuthenticationThrottleP
 					+ "window_started_at=case when iam.authentication_failure.window_started_at <= ? then ? else iam.authentication_failure.window_started_at end, last_failure_at=?",
 					UUID.randomUUID(), identifier.value(), clientFingerprint, 1, Timestamp.from(now), Timestamp.from(now),
 					Timestamp.from(cutoff), Timestamp.from(cutoff), Timestamp.from(now), Timestamp.from(now));
-			cleanup(now);
 			return;
 		}
 		var failure = failures.findForUpdate(identifier.value(), clientFingerprint)
@@ -88,7 +88,10 @@ public class JpaAuthenticationThrottleAdapter implements AuthenticationThrottleP
 		failures.findByNormalizedIdentifierAndClientFingerprint(identifier.value(), clientFingerprint).ifPresent(failures::delete);
 	}
 
-	private void cleanup(Instant now) {
+	@Scheduled(fixedDelayString = "${nexa.security.throttle.cleanup-delay-ms:3600000}", initialDelayString = "${nexa.security.throttle.cleanup-initial-delay-ms:3600000}")
+	void cleanupExpiredFailures() {
+		if (jdbc == null) return;
+		Instant now = Instant.now();
 		jdbc.update("delete from iam.authentication_failure where id in (select id from iam.authentication_failure where last_failure_at < ? order by last_failure_at, id limit ?)",
 				Timestamp.from(now.minus(window.multipliedBy(2))), cleanupBatchSize);
 	}

@@ -74,6 +74,7 @@ public final class ApiProblemDetailFactory {
 				case SALES_ORDER_REJECTION_REASON_REQUIRED -> "Sales order rejection reason required";
 				case SALES_ORDER_INVALID -> "Sales order invalid";
 				case CHANGE_FEED_CAPACITY -> "Change feed capacity unavailable";
+				case CHANGE_FEED_CONNECTION_LIMIT -> "Change feed connection limit";
 				case INTERNAL_ERROR -> "Internal server error";
 		};
 	}

@@ -32,7 +32,7 @@ class ModernPostgresMigrationTests {
 			assertThat(tables(connection, "integration")).containsExactly("change_event");
 			assertThat(columns(connection, "integration", "change_event")).containsExactlyInAnyOrder(
 				"sequence", "event_id", "tenant_id", "workspace_id", "client_account_id", "aggregate_type",
-				"aggregate_id", "event_type", "aggregate_version", "public_status", "occurred_at", "expires_at");
+				"aggregate_id", "event_type", "aggregate_version", "public_status", "audiences", "occurred_at", "expires_at");
 			assertThat(columns(connection, "iam", "refresh_session")).containsExactlyInAnyOrder(
 				"id", "user_id", "membership_id", "surface", "token_hash", "family_id", "created_at", "last_used_at",
 				"expires_at", "revoked_at", "family_revoked_at", "replaced_by_session_id", "version");
