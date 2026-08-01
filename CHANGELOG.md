@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.8.0] - 2026-07-31
+
+This release consolidates the previously unpublished TASK-NEXA-008, TASK-NEXA-008.6, TASK-NEXA-009, TASK-NEXA-010 and TASK-NEXA-010.5 work.
+
+### Added
+
+- Sales Order conversion and lifecycle, secure Change Feed and Workspace Preview.
+- Warehouse topology, Inventory Lots, Stock Movements, FEFO reservations and Dispatch Readiness.
+- Dispatch Orders, temperature readings, incidents, Proof of Delivery metadata and Buyer delivery tracking APIs.
+
+### Changed
+
+- Sales Order lifecycle orchestration is application-owned.
+- FEFO reservation and route-start consumption are server-authoritative and atomic.
+- Permission policy, idempotency, optimistic concurrency and Buyer visibility boundaries are enforced at the API.
+
+### Security
+
+- Authentication throttling, session revalidation, tenant/client isolation and role-specific Warehouse/Logistics authorization are covered by the release gate.
+
 ## [0.7.0] - 2026-07-30
 
 ### Added
@@ -102,7 +122,8 @@ This release consolidates previously unreleased Identity, tenant, security and c
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.8.0
 [0.7.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
