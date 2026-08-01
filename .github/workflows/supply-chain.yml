@@ -50,6 +50,13 @@ jobs:
           java-version: '25'
           cache: maven
       - run: ./mvnw -B -ntp -DskipTests package
+      - name: Generate artifact checksum
+        run: sha256sum target/api-*.jar > target/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-checksum-${{ github.sha }}
+          path: target/SHA256SUMS
+          if-no-files-found: error
       - uses: docker/build-push-action@v6
         with:
           context: .
