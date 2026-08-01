@@ -107,6 +107,7 @@ public final class ApiProblemDetailFactory {
 				case RESET_RATE_LIMITED -> "Password reset rate limited";
 				case REGISTRATION_INVALID -> "Organization registration invalid";
 				case REGISTRATION_SLUG_CONFLICT -> "Organization workspace slug conflict";
+				case FOUNDER_EMAIL_INCOMPATIBLE -> "Founder email is already used by an incompatible membership";
 				case REGISTRATION_NOT_PENDING -> "Organization registration is not pending";
 				case SYSTEM_OPERATOR_REQUIRED -> "System operator authorization required";
 				case REJECTION_REASON_REQUIRED -> "Rejection reason required";

@@ -28,7 +28,7 @@ public interface IamSecurityUseCase {
 	void revokeOtherSessions(Actor actor);
 	String requestPasswordReset(String email, String surface, String correlationId, String traceId);
 	void resetPassword(String token, String newPassword, String correlationId, String traceId);
-	Registration submitRegistration(RegistrationRequest request);
+	Registration submitRegistration(RegistrationRequest request, String correlationId, String traceId);
 	Registration registration(UUID registrationId);
 	Activation activate(UUID registrationId, String operatorToken, String correlationId, String traceId);
 	Registration reject(UUID registrationId, String operatorToken, String reason, String correlationId, String traceId);
