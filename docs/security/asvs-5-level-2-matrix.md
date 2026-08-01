@@ -21,3 +21,13 @@ Estado verificable de los controles aplicables a este gate. `PASS` requiere una 
 | V15 Files | No | no se implementan archivos | NOT_IMPLEMENTED | TASK-011 |
 
 Los controles de pagos, documentos, MFA, mobile y almacenamiento de objetos permanecen fuera de alcance y no se marcan como aprobados.
+
+## Browser gate alternative
+
+The modern Platform and Portal manifests do not declare `playwright/test`, and installing a new package is outside this gate. The repository Playwright specs remain stored under each frontend `e2e/` directory. The supported alternative gate was executed with installed Chromium through the local Playwright CLI wrapper:
+
+- Platform organization registration submitted and navigated to `registration-pending/:registrationId`.
+- Platform public forgot-password route rendered with the generic recovery form.
+- Portal public forgot-password route rendered without internal roles.
+
+The Playwright test-runner command remains a documented manual follow-up until the dependency is approved and declared.
