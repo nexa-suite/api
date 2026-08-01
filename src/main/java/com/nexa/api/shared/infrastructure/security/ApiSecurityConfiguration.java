@@ -55,7 +55,11 @@ public class ApiSecurityConfiguration {
 					authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
 					if (localProfile) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
 					authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
-						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews").permitAll();
+						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",
+						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
+						"/api/v1/tenant-management/organization-registrations",
+						"/api/v1/tenant-management/organization-registrations/**",
+						"/api/v1/internal/organization-registrations/**").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();
 					authorize.anyRequest().denyAll();
 					});
@@ -69,8 +73,8 @@ public class ApiSecurityConfiguration {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Nexa-Surface"));
-		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-Id"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-System-Operator"));
+		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-ID", "X-Trace-ID"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/**", configuration);

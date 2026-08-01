@@ -21,6 +21,8 @@ public final class ApiProblemDetailFactory {
 		problem.setInstance(URI.create(request.getRequestURI()));
 		problem.setProperty("code", code.name());
 		problem.setProperty("correlationId", correlationId(request));
+		Object trace = request.getAttribute(com.nexa.api.shared.presentation.http.TraceIdFilter.ATTRIBUTE_NAME);
+		if (trace instanceof String traceId) problem.setProperty("traceId", traceId);
 		return problem;
 	}
 
@@ -96,6 +98,18 @@ public final class ApiProblemDetailFactory {
 				case RESERVATION_NOT_READY -> "Reservation is not ready";
 				case RESPONSIBLE_MEMBERSHIP_INVALID -> "Responsible membership is invalid";
 				case INVALID_INVENTORY_SORT -> "Invalid inventory sort";
+				case PROFILE_INVALID -> "Profile invalid";
+				case PROFILE_VERSION_CONFLICT -> "Profile version conflict";
+				case PASSWORD_POLICY_INVALID -> "Password policy invalid";
+				case PASSWORD_CHANGE_FAILED -> "Password change failed";
+				case PASSWORD_REUSE_NOT_ALLOWED -> "Password reuse not allowed";
+				case RESET_INVALID -> "Password reset invalid";
+				case RESET_RATE_LIMITED -> "Password reset rate limited";
+				case REGISTRATION_INVALID -> "Organization registration invalid";
+				case REGISTRATION_SLUG_CONFLICT -> "Organization workspace slug conflict";
+				case REGISTRATION_NOT_PENDING -> "Organization registration is not pending";
+				case SYSTEM_OPERATOR_REQUIRED -> "System operator authorization required";
+				case REJECTION_REASON_REQUIRED -> "Rejection reason required";
 				case INTERNAL_ERROR -> "Internal server error";
 		};
 	}

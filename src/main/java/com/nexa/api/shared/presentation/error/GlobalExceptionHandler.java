@@ -4,6 +4,7 @@ import com.nexa.api.iam.application.exception.InvalidCredentialsException;
 import com.nexa.api.iam.application.exception.InvalidRefreshTokenException;
 import com.nexa.api.iam.application.exception.SessionNotFoundException;
 import com.nexa.api.iam.application.exception.AuthenticationThrottledException;
+import com.nexa.api.iam.application.exception.IamSecurityException;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -60,6 +61,33 @@ public final class GlobalExceptionHandler {
 			HttpServletRequest request) {
 		return response(HttpStatus.TOO_MANY_REQUESTS, ApiErrorCode.AUTHENTICATION_THROTTLED,
 				"Authentication temporarily unavailable", request);
+	}
+
+	@ExceptionHandler(IamSecurityException.class)
+	public ResponseEntity<ProblemDetail> handleIamSecurity(IamSecurityException exception, HttpServletRequest request) {
+		ApiErrorCode code = switch (exception.code()) {
+			case "RESET_RATE_LIMITED" -> ApiErrorCode.RESET_RATE_LIMITED;
+			case "PROFILE_VERSION_CONFLICT" -> ApiErrorCode.PROFILE_VERSION_CONFLICT;
+			case "PASSWORD_POLICY_INVALID" -> ApiErrorCode.PASSWORD_POLICY_INVALID;
+			case "PASSWORD_REUSE_NOT_ALLOWED" -> ApiErrorCode.PASSWORD_REUSE_NOT_ALLOWED;
+			case "PASSWORD_CHANGE_FAILED" -> ApiErrorCode.PASSWORD_CHANGE_FAILED;
+			case "RESET_INVALID" -> ApiErrorCode.RESET_INVALID;
+			case "REGISTRATION_SLUG_CONFLICT" -> ApiErrorCode.REGISTRATION_SLUG_CONFLICT;
+			case "REGISTRATION_NOT_PENDING" -> ApiErrorCode.REGISTRATION_NOT_PENDING;
+			case "SYSTEM_OPERATOR_REQUIRED" -> ApiErrorCode.SYSTEM_OPERATOR_REQUIRED;
+			case "REJECTION_REASON_REQUIRED" -> ApiErrorCode.REJECTION_REASON_REQUIRED;
+			case "PROFILE_INVALID" -> ApiErrorCode.PROFILE_INVALID;
+			default -> ApiErrorCode.REGISTRATION_INVALID;
+		};
+		HttpStatus status = switch (code) {
+			case RESET_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
+			case PROFILE_VERSION_CONFLICT, REGISTRATION_SLUG_CONFLICT, REGISTRATION_NOT_PENDING -> HttpStatus.CONFLICT;
+			case SYSTEM_OPERATOR_REQUIRED -> HttpStatus.FORBIDDEN;
+			default -> HttpStatus.BAD_REQUEST;
+		};
+		String detail = code == ApiErrorCode.RESET_RATE_LIMITED ? "Password reset requests are temporarily limited"
+				: code == ApiErrorCode.RESET_INVALID ? "The reset request is invalid or expired" : "The requested security operation could not be completed";
+		return response(status, code, detail, request);
 	}
 
 	@ExceptionHandler({InvalidRefreshTokenException.class, SessionNotFoundException.class})
@@ -187,8 +215,8 @@ public final class GlobalExceptionHandler {
 		return ResponseEntity.badRequest().body(problem);
 	}
 
-	@ExceptionHandler(ApiResourceNotFoundException.class)
-	public ResponseEntity<ProblemDetail> handleApiNotFound(ApiResourceNotFoundException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.shared.application.error.ApiResourceNotFoundException.class)
+	public ResponseEntity<ProblemDetail> handleApiNotFound(com.nexa.api.shared.application.error.ApiResourceNotFoundException exception, HttpServletRequest request) {
 		return response(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found", request);
 	}
 

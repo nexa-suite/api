@@ -27,6 +27,7 @@ class AccessPolicyTests {
 	@Test
 	void membershipRoleIsTheCanonicalRoleSet() {
 		assertThat(MembershipRole.values()).containsExactly(
+				MembershipRole.TENANT_ADMIN,
 				MembershipRole.COMPANY_OWNER,
 				MembershipRole.SALES,
 				MembershipRole.WAREHOUSE,
@@ -53,13 +54,15 @@ class AccessPolicyTests {
 	void onePermissionPolicyMapsRequiredCapabilitiesByMembershipRole() {
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.COMPANY_OWNER))
 				.containsExactlyInAnyOrder(
-						Permission.TENANT_READ, Permission.TENANT_MANAGE,
-						Permission.IAM_USER_READ, Permission.IAM_USER_MANAGE,
-						Permission.OWNER_DASHBOARD_READ);
+						Permission.TENANT_READ, Permission.OWNER_DASHBOARD_READ,
+						Permission.SALES_READ, Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.COMPANY_OWNER))
-				.doesNotContain(Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE,
-						Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
-						Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE);
+				.doesNotContain(Permission.CATALOG_READ, Permission.SALES_WRITE,
+						Permission.WAREHOUSE_WRITE, Permission.LOGISTICS_WRITE,
+						Permission.TENANT_MANAGE, Permission.IAM_USER_MANAGE);
+		assertThat(PermissionPolicy.permissionsFor(MembershipRole.TENANT_ADMIN))
+				.containsExactlyInAnyOrder(Permission.TENANT_READ, Permission.TENANT_MANAGE,
+						Permission.IAM_USER_READ, Permission.IAM_USER_MANAGE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.SALES))
 				.containsExactlyInAnyOrder(
 						Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE);
