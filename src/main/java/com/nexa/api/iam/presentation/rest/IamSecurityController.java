@@ -106,10 +106,10 @@ public final class IamSecurityController {
 
 	@PostMapping("/tenant-management/organization-registrations")
 	@Operation(summary = "Submit a public organization registration")
-	public RegistrationResponse register(@Valid @RequestBody RegistrationRequest request) {
+	public RegistrationResponse register(HttpServletRequest httpRequest, @Valid @RequestBody RegistrationRequest request) {
 		return toResponse(security.submitRegistration(new IamSecurityUseCase.RegistrationRequest(request.legalName(), request.displayName(), request.businessIdentifier(),
 				request.operationCategory(), request.storageSiteName(), request.storageSiteAddress(), request.founderEmail(), request.founderDisplayName(),
-				request.workspaceName(), request.workspaceSlug(), request.referencePlan(), request.termsVersion(), request.termsAccepted())));
+				request.workspaceName(), request.workspaceSlug(), request.referencePlan(), request.termsVersion(), request.termsAccepted()), correlation(httpRequest), trace(httpRequest)));
 	}
 
 	@GetMapping("/tenant-management/organization-registrations/{registrationId}")

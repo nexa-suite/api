@@ -129,13 +129,17 @@ public class JdbcIamSecurityAdapter implements IamSecurityUseCase {
 		long recent = jdbc.queryForObject("select count(*) from iam.password_reset_request where normalized_email=? and created_at>?", Long.class, normalized, sql(now.minus(Duration.ofMinutes(10))));
 		if (recent >= 3) throw new IamSecurityException("RESET_RATE_LIMITED");
 		var users = jdbc.query("select id,email from iam.user_account where normalized_email=? and status='ACTIVE'", (rs, row) -> new User(rs.getObject("id", UUID.class), rs.getString("email")), normalized);
+		String token = opaqueToken();
 		if (!users.isEmpty()) {
-			String token = opaqueToken();
 			Instant expires = now.plus(resetTtl);
 			jdbc.update("update iam.password_reset_request set status='REVOKED' where normalized_email=? and status='PENDING'", normalized);
 			jdbc.update("insert into iam.password_reset_request (id,normalized_email,surface,token_hash,status,attempts,expires_at,created_at) values (?,?,?,?, 'PENDING',0,?,?)",
 					UUID.randomUUID(), normalized, surface, sha256(token), sql(expires), sql(now));
 			delivery.sendReset(users.get(0).email(), surface, token, expires);
+		} else {
+			// Keep the throttle observable without making the response differ for unknown emails.
+			jdbc.update("insert into iam.password_reset_request (id,normalized_email,surface,token_hash,status,attempts,expires_at,created_at) values (?,?,?,?, 'REVOKED',0,?,?)",
+					UUID.randomUUID(), normalized, surface, sha256(token), sql(now), sql(now));
 		}
 		audit.append(new SecurityAuditPort.Event("PASSWORD_RESET_REQUESTED", null, users.isEmpty() ? null : users.get(0).id(), null, null, surface,
 				valueOrUnknown(correlationId), valueOrUnknown(traceId), now, Map.of("accountResponse", "generic")));
@@ -166,7 +170,7 @@ public class JdbcIamSecurityAdapter implements IamSecurityUseCase {
 
 	@Override
 	@Transactional
-	public Registration submitRegistration(RegistrationRequest request) {
+	public Registration submitRegistration(RegistrationRequest request, String correlationId, String traceId) {
 		validateRegistration(request);
 		Instant now = clock.instant();
 		String slug = request.workspaceSlug().trim().toLowerCase(Locale.ROOT);
@@ -175,6 +179,8 @@ public class JdbcIamSecurityAdapter implements IamSecurityUseCase {
 		UUID id = UUID.randomUUID();
 		jdbc.update("insert into tenant_management.organization_registration (id,legal_name,display_name,normalized_legal_name,business_identifier,operation_category,storage_site_name,storage_site_address,founder_email,founder_display_name,workspace_name,workspace_slug,reference_plan,terms_version,terms_accepted_at,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING_ACTIVATION',?,?,0)",
 				id, request.legalName().trim(), request.displayName().trim(), request.legalName().trim().toLowerCase(Locale.ROOT), blankToNull(request.businessIdentifier()), request.operationCategory(), request.storageSiteName(), request.storageSiteAddress(), normalizeEmail(request.founderEmail()), request.founderDisplayName(), request.workspaceName(), slug, request.referencePlan(), request.termsVersion(), sql(now), sql(now), sql(now));
+		audit.append(new SecurityAuditPort.Event("ORGANIZATION_REGISTRATION_SUBMITTED", null, null, null, null, "PUBLIC",
+				valueOrUnknown(correlationId), valueOrUnknown(traceId), now, Map.of("registrationId", id.toString(), "status", "PENDING_ACTIVATION")));
 		return new Registration(id.toString(), "PENDING_ACTIVATION", now);
 	}
 
@@ -193,11 +199,13 @@ public class JdbcIamSecurityAdapter implements IamSecurityUseCase {
 		if (rows.isEmpty()) throw new ApiResourceNotFoundException("organization registration");
 		RegistrationRow registration = rows.get(0);
 		if (!"PENDING_ACTIVATION".equals(registration.status)) throw new IamSecurityException("REGISTRATION_NOT_PENDING");
+		UUID userId = jdbc.query("select id from iam.user_account where normalized_email=?", (rs, row) -> rs.getObject(1, UUID.class), registration.founderEmail).stream().findFirst().orElse(null);
+		if (userId != null && Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from tenant_management.workspace_membership where user_id=? and membership_type='BUYER' and status='ACTIVE')", Boolean.class, userId)))
+			throw new IamSecurityException("FOUNDER_EMAIL_INCOMPATIBLE");
 		UUID tenantId = UUID.randomUUID();
 		UUID workspaceId = UUID.randomUUID();
 		jdbc.update("insert into tenant_management.tenant (id,name,slug,status,created_at,updated_at,version) values (?,?,?,'ACTIVE',?,?,0)", tenantId, registration.displayName, registration.workspaceSlug, sql(now), sql(now));
 		jdbc.update("insert into tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at,version) values (?,?,?,?,'ACTIVE',?,?,0)", workspaceId, tenantId, registration.workspaceName, registration.workspaceSlug, sql(now), sql(now));
-		UUID userId = jdbc.query("select id from iam.user_account where normalized_email=?", (rs, row) -> rs.getObject(1, UUID.class), registration.founderEmail).stream().findFirst().orElse(null);
 		if (userId == null) {
 			userId = UUID.randomUUID();
 			jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,'es','ACTIVE',?,?,0)", userId, registration.founderEmail, registration.founderEmail, registration.founderEmail, registration.founderEmail, registration.founderDisplayName, sql(now), sql(now));
