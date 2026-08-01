@@ -55,7 +55,7 @@ public class ApiSecurityConfiguration {
 					authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
 					if (localProfile) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
 					authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
-						"/api/v1/authentication/sign-out").permitAll();
+						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();
 					authorize.anyRequest().denyAll();
 					});

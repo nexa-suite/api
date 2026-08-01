@@ -21,6 +21,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/purchase-requests")
@@ -36,11 +37,11 @@ public class PurchaseRequestQueryController {
 
 	@GetMapping
 	public PurchaseRequestPageResponse list(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
-			@RequestParam(required = false) @Pattern(regexp = "DRAFT|SUBMITTED|IN_REVIEW|NEEDS_ADJUSTMENT|APPROVED|REJECTED|CANCELLED|CONVERTED_TO_ORDER") String status,
-			@RequestParam(required = false) @Pattern(regexp = "NORMAL|HIGH|URGENT") String priority, @RequestParam(required = false) String search,
+			@RequestParam(required = false) @Pattern(regexp = "(?i)DRAFT|SUBMITTED|IN_REVIEW|NEEDS_ADJUSTMENT|APPROVED|REJECTED|CANCELLED|CONVERTED_TO_ORDER") String status,
+			@RequestParam(required = false) @Pattern(regexp = "(?i)NORMAL|HIGH|URGENT") String priority, @RequestParam(required = false) String search,
 			@RequestParam(required = false) LocalDate createdFrom, @RequestParam(required = false) LocalDate createdTo,
 			@RequestParam(defaultValue = "0") @Min(0) int page, @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
-			@RequestParam(defaultValue = "createdAt,desc") @Pattern(regexp = "(createdAt|updatedAt),(asc|desc)") String sort) {
+			@RequestParam(defaultValue = "createdAt,desc") @Pattern(regexp = "(?i)(createdAt|updatedAt),(asc|desc)") String sort) {
 		return mapper.page(sales.list(context, new PurchaseRequestFilter(status, priority, search, createdFrom, createdTo, page, size, sort)));
 	}
 
@@ -48,5 +49,10 @@ public class PurchaseRequestQueryController {
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Purchase Request returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Purchase Request not found")})
 	public ResponseEntity<PurchaseRequestDetailResponse> detail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
 		var value = sales.detail(context, id); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	}
+
+	@GetMapping("/{id}/events")
+	public List<com.nexa.api.sales.presentation.purchaserequest.response.PurchaseRequestEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
+		return sales.events(context, id).stream().map(mapper::event).toList();
 	}
 }

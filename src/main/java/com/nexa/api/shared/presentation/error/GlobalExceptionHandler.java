@@ -27,10 +27,19 @@ import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrat
 import com.nexa.api.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
 import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
+import com.nexa.api.sales.application.exception.PurchaseRequestAlreadyConvertedException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
+import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
+import com.nexa.api.sales.domain.model.salesorder.SalesOrderInvariantViolation;
+import com.nexa.api.sales.application.exception.SalesOrderRejectionReasonRequiredException;
+import com.nexa.api.sales.application.exception.SalesOrderTransitionException;
+import com.nexa.api.shared.application.changefeed.ChangeFeedCapacityException;
+import com.nexa.api.warehouse.application.WarehouseOperationsService;
+import com.nexa.api.logistics.application.LogisticsOperationsService;
+import com.nexa.api.logistics.domain.dispatchorder.DispatchTransitionViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -88,6 +97,7 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleSalesNotFound(SalesResourceNotFoundException exception, HttpServletRequest request) {
 		ApiErrorCode code = switch (exception.getMessage()) {
 			case "purchase-request" -> ApiErrorCode.PURCHASE_REQUEST_NOT_FOUND;
+			case "sales-order" -> ApiErrorCode.SALES_ORDER_NOT_FOUND;
 			case "catalog-item" -> ApiErrorCode.CATALOG_ITEM_NOT_FOUND;
 			default -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
 		};
@@ -95,10 +105,12 @@ public final class GlobalExceptionHandler {
 	}
 	@ExceptionHandler(SalesInvariantViolation.class)
 	public ResponseEntity<ProblemDetail> handleSalesInvariant(SalesInvariantViolation exception, HttpServletRequest request) {
+		LOGGER.warn("Sales invariant rejected request {}: {}", request.getRequestURI(), exception.getMessage());
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.PURCHASE_REQUEST_LINE_INVALID, "Sales request is invalid", request);
 	}
 	@ExceptionHandler(DataIntegrityViolationException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
+		LOGGER.warn("Data integrity constraint rejected request {}", request.getRequestURI(), exception.getMostSpecificCause());
 		String message = exception.getMostSpecificCause() == null ? "" : String.valueOf(exception.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
 		ApiErrorCode code = message.contains("code") ? ApiErrorCode.CLIENT_ACCOUNT_CODE_CONFLICT
 				: message.contains("tax") ? ApiErrorCode.CLIENT_ACCOUNT_TAX_ID_CONFLICT
@@ -108,12 +120,45 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request); }
+	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
+	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
+	@ExceptionHandler(PurchaseRequestAlreadyConvertedException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestAlreadyConverted(PurchaseRequestAlreadyConvertedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_ALREADY_CONVERTED, "Purchase request has already been converted", request); }
 	@ExceptionHandler(SalesPreconditionRequiredException.class)
 	public ResponseEntity<ProblemDetail> handleSalesPrecondition(SalesPreconditionRequiredException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request); }
 	@ExceptionHandler(IdempotencyKeyRequiredException.class)
 	public ResponseEntity<ProblemDetail> handleIdempotency(IdempotencyKeyRequiredException exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request); }
-	@ExceptionHandler(PurchaseRequestTransitionException.class)
-	public ResponseEntity<ProblemDetail> handleTransition(PurchaseRequestTransitionException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_TRANSITION_INVALID, "Purchase request transition is not allowed", request); }
+		@ExceptionHandler(PurchaseRequestTransitionException.class)
+		public ResponseEntity<ProblemDetail> handleTransition(PurchaseRequestTransitionException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_TRANSITION_INVALID, "Purchase request transition is not allowed", request); }
+		@ExceptionHandler(SalesOrderTransitionException.class)
+		public ResponseEntity<ProblemDetail> handleSalesOrderTransition(SalesOrderTransitionException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.SALES_ORDER_TRANSITION_INVALID, "Sales order transition is not allowed", request); }
+		@ExceptionHandler(SalesOrderRejectionReasonRequiredException.class)
+		public ResponseEntity<ProblemDetail> handleSalesOrderRejectionReason(SalesOrderRejectionReasonRequiredException exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.SALES_ORDER_REJECTION_REASON_REQUIRED, "Sales order rejection reason is required", request); }
+		@ExceptionHandler(SalesOrderInvariantViolation.class)
+		public ResponseEntity<ProblemDetail> handleSalesOrderInvariant(SalesOrderInvariantViolation exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.SALES_ORDER_INVALID, "Sales order is invalid", request); }
+		@ExceptionHandler(ChangeFeedCapacityException.class)
+		public ResponseEntity<ProblemDetail> handleChangeFeedCapacity(ChangeFeedCapacityException exception, HttpServletRequest request) { return response(HttpStatus.TOO_MANY_REQUESTS, ApiErrorCode.CHANGE_FEED_CONNECTION_LIMIT, "Change feed connection limit reached", request); }
+		@ExceptionHandler(WarehouseOperationsService.WarehouseException.class)
+		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationsService.WarehouseException exception, HttpServletRequest request) {
+			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+				HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+			return response(status, code, "Warehouse operation could not be completed", request);
+		}
+		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)
+		public ResponseEntity<ProblemDetail> handleLogistics(LogisticsOperationsService.LogisticsException exception, HttpServletRequest request) {
+			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) {
+				case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "IDEMPOTENCY_PAYLOAD_CONFLICT", "DISPATCH_ALREADY_EXISTS", "INVALID_TRANSITION", "RESERVATION_NOT_READY" -> HttpStatus.CONFLICT;
+				case "FORBIDDEN" -> HttpStatus.FORBIDDEN;
+				case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED;
+				default -> HttpStatus.BAD_REQUEST;
+			};
+			return response(status, code, "Logistics operation could not be completed", request);
+		}
+		@ExceptionHandler(DispatchTransitionViolation.class)
+		public ResponseEntity<ProblemDetail> handleDispatchTransition(DispatchTransitionViolation exception, HttpServletRequest request) {
+			return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Logistics transition is not allowed", request);
+		}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	public ResponseEntity<ProblemDetail> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {

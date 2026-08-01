@@ -58,15 +58,18 @@ public final class SignInService implements SignInUseCase {
 		if (throttle.isThrottled(command.login(), command.clientFingerprint(), now)) throw new AuthenticationThrottledException();
 		StoredUserAccount stored = userAccounts.findByLogin(command.login()).orElse(null);
 		if (stored == null) {
-			throttle.recordFailure(command.login(), command.clientFingerprint(), now);
+			if (throttle.recordFailureAndCheck(command.login(), command.clientFingerprint(), now)) throw new AuthenticationThrottledException();
 			throw new InvalidCredentialsException();
 		}
 		if (!stored.account().canAuthenticate() || !passwordVerifier.matches(command.password(), stored.passwordHash())) {
-			throttle.recordFailure(command.login(), command.clientFingerprint(), now);
+			if (throttle.recordFailureAndCheck(command.login(), command.clientFingerprint(), now)) throw new AuthenticationThrottledException();
 			throw new InvalidCredentialsException();
 		}
-		AccessPolicy policy = accessPolicies.findFor(stored.account().id(), command.workspaceSlug(), command.surface())
-				.orElseGet(() -> { throttle.recordFailure(command.login(), command.clientFingerprint(), now); throw new InvalidCredentialsException(); });
+		AccessPolicy policy = accessPolicies.findFor(stored.account().id(), command.workspaceSlug(), command.surface()).orElse(null);
+		if (policy == null) {
+			if (throttle.recordFailureAndCheck(command.login(), command.clientFingerprint(), now)) throw new AuthenticationThrottledException();
+			throw new InvalidCredentialsException();
+		}
 		throttle.clear(command.login(), command.clientFingerprint());
 		AuthenticationSubject subject = new AuthenticationSubject(stored.account().id(), stored.account().email(),
 				command.surface(), policy);

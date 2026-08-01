@@ -26,7 +26,9 @@ final class CookieOriginGuardFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
-		if (request.getMethod().equalsIgnoreCase("POST") && request.getRequestURI().startsWith("/api/v1/authentication/")) {
+		if (request.getMethod().equalsIgnoreCase("POST")
+				&& (request.getRequestURI().startsWith("/api/v1/authentication/")
+					|| request.getRequestURI().startsWith("/api/v1/auth/"))) {
 			String origin = request.getHeader("Origin");
 			if (origin == null || !allowedOrigins.contains(origin)) {
 				var problem = ApiProblemDetailFactory.create(HttpStatus.FORBIDDEN, ApiErrorCode.ORIGIN_NOT_ALLOWED,
