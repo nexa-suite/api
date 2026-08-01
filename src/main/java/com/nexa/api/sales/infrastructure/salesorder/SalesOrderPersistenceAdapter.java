@@ -3,6 +3,7 @@ package com.nexa.api.sales.infrastructure.salesorder;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
+import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.sales.application.model.SalesPage;
 import com.nexa.api.sales.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.sales.application.salesorder.model.SalesOrderEventView;
@@ -79,7 +80,23 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 
 	@Override
 	public Optional<SalesOrderView> findByIdempotency(String tenantId, String workspaceId, String actorMembershipId, String idempotencyKey) {
+		lockConversionIdempotency(tenantId, workspaceId, actorMembershipId, idempotencyKey);
 		return findIdempotent(tenantId, workspaceId, actorMembershipId, idempotencyKey);
+	}
+
+	@Override
+	public Optional<SalesOrderView> findByIdempotency(String tenantId, String workspaceId, String actorMembershipId,
+			String idempotencyKey, String requestHash) {
+		lockConversionIdempotency(tenantId, workspaceId, actorMembershipId, idempotencyKey);
+		return jdbc.query("select resource_id,request_hash from sales.idempotency_record where tenant_id=? and workspace_id=? and actor_membership_id=? and operation='purchase-request-order-conversion' and idempotency_key=?",
+			rs -> {
+				if (!rs.next()) return Optional.empty();
+				String stored = rs.getString(2);
+				if (stored != null && !stored.isBlank() && !stored.equalsIgnoreCase(requestHash)) {
+					throw new SalesIdempotencyPayloadConflictException();
+				}
+				return find(tenantId, workspaceId, null, rs.getObject(1).toString());
+			}, uuid(tenantId), uuid(workspaceId), uuid(actorMembershipId), idempotencyKey);
 	}
 
 	@Override
@@ -121,6 +138,13 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	@Override
 	public SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
 			String idempotencyKey, String note, long nowEpochMillis) {
+		return persistConversion(aggregate, purchaseRequestVersion, actorMembershipId, idempotencyKey, note,
+				nowEpochMillis, "");
+	}
+
+	@Override
+	public SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
+			String idempotencyKey, String note, long nowEpochMillis, String requestHash) {
 		UUID orderId = uuid(aggregate.id().value()), tenant = aggregate.tenantId().value(), workspace = aggregate.workspaceId().value();
 		UUID request = uuid(aggregate.sourcePurchaseRequestId().value()), actor = uuid(actorMembershipId);
 		jdbc.update("insert into sales.sales_order (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,buyer_membership_id,source_purchase_request_id,priority,requested_delivery_date,delivery_snapshot,payment_option,notes,currency,total_amount,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?,0)",
@@ -135,8 +159,15 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 				UUID.randomUUID(), orderId, tenant, workspace, actor, note, timestamp(nowEpochMillis));
 		changeFeed.append(tenant.toString(), workspace.toString(), aggregate.clientAccountId().value(), "purchase_request", request.toString(), "sales.purchase-request.converted", "CONVERTED_TO_ORDER", nowEpochMillis, true);
 		changeFeed.append(tenant.toString(), workspace.toString(), aggregate.clientAccountId().value(), "sales_order", orderId.toString(), "sales.sales-order.created", "PENDING", nowEpochMillis, true);
-		jdbc.update("insert into sales.idempotency_record (id,tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,resource_id,response_version,created_at) values (?,?,?,?,?,?,?,?,?)",
-				UUID.randomUUID(), tenant, workspace, actor, "purchase-request-order-conversion", idempotencyKey, orderId, 0, timestamp(nowEpochMillis));
+		int inserted = jdbc.update("insert into sales.idempotency_record (id,tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,resource_id,response_version,request_hash,created_at) values (?,?,?,?,?,?,?,?,?,?) on conflict (tenant_id,workspace_id,actor_membership_id,operation,idempotency_key) do nothing",
+				UUID.randomUUID(), tenant, workspace, actor, "purchase-request-order-conversion", idempotencyKey, orderId, 0, requestHash, timestamp(nowEpochMillis));
+		if (inserted != 1) {
+			String existingHash = jdbc.queryForObject("select request_hash from sales.idempotency_record where tenant_id=? and workspace_id=? and actor_membership_id=? and operation='purchase-request-order-conversion' and idempotency_key=?", String.class, tenant, workspace, actor, idempotencyKey);
+			if (existingHash != null && !existingHash.isBlank() && !existingHash.equalsIgnoreCase(requestHash)) {
+				throw new SalesIdempotencyPayloadConflictException();
+			}
+			return findIdempotent(tenant.toString(), workspace.toString(), actor.toString(), idempotencyKey).orElseThrow();
+		}
 		return find(tenant.toString(), workspace.toString(), null, orderId.toString()).orElseThrow();
 	}
 
@@ -221,6 +252,10 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	private Optional<SalesOrderView> findIdempotent(String tenant, String workspace, String actor, String key) {
 		return jdbc.query("select resource_id from sales.idempotency_record where tenant_id=? and workspace_id=? and actor_membership_id=? and operation='purchase-request-order-conversion' and idempotency_key=?",
 				rs -> rs.next() ? find(tenant, workspace, null, rs.getObject(1).toString()) : Optional.empty(), uuid(tenant), uuid(workspace), uuid(actor), key);
+	}
+	private void lockConversionIdempotency(String tenant, String workspace, String actor, String key) {
+		jdbc.query("select pg_advisory_xact_lock(hashtext(?))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
+				tenant + "|" + workspace + "|" + actor + "|purchase-request-order-conversion|" + key);
 	}
 	private SalesOrder aggregate(SalesOrderView view) {
 		List<SalesOrderLine> lines = view.lines().stream().map(line -> new SalesOrderLine(line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal())).toList();

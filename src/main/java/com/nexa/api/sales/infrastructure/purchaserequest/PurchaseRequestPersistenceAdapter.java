@@ -91,7 +91,14 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 	public int update(String tenant, String workspace, String buyerAccount, String id, String priority, LocalDate date,
 			String delivery, String payment, String comment, long version) {
 		String scope = buyerAccount == null ? "" : " and client_account_id=?";
-		List<Object> args = new ArrayList<>(List.of(priority, date, delivery, payment, comment, uuid(tenant), uuid(workspace)));
+		List<Object> args = new ArrayList<>();
+		args.add(priority);
+		args.add(date);
+		args.add(delivery);
+		args.add(payment);
+		args.add(comment);
+		args.add(uuid(tenant));
+		args.add(uuid(workspace));
 		if (buyerAccount != null) args.add(uuid(buyerAccount));
 		args.add(uuid(id));
 		args.add(version);

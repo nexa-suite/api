@@ -12,6 +12,11 @@ import java.util.Optional;
 public interface SalesOrderConversionPersistencePort {
     Optional<SalesOrderView> findByIdempotency(String tenantId, String workspaceId, String actorMembershipId, String idempotencyKey);
 
+    default Optional<SalesOrderView> findByIdempotency(String tenantId, String workspaceId, String actorMembershipId,
+                                                       String idempotencyKey, String requestHash) {
+        return findByIdempotency(tenantId, workspaceId, actorMembershipId, idempotencyKey);
+    }
+
     Optional<ApprovedPurchaseRequestSnapshot> loadApprovedSnapshot(String tenantId, String workspaceId,
                                                                     String purchaseRequestId, long expectedVersion);
 
@@ -21,6 +26,11 @@ public interface SalesOrderConversionPersistencePort {
 
     SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
                                       String idempotencyKey, String note, long nowEpochMillis);
+
+    default SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
+                                             String idempotencyKey, String note, long nowEpochMillis, String requestHash) {
+        return persistConversion(aggregate, purchaseRequestVersion, actorMembershipId, idempotencyKey, note, nowEpochMillis);
+    }
 
     record SalesOrderIdentity(SalesOrderId id, SalesOrderNumber number) { }
 }
