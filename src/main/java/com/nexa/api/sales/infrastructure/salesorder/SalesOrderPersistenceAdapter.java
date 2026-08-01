@@ -25,6 +25,7 @@ import com.nexa.api.sales.domain.model.salesorder.SalesOrderStatus;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
+import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import org.springframework.context.annotation.Profile;
@@ -211,28 +212,6 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	}
 
 	@Override
-	public SalesOrderView transition(String tenantId, String workspaceId, String id, String action, String reason,
-			String actorMembershipId, long expectedVersion, long nowEpochMillis) {
-		UUID orderId = uuid(id); UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), actor = uuid(actorMembershipId);
-		String status = switch (action) { case "confirm" -> "CONFIRMED"; case "reject" -> "REJECTED"; case "cancel" -> "CANCELLED"; default -> throw new com.nexa.api.sales.application.exception.SalesOrderTransitionException(); };
-		if ("reject".equals(action) && (reason == null || reason.isBlank())) throw new com.nexa.api.sales.application.exception.SalesOrderRejectionReasonRequiredException();
-		int changed = jdbc.update("update sales.sales_order set status=?,rejection_reason=?,confirmed_at=case when ?='CONFIRMED' then ? else confirmed_at end,rejected_at=case when ?='REJECTED' then ? else rejected_at end,cancelled_at=case when ?='CANCELLED' then ? else cancelled_at end,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='PENDING' and version=?",
-				status, "REJECTED".equals(status) ? reason.trim() : null, status, timestamp(nowEpochMillis), status, timestamp(nowEpochMillis), status, timestamp(nowEpochMillis), timestamp(nowEpochMillis), tenant, workspace, orderId, expectedVersion);
-		if (changed != 1) throw new SalesConcurrencyConflictException();
-		jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,from_status,to_status,reason,occurred_at) values (?,?,?,?,?,'ORDER_STATUS_CHANGED','PENDING',?,?,?)",
-				UUID.randomUUID(), orderId, tenant, workspace, actor, status, reason, timestamp(nowEpochMillis));
-		String client = jdbc.queryForObject("select client_account_id from sales.sales_order where id=?", String.class, orderId);
-		String eventType = switch (action) {
-			case "confirm" -> "sales.sales-order.confirmed";
-			case "reject" -> "sales.sales-order.rejected";
-			case "cancel" -> "sales.sales-order.cancelled";
-			default -> throw new com.nexa.api.sales.application.exception.SalesOrderTransitionException();
-		};
-		changeFeed.append(tenantId, workspaceId, client, "sales_order", id, eventType, status, nowEpochMillis, client != null);
-		return find(tenantId, workspaceId, null, id).orElseThrow();
-	}
-
-	@Override
 	public List<SalesOrderEventView> events(String tenantId, String workspaceId, String buyerAccountId, String id) {
 		find(tenantId, workspaceId, buyerAccountId, id).orElseThrow(() -> new SalesResourceNotFoundException("sales-order"));
 		return jdbc.query("select id,event_type,from_status,to_status,reason,actor_membership_id,occurred_at from sales.sales_order_event where tenant_id=? and workspace_id=? and sales_order_id=? order by occurred_at,id",
@@ -259,7 +238,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	}
 	private SalesOrder aggregate(SalesOrderView view) {
 		List<SalesOrderLine> lines = view.lines().stream().map(line -> new SalesOrderLine(line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal())).toList();
-		return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new ClientAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), new PurchaseRequestId(view.sourcePurchaseRequestId()), new BuyerMembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
+        return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new ClientAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), new PurchaseRequestId(view.sourcePurchaseRequestId()), new MembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
 	}
 	private long nextSequence(UUID tenant, UUID workspace, int year) {
 		jdbc.update("insert into sales.sales_order_sequence (tenant_id,workspace_id,order_year,next_value) values (?,?,?,1) on conflict do nothing", tenant, workspace, year);
