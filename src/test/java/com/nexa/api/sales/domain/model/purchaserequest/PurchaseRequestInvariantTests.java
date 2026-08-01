@@ -33,7 +33,7 @@ class PurchaseRequestInvariantTests {
 		assertThatThrownBy(() -> new RequestedQuantity(BigDecimal.ZERO)).isInstanceOf(SalesInvariantViolation.class);
 		assertThatThrownBy(() -> new RequestComment("x".repeat(2001))).isInstanceOf(SalesInvariantViolation.class);
 		assertThatThrownBy(() -> new RequestedDeliveryDate(java.time.LocalDate.now().minusDays(1))).isInstanceOf(SalesInvariantViolation.class);
-		assertThat(new PaymentOption("CREDIT").value()).isEqualTo("CREDIT");
+		assertThat(PaymentOption.from("CREDIT_LINE")).isEqualTo(PaymentOption.CREDIT_LINE);
 	}
 
 	private static PurchaseRequestLine line(String id, String item) { return new PurchaseRequestLine(new PurchaseRequestLineId(UUID.nameUUIDFromBytes(id.getBytes())), new CatalogItemSnapshot(item, "Frozen item", "Box", new PriceSnapshot(BigDecimal.TEN, "PEN")), new RequestedQuantity(BigDecimal.ONE), "unit", null); }

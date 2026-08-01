@@ -2,6 +2,7 @@ package com.nexa.api.sales.application.purchaserequest.port;
 
 import com.nexa.api.sales.application.model.SalesPage;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestFilter;
+import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestEventView;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestView;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 
@@ -12,6 +13,7 @@ import java.util.List;
 public interface PurchaseRequestUseCase {
 	SalesPage<PurchaseRequestView> list(CurrentAccessContext context, PurchaseRequestFilter filter);
 	PurchaseRequestView detail(CurrentAccessContext context, String id);
+	List<PurchaseRequestEventView> events(CurrentAccessContext context, String id);
 	PurchaseRequestView create(CurrentAccessContext context, String clientAccountId, String priority, LocalDate deliveryDate,
 			String deliveryProfile, String paymentOption, String comment, List<RequestedLine> lines);
 	PurchaseRequestView update(CurrentAccessContext context, String id, String priority, LocalDate deliveryDate,

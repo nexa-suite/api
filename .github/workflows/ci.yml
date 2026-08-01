@@ -1,0 +1,23 @@
+name: API CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**"]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "26.0.1"
+          cache: maven
+      - name: Verify API
+        run: ./mvnw clean verify

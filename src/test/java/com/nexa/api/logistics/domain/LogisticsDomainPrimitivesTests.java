@@ -1,62 +1,50 @@
 package com.nexa.api.logistics.domain;
 
+import com.nexa.api.logistics.domain.dispatchorder.ClientAccountId;
+import com.nexa.api.logistics.domain.dispatchorder.DeliveryWindow;
+import com.nexa.api.logistics.domain.dispatchorder.DispatchNumber;
+import com.nexa.api.logistics.domain.dispatchorder.DispatchOrder;
+import com.nexa.api.logistics.domain.dispatchorder.DispatchStatus;
+import com.nexa.api.logistics.domain.dispatchorder.DestinationSnapshot;
+import com.nexa.api.logistics.domain.dispatchorder.InventoryReservationId;
+import com.nexa.api.logistics.domain.dispatchorder.SalesOrderId;
+import com.nexa.api.logistics.domain.dispatchorder.TransportAssignment;
+import com.nexa.api.logistics.domain.temperaturereading.TemperatureScale;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LogisticsDomainPrimitivesTests {
-	private static final Instant START = Instant.parse("2026-07-28T10:00:00Z");
+    private static final Instant START = Instant.parse("2026-07-28T10:00:00Z");
 
-	@Test
-	void identifiersNormalize() {
-		assertThat(new ShipmentId(" shp-01 ").value()).isEqualTo("SHP-01");
-		assertThat(new DispatchOrderId("dispatch-01").toString()).isEqualTo("DISPATCH-01");
-	}
+    @Test
+    void dispatchAggregateOwnsTheCanonicalLifecycle() {
+        DispatchOrder dispatch = DispatchOrder.create(UUID.randomUUID(), new DispatchNumber("DO-2026-000001"), new InventoryReservationId(UUID.randomUUID()), new SalesOrderId(UUID.randomUUID()), new ClientAccountId(UUID.randomUUID()), new DestinationSnapshot("Lima"));
+        dispatch.startPreparation();
+        dispatch.assign(new TransportAssignment(UUID.randomUUID(), "Driver", "TRUCK-1", "Route 1"));
+        dispatch.schedule(new DeliveryWindow(START, START.plus(2, java.time.temporal.ChronoUnit.HOURS)), START.plus(60, java.time.temporal.ChronoUnit.MINUTES));
+        dispatch.markReadyForRoute();
+        dispatch.startRoute();
+        dispatch.deliver();
+        assertThat(dispatch.status()).isEqualTo(DispatchStatus.DELIVERED);
+    }
 
-	@Test
-	void temperatureReadingKeepsExactValueAndExplicitUnit() {
-		TemperatureReading reading = new TemperatureReading(new BigDecimal("-18.250"), "c", START);
+    @Test
+    void lifecycleRejectsInvalidTransitions() {
+        DispatchOrder dispatch = DispatchOrder.create(UUID.randomUUID(), new DispatchNumber("DO-2026-000002"), new InventoryReservationId(UUID.randomUUID()), new SalesOrderId(UUID.randomUUID()), new ClientAccountId(UUID.randomUUID()), new DestinationSnapshot("Lima"));
+        assertThatThrownBy(() -> dispatch.startRoute()).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new DeliveryWindow(START, START)).isInstanceOf(IllegalArgumentException.class);
+    }
 
-		assertThat(reading.value()).isEqualByComparingTo("-18.250");
-		assertThat(reading.value().scale()).isEqualTo(3);
-		assertThat(reading.unit()).isEqualTo(TemperatureUnit.CELSIUS);
-		assertThat(reading.recordedAt()).isEqualTo(START);
-	}
-
-	@Test
-	void deliveryWindowRequiresOrderedNonEmptyBounds() {
-		DeliveryWindow window = new DeliveryWindow(START, START.plusSeconds(30));
-
-		assertThat(window.startsAt()).isEqualTo(START);
-		assertThat(window.endsAt()).isEqualTo(START.plusSeconds(30));
-		assertThatThrownBy(() -> new DeliveryWindow(START, START)).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new DeliveryWindow(null, START)).isInstanceOf(IllegalArgumentException.class);
-	}
-
-	@Test
-	void rejectsIncompleteTemperatureReadingsAndUnknownUnits() {
-		assertThatThrownBy(() -> new TemperatureReading(null, TemperatureUnit.CELSIUS, START))
-			.isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new TemperatureReading(BigDecimal.ONE, (TemperatureUnit) null, START))
-			.isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new TemperatureReading(BigDecimal.ONE, "KELVIN", START))
-			.isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new TemperatureReading(BigDecimal.ONE, TemperatureUnit.CELSIUS, null))
-			.isInstanceOf(IllegalArgumentException.class);
-	}
-
-	@Test
-	void exposesShipmentStatusVocabulary() {
-		assertThat(ShipmentStatus.values()).containsExactly(
-			ShipmentStatus.PLANNED,
-			ShipmentStatus.DISPATCHED,
-			ShipmentStatus.IN_TRANSIT,
-			ShipmentStatus.DELIVERED,
-			ShipmentStatus.FAILED,
-			ShipmentStatus.CANCELLED);
-	}
+    @Test
+    void temperatureScaleConvertsExplicitlyAndBoundsValues() {
+        assertThat(TemperatureScale.CELSIUS.toCelsius(new BigDecimal("-18.250"))).isEqualByComparingTo("-18.250");
+        assertThat(TemperatureScale.FAHRENHEIT.toCelsius(new BigDecimal("32"))).isEqualByComparingTo("0");
+        assertThatThrownBy(() -> TemperatureScale.CELSIUS.toCelsius(new BigDecimal("1000"))).isInstanceOf(IllegalArgumentException.class);
+    }
 }
