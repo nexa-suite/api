@@ -6,11 +6,11 @@
 
 Business and integration API foundation for Nexa Suite, implemented as a Spring Boot modular monolith.
 
-[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.6.0](https://img.shields.io/badge/release-v0.6.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.6.0)
+[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.8.1](https://img.shields.io/badge/release-v0.8.1-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.8.1)
 
 [Changelog](./CHANGELOG.md) · [Release notes](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
 
-**Current repository:** API · **Current release:** `v0.6.0`
+**Current repository:** API · **Current release:** `v0.8.1`
 
 [Website](https://github.com/nexa-suite/website) · [Platform](https://github.com/nexa-suite/platform) · [Portal](https://github.com/nexa-suite/portal) · [API](https://github.com/nexa-suite/api) · [Mobile](https://github.com/nexa-suite/mobile)
 
@@ -22,7 +22,7 @@ Business and integration API foundation for Nexa Suite, implemented as a Spring 
 
 `v0.6.0` consolidates RS256 identity sessions, refresh-token rotation, tenant/workspace membership verification, Organization Administration, Client Accounts, Purchase Requests and secured Catalog Management reads over the existing checksum-validated 50-item seed. It includes Flyway-managed PostgreSQL schemas, idempotency, optimistic concurrency, Problem Details and local OpenAPI.
 
-The API is the business authority for the approved identity, workspace, Catalog and commercial request slice. Sales Order persistence/HTTP, warehouse, logistics, invoicing, cache and external integrations remain outside this release.
+The API is the business authority for identity, workspace, Catalog, commercial, Warehouse and Logistics workflows. Proof of Delivery is metadata-only; Business Documents, file storage, invoices, payments, cache and external integrations are not implemented.
 
 Catalog routes require a valid RS256 access token, active membership and `catalog:read`. Health/info are public; local OpenAPI is enabled only with the `local` profile.
 
