@@ -1,6 +1,7 @@
 package com.nexa.api.logistics.application;
 
 import com.nexa.api.logistics.application.port.LogisticsPersistencePort;
+import com.nexa.api.logistics.application.service.StartDispatchRouteService;
 import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
 import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
@@ -17,24 +18,31 @@ import java.util.List;
 public class LogisticsOperationsService {
     private final LogisticsPersistencePort persistence;
     private final ClientAccountPersistencePort accounts;
+    private final StartDispatchRouteService startDispatchRoute;
 
     public LogisticsOperationsService(LogisticsPersistencePort persistence, ClientAccountPersistencePort accounts) {
-        this.persistence = persistence; this.accounts = accounts;
+        this(persistence, accounts, new StartDispatchRouteService(persistence));
+    }
+
+    public LogisticsOperationsService(LogisticsPersistencePort persistence, ClientAccountPersistencePort accounts,
+                                      StartDispatchRouteService startDispatchRoute) {
+        this.persistence = persistence; this.accounts = accounts; this.startDispatchRoute = startDispatchRoute;
     }
 
     public Page<DispatchView> list(CurrentAccessContext context, String status, int page, int size, String sort) {
         String client = readScope(context);
-        return persistence.list(tenant(context), workspace(context), client, status, page, size, sort);
+        Page<DispatchView> value = persistence.list(tenant(context), workspace(context), client, status, page, size, sort);
+        return new Page<>(value.items().stream().map(item -> safe(context, item)).toList(), value.page(), value.size(), value.total());
     }
-    public DispatchView detail(CurrentAccessContext context, String id) { return persistence.detail(tenant(context), workspace(context), readScope(context), id); }
-    public List<DispatchEventView> events(CurrentAccessContext context, String id) { return persistence.events(tenant(context), workspace(context), readScope(context), id); }
+    public DispatchView detail(CurrentAccessContext context, String id) { return safe(context, persistence.detail(tenant(context), workspace(context), readScope(context), id)); }
+    public List<DispatchEventView> events(CurrentAccessContext context, String id) { return persistence.events(tenant(context), workspace(context), readScope(context), id).stream().map(event -> safeEvent(context, event)).toList(); }
 
     @Transactional public DispatchView create(CurrentAccessContext c, String reservationId, long version, String key) { write(c); requireKey(key); return persistence.create(tenant(c), workspace(c), reservationId, version, actor(c), key, now()); }
     @Transactional public DispatchView prepare(CurrentAccessContext c, String id, long version, String key) { write(c); requireKey(key); return persistence.prepare(tenant(c), workspace(c), id, version, actor(c), key, now()); }
     @Transactional public DispatchView assign(CurrentAccessContext c, String id, long version, String key, String membership, String vehicle, String route) { write(c); requireKey(key); return persistence.assign(tenant(c), workspace(c), id, version, actor(c), key, membership, vehicle, route, now()); }
     @Transactional public DispatchView schedule(CurrentAccessContext c, String id, long version, String key, Instant start, Instant end, Instant eta) { write(c); requireKey(key); validateWindow(start, end, eta); return persistence.schedule(tenant(c), workspace(c), id, version, actor(c), key, start, end, eta, now()); }
     @Transactional public DispatchView ready(CurrentAccessContext c, String id, long version, String key) { write(c); requireKey(key); return persistence.ready(tenant(c), workspace(c), id, version, actor(c), key, now()); }
-    @Transactional public DispatchView startRoute(CurrentAccessContext c, String id, long version, String key) { write(c); requireKey(key); return persistence.startRoute(tenant(c), workspace(c), id, version, actor(c), key, now()); }
+    @Transactional public DispatchView startRoute(CurrentAccessContext c, String id, long version, String key) { write(c); requireKey(key); return startDispatchRoute.execute(tenant(c), workspace(c), id, version, actor(c), key, now()); }
     @Transactional public DispatchView temperature(CurrentAccessContext c, String id, long version, String key, BigDecimal value, String unit, Instant recordedAt, String source) { write(c); requireKey(key); return persistence.temperature(tenant(c), workspace(c), id, version, actor(c), key, value, unit, recordedAt == null ? Instant.now() : recordedAt, source, now()); }
     @Transactional public DispatchView incident(CurrentAccessContext c, String id, long version, String key, String type, String severity, boolean buyerVisible, String description, Instant occurredAt, String resolution) { write(c); requireKey(key); return persistence.incident(tenant(c), workspace(c), id, version, actor(c), key, type, severity, buyerVisible, description, occurredAt == null ? Instant.now() : occurredAt, resolution, now()); }
     @Transactional public DispatchView reprogram(CurrentAccessContext c, String id, long version, String key, Instant start, Instant end, Instant eta, String reason) { write(c); requireKey(key); validateWindow(start, end, eta); return persistence.reprogram(tenant(c), workspace(c), id, version, actor(c), key, start, end, eta, reason, now()); }
@@ -63,18 +71,44 @@ public class LogisticsOperationsService {
     public record DispatchView(String id, String dispatchNumber, String reservationId, String salesOrderId, String salesOrderNumber, String clientAccountId, String status,
                                 String destination, Instant deliveryWindowStart, Instant deliveryWindowEnd, Instant eta,
                                 AssignmentView assignment, BigDecimal temperatureMin, BigDecimal temperatureMax, String temperatureUnit,
-                                String temperatureStatus, String podStatus, long version, Instant updatedAt, List<String> alerts) {
+                                String temperatureStatus, String podId, String podStatus, long version, Instant updatedAt, List<String> alerts) {
         public DispatchView { alerts = alerts == null ? List.of() : List.copyOf(alerts); }
-        public DispatchView buyerSafe() { return new DispatchView(id, dispatchNumber, null, salesOrderId, salesOrderNumber, clientAccountId, buyerStatus(status), destination,
-                deliveryWindowStart, deliveryWindowEnd, eta, null, null, null, null, null, podStatus, version, updatedAt, buyerAlerts(alerts)); }
-        private static String buyerStatus(String value) { return switch (value) { case "READY_FOR_OPERATIONS", "PREPARING", "ASSIGNED" -> "PREPARING_DELIVERY"; case "SCHEDULED", "READY_FOR_ROUTE" -> "DELIVERY_SCHEDULED"; case "IN_ROUTE" -> "IN_TRANSIT"; case "INCIDENT" -> "DELIVERY_REVIEW"; case "REPROGRAMMED" -> "DELIVERY_RESCHEDULED"; case "DELIVERED" -> "DELIVERED"; case "CANCELLED" -> "DELIVERY_CANCELLED"; default -> "UNKNOWN"; }; }
-        private static List<String> buyerAlerts(List<String> values) { return values.stream().filter(value -> value.equals("DELIVERY_REVIEW")).toList(); }
+        public DispatchView buyerSafe() { return new DispatchView(id, dispatchNumber, null, null, salesOrderNumber, null, buyerStatus(status), destination,
+                deliveryWindowStart, deliveryWindowEnd, eta, null, null, null, null, null, podId, podStatus, version, updatedAt, buyerAlerts(alerts)); }
+        public DispatchView salesSafe() { return new DispatchView(id, dispatchNumber, null, null, salesOrderNumber, null, buyerStatus(status), destination,
+                deliveryWindowStart, deliveryWindowEnd, eta, null, null, null, null, null, podId, podStatus, version, updatedAt, buyerAlerts(alerts)); }
+        public DispatchView warehouseSafe() { return new DispatchView(id, dispatchNumber, reservationId, null, salesOrderNumber, null, status, destination,
+                deliveryWindowStart, deliveryWindowEnd, eta, null, null, null, null, null, podId, podStatus, version, updatedAt, List.of()); }
+        private static String buyerStatus(String value) { return switch (value) { case "READY_FOR_OPERATIONS", "PREPARING", "ASSIGNED" -> "PREPARING_DELIVERY"; case "SCHEDULED", "READY_FOR_ROUTE" -> "DELIVERY_SCHEDULED"; case "IN_ROUTE" -> "IN_TRANSIT"; case "INCIDENT" -> "DELIVERY_REVIEW"; case "REPROGRAMMED" -> "DELIVERY_RESCHEDULED"; case "DELIVERED" -> "DELIVERED"; case "CANCELLED" -> "DELIVERY_CANCELLED"; case "PREPARING_DELIVERY", "DELIVERY_SCHEDULED", "IN_TRANSIT", "DELIVERY_REVIEW", "DELIVERY_RESCHEDULED", "DELIVERY_CANCELLED", "UNKNOWN" -> value; default -> "UNKNOWN"; }; }
+        private static List<String> buyerAlerts(List<String> values) { return values.stream().filter(value -> value.equals("DELIVERY_REVIEW") || value.equals("TEMPERATURE_ALERT")).map(value -> value.equals("TEMPERATURE_ALERT") ? "DELIVERY_REVIEW" : value).distinct().toList(); }
     }
     public record AssignmentView(String responsibleMembershipId, String responsibleDisplayName, String vehicleReference, String routeName) { }
     public record DispatchEventView(String id, String type, String fromStatus, String toStatus, String occurredAt, boolean buyerVisible, String summary) { }
     public record Page<T>(List<T> items, int page, int size, long total) { public Page { items = List.copyOf(items); } }
     public record DashboardView(long readyForOperations, long preparing, long assigned, long scheduled, long readyForRoute, long inRoute, long incidents, long deliveredToday, long temperatureAlerts, long podPending, long reservationsReady) { }
     public record AnalyticsView(Instant from, Instant to, long dispatches, long delivered, long incidents, long temperatureExcursions, long podCompleted, double onTimeRate, double averagePreparationMinutes, double averageRouteMinutes) { }
-    public record ProofOfDeliveryView(String dispatchOrderId, String dispatchNumber, String status, String receiverName, Instant completedAt, String notes, boolean photoEvidenceDeclared, boolean signatureEvidenceDeclared, Instant updatedAt) { }
+    public record ProofOfDeliveryView(String podId, String dispatchOrderId, String dispatchNumber, String status, String receiverName, Instant completedAt, String notes, boolean photoEvidenceDeclared, boolean signatureEvidenceDeclared, Instant updatedAt) { }
+    private static DispatchView safe(CurrentAccessContext context, DispatchView value) {
+        return switch (context.role()) {
+            case BUYER -> value.buyerSafe();
+            case SALES -> value.salesSafe();
+            case WAREHOUSE -> value.warehouseSafe();
+            case LOGISTICS, COMPANY_OWNER -> value;
+        };
+    }
+    private static DispatchEventView safeEvent(CurrentAccessContext context, DispatchEventView value) {
+        if (context.role() == MembershipRole.BUYER || context.role() == MembershipRole.SALES) {
+            String publicType = switch (value.type()) {
+                case "logistics.dispatch.scheduled", "logistics.dispatch.reprogrammed", "DELIVERY_SCHEDULED" -> "DELIVERY_SCHEDULED";
+                case "logistics.dispatch.route-started", "IN_TRANSIT" -> "IN_TRANSIT";
+                case "logistics.dispatch.delivered", "logistics.pod.completed", "DELIVERED" -> "DELIVERED";
+                case "logistics.dispatch.cancelled", "DELIVERY_CANCELLED" -> "DELIVERY_CANCELLED";
+                case "logistics.dispatch.incident-recorded", "logistics.dispatch.buyer-temperature-review", "DELIVERY_REVIEW" -> "DELIVERY_REVIEW";
+                default -> "DELIVERY_UPDATED";
+            };
+            return new DispatchEventView(value.id(), publicType, null, null, value.occurredAt(), true, publicType);
+        }
+        return value;
+    }
     public static final class LogisticsException extends RuntimeException { private final String code; private final boolean notFound; public LogisticsException(String code, boolean notFound) { super(code); this.code = code; this.notFound = notFound; } public String code() { return code; } public boolean notFound() { return notFound; } }
 }

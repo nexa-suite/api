@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -32,6 +33,8 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static com.nexa.api.warehouse.infrastructure.persistence.WarehousePersistenceSupport.*;
+
 /**
  * PostgreSQL adapter for Warehouse commands and bounded read projections.
  * Application code reaches this adapter only through WarehouseOperationsPort.
@@ -40,13 +43,22 @@ import java.util.stream.Collectors;
 @Profile("!test")
 public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
     private static final Logger LOGGER = LoggerFactory.getLogger(JdbcWarehouseOperationsAdapter.class);
-    private static final int MAX_PAGE_SIZE = 100;
-    private static final BigDecimal MIN_TEMPERATURE = BigDecimal.valueOf(-1000);
-    private static final BigDecimal MAX_TEMPERATURE = BigDecimal.valueOf(1000);
-
     private final JdbcTemplate jdbc;
     private final ChangeEventPersistencePort changeFeed;
     private final CatalogItemSnapshotLookupPort catalog;
+    private final TransactionTemplate transactionTemplate;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public JdbcWarehouseOperationsAdapter(
+            JdbcTemplate jdbc,
+            ChangeEventPersistencePort changeFeed,
+            CatalogItemSnapshotLookupPort catalog,
+            org.springframework.transaction.PlatformTransactionManager transactionManager) {
+        this.jdbc = jdbc;
+        this.changeFeed = changeFeed;
+        this.catalog = catalog;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
 
     public JdbcWarehouseOperationsAdapter(
             JdbcTemplate jdbc,
@@ -55,6 +67,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         this.jdbc = jdbc;
         this.changeFeed = changeFeed;
         this.catalog = catalog;
+        this.transactionTemplate = null;
     }
 
     @Override
@@ -70,7 +83,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         List<WarehouseOperationsService.WarehouseSummary> items = jdbc.query(
                 "select id,code,name,address,status,version from warehouse.warehouse " +
                         "where tenant_id=? and workspace_id=? order by " + order + ",id asc limit ? offset ?",
-                (rs, row) -> warehouse(rs), tenant(context), workspace(context), size, page * size);
+                (rs, row) -> WarehousePersistenceSupport.warehouse(rs), tenant(context), workspace(context), size, page * size);
         long total = count("select count(*) from warehouse.warehouse where tenant_id=? and workspace_id=?",
                 tenant(context), workspace(context));
         return new WarehouseOperationsService.Page<>(items, page, size, total);
@@ -83,7 +96,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         return jdbc.query(
                         "select id,code,name,address,status,version from warehouse.warehouse " +
                                 "where tenant_id=? and workspace_id=? and id=?",
-                        (rs, row) -> warehouse(rs), tenant(context), workspace(context), uuid(id))
+                        (rs, row) -> WarehousePersistenceSupport.warehouse(rs), tenant(context), workspace(context), uuid(id))
                 .stream().findFirst()
                 .orElseThrow(() -> error("WAREHOUSE_NOT_FOUND", true));
     }
@@ -140,7 +153,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                 "select id,warehouse_id,code,name,zone_type,temperature_min,temperature_max,status,version " +
                         "from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? " +
                         "order by code asc,id asc limit ? offset ?",
-                (rs, row) -> zone(rs), tenant(context), workspace(context), warehouseIdValue, size, page * size);
+                (rs, row) -> WarehousePersistenceSupport.zone(rs), tenant(context), workspace(context), warehouseIdValue, size, page * size);
         long total = count("select count(*) from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=?",
                 tenant(context), workspace(context), warehouseIdValue);
         return new WarehouseOperationsService.Page<>(items, page, size, total);
@@ -179,7 +192,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         WarehouseOperationsService.ZoneSummary current = jdbc.query(
                         "select id,warehouse_id,code,name,zone_type,temperature_min,temperature_max,status,version " +
                                 "from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? and id=?",
-                        (rs, row) -> zone(rs), tenant(context), workspace(context), warehouse, zone)
+                        (rs, row) -> WarehousePersistenceSupport.zone(rs), tenant(context), workspace(context), warehouse, zone)
                 .stream().findFirst().orElseThrow(() -> error("STORAGE_ZONE_NOT_FOUND", true));
         validateTemperatureRange(min == null ? current.temperatureMin() : min,
                 max == null ? current.temperatureMax() : max);
@@ -235,7 +248,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         pageArgs.add(page * size);
         query.append(" order by ").append(order).append(",id asc limit ? offset ?");
         List<WarehouseOperationsService.LotSummary> items = jdbc.query(query.toString(),
-                (rs, row) -> lot(rs), pageArgs.toArray());
+                (rs, row) -> WarehousePersistenceSupport.lot(rs), pageArgs.toArray());
         long total = count(countSql, args.toArray());
         return new WarehouseOperationsService.Page<>(items, page, size, total);
     }
@@ -261,8 +274,8 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         List<WarehouseOperationsService.MovementSummary> items = jdbc.query(
                 "select id,lot_id,catalog_item_id,movement_type,quantity,unit,quantity_before,quantity_after," +
                         "reserved_before,reserved_after,reason,occurred_at from warehouse.stock_movement" +
-                        predicate + " order by " + order + " desc,id desc limit ? offset ?",
-                (rs, row) -> movement(rs), pageArgs.toArray());
+                        predicate + " order by " + order + ",id" + (order.endsWith(" desc") ? " desc" : " asc") + " limit ? offset ?",
+                (rs, row) -> WarehousePersistenceSupport.movement(rs), pageArgs.toArray());
         long total = count("select count(*) from warehouse.stock_movement" + predicate, args.toArray());
         return new WarehouseOperationsService.Page<>(items, page, size, total);
     }
@@ -281,13 +294,14 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
             String key, String correlation) {
         requireWrite(context);
         requireIdempotency(key);
+        lockIdempotency(context, "inbound", key);
+        if (receipt == null) throw error("INVALID_REQUEST", false);
         String hash = requestHash("inbound", receipt);
         IdempotencyRecord prior = idempotent(context, "inbound", key);
         if (prior != null) {
             requireSamePayload(prior, hash);
             return loadLot(context, uuid(prior.resourceId()), false);
         }
-        Objects.requireNonNull(receipt, "receipt");
         UUID warehouse = uuidRequired(receipt.warehouseId(), "warehouseId");
         UUID zone = uuidRequired(receipt.zoneId(), "zoneId");
         String catalogItemId = bounded(receipt.catalogItemId(), "catalogItemId", 64);
@@ -342,9 +356,10 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
             String reason, long expected, String key, String correlation) {
         requireWrite(context);
         requireIdempotency(key);
+        String operation = movementType.toLowerCase(Locale.ROOT);
+        lockIdempotency(context, operation, key);
         if (quantity == null || quantity.signum() <= 0) throw error("INVALID_REQUEST", false);
         String normalizedReason = bounded(reason, "reason", 2000);
-        String operation = movementType.toLowerCase(Locale.ROOT);
         String hash = requestHash(operation, lotId, quantity, normalizedReason, expected);
         IdempotencyRecord prior = idempotent(context, operation, key);
         if (prior != null) {
@@ -410,6 +425,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         requireIdempotency(key);
         String normalizedReason = bounded(reason, "reason", 2000);
         String hash = requestHash(eventType, lotId, expected, normalizedReason);
+        lockIdempotency(context, eventType, key);
         IdempotencyRecord prior = idempotent(context, eventType, key);
         if (prior != null) {
             requireSamePayload(prior, hash);
@@ -460,7 +476,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                         "join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id " +
                         "where l.tenant_id=? and l.workspace_id=? and l.catalog_item_id in (" + placeholders + ") " +
                         "and l.status='AVAILABLE' and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity " +
-                        "and w.status='ACTIVE' and z.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' " +
+                        "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' " +
                         "group by l.catalog_item_id",
                 (rs, row) -> Map.entry(rs.getString(1), rs.getInt(2)), args.toArray())
                 .stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
@@ -489,6 +505,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
             CurrentAccessContext context, String orderId, long expected, String key, String correlation) {
         requireWrite(context);
         requireIdempotency(key);
+        lockIdempotency(context, "reservation", key);
         String hash = requestHash("reservation", orderId, expected);
         IdempotencyRecord prior = idempotent(context, "reservation", key);
         if (prior != null) {
@@ -496,6 +513,11 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
             return loadReservation(context, uuid(prior.resourceId()), false);
         }
         OrderData order = loadOrder(context, uuid(orderId), true);
+        IdempotencyRecord afterLock = idempotent(context, "reservation", key);
+        if (afterLock != null) {
+            requireSamePayload(afterLock, hash);
+            return loadReservation(context, uuid(afterLock.resourceId()), false);
+        }
         if (!order.status().equals("CONFIRMED")) throw error("FULFILLMENT_CANDIDATE_NOT_ELIGIBLE", false);
         if (order.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
         if (count("select count(*) from warehouse.inventory_reservation where tenant_id=? and workspace_id=? " +
@@ -570,6 +592,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         requireIdempotency(key);
         String normalizedReason = bounded(reason, "reason", 2000);
         String operation = expiry ? "reservation-expiry" : "reservation-release";
+        lockIdempotency(context, operation, key);
         String hash = requestHash(operation, reservationId, expected, normalizedReason);
         IdempotencyRecord prior = idempotent(context, operation, key);
         if (prior != null) {
@@ -664,7 +687,6 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
 
     @Override
     @Scheduled(fixedDelay = 60000L)
-    @Transactional
     public void expireReservations() {
         List<ScopeId> expired = jdbc.query(
                 "select tenant_id,workspace_id,id from warehouse.inventory_reservation " +
@@ -672,7 +694,12 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                         "order by expires_at,id limit 100 for update skip locked",
                 (rs, row) -> new ScopeId(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class)));
         for (ScopeId candidate : expired) {
-            expireOne(candidate);
+            try {
+                if (transactionTemplate == null) expireOne(candidate);
+                else transactionTemplate.executeWithoutResult(status -> expireOne(candidate));
+            } catch (RuntimeException exception) {
+                LOGGER.error("Warehouse reservation expiration failed correlationId=reservation-expiry-{}", candidate.id(), exception);
+            }
         }
     }
 
@@ -690,7 +717,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
             insertMovement(candidate.tenantId(), candidate.workspaceId(), uuid(lot.warehouseId()), uuid(lot.zoneId()),
                     uuid(allocation.lotId()), lot.catalogItemId(), "RESERVATION_EXPIRATION", allocation.quantity(),
                     allocation.unit(), lot.onHand(), lot.onHand(), lot.reserved(),
-                    lot.reserved().subtract(allocation.quantity()), "Reservation expired", "scheduler",
+                    lot.reserved().subtract(allocation.quantity()), "Reservation expired", null,
                     "reservation-expiry-" + candidate.id(), occurred);
         }
         checkUpdated(jdbc.update(
@@ -727,7 +754,9 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
     }
 
     private List<LineData> lines(UUID orderId) {
-        return jdbc.query("select catalog_item_id,quantity,unit from sales.sales_order_line where sales_order_id=? order by id",
+        // Every reservation transaction locks candidate lots in this deterministic
+        // catalog-item order, avoiding cross-line lock inversion.
+        return jdbc.query("select catalog_item_id,quantity,unit from sales.sales_order_line where sales_order_id=? order by catalog_item_id,id",
                 (rs, row) -> new LineData(rs.getString("catalog_item_id"), rs.getBigDecimal("quantity"), rs.getString("unit")),
                 orderId);
     }
@@ -754,7 +783,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                         "select id,warehouse_id,zone_id,catalog_item_id,batch_number,expiration_date,received_at," +
                                 "stock_quantity,reserved_quantity,unit,status,version from warehouse.inventory_lot " +
                                 "where tenant_id=? and workspace_id=? and id=?" + (lock ? " for update" : ""),
-                        (rs, row) -> lot(rs), tenantId, workspaceId, id)
+                        (rs, row) -> WarehousePersistenceSupport.lot(rs), tenantId, workspaceId, id)
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_LOT_NOT_FOUND", true));
     }
 
@@ -797,7 +826,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         return jdbc.query(
                         "select id,warehouse_id,code,name,zone_type,temperature_min,temperature_max,status,version " +
                                 "from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? and id=?",
-                        (rs, row) -> zone(rs), tenant(context), workspace(context), warehouseId, id)
+                        (rs, row) -> WarehousePersistenceSupport.zone(rs), tenant(context), workspace(context), warehouseId, id)
                 .stream().findFirst().orElseThrow(() -> error("STORAGE_ZONE_NOT_FOUND", true));
     }
 
@@ -822,7 +851,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                         "actor_membership_id,correlation_id,occurred_at) values (?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?)",
                 UUID.randomUUID(), tenantId, workspaceId, warehouseId, zoneId, lotId, catalogItemId, movementType,
                 quantity, unit, quantityBefore, quantityAfter, reservedBefore, reservedAfter, reason,
-                uuid(actorMembershipId), correlation == null ? "unknown" : correlation, occurred), "movement insert");
+                actorMembershipId == null ? null : uuid(actorMembershipId), correlation == null ? "unknown" : correlation, occurred), "movement insert");
     }
 
     private void appendEvent(CurrentAccessContext context, UUID aggregateId, String eventType, String aggregateType) {
@@ -843,6 +872,10 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                              String publicStatus, Timestamp occurred) {
         changeFeed.append(tenantId.toString(), workspaceId.toString(), null, aggregateType,
                 aggregateId.toString(), eventType, publicStatus, occurred.getTime(), false);
+        checkUpdated(jdbc.update(
+                "insert into warehouse.inventory_event(id,tenant_id,workspace_id,aggregate_id,event_type,occurred_at,actor_membership_id,correlation_id) values (?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), tenantId, workspaceId, aggregateId, eventType, occurred, null,
+                "reservation-expiry-" + aggregateId), "inventory event insert");
     }
 
     private IdempotencyRecord idempotent(CurrentAccessContext context, String operation, String key) {
@@ -854,11 +887,24 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                 .stream().findFirst().map(record -> record).orElse(null);
     }
 
+    private void lockIdempotency(CurrentAccessContext context, String operation, String key) {
+        jdbc.query("select pg_advisory_xact_lock(hashtext(?))",
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
+                tenant(context) + "|" + workspace(context) + "|" + operation + "|" + key);
+    }
+
     private void saveIdempotency(CurrentAccessContext context, String operation, String key, String hash, String resourceId) {
-        checkUpdated(jdbc.update(
+        int inserted = jdbc.update(
                 "insert into warehouse.command_idempotency(tenant_id,workspace_id,operation,idempotency_key,request_hash,response_json,created_at) " +
                         "values (?,?,?,?,?,?,?) on conflict (tenant_id,workspace_id,operation,idempotency_key) do nothing",
-                tenant(context), workspace(context), operation, key, hash, resourceId, now()), "idempotency insert");
+                tenant(context), workspace(context), operation, key, hash, resourceId, now());
+        if (inserted == 0) {
+            IdempotencyRecord prior = idempotent(context, operation, key);
+            if (prior == null) throw error("IDEMPOTENCY_PAYLOAD_CONFLICT", false);
+            requireSamePayload(prior, hash);
+        } else if (inserted != 1) {
+            throw error("INVALID_REQUEST", false);
+        }
     }
 
     private void requireSamePayload(IdempotencyRecord record, String hash) {
@@ -890,80 +936,9 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                 tenant(context), workspace(context), warehouseId, zoneId)) throw error("STORAGE_ZONE_NOT_FOUND", true);
     }
 
-    private static void validateTemperatureRange(BigDecimal min, BigDecimal max) {
-        if (min != null && (min.compareTo(MIN_TEMPERATURE) <= 0 || min.compareTo(MAX_TEMPERATURE) >= 0) ||
-                max != null && (max.compareTo(MIN_TEMPERATURE) <= 0 || max.compareTo(MAX_TEMPERATURE) >= 0) ||
-                min != null && max != null && min.compareTo(max) > 0) {
-            throw error("INVALID_REQUEST", false);
-        }
-    }
-
-    private static void validateTemperature(BigDecimal value) {
-        if (value == null) return;
-        if (!Double.isFinite(value.doubleValue()) ||
-                value.compareTo(MIN_TEMPERATURE) <= 0 || value.compareTo(MAX_TEMPERATURE) >= 0) {
-            throw error("INVALID_REQUEST", false);
-        }
-    }
-
-    private static String normalizedUnit(String value) {
-        String unit = bounded(value, "unit", 32).toUpperCase(Locale.ROOT);
-        if (!unit.matches("[A-Z0-9._/-]+")) throw error("INVALID_REQUEST", false);
-        return unit;
-    }
-
-    private static String bounded(String value, String field, int max) {
-        if (value == null || value.isBlank() || value.trim().length() > max) throw error("INVALID_REQUEST", false);
-        return value.trim();
-    }
-
-    private static String boundedNullable(String value, String field, int max) {
-        if (value == null) return null;
-        if (value.trim().length() > max) throw error("INVALID_REQUEST", false);
-        return value.trim();
-    }
-
-    private static String boundedUpper(String value, String field, int max) {
-        return bounded(value, field, max).toUpperCase(Locale.ROOT);
-    }
-
-    private static String enumValue(String value, String field, String... allowed) {
-        String normalized = bounded(value, field, 32).toUpperCase(Locale.ROOT);
-        for (String candidate : allowed) if (candidate.equals(normalized)) return normalized;
-        throw error("INVALID_REQUEST", false);
-    }
-
     private void requireRead(CurrentAccessContext context) { context.requirePermission(Permission.WAREHOUSE_READ); }
     private void requireWrite(CurrentAccessContext context) { context.requirePermission(Permission.WAREHOUSE_WRITE); }
     private void requireFulfillmentRead(CurrentAccessContext context) { context.requirePermission(Permission.FULFILLMENT_READ); }
-    private static void requireIdempotency(String key) {
-        if (key == null || key.isBlank() || key.length() > 160) throw error("IDEMPOTENCY_KEY_REQUIRED", false);
-    }
-
-    private static void pageCheck(int page, int size) {
-        if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) throw error("INVALID_REQUEST", false);
-    }
-
-    private static String sort(String value, Map<String, String> allowed, String fallback) {
-        if (value == null || value.isBlank()) return allowed.getOrDefault(fallback, fallback) + " asc";
-        String[] parts = value.split(",", -1);
-        if (parts.length > 2 || !allowed.containsKey(parts[0]) ||
-                (parts.length == 2 && !parts[1].equals("asc") && !parts[1].equals("desc"))) {
-            throw error("INVALID_INVENTORY_SORT", false);
-        }
-        return allowed.get(parts[0]) + (parts.length == 2 && parts[1].equals("desc") ? " desc" : " asc");
-    }
-
-    private static UUID tenant(CurrentAccessContext context) { return UUID.fromString(context.tenantId().toString()); }
-    private static UUID workspace(CurrentAccessContext context) { return UUID.fromString(context.workspaceId().toString()); }
-    private static UUID uuid(String value) {
-        try { return UUID.fromString(value); } catch (RuntimeException exception) { throw error("INVALID_REQUEST", false); }
-    }
-    private static UUID uuidRequired(String value, String field) {
-        if (value == null || value.isBlank()) throw error("INVALID_REQUEST", false);
-        return uuid(value);
-    }
-    private static Timestamp now() { return Timestamp.from(Instant.now()); }
     private long count(String sql, Object... args) {
         Long value = jdbc.queryForObject(sql, Long.class, args);
         return value == null ? 0 : value;
@@ -971,56 +946,6 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
     private boolean exists(String sql, Object... args) {
         return jdbc.query(sql, (rs, row) -> true, args).stream().findFirst().orElse(false);
     }
-    private static void checkUpdated(int count, String operation) { checkUpdated(count, operation, "INVALID_REQUEST"); }
-    private static void checkUpdated(int count, String operation, String code) {
-        if (count != 1) throw error(code, false);
-    }
-
-    private static WarehouseOperationsService.WarehouseException error(String code, boolean notFound) {
-        return new WarehouseOperationsService.WarehouseException(code, notFound);
-    }
-
-    private static WarehouseOperationsService.WarehouseSummary warehouse(ResultSet rs) throws java.sql.SQLException {
-        return new WarehouseOperationsService.WarehouseSummary(rs.getObject("id").toString(), rs.getString("code"),
-                rs.getString("name"), rs.getString("address"), rs.getString("status"), rs.getLong("version"));
-    }
-
-    private static WarehouseOperationsService.ZoneSummary zone(ResultSet rs) throws java.sql.SQLException {
-        return new WarehouseOperationsService.ZoneSummary(rs.getObject("id").toString(), rs.getObject("warehouse_id").toString(),
-                rs.getString("code"), rs.getString("name"), rs.getString("zone_type"),
-                rs.getBigDecimal("temperature_min"), rs.getBigDecimal("temperature_max"),
-                rs.getString("status"), rs.getLong("version"));
-    }
-
-    private static WarehouseOperationsService.LotSummary lot(ResultSet rs) throws java.sql.SQLException {
-        BigDecimal onHand = rs.getBigDecimal("stock_quantity");
-        BigDecimal reserved = rs.getBigDecimal("reserved_quantity");
-        return new WarehouseOperationsService.LotSummary(rs.getObject("id").toString(),
-                rs.getObject("warehouse_id").toString(), rs.getObject("zone_id").toString(),
-                rs.getString("catalog_item_id"), rs.getString("batch_number"),
-                rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
-                onHand, reserved, onHand.subtract(reserved), rs.getString("unit"),
-                rs.getString("status"), rs.getLong("version"));
-    }
-
-    private static WarehouseOperationsService.MovementSummary movement(ResultSet rs) throws java.sql.SQLException {
-        return new WarehouseOperationsService.MovementSummary(rs.getObject("id").toString(),
-                rs.getObject("lot_id").toString(), rs.getString("catalog_item_id"),
-                rs.getString("movement_type"), rs.getBigDecimal("quantity"), rs.getString("unit"),
-                rs.getBigDecimal("quantity_before"), rs.getBigDecimal("quantity_after"),
-                rs.getBigDecimal("reserved_before"), rs.getBigDecimal("reserved_after"),
-                rs.getString("reason"), instant(rs, "occurred_at"));
-    }
-
-    private static Instant instant(ResultSet rs, String column) throws java.sql.SQLException {
-        Timestamp value = rs.getTimestamp(column);
-        return value == null ? null : value.toInstant();
-    }
-
-    private static Instant instantNullable(ResultSet rs, String column) throws java.sql.SQLException {
-        return instant(rs, column);
-    }
-
     private record IdempotencyRecord(String resourceId, String requestHash) { }
     private record LineData(String catalogItemId, BigDecimal quantity, String unit) { }
     private record OrderData(UUID id, String number, String status, long version, UUID clientAccountId) { }

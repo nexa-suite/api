@@ -60,7 +60,7 @@ public final class DispatchOrder {
     }
     public void reprogram(DeliveryWindow value, Instant newEta) { require(DispatchStatus.INCIDENT); deliveryWindow = Objects.requireNonNull(value); eta = newEta; status = DispatchStatus.REPROGRAMMED; }
     public void cancel() {
-        if (status == DispatchStatus.IN_ROUTE || status == DispatchStatus.DELIVERED || status == DispatchStatus.CANCELLED || status == DispatchStatus.INCIDENT) throw invalid();
+        if (status == DispatchStatus.IN_ROUTE || status == DispatchStatus.DELIVERED || status == DispatchStatus.CANCELLED) throw invalid();
         status = DispatchStatus.CANCELLED;
     }
     public void deliver() { require(DispatchStatus.IN_ROUTE); status = DispatchStatus.DELIVERED; }
