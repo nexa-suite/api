@@ -13,6 +13,10 @@ public record CurrentSession(SessionId sessionId, UserAccountId userAccountId, E
 		ClientSurface surface, String role, Set<String> permissions, AuthenticationSessionStatus status,
 		Instant createdAt, Instant expiresAt, String displayName, String preferredLanguage,
 		String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId) {
+	public Set<String> roles() {
+		return role == null || role.isBlank() ? Set.of() : java.util.Arrays.stream(role.split(","))
+				.map(String::trim).filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+	}
 	public static CurrentSession from(SessionRecord record) {
 		var policy = record.subject().policy();
 		return new CurrentSession(record.session().id(), record.subject().userAccountId(), record.subject().email(),

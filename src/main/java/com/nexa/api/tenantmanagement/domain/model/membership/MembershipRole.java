@@ -8,6 +8,7 @@ import java.util.Locale;
  * The role is owned by a workspace membership. IAM may authenticate a user, but it does not define this role.
  */
 public enum MembershipRole {
+	TENANT_ADMIN,
 	COMPANY_OWNER,
 	SALES,
 	WAREHOUSE,

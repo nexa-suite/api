@@ -40,6 +40,10 @@ services:
       NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300}
       NEXA_SECURITY_RSA_PUBLIC_KEY: /run/secrets/nexa_access_token_public
       NEXA_SECURITY_RSA_PRIVATE_KEY: /run/secrets/nexa_access_token_private
+      NEXA_SMTP_HOST: ${NEXA_SMTP_HOST:-modern-mailpit}
+      NEXA_SMTP_PORT: ${NEXA_SMTP_PORT:-1025}
+      NEXA_SMTP_FROM: ${NEXA_SMTP_FROM:-no-reply@nexa.local}
+      NEXA_SMTP_REQUIRED: ${NEXA_SMTP_REQUIRED:-true}
       NEXA_DEV_BOOTSTRAP_ENABLED: ${NEXA_DEV_BOOTSTRAP_ENABLED:-false}
       NEXA_DEV_TENANT_NAME: ${NEXA_DEV_TENANT_NAME:-}
       NEXA_DEV_TENANT_SLUG: ${NEXA_DEV_TENANT_SLUG:-}
@@ -61,6 +65,8 @@ services:
     depends_on:
       modern-postgres:
         condition: service_healthy
+      modern-mailpit:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
     networks:
@@ -72,6 +78,20 @@ services:
       interval: 10s
       timeout: 5s
       start_period: 20s
+      retries: 12
+
+  modern-mailpit:
+    image: axllent/mailpit:v1.26.0
+    container_name: nexa-modern-mailpit
+    ports:
+      - "127.0.0.1:8025:8025"
+    networks:
+      - modern-edge
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8025/"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
       retries: 12
 
   modern-platform:
@@ -113,6 +133,18 @@ services:
       timeout: 5s
       start_period: 5s
       retries: 12
+
+  modern-jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.76
+    container_name: nexa-modern-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+    networks:
+      - modern-edge
 
 networks:
   modern-edge:

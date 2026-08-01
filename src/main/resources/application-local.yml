@@ -23,5 +23,16 @@ nexa:
     allowed-origins: ${NEXA_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4300}
     refresh-cookie-secure: ${NEXA_REFRESH_COOKIE_SECURE:false}
     bcrypt-strength: ${NEXA_BCRYPT_STRENGTH:12}
+    smtp:
+      host: ${NEXA_SMTP_HOST:}
+      port: ${NEXA_SMTP_PORT:1025}
+      from: ${NEXA_SMTP_FROM:no-reply@nexa.local}
+      timeout: ${NEXA_SMTP_TIMEOUT:PT5S}
+      required: ${NEXA_SMTP_REQUIRED:false}
+    reset:
+      ttl: ${NEXA_PASSWORD_RESET_TTL:PT30M}
+      platform-url: ${NEXA_PLATFORM_RESET_URL:http://localhost:4200/reset-password}
+      portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4300/reset-password}
+    system-operator-token: ${NEXA_SYSTEM_OPERATOR_TOKEN:}
   dev-bootstrap:
     enabled: ${NEXA_DEV_BOOTSTRAP_ENABLED:false}

@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.8.1] - 2026-08-01
+
+Operations release stabilization for the consolidated commercial, Warehouse and Logistics baseline.
+
+### Fixed
+
+- Sales Order creator identity, aggregate-owned lifecycle and concurrent conversion replay.
+- Warehouse FEFO/expiration forward migration and route-start application ownership.
+- Dispatch number initialization and OpenAPI release metadata.
+
+### Changed
+
+- Warehouse and Logistics application boundaries and dedicated operational evidence were strengthened.
+
+### Added
+
+- Internal TASK-011 document-subject vocabulary and lookup contract only.
+
+Business Documents, storage, files, invoices and payments are not implemented.
+
 ## [0.8.0] - 2026-07-31
 
 This release consolidates the previously unpublished TASK-NEXA-008, TASK-NEXA-008.6, TASK-NEXA-009, TASK-NEXA-010 and TASK-NEXA-010.5 work.

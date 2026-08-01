@@ -15,6 +15,8 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -46,6 +48,15 @@ public class OrganizationAdministrationController {
 	@PatchMapping("/workspace-memberships/{membershipId}/role")
 	public ResponseEntity<WorkspaceMembershipSummary> role(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestBody RolePatch patch,HttpServletRequest request) { var result=administration.changeRole(context,membershipId,MembershipRole.from(patch.role()),version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 
+	@PatchMapping("/workspace-memberships/{membershipId}/roles")
+	public ResponseEntity<WorkspaceMembershipSummary> roles(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
+			@PathVariable String membershipId, @RequestHeader(name="If-Match", required=false) String ifMatch,
+			@RequestBody RolesPatch patch, HttpServletRequest request) {
+		var roles = patch.roles().stream().map(MembershipRole::from).collect(Collectors.toUnmodifiableSet());
+		var result = administration.changeRoles(context, membershipId, roles, version(ifMatch), correlation(request));
+		return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value());
+	}
+
 	@PostMapping("/workspace-memberships/{membershipId}/suspensions")
 	public ResponseEntity<WorkspaceMembershipSummary> suspend(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.suspendMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 
@@ -57,6 +68,7 @@ public class OrganizationAdministrationController {
 	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
 	public record WorkspacePatch(String name,String status) { }
 	public record RolePatch(@NotBlank String role) { }
+	public record RolesPatch(Set<String> roles) { public RolesPatch { if (roles == null || roles.isEmpty()) throw new IllegalArgumentException("At least one role is required"); } }
 	public record OrganizationResponse(String id,String name,String slug,String status,String currentWorkspaceId,String currentWorkspaceName,long version) { static OrganizationResponse from(OrganizationSummary value){ return new OrganizationResponse(value.id(),value.name(),value.slug(),value.status(),value.currentWorkspaceId(),value.currentWorkspaceName(),value.version()); } }
 	public static final class PreconditionRequiredException extends RuntimeException { }
 }

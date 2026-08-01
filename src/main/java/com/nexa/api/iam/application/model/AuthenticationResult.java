@@ -13,6 +13,10 @@ public record AuthenticationResult(SessionId sessionId, UserAccountId userAccoun
 		Instant issuedAt, Instant accessTokenExpiresAt, Instant refreshTokenExpiresAt,
 		String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
 		String displayName, String preferredLanguage) {
+	public Set<String> roles() {
+		return role == null || role.isBlank() ? Set.of() : java.util.Arrays.stream(role.split(","))
+				.map(String::trim).filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+	}
 	public AuthenticationResult(SessionId sessionId, UserAccountId userAccountId, EmailAddress email,
 			ClientSurface surface, String role, Set<String> permissions, String accessToken, String refreshToken,
 			Instant issuedAt, Instant accessTokenExpiresAt, Instant refreshTokenExpiresAt) {

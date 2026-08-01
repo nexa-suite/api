@@ -17,6 +17,7 @@ import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 
 import java.util.Objects;
 import java.util.Set;
+import java.util.LinkedHashSet;
 
 /**
  * Application-facing access snapshot created only from a verified membership.
@@ -33,8 +34,8 @@ public final class CurrentAccessContext implements AccessContext {
 		if (!verifiedMembership.isAccessible()) {
 			throw new AccessPolicyViolation("Tenant workspace membership is not active");
 		}
-		RoleSurfacePolicy.requireAllowed(role(), surface);
-		this.permissions = PermissionPolicy.permissionsFor(role());
+		if (!RoleSurfacePolicy.allows(roles(), surface)) throw new AccessPolicyViolation("Membership roles are not allowed on requested surface");
+		this.permissions = PermissionPolicy.permissionsFor(roles());
 	}
 
 	public static CurrentAccessContext from(VerifiedMembership verifiedMembership, Surface surface) {
@@ -69,6 +70,10 @@ public final class CurrentAccessContext implements AccessContext {
 	public MembershipRole role() {
 		return verifiedMembership.membership().role();
 	}
+
+	public Set<MembershipRole> roles() { return verifiedMembership.membership().roles(); }
+
+	public boolean hasRole(MembershipRole role) { return roles().contains(Objects.requireNonNull(role)); }
 
 	@Override
 	public Surface surface() {

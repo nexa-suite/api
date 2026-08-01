@@ -2,6 +2,7 @@ package com.nexa.api.warehouse.application;
 
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.warehouse.application.port.WarehouseOperationsPort;
+import com.nexa.api.warehouse.application.port.WarehouseDashboardQueryPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
@@ -15,9 +16,11 @@ import java.util.List;
 @Profile("!test")
 public class WarehouseOperationsService {
     private final WarehouseOperationsPort operations;
+    private final WarehouseDashboardQueryPort dashboard;
 
-    public WarehouseOperationsService(WarehouseOperationsPort operations) {
+    public WarehouseOperationsService(WarehouseOperationsPort operations, WarehouseDashboardQueryPort dashboard) {
         this.operations = operations;
+        this.dashboard = dashboard;
     }
 
     public Page<WarehouseSummary> warehouses(CurrentAccessContext context, int page, int size, String sort) { return operations.warehouses(context, page, size, sort); }
@@ -42,7 +45,7 @@ public class WarehouseOperationsService {
     public ReservationDetail release(CurrentAccessContext context, String reservationId, long expected, String key, String reason, String correlation, boolean expiry) { return operations.release(context, reservationId, expected, key, reason, correlation, expiry); }
     public Page<ReservationSummary> reservations(CurrentAccessContext context, String status, int page, int size) { return operations.reservations(context, status, page, size); }
     public ReservationDetail reservation(CurrentAccessContext context, String id) { return operations.reservation(context, id); }
-    public List<ReadinessCandidate> readiness(CurrentAccessContext context) { return operations.readiness(context); }
+    public List<ReadinessCandidate> readiness(CurrentAccessContext context) { return dashboard.readiness(context); }
     public void expireReservations() { operations.expireReservations(); }
 
     public record Page<T>(List<T> items, int page, int size, long total) {

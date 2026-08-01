@@ -19,6 +19,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
+    @Test void dispatchNumbersRemainSequentialWithinTheYear() throws Exception {
+        var first = createReservedDispatch();
+        var second = createReservedDispatch();
+        assertThat(first.dispatchNumber()).matches("DO-\\d{4}-\\d{6}");
+        assertThat(second.dispatchNumber()).matches("DO-\\d{4}-\\d{6}");
+        assertThat(second.dispatchNumber().substring(0, 7)).isEqualTo(first.dispatchNumber().substring(0, 7));
+        int firstValue = Integer.parseInt(first.dispatchNumber().substring(8));
+        int secondValue = Integer.parseInt(second.dispatchNumber().substring(8));
+        assertThat(secondValue).isEqualTo(firstValue + 1);
+    }
+
     @Test void routeStartConsumesReservationOnceAndDeliveryStoresPodMetadata() throws Exception {
         var dispatch = createReservedDispatch();
         dispatch = prepare(dispatch);
@@ -71,6 +82,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
             assertThat(json(firstResult).get("id").asText()).isEqualTo(json(secondResult).get("id").asText());
             assertThat(json(firstResult).get("status").asText()).isEqualTo("IN_ROUTE");
             assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where correlation_id=? and movement_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where correlation_id=? and event_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
             MvcResult competing = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/route-starts")
                             .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", dispatch.etag()).header("Idempotency-Key", "route-concurrent-other")
                             .contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -124,6 +136,6 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
     private DispatchResource ready(DispatchResource value) throws Exception { return mutate(value, "/route-readiness", "{}", "ready-" + value.id()); }
     private DispatchResource reprogram(DispatchResource value) throws Exception { Instant start = Instant.now().plusSeconds(7200); Instant end = start.plusSeconds(7200); return mutate(value, "/reprogrammings", "{\"deliveryWindowStart\":\"" + start + "\",\"deliveryWindowEnd\":\"" + end + "\",\"eta\":\"" + start.plusSeconds(3600) + "\",\"reason\":\"Route changed\"}", "reprogram-" + value.id()); }
     private MvcResult routeStart(DispatchResource value, String key) throws Exception { return mockMvc.perform(post("/api/v1/dispatch-orders/" + value.id() + "/route-starts").header("Authorization", "Bearer " + value.logisticsToken()).header("If-Match", value.etag()).header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content("{}")).andReturn(); }
-    private DispatchResource mutate(DispatchResource value, String suffix, String body, String key) throws Exception { MvcResult result = mockMvc.perform(post("/api/v1/dispatch-orders/" + value.id() + suffix).header("Authorization", "Bearer " + value.logisticsToken()).header("If-Match", value.etag()).header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk()).andReturn(); return new DispatchResource(value.id(), result.getResponse().getHeader("ETag"), value.logisticsToken(), value.reservationId(), value.reservationEtag(), value.salesOrderId()); }
+    private DispatchResource mutate(DispatchResource value, String suffix, String body, String key) throws Exception { MvcResult result = mockMvc.perform(post("/api/v1/dispatch-orders/" + value.id() + suffix).header("Authorization", "Bearer " + value.logisticsToken()).header("If-Match", value.etag()).header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk()).andReturn(); return new DispatchResource(value.id(), value.dispatchNumber(), result.getResponse().getHeader("ETag"), value.logisticsToken(), value.reservationId(), value.reservationEtag(), value.salesOrderId()); }
     private MvcResult detail(DispatchResource value) throws Exception { return mockMvc.perform(get("/api/v1/dispatch-orders/" + value.id()).header("Authorization", "Bearer " + value.logisticsToken())).andExpect(status().isOk()).andReturn(); }
 }

@@ -10,6 +10,10 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 @Profile("!test")
@@ -22,12 +26,28 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	}
 	@Override public List<WorkspaceSummary> findWorkspaces(String tenantId) { return jdbc.query("select id,tenant_id,name,slug,status,version from tenant_management.workspace where tenant_id=? order by name", (rs,n)->new WorkspaceSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getString(3),rs.getString(4),rs.getString(5),rs.getLong(6)), uuid(tenantId)); }
 	@Override public Optional<WorkspaceSummary> findWorkspace(String tenantId, String workspaceId) { return jdbc.query("select id,tenant_id,name,slug,status,version from tenant_management.workspace where tenant_id=? and id=?", rs -> rs.next()?Optional.of(new WorkspaceSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getString(3),rs.getString(4),rs.getString(5),rs.getLong(6))):Optional.empty(),uuid(tenantId),uuid(workspaceId)); }
-	@Override public List<WorkspaceMembershipSummary> findMemberships(String tenantId, String workspaceId) { return jdbc.query("select m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.role,m.status,m.version from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join iam.user_account u on u.id=m.user_id where w.tenant_id=? and m.workspace_id=? order by u.display_name",(rs,n)->new WorkspaceMembershipSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getObject(3).toString(),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getLong(8)),uuid(tenantId),uuid(workspaceId)); }
-	@Override public Optional<WorkspaceMembershipSummary> findMembership(String tenantId, String membershipId) { return jdbc.query("select m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.role,m.status,m.version from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join iam.user_account u on u.id=m.user_id where w.tenant_id=? and m.id=?",rs -> rs.next()?Optional.of(new WorkspaceMembershipSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getObject(3).toString(),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getLong(8))):Optional.empty(),uuid(tenantId),uuid(membershipId)); }
+	@Override public List<WorkspaceMembershipSummary> findMemberships(String tenantId, String workspaceId) { return jdbc.query(membershipSql() + " where w.tenant_id=? and m.workspace_id=? group by m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.membership_type,m.status,m.version order by u.display_name", (org.springframework.jdbc.core.RowMapper<WorkspaceMembershipSummary>) this::membership, uuid(tenantId), uuid(workspaceId)); }
+	@Override public Optional<WorkspaceMembershipSummary> findMembership(String tenantId, String membershipId) { return jdbc.query(membershipSql() + " where w.tenant_id=? and m.id=? group by m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.membership_type,m.status,m.version",rs -> rs.next()?Optional.of(membership(rs)):Optional.empty(),uuid(tenantId),uuid(membershipId)); }
 	@Override public int updateWorkspace(String tenantId,String workspaceId,String name,String status,long version){ return jdbc.update("update tenant_management.workspace set name=?,status=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and id=? and version=?",name,status,uuid(tenantId),uuid(workspaceId),version); }
-	@Override public int activeOwnerCount(String workspaceId){ return jdbc.queryForObject("select count(*) from tenant_management.workspace_membership where workspace_id=? and role='COMPANY_OWNER' and status='ACTIVE'",Integer.class,uuid(workspaceId)); }
-	@Override public int updateRole(String tenantId,String membershipId,String role,long version){ return jdbc.update("update tenant_management.workspace_membership m set role=?,updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.version=?",role,uuid(tenantId),uuid(membershipId),version); }
+	@Override public int activeOwnerCount(String workspaceId){ return activeTenantAdminCount(workspaceId); }
+	@Override public int activeTenantAdminCount(String workspaceId){ return jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.membership_role_assignment r on r.membership_id=m.id where m.workspace_id=? and r.role='TENANT_ADMIN' and m.status='ACTIVE'",Integer.class,uuid(workspaceId)); }
+	@Override @Transactional public int updateRole(String tenantId,String membershipId,String role,long version){ return updateRoles(tenantId,membershipId,Set.of(role),version); }
+	@Override @Transactional public int updateRoles(String tenantId,String membershipId,Set<String> roles,long version){
+		int updated = jdbc.update("update tenant_management.workspace_membership m set updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.membership_type='INTERNAL' and m.version=?",uuid(tenantId),uuid(membershipId),version);
+		if (updated == 0) return 0;
+		jdbc.update("delete from tenant_management.membership_role_assignment where membership_id=?",uuid(membershipId));
+		for (String role : roles) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) select m.id,w.tenant_id,m.workspace_id,?,current_timestamp from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id where m.id=? and w.tenant_id=?",role,uuid(membershipId),uuid(tenantId));
+		return updated;
+	}
 	@Override public int updateStatus(String tenantId,String membershipId,String status,long version){ return jdbc.update("update tenant_management.workspace_membership m set status=?,updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.version=?",status,uuid(tenantId),uuid(membershipId),version); }
 	@Override public void appendMembershipEvent(String type,String tenantId,String workspaceId,String targetMembershipId,String actorMembershipId,String beforeRole,String beforeStatus,String afterRole,String afterStatus,String correlationId){ jdbc.update("insert into tenant_management.membership_admin_event (id,event_type,tenant_id,workspace_id,target_membership_id,actor_membership_id,before_role,before_status,after_role,after_status,correlation_id,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,current_timestamp)",java.util.UUID.randomUUID(),type,uuid(tenantId),uuid(workspaceId),uuid(targetMembershipId),uuid(actorMembershipId),beforeRole,beforeStatus,afterRole,afterStatus,correlationId == null ? "unknown" : correlationId); }
+	private String membershipSql() { return "select m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.membership_type,m.status,m.version,case when m.membership_type='BUYER' then array['BUYER'] else coalesce(array_agg(r.role) filter (where r.role is not null), array[]::varchar[]) end as roles from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join iam.user_account u on u.id=m.user_id left join tenant_management.membership_role_assignment r on r.membership_id=m.id"; }
+	private WorkspaceMembershipSummary membership(java.sql.ResultSet rs, int row) throws java.sql.SQLException { return membership(rs); }
+	private WorkspaceMembershipSummary membership(java.sql.ResultSet rs) throws java.sql.SQLException {
+		java.sql.Array array = rs.getArray(9);
+		Set<String> roles = array == null ? Set.of() : new LinkedHashSet<>(Arrays.asList((String[]) array.getArray()));
+		String primary = roles.stream().sorted().findFirst().orElse(null);
+		return new WorkspaceMembershipSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getObject(3).toString(),rs.getString(4),rs.getString(5),primary,rs.getString(7),rs.getLong(8),roles);
+	}
 	private static java.util.UUID uuid(String value) { return java.util.UUID.fromString(value); }
 }

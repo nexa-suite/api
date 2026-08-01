@@ -96,6 +96,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 	private boolean isTooOld(CurrentAccessContext context, String clientAccount, ChangeEventAudience audience, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount, audience); return last > 0 && minimum > 0 && last < minimum - 1; }
 	private static ChangeEventAudience audience(CurrentAccessContext context) {
 		return switch (context.role()) {
+			case TENANT_ADMIN -> ChangeEventAudience.OWNER;
 			case COMPANY_OWNER -> ChangeEventAudience.OWNER;
 			case SALES -> ChangeEventAudience.SALES;
 			case WAREHOUSE -> ChangeEventAudience.WAREHOUSE;
@@ -109,14 +110,14 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		CurrentAccessContext resolved = accessContext.resolve(new CurrentAccessRequest(new UserId(jwt.getSubject()),
 				new com.nexa.api.tenantmanagement.domain.model.identity.TenantId(required(jwt, "tenant_id")),
 				new com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId(required(jwt, "workspace_id")), surface));
-		if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.role().equals(expected.role())
+		if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.roles().equals(expected.roles())
 				|| !resolved.tenantId().equals(expected.tenantId()) || !resolved.workspaceId().equals(expected.workspaceId())
 				|| !resolved.surface().equals(expected.surface())) {
 			throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Change feed access context changed");
 		}
 		return resolved;
 	}
-	private String clientAccount(CurrentAccessContext context) { return context.role().name().equals("BUYER") ? accounts.findForBuyer(scope(context), workspace(context), context.membershipId().toString()).map(ClientAccountView::id).orElseThrow() : null; }
+	private String clientAccount(CurrentAccessContext context) { return context.hasRole(com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole.BUYER) ? accounts.findForBuyer(scope(context), workspace(context), context.membershipId().toString()).map(ClientAccountView::id).orElseThrow() : null; }
 	private static String required(Jwt jwt, String name) { String value = jwt.getClaimAsString(name); if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing JWT claim " + name); return value; }
 	private static long parseLastEventId(String value) { if (value == null || value.isBlank()) return 0; try { long parsed = Long.parseLong(value); if (parsed < 0) throw new NumberFormatException(); return parsed; } catch (NumberFormatException exception) { throw new IllegalArgumentException("Last-Event-ID is invalid"); } }
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }

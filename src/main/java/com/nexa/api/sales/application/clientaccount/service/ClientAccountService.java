@@ -52,7 +52,7 @@ public class ClientAccountService implements ClientAccountUseCase {
 		new BusinessName(command.businessName()); new CommercialName(command.commercialName()); new ContactEmail(command.contactEmail());
 		new PhoneNumber(command.phone()); new PaymentCondition(command.paymentCondition());
 	}
-	private static void internal(CurrentAccessContext context, Permission permission) { if (context.role().name().equals("BUYER")) throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Administrative sales access is not available to buyers"); context.requirePermission(permission); }
+	private static void internal(CurrentAccessContext context, Permission permission) { if (context.hasRole(com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole.BUYER)) throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Administrative sales access is not available to buyers"); context.requirePermission(permission); }
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }
 	private static String workspace(CurrentAccessContext context) { return context.workspaceId().toString(); }
 	private static long now() { return System.currentTimeMillis(); }

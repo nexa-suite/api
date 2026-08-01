@@ -665,27 +665,6 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public List<WarehouseOperationsService.ReadinessCandidate> readiness(CurrentAccessContext context) {
-        requireFulfillmentRead(context);
-        return jdbc.query(
-                "select r.id,r.sales_order_id,r.order_number,r.client_account_id,r.status,r.reserved_at,r.expires_at," +
-                        "count(distinct l.id) line_count,coalesce(sum(a.quantity),0) total_reserved_quantity " +
-                        "from warehouse.inventory_reservation r " +
-                        "join warehouse.inventory_reservation_line l on l.reservation_id=r.id " +
-                        "left join warehouse.inventory_reservation_allocation a on a.reservation_line_id=l.id " +
-                        "where r.tenant_id=? and r.workspace_id=? and r.status='RESERVED' " +
-                        "group by r.id,r.sales_order_id,r.order_number,r.client_account_id,r.status,r.reserved_at,r.expires_at " +
-                        "order by r.reserved_at asc,r.id asc limit 100",
-                (rs, row) -> new WarehouseOperationsService.ReadinessCandidate(
-                        rs.getObject("id").toString(), rs.getObject("sales_order_id").toString(),
-                        rs.getString("order_number"), rs.getObject("client_account_id").toString(),
-                        rs.getInt("line_count"), rs.getBigDecimal("total_reserved_quantity"),
-                        instant(rs, "reserved_at"), instant(rs, "expires_at"), "INVENTORY_RESERVED"),
-                tenant(context), workspace(context));
-    }
-
-    @Override
     @Scheduled(fixedDelay = 60000L)
     public void expireReservations() {
         List<ScopeId> expired = jdbc.query(
@@ -860,22 +839,24 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
 
     private void appendEvent(CurrentAccessContext context, UUID aggregateId, String eventType, String aggregateType,
                              String publicStatus, Timestamp occurred) {
-        appendEvent(tenant(context), workspace(context), aggregateId, eventType, aggregateType, publicStatus, occurred);
-        checkUpdated(jdbc.update(
-                "insert into warehouse.inventory_event(id,tenant_id,workspace_id,aggregate_id,event_type,occurred_at," +
-                        "actor_membership_id,correlation_id) values (?,?,?,?,?,?,?,?)",
-                UUID.randomUUID(), tenant(context), workspace(context), aggregateId, eventType, occurred,
-                uuid(context.membershipId().toString()), eventType), "inventory event insert");
+        appendEvent(tenant(context), workspace(context), aggregateId, eventType, aggregateType, publicStatus, occurred,
+                uuid(context.membershipId().toString()), eventType);
     }
 
     private void appendEvent(UUID tenantId, UUID workspaceId, UUID aggregateId, String eventType, String aggregateType,
                              String publicStatus, Timestamp occurred) {
+        appendEvent(tenantId, workspaceId, aggregateId, eventType, aggregateType, publicStatus, occurred, null,
+                "reservation-expiry-" + aggregateId);
+    }
+
+    private void appendEvent(UUID tenantId, UUID workspaceId, UUID aggregateId, String eventType, String aggregateType,
+                             String publicStatus, Timestamp occurred, UUID actorMembershipId, String correlationId) {
         changeFeed.append(tenantId.toString(), workspaceId.toString(), null, aggregateType,
                 aggregateId.toString(), eventType, publicStatus, occurred.getTime(), false);
         checkUpdated(jdbc.update(
                 "insert into warehouse.inventory_event(id,tenant_id,workspace_id,aggregate_id,event_type,occurred_at,actor_membership_id,correlation_id) values (?,?,?,?,?,?,?,?)",
-                UUID.randomUUID(), tenantId, workspaceId, aggregateId, eventType, occurred, null,
-                "reservation-expiry-" + aggregateId), "inventory event insert");
+                UUID.randomUUID(), tenantId, workspaceId, aggregateId, eventType, occurred, actorMembershipId,
+                correlationId), "inventory event insert");
     }
 
     private IdempotencyRecord idempotent(CurrentAccessContext context, String operation, String key) {

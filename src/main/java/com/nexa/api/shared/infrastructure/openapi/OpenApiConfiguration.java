@@ -14,12 +14,13 @@ public class OpenApiConfiguration {
 	@Bean
 	OpenAPI nexaOpenAPI() {
 		return new OpenAPI()
-				.info(new Info().title("Nexa API").version("0.7.0").description(
+				.info(new Info().title("Nexa API").version("0.8.1").description(
 						"Local API contract for secured identity, tenant/workspace administration, Catalog reads and "
 								+ "Sales Client Accounts and Purchase Requests. Bearer authentication revalidates the "
 								+ "persistent session; refresh and sign-out require the surface refresh cookie and Origin policy. "
 								+ "Sales Order conversion and lifecycle endpoints plus the tenant-scoped persisted change feed are included. "
-								+ "Warehouse, Logistics and Invoicing HTTP endpoints remain outside this release."))
+								+ "Warehouse and Logistics HTTP workflows are included; Proof of Delivery remains metadata-only. "
+								+ "Business Documents, file storage, invoices and payments are not implemented."))
 				.components(new Components()
 						.addSecuritySchemes("bearerAuth", new SecurityScheme().type(SecurityScheme.Type.HTTP)
 								.scheme("bearer").bearerFormat("JWT").description("RS256 access token"))

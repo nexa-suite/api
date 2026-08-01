@@ -6,6 +6,7 @@ import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
+import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 
 import java.math.BigDecimal;
@@ -20,7 +21,7 @@ public final class SalesOrder {
 	private final TenantId tenantId;
 	private final WorkspaceId workspaceId;
 	private final ClientAccountId clientAccountId;
-	private final BuyerMembershipId createdByMembershipId;
+	private final MembershipId createdByMembershipId;
 	private final BuyerMembershipId buyerMembershipId;
 	private final PurchaseRequestId sourcePurchaseRequestId;
 	private final List<SalesOrderLine> lines;
@@ -40,7 +41,7 @@ public final class SalesOrder {
 	private long version;
 
 	private SalesOrder(ApprovedPurchaseRequestSnapshot snapshot, SalesOrderId id, SalesOrderNumber number,
-			BuyerMembershipId createdByMembershipId, Instant createdAt) {
+			MembershipId createdByMembershipId, Instant createdAt) {
 		this.id = Objects.requireNonNull(id); this.number = Objects.requireNonNull(number);
 		this.tenantId = snapshot.tenantId(); this.workspaceId = snapshot.workspaceId(); this.clientAccountId = snapshot.clientAccountId();
 		this.createdByMembershipId = Objects.requireNonNull(createdByMembershipId);
@@ -52,18 +53,13 @@ public final class SalesOrder {
 	}
 
 	public static SalesOrder fromApprovedSnapshot(ApprovedPurchaseRequestSnapshot snapshot, SalesOrderId id,
-			SalesOrderNumber number, Instant createdAt) {
-		return fromApprovedSnapshot(snapshot, id, number, snapshot.buyerMembershipId(), createdAt);
-	}
-
-	public static SalesOrder fromApprovedSnapshot(ApprovedPurchaseRequestSnapshot snapshot, SalesOrderId id,
-			SalesOrderNumber number, BuyerMembershipId createdByMembershipId, Instant createdAt) {
+			SalesOrderNumber number, MembershipId createdByMembershipId, Instant createdAt) {
 		return new SalesOrder(Objects.requireNonNull(snapshot), id, number, createdByMembershipId, createdAt);
 	}
 
 	public static SalesOrder rehydrate(SalesOrderId id, SalesOrderNumber number, TenantId tenantId, WorkspaceId workspaceId,
 			ClientAccountId clientAccountId, BuyerMembershipId buyerMembershipId, PurchaseRequestId sourcePurchaseRequestId,
-			BuyerMembershipId createdByMembershipId, List<SalesOrderLine> lines, PurchaseRequestPriority priority,
+			MembershipId createdByMembershipId, List<SalesOrderLine> lines, PurchaseRequestPriority priority,
 			LocalDate requestedDeliveryDate, String deliverySnapshot, PaymentOption paymentOption, String notes,
 			String currency, BigDecimal totalSnapshot, Instant createdAt, SalesOrderStatus status, Instant confirmedAt,
 			Instant rejectedAt, Instant cancelledAt, String rejectionReason, long version) {
@@ -89,7 +85,7 @@ public final class SalesOrder {
 	public TenantId tenantId() { return tenantId; }
 	public WorkspaceId workspaceId() { return workspaceId; }
 	public ClientAccountId clientAccountId() { return clientAccountId; }
-	public BuyerMembershipId createdByMembershipId() { return createdByMembershipId; }
+	public MembershipId createdByMembershipId() { return createdByMembershipId; }
 	public BuyerMembershipId buyerMembershipId() { return buyerMembershipId; }
 	public PurchaseRequestId sourcePurchaseRequestId() { return sourcePurchaseRequestId; }
 	public List<SalesOrderLine> lines() { return lines; }

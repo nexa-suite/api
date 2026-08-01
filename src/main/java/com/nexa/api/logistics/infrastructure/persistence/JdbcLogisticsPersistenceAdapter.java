@@ -3,6 +3,7 @@ package com.nexa.api.logistics.infrastructure.persistence;
 import com.nexa.api.logistics.application.LogisticsOperationsService;
 import com.nexa.api.logistics.application.LogisticsOperationsService.LogisticsException;
 import com.nexa.api.logistics.application.port.LogisticsPersistencePort;
+import com.nexa.api.logistics.application.port.DispatchRouteStartPort;
 import com.nexa.api.logistics.domain.dispatchorder.DeliveryWindow;
 import com.nexa.api.logistics.domain.dispatchorder.ClientAccountId;
 import com.nexa.api.logistics.domain.dispatchorder.DispatchOrder;
@@ -44,7 +45,7 @@ import java.util.UUID;
 
 @Repository
 @Profile("!test")
-public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort {
+public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort, DispatchRouteStartPort {
     private static final int MAX_PAGE_SIZE = 100;
     private final JdbcTemplate jdbc;
     private final ChangeEventPersistencePort changeFeed;
@@ -111,7 +112,7 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
     public LogisticsOperationsService.DispatchView assign(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, String responsibleMembershipId, String vehicleReference, String routeName, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId), membership = uuid(responsibleMembershipId); String hash = hash("dispatch-assignment", dispatchId, version, responsibleMembershipId, vehicleReference, routeName);
         LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-assignment", key, hash); if (replay != null) return replay;
-        DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); String display = jdbc.query("select u.display_name from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join iam.user_account u on u.id=m.user_id where m.id=? and w.tenant_id=? and w.id=? and m.role='LOGISTICS' and m.status='ACTIVE'", rs -> rs.next() ? rs.getString(1) : null, membership, tenant, workspace); if (display == null) throw error("RESPONSIBLE_MEMBERSHIP_INVALID", false);
+        DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); String display = jdbc.query("select u.display_name from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join iam.user_account u on u.id=m.user_id join tenant_management.membership_role_assignment r on r.membership_id=m.id where m.id=? and w.tenant_id=? and w.id=? and r.role='LOGISTICS' and m.status='ACTIVE'", rs -> rs.next() ? rs.getString(1) : null, membership, tenant, workspace); if (display == null) throw error("RESPONSIBLE_MEMBERSHIP_INVALID", false);
         DispatchOrder aggregate = aggregate(row); aggregate.assign(new TransportAssignment(membership, display, vehicleReference, routeName)); updateAssignment(tenant, workspace, row, aggregate, membership, display, vehicleReference, routeName, now, actor, "logistics.dispatch.assigned", false, null); saveIdempotency(tenant, workspace, "dispatch-assignment", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
@@ -126,14 +127,41 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return statusCommand(tenantId, workspaceId, dispatchId, version, actorMembershipId, key, "dispatch-ready", "logistics.dispatch.ready", now, "READY", null);
     }
 
-    @Override @Transactional
-    public LogisticsOperationsService.DispatchView startRoute(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, long now) {
-        UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-route-start", dispatchId, version); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-route-start", key, hash); if (replay != null) return replay;
-        DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); LogisticsOperationsService.DispatchView committedReplay = replay(tenant, workspace, "dispatch-route-start", key, hash); if (committedReplay != null) return committedReplay; if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); DispatchOrder aggregate = aggregate(row); aggregate.startRoute();
-        warehouseFulfillment.consumeReservation(tenantId, workspaceId, row.reservationId().toString(), actorMembershipId,
-                id.toString(), Instant.ofEpochMilli(now));
-        updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.route-started", true, null);
-        saveIdempotency(tenant, workspace, "dispatch-route-start", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
+    @Override
+    public java.util.Optional<LogisticsOperationsService.DispatchView> replayRouteStart(
+            String tenantId, String workspaceId, String idempotencyKey, String requestHash) {
+        LogisticsOperationsService.DispatchView value = replay(
+                uuid(tenantId), uuid(workspaceId), "dispatch-route-start", idempotencyKey, requestHash);
+        return java.util.Optional.ofNullable(value);
+    }
+
+    @Override
+    public java.util.Optional<DispatchOrder> findDispatchForRouteStart(
+            String tenantId, String workspaceId, String dispatchId) {
+        DispatchRow row = locked(uuid(tenantId), uuid(workspaceId), uuid(dispatchId), null);
+        return row == null ? java.util.Optional.empty() : java.util.Optional.of(aggregate(row));
+    }
+
+    @Override
+    public LogisticsOperationsService.DispatchView commitRouteStart(
+            String tenantId, String workspaceId, DispatchOrder aggregate,
+            DispatchStatus expectedStatus, long expectedVersion,
+            String actorMembershipId, String idempotencyKey, String requestHash, long nowEpochMillis) {
+        UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), dispatchId = aggregate.id();
+        UUID actor = uuid(actorMembershipId);
+        DispatchRow row = locked(tenant, workspace, dispatchId, null);
+        if (row == null) throw error("RESOURCE_NOT_FOUND", true);
+        if (row.version() != expectedVersion || !expectedStatus.name().equals(row.status())) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        int changed = jdbc.update("update logistics.dispatch_order set status=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status=? and version=?",
+                aggregate.status().name(), timestamp(nowEpochMillis), tenant, workspace, dispatchId,
+                expectedStatus.name(), expectedVersion);
+        if (changed != 1) throw error("CONCURRENCY_CONFLICT", false);
+        appendEvent(tenant, workspace, dispatchId, "logistics.dispatch.route-started",
+                expectedStatus.name(), aggregate.status().name(), actor, true, null, nowEpochMillis, row.clientAccountId());
+        saveIdempotency(tenant, workspace, "dispatch-route-start", idempotencyKey, requestHash, dispatchId, nowEpochMillis);
+        return detail(tenant.toString(), workspace.toString(), null, dispatchId.toString());
     }
 
     @Override @Transactional
@@ -252,7 +280,7 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
     private LogisticsOperationsService.DispatchView replay(UUID tenant, UUID workspace, String operation, String key, String hash) { lockIdempotency(tenant, workspace, operation, key); Idem value=jdbc.query("select response_json,request_hash from logistics.command_idempotency where tenant_id=? and workspace_id=? and operation=? and idempotency_key=?",rs->rs.next()?new Idem(rs.getString(1),rs.getString(2)):null,tenant,workspace,operation,key); if(value==null)return null; if(!value.hash().equalsIgnoreCase(hash))throw error("IDEMPOTENCY_PAYLOAD_CONFLICT",false); return detail(tenant.toString(),workspace.toString(),null,value.resource()); }
     private void lockIdempotency(UUID tenant, UUID workspace, String operation, String key) { jdbc.query("select pg_advisory_xact_lock(hashtext(?))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null, tenant + "|" + workspace + "|" + operation + "|" + key); }
     private void saveIdempotency(UUID tenant, UUID workspace, String operation, String key, String hash, UUID resource, long now) { if(jdbc.update("insert into logistics.command_idempotency(tenant_id,workspace_id,operation,idempotency_key,request_hash,response_json,created_at) values (?,?,?,?,?,?,?) on conflict (tenant_id,workspace_id,operation,idempotency_key) do nothing",tenant,workspace,operation,key,hash,resource.toString(),timestamp(now))!=1) { Idem prior=jdbc.query("select response_json,request_hash from logistics.command_idempotency where tenant_id=? and workspace_id=? and operation=? and idempotency_key=?",rs->rs.next()?new Idem(rs.getString(1),rs.getString(2)):null,tenant,workspace,operation,key); if(prior==null||!prior.hash().equalsIgnoreCase(hash))throw error("IDEMPOTENCY_PAYLOAD_CONFLICT",false); } }
-    private long nextDispatchNumber(UUID tenant, UUID workspace, int year) { jdbc.update("insert into logistics.dispatch_number_counter(tenant_id,workspace_id,dispatch_year,next_value) values (?,?,?,2) on conflict (tenant_id,workspace_id,dispatch_year) do nothing",tenant,workspace,year); Long value=jdbc.queryForObject("select next_value from logistics.dispatch_number_counter where tenant_id=? and workspace_id=? and dispatch_year=? for update",Long.class,tenant,workspace,year); jdbc.update("update logistics.dispatch_number_counter set next_value=? where tenant_id=? and workspace_id=? and dispatch_year=?",value+1,tenant,workspace,year); return value; }
+    private long nextDispatchNumber(UUID tenant, UUID workspace, int year) { jdbc.update("insert into logistics.dispatch_number_counter(tenant_id,workspace_id,dispatch_year,next_value) values (?,?,?,1) on conflict (tenant_id,workspace_id,dispatch_year) do nothing",tenant,workspace,year); Long value=jdbc.queryForObject("select next_value from logistics.dispatch_number_counter where tenant_id=? and workspace_id=? and dispatch_year=? for update",Long.class,tenant,workspace,year); jdbc.update("update logistics.dispatch_number_counter set next_value=? where tenant_id=? and workspace_id=? and dispatch_year=?",value+1,tenant,workspace,year); return value; }
     private double averageMinutes(UUID tenant, UUID workspace, String startEvent, String endEvent, Instant from, Instant to) {
         String sql = "select coalesce(avg(extract(epoch from (finish.occurred_at-start.occurred_at))/60.0),0) "
                 + "from logistics.dispatch_order d "

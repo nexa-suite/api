@@ -236,15 +236,15 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 
 	private PurchaseRequestView canEdit(CurrentAccessContext context, String id) {
 		PurchaseRequestView request = detail(context, id);
-		if (context.role() == MembershipRole.BUYER) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
-		if (!"DRAFT".equals(request.status()) && !(context.role() == MembershipRole.BUYER && "NEEDS_ADJUSTMENT".equals(request.status()))) {
+		if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
+		if (!"DRAFT".equals(request.status()) && !(context.hasRole(MembershipRole.BUYER) && "NEEDS_ADJUSTMENT".equals(request.status()))) {
 			throw new PurchaseRequestTransitionException();
 		}
 		return request;
 	}
 
 	private String buyerAccount(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.BUYER) {
+		if (!context.hasRole(MembershipRole.BUYER)) {
 			internal(context, Permission.SALES_READ);
 			return null;
 		}
@@ -253,12 +253,12 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	}
 
 	private static void buyerWrite(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.BUYER) throw new AccessPolicyViolation("Purchase request creation is buyer-only");
+		if (!context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Purchase request creation is buyer-only");
 		context.requirePermission(Permission.SALES_BUYER_WRITE);
 	}
 
 	private static void internal(CurrentAccessContext context, Permission permission) {
-		if (context.role() == MembershipRole.BUYER) throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
+		if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
 		context.requirePermission(permission);
 	}
 

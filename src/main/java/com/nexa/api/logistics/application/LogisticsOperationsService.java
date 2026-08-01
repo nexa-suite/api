@@ -20,10 +20,6 @@ public class LogisticsOperationsService {
     private final ClientAccountPersistencePort accounts;
     private final StartDispatchRouteService startDispatchRoute;
 
-    public LogisticsOperationsService(LogisticsPersistencePort persistence, ClientAccountPersistencePort accounts) {
-        this(persistence, accounts, new StartDispatchRouteService(persistence));
-    }
-
     public LogisticsOperationsService(LogisticsPersistencePort persistence, ClientAccountPersistencePort accounts,
                                       StartDispatchRouteService startDispatchRoute) {
         this.persistence = persistence; this.accounts = accounts; this.startDispatchRoute = startDispatchRoute;
@@ -54,15 +50,15 @@ public class LogisticsOperationsService {
     public Page<ProofOfDeliveryView> proofOfDelivery(CurrentAccessContext c, String status, int page, int size) { logisticsRead(c); return persistence.proofOfDelivery(tenant(c), workspace(c), status, page, size); }
 
     private String readScope(CurrentAccessContext c) {
-        if (c.role() == MembershipRole.BUYER) { c.requirePermission(Permission.TRACKING_BUYER_READ); return accounts.findForBuyer(tenant(c), workspace(c), actor(c)).map(ClientAccountView::id).orElseThrow(() -> error("RESOURCE_NOT_FOUND", true)); }
-        if (c.role() == MembershipRole.SALES) c.requirePermission(Permission.SALES_READ);
-        else if (c.role() == MembershipRole.WAREHOUSE) c.requirePermission(Permission.FULFILLMENT_READ);
-        else if (c.role() == MembershipRole.LOGISTICS) c.requirePermission(Permission.LOGISTICS_READ);
+        if (c.hasRole(MembershipRole.BUYER)) { c.requirePermission(Permission.TRACKING_BUYER_READ); return accounts.findForBuyer(tenant(c), workspace(c), actor(c)).map(ClientAccountView::id).orElseThrow(() -> error("RESOURCE_NOT_FOUND", true)); }
+        if (c.hasRole(MembershipRole.SALES)) c.requirePermission(Permission.SALES_READ);
+        else if (c.hasRole(MembershipRole.WAREHOUSE)) c.requirePermission(Permission.FULFILLMENT_READ);
+        else if (c.hasRole(MembershipRole.LOGISTICS)) c.requirePermission(Permission.LOGISTICS_READ);
         else throw new AccessPolicyViolation("Logistics access is not available");
         return null;
     }
-    private static void logisticsRead(CurrentAccessContext c) { if (c.role() != MembershipRole.LOGISTICS) throw new AccessPolicyViolation("Logistics access is required"); c.requirePermission(Permission.LOGISTICS_READ); }
-    private static void write(CurrentAccessContext c) { if (c.role() != MembershipRole.LOGISTICS) throw new AccessPolicyViolation("Logistics write access is required"); c.requirePermission(Permission.LOGISTICS_WRITE); }
+    private static void logisticsRead(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS)) throw new AccessPolicyViolation("Logistics access is required"); c.requirePermission(Permission.LOGISTICS_READ); }
+    private static void write(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS)) throw new AccessPolicyViolation("Logistics write access is required"); c.requirePermission(Permission.LOGISTICS_WRITE); }
     private static void requireKey(String key) { if (key == null || key.isBlank() || key.length() > 160) throw error("IDEMPOTENCY_KEY_REQUIRED", false); }
     private static void validateWindow(Instant start, Instant end, Instant eta) { if (start == null || end == null || !end.isAfter(start) || start.isBefore(Instant.now().minus(5, ChronoUnit.MINUTES)) || start.isAfter(Instant.now().plus(366, ChronoUnit.DAYS))) throw error("INVALID_REQUEST", false); if (eta != null && (eta.isBefore(start) || eta.isAfter(end))) throw error("INVALID_REQUEST", false); }
     private static String tenant(CurrentAccessContext c) { return c.tenantId().toString(); } private static String workspace(CurrentAccessContext c) { return c.workspaceId().toString(); } private static String actor(CurrentAccessContext c) { return c.membershipId().toString(); } private static long now() { return System.currentTimeMillis(); }
@@ -89,15 +85,13 @@ public class LogisticsOperationsService {
     public record AnalyticsView(Instant from, Instant to, long dispatches, long delivered, long incidents, long temperatureExcursions, long podCompleted, double onTimeRate, double averagePreparationMinutes, double averageRouteMinutes) { }
     public record ProofOfDeliveryView(String podId, String dispatchOrderId, String dispatchNumber, String status, String receiverName, Instant completedAt, String notes, boolean photoEvidenceDeclared, boolean signatureEvidenceDeclared, Instant updatedAt) { }
     private static DispatchView safe(CurrentAccessContext context, DispatchView value) {
-        return switch (context.role()) {
-            case BUYER -> value.buyerSafe();
-            case SALES -> value.salesSafe();
-            case WAREHOUSE -> value.warehouseSafe();
-            case LOGISTICS, COMPANY_OWNER -> value;
-        };
+        if (context.hasRole(MembershipRole.BUYER)) return value.buyerSafe();
+        if (context.hasRole(MembershipRole.SALES)) return value.salesSafe();
+        if (context.hasRole(MembershipRole.WAREHOUSE) && !context.hasRole(MembershipRole.LOGISTICS)) return value.warehouseSafe();
+        return value;
     }
     private static DispatchEventView safeEvent(CurrentAccessContext context, DispatchEventView value) {
-        if (context.role() == MembershipRole.BUYER || context.role() == MembershipRole.SALES) {
+        if (context.hasRole(MembershipRole.BUYER) || context.hasRole(MembershipRole.SALES)) {
             String publicType = switch (value.type()) {
                 case "logistics.dispatch.scheduled", "logistics.dispatch.reprogrammed", "DELIVERY_SCHEDULED" -> "DELIVERY_SCHEDULED";
                 case "logistics.dispatch.route-started", "IN_TRANSIT" -> "IN_TRANSIT";
