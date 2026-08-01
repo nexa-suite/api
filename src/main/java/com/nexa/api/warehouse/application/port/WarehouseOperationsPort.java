@@ -30,6 +30,5 @@ public interface WarehouseOperationsPort {
     WarehouseOperationsService.ReservationDetail release(CurrentAccessContext context, String reservationId, long expected, String key, String reason, String correlation, boolean expiry);
     WarehouseOperationsService.Page<WarehouseOperationsService.ReservationSummary> reservations(CurrentAccessContext context, String status, int page, int size);
     WarehouseOperationsService.ReservationDetail reservation(CurrentAccessContext context, String id);
-    List<WarehouseOperationsService.ReadinessCandidate> readiness(CurrentAccessContext context);
     void expireReservations();
 }

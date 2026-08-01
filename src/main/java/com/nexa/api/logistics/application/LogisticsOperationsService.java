@@ -20,10 +20,6 @@ public class LogisticsOperationsService {
     private final ClientAccountPersistencePort accounts;
     private final StartDispatchRouteService startDispatchRoute;
 
-    public LogisticsOperationsService(LogisticsPersistencePort persistence, ClientAccountPersistencePort accounts) {
-        this(persistence, accounts, new StartDispatchRouteService(persistence));
-    }
-
     public LogisticsOperationsService(LogisticsPersistencePort persistence, ClientAccountPersistencePort accounts,
                                       StartDispatchRouteService startDispatchRoute) {
         this.persistence = persistence; this.accounts = accounts; this.startDispatchRoute = startDispatchRoute;

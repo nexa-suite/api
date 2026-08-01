@@ -76,7 +76,7 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .header("Authorization", "Bearer " + logistics).header("If-Match", reservation.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "dispatch-create-" + suffix))
                 .andExpect(status().isCreated()).andReturn();
-        return new DispatchResource(json(dispatch).get("id").asText(), dispatch.getResponse().getHeader("ETag"), logistics, reservationId, confirmed.getResponse().getHeader("ETag"), pending.id());
+        return new DispatchResource(json(dispatch).get("id").asText(), json(dispatch).get("dispatchNumber").asText(), dispatch.getResponse().getHeader("ETag"), logistics, reservationId, confirmed.getResponse().getHeader("ETag"), pending.id());
     }
 
     protected tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {
@@ -85,5 +85,5 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
 
     public record PurchaseRequestResource(String id, String etag, String salesToken) { }
     public record SalesOrderResource(String id, String etag, String salesToken) { }
-    public record DispatchResource(String id, String etag, String logisticsToken, String reservationId, String reservationEtag, String salesOrderId) { }
+    public record DispatchResource(String id, String dispatchNumber, String etag, String logisticsToken, String reservationId, String reservationEtag, String salesOrderId) { }
 }
