@@ -65,7 +65,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 			verified = verify(jwt, initial);
 			String clientAccount = clientAccount(verified);
 			if (isTooOld(verified, clientAccount, audience, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
-			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audience, last, MAX_REPLAY));
+			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audience, last, MAX_REPLAY), jwt, initial);
 		} catch (RuntimeException | IOException exception) {
 			release.run(); emitter.completeWithError(exception); return emitter;
 		}
@@ -75,15 +75,19 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 			try {
 				CurrentAccessContext current = verify(jwt, initial); String clientAccount = clientAccount(current); long position = cursor.get();
 				if (isTooOld(current, clientAccount, audience, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
-				sendBatch(emitter, cursor, feed.after(scope(current), workspace(current), clientAccount, audience, position, MAX_REPLAY));
+				sendBatch(emitter, cursor, feed.after(scope(current), workspace(current), clientAccount, audience, position, MAX_REPLAY), jwt, initial);
 				emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
 			} catch (RuntimeException | IOException exception) { release.run(); emitter.completeWithError(exception); }
 		}, 15, 15, TimeUnit.SECONDS);
 		return emitter;
 	}
 
-	private void sendBatch(SseEmitter emitter, AtomicLong cursor, List<ChangeEventView> events) throws IOException {
+	private void sendBatch(SseEmitter emitter, AtomicLong cursor, List<ChangeEventView> events, Jwt jwt,
+			CurrentAccessContext expected) throws IOException {
 		for (ChangeEventView event : events) {
+			// Revalidate immediately before every business event. A revoked session may
+			// invalidate a batch after it was queried but before it is emitted.
+			verify(jwt, expected);
 			emitter.send(SseEmitter.event().id(Long.toString(event.sequence())).name(event.eventType()).data(event.dataJson(), MediaType.APPLICATION_JSON));
 			cursor.set(event.sequence());
 		}

@@ -27,7 +27,9 @@ import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrat
 import com.nexa.api.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
 import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
+import com.nexa.api.sales.application.exception.PurchaseRequestAlreadyConvertedException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
+import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
@@ -103,6 +105,7 @@ public final class GlobalExceptionHandler {
 	}
 	@ExceptionHandler(SalesInvariantViolation.class)
 	public ResponseEntity<ProblemDetail> handleSalesInvariant(SalesInvariantViolation exception, HttpServletRequest request) {
+		LOGGER.warn("Sales invariant rejected request {}: {}", request.getRequestURI(), exception.getMessage());
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.PURCHASE_REQUEST_LINE_INVALID, "Sales request is invalid", request);
 	}
 	@ExceptionHandler(DataIntegrityViolationException.class)
@@ -117,6 +120,10 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request); }
+	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
+	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
+	@ExceptionHandler(PurchaseRequestAlreadyConvertedException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestAlreadyConverted(PurchaseRequestAlreadyConvertedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_ALREADY_CONVERTED, "Purchase request has already been converted", request); }
 	@ExceptionHandler(SalesPreconditionRequiredException.class)
 	public ResponseEntity<ProblemDetail> handleSalesPrecondition(SalesPreconditionRequiredException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request); }
 	@ExceptionHandler(IdempotencyKeyRequiredException.class)

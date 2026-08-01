@@ -80,6 +80,26 @@ public class JpaAuthenticationThrottleAdapter implements AuthenticationThrottleP
 
 	@Override
 	@Transactional
+	public boolean recordFailureAndCheck(LoginIdentifier identifier, String clientFingerprint, Instant now) {
+		if (jdbc == null) {
+			recordFailure(identifier, clientFingerprint, now);
+			return isThrottled(identifier, clientFingerprint, now);
+		}
+		Instant cutoff = now.minus(window);
+		Boolean throttled = jdbc.query("insert into iam.authentication_failure (id,normalized_identifier,client_fingerprint,failure_count,window_started_at,last_failure_at) values (?,?,?,?,?,?) "
+				+ "on conflict (normalized_identifier,client_fingerprint) do update set failure_count=case when iam.authentication_failure.window_started_at <= ? then 1 else iam.authentication_failure.failure_count + 1 end, "
+				+ "window_started_at=case when iam.authentication_failure.window_started_at <= ? then ? else iam.authentication_failure.window_started_at end, last_failure_at=? "
+				+ "returning failure_count,window_started_at",
+				(org.springframework.jdbc.core.ResultSetExtractor<Boolean>) rs -> rs.next()
+						&& rs.getInt(1) >= maxFailures
+						&& rs.getTimestamp(2).toInstant().plus(window).isAfter(now),
+				UUID.randomUUID(), identifier.value(), clientFingerprint, 1, Timestamp.from(now), Timestamp.from(now),
+				Timestamp.from(cutoff), Timestamp.from(cutoff), Timestamp.from(now), Timestamp.from(now));
+		return Boolean.TRUE.equals(throttled);
+	}
+
+	@Override
+	@Transactional
 	public void clear(LoginIdentifier identifier, String clientFingerprint) {
 		if (jdbc != null) {
 			jdbc.update("delete from iam.authentication_failure where normalized_identifier=? and client_fingerprint=?", identifier.value(), clientFingerprint);

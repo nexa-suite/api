@@ -65,8 +65,9 @@ public final class ApiProblemDetailFactory {
 			case CLIENT_ACCOUNT_CODE_CONFLICT -> "Client account code conflict";
 			case CLIENT_ACCOUNT_TAX_ID_CONFLICT -> "Client account tax identifier conflict";
 			case BUYER_MEMBERSHIP_ALREADY_ASSIGNED -> "Buyer membership already assigned";
-			case PURCHASE_REQUEST_NOT_FOUND -> "Purchase request not found";
-			case PURCHASE_REQUEST_TRANSITION_INVALID -> "Purchase request transition invalid";
+				case PURCHASE_REQUEST_NOT_FOUND -> "Purchase request not found";
+				case PURCHASE_REQUEST_TRANSITION_INVALID -> "Purchase request transition invalid";
+				case PURCHASE_REQUEST_ALREADY_CONVERTED -> "Purchase request already converted";
 			case PURCHASE_REQUEST_LINE_INVALID -> "Purchase request line invalid";
 				case PURCHASE_REQUEST_CLIENT_SCOPE_INVALID -> "Purchase request client scope invalid";
 				case IDEMPOTENCY_KEY_REQUIRED -> "Idempotency key required";
@@ -90,6 +91,10 @@ public final class ApiProblemDetailFactory {
 				case INVENTORY_RESERVATION_EXPIRED -> "Inventory reservation expired";
 				case FULFILLMENT_CANDIDATE_NOT_ELIGIBLE -> "Fulfillment candidate not eligible";
 				case DISPATCH_READINESS_CANDIDATE_NOT_FOUND -> "Dispatch readiness candidate not found";
+				case DISPATCH_ALREADY_EXISTS -> "Dispatch already exists";
+				case RESERVATION_NOT_FOUND -> "Reservation not found";
+				case RESERVATION_NOT_READY -> "Reservation is not ready";
+				case RESPONSIBLE_MEMBERSHIP_INVALID -> "Responsible membership is invalid";
 				case INVALID_INVENTORY_SORT -> "Invalid inventory sort";
 				case INTERNAL_ERROR -> "Internal server error";
 		};
