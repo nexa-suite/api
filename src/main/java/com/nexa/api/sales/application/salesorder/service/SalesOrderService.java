@@ -12,21 +12,42 @@ import com.nexa.api.sales.application.salesorder.model.SalesOrderFilter;
 import com.nexa.api.sales.application.salesorder.model.SalesOrderView;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderUseCase;
+import com.nexa.api.sales.application.salesorder.port.SalesOrderAggregatePersistencePort;
+import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersistencePort;
+import com.nexa.api.sales.domain.model.salesorder.SalesOrder;
+import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 
 public class SalesOrderService implements SalesOrderUseCase {
 	private final SalesOrderPersistencePort persistence;
 	private final ClientAccountPersistencePort accounts;
+	private final SalesOrderAggregatePersistencePort aggregatePersistence;
+	private final SalesOrderConversionPersistencePort conversionPersistence;
 
 	public SalesOrderService(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts) {
+		this(persistence, accounts, persistence instanceof SalesOrderAggregatePersistencePort aggregate ? aggregate : null,
+				persistence instanceof SalesOrderConversionPersistencePort conversion ? conversion : null);
+	}
+
+	public SalesOrderService(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts,
+			SalesOrderAggregatePersistencePort aggregatePersistence) {
+		this(persistence, accounts, aggregatePersistence,
+				persistence instanceof SalesOrderConversionPersistencePort conversion ? conversion : null);
+	}
+
+	public SalesOrderService(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts,
+			SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence) {
 		this.persistence = persistence;
 		this.accounts = accounts;
+		this.aggregatePersistence = aggregatePersistence;
+		this.conversionPersistence = conversionPersistence;
 	}
 
 	@Override
@@ -35,8 +56,18 @@ public class SalesOrderService implements SalesOrderUseCase {
 			String idempotencyKey, String note) {
 		commercialWrite(context);
 		if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 160) throw new IdempotencyKeyRequiredException();
-		return persistence.convertApproved(scope(context), workspace(context), purchaseRequestId, purchaseRequestVersion,
-				context.membershipId().toString(), idempotencyKey, note, now()).order();
+		if (conversionPersistence == null) throw new IllegalStateException("Sales order conversion persistence is not configured");
+		String tenant = scope(context), workspace = workspace(context), actor = context.membershipId().toString();
+		var prior = conversionPersistence.findByIdempotency(tenant, workspace, actor, idempotencyKey);
+		if (prior.isPresent()) return prior.get();
+		if (note != null && note.length() > 2000) throw new com.nexa.api.sales.domain.exception.SalesInvariantViolation("Conversion note is too long");
+		var snapshot = conversionPersistence.loadApprovedSnapshot(tenant, workspace, purchaseRequestId, purchaseRequestVersion);
+		if (snapshot.isEmpty()) return conversionPersistence.findBySourcePurchaseRequest(tenant, workspace, purchaseRequestId)
+				.orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesConcurrencyConflictException());
+		var identity = conversionPersistence.nextIdentity(tenant, workspace);
+		SalesOrder aggregate = SalesOrder.fromApprovedSnapshot(snapshot.get(), identity.id(), identity.number(),
+				new BuyerMembershipId(context.membershipId().value()), java.time.Instant.ofEpochMilli(now()));
+		return conversionPersistence.persistConversion(aggregate, purchaseRequestVersion, actor, idempotencyKey, note, now());
 	}
 
 	@Override
@@ -57,6 +88,18 @@ public class SalesOrderService implements SalesOrderUseCase {
 		String normalized = action == null ? "" : action.trim().toLowerCase(java.util.Locale.ROOT);
 		if (!(normalized.equals("confirm") || normalized.equals("reject") || normalized.equals("cancel"))) throw new SalesOrderTransitionException();
 		if (normalized.equals("reject") && (reason == null || reason.isBlank())) throw new SalesOrderRejectionReasonRequiredException();
+		if (aggregatePersistence != null) {
+			SalesOrder aggregate = aggregatePersistence.findForUpdate(scope(context), workspace(context), id)
+					.orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("sales-order"));
+			if (aggregate.version() != expectedVersion) throw new com.nexa.api.sales.application.exception.SalesConcurrencyConflictException();
+			Instant at = java.time.Instant.ofEpochMilli(now());
+			switch (normalized) {
+				case "confirm" -> aggregate.confirm(at);
+				case "reject" -> aggregate.reject(reason, at);
+				case "cancel" -> aggregate.cancel(at);
+			}
+			return aggregatePersistence.saveTransition(aggregate, normalized, reason, context.membershipId().toString(), expectedVersion, at.toEpochMilli());
+		}
 		return persistence.transition(scope(context), workspace(context), id, normalized, reason, context.membershipId().toString(), expectedVersion, now());
 	}
 

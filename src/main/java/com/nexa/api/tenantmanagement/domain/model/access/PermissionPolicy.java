@@ -25,7 +25,7 @@ public final class PermissionPolicy {
 					Permission.FULFILLMENT_READ),
 			MembershipRole.BUYER, Set.of(
 					Permission.CATALOG_READ, Permission.SALES_BUYER_READ, Permission.SALES_BUYER_WRITE,
-					Permission.ORDERS_BUYER_READ));
+					Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ));
 
 	private PermissionPolicy() {
 	}

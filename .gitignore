@@ -1,5 +1,9 @@
 HELP.md
 target/
+node_modules/
+dist/
+.angular/
+coverage/
 .env.local
 .local-keys/
 *.pem

@@ -59,6 +59,7 @@ public final class ApiProblemDetailFactory {
 			case LAST_ACTIVE_OWNER_REQUIRED -> "Last active owner required";
 			case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
 			case CONCURRENCY_CONFLICT -> "Concurrency conflict";
+			case INVALID_TRANSITION -> "Invalid transition";
 			case PRECONDITION_REQUIRED -> "Precondition required";
 			case CLIENT_ACCOUNT_NOT_FOUND -> "Client account not found";
 			case CLIENT_ACCOUNT_CODE_CONFLICT -> "Client account code conflict";
@@ -69,6 +70,7 @@ public final class ApiProblemDetailFactory {
 			case PURCHASE_REQUEST_LINE_INVALID -> "Purchase request line invalid";
 				case PURCHASE_REQUEST_CLIENT_SCOPE_INVALID -> "Purchase request client scope invalid";
 				case IDEMPOTENCY_KEY_REQUIRED -> "Idempotency key required";
+				case IDEMPOTENCY_PAYLOAD_CONFLICT -> "Idempotency payload conflict";
 				case SALES_ORDER_NOT_FOUND -> "Sales order not found";
 				case SALES_ORDER_TRANSITION_INVALID -> "Sales order transition invalid";
 				case SALES_ORDER_REJECTION_REASON_REQUIRED -> "Sales order rejection reason required";

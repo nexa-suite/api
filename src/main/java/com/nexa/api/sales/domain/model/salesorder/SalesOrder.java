@@ -77,10 +77,12 @@ public final class SalesOrder {
 	}
 
 	public void confirm(Instant at) { requirePending(); status = SalesOrderStatus.CONFIRMED; confirmedAt = Objects.requireNonNull(at); }
-	public void reject(String reason) { requirePending(); if (reason == null || reason.isBlank()) throw new SalesOrderInvariantViolation("Sales order rejection reason is required"); rejectionReason = reason.trim(); rejectedAt = Instant.now(); status = SalesOrderStatus.REJECTED; }
+	public void reject(String reason) { reject(reason, Instant.now()); }
+	public void reject(String reason, Instant at) { requirePending(); if (reason == null || reason.isBlank()) throw new SalesOrderInvariantViolation("Sales order rejection reason is required"); rejectionReason = reason.trim(); rejectedAt = Objects.requireNonNull(at); status = SalesOrderStatus.REJECTED; }
 	/** Compatibility helper; HTTP/application commands always provide an explicit reason. */
 	public void reject() { reject("Rejected by commercial review"); }
-	public void cancel() { requirePending(); cancelledAt = Instant.now(); status = SalesOrderStatus.CANCELLED; }
+	public void cancel() { cancel(Instant.now()); }
+	public void cancel(Instant at) { requirePending(); cancelledAt = Objects.requireNonNull(at); status = SalesOrderStatus.CANCELLED; }
 
 	public SalesOrderId id() { return id; }
 	public SalesOrderNumber number() { return number; }

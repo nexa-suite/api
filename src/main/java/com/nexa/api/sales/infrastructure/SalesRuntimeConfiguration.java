@@ -6,6 +6,8 @@ import com.nexa.api.sales.application.clientaccount.service.ClientAccountService
 import com.nexa.api.sales.application.purchaserequest.port.*;
 import com.nexa.api.sales.application.purchaserequest.service.PurchaseRequestService;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderPersistencePort;
+import com.nexa.api.sales.application.salesorder.port.SalesOrderAggregatePersistencePort;
+import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.sales.application.salesorder.service.SalesOrderService;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
@@ -22,5 +24,5 @@ public class SalesRuntimeConfiguration {
 			ChangeEventPersistencePort changeFeed) {
 		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed);
 	}
-	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts) { return new SalesOrderService(persistence, accounts); }
+	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, ClientAccountPersistencePort accounts) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence); }
 }

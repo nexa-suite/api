@@ -36,6 +36,8 @@ import com.nexa.api.sales.application.exception.SalesOrderRejectionReasonRequire
 import com.nexa.api.sales.application.exception.SalesOrderTransitionException;
 import com.nexa.api.shared.application.changefeed.ChangeFeedCapacityException;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
+import com.nexa.api.logistics.application.LogisticsOperationsService;
+import com.nexa.api.logistics.domain.dispatchorder.DispatchTransitionViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -132,8 +134,23 @@ public final class GlobalExceptionHandler {
 		@ExceptionHandler(WarehouseOperationsService.WarehouseException.class)
 		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationsService.WarehouseException exception, HttpServletRequest request) {
 			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
-			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT" -> HttpStatus.CONFLICT; case "INVENTORY_SHORTAGE" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+				HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
+		}
+		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)
+		public ResponseEntity<ProblemDetail> handleLogistics(LogisticsOperationsService.LogisticsException exception, HttpServletRequest request) {
+			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) {
+				case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "IDEMPOTENCY_PAYLOAD_CONFLICT", "DISPATCH_ALREADY_EXISTS", "INVALID_TRANSITION", "RESERVATION_NOT_READY" -> HttpStatus.CONFLICT;
+				case "FORBIDDEN" -> HttpStatus.FORBIDDEN;
+				case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED;
+				default -> HttpStatus.BAD_REQUEST;
+			};
+			return response(status, code, "Logistics operation could not be completed", request);
+		}
+		@ExceptionHandler(DispatchTransitionViolation.class)
+		public ResponseEntity<ProblemDetail> handleDispatchTransition(DispatchTransitionViolation exception, HttpServletRequest request) {
+			return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Logistics transition is not allowed", request);
 		}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
