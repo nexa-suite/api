@@ -12,6 +12,8 @@ import com.nexa.api.iam.application.port.in.CurrentSessionUseCase;
 import com.nexa.api.iam.application.port.in.RefreshSessionUseCase;
 import com.nexa.api.iam.application.port.in.SignInUseCase;
 import com.nexa.api.iam.application.port.in.SignOutUseCase;
+import com.nexa.api.iam.application.port.in.WorkspacePreviewUseCase;
+import com.nexa.api.iam.application.model.WorkspacePreview;
 import com.nexa.api.iam.domain.model.access.ClientSurface;
 import com.nexa.api.iam.domain.model.session.SessionId;
 import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
@@ -28,6 +30,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
@@ -63,19 +67,28 @@ public class AuthenticationController {
 	private final RefreshSessionUseCase refresh;
 	private final SignOutUseCase signOut;
 	private final CurrentSessionUseCase currentSession;
+	private final WorkspacePreviewUseCase workspacePreview;
 	private final boolean secureCookie;
 	private final Clock clock;
 
 	public AuthenticationController(SignInUseCase signIn, RefreshSessionUseCase refresh, SignOutUseCase signOut,
-			CurrentSessionUseCase currentSession, @Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie,
+			CurrentSessionUseCase currentSession, WorkspacePreviewUseCase workspacePreview, @Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie,
 			Environment environment, Clock clock) {
 		this.signIn = signIn;
 		this.refresh = refresh;
 		this.signOut = signOut;
 		this.currentSession = currentSession;
+		this.workspacePreview = workspacePreview;
 		this.secureCookie = environment.acceptsProfiles(Profiles.of("local")) && !configuredSecureCookie
 				? false : true;
 		this.clock = clock;
+	}
+
+	@PostMapping("/auth/workspace-previews")
+	@Operation(summary = "Resolve public workspace login preview")
+	public WorkspacePreviewResponse workspacePreview(@Valid @RequestBody WorkspacePreviewRequest request, HttpServletRequest httpRequest) {
+		WorkspacePreview value = workspacePreview.preview(request.workspaceSlug(), clientFingerprint(httpRequest));
+		return new WorkspacePreviewResponse(value.recognized(), value.displayName(), value.workspaceUrl(), value.logoUrl(), value.loginAvailable());
 	}
 
 	@PostMapping("/authentication/sign-in")
@@ -177,6 +190,8 @@ public class AuthenticationController {
 
 	public record SignInRequest(@NotBlank String identifier, @NotBlank String password, @NotBlank String workspaceSlug,
 			@NotNull ClientSurface surface) {}
+	public record WorkspacePreviewRequest(@NotBlank @Size(min = 3, max = 80) @Pattern(regexp = "[a-zA-Z0-9-]+") String workspaceSlug) {}
+	public record WorkspacePreviewResponse(boolean recognized, String displayName, String workspaceUrl, String logoUrl, boolean loginAvailable) {}
 
 	public record AuthenticationResponse(String accessToken, String tokenType, long expiresIn, SessionContext session) {
 		static AuthenticationResponse from(AuthenticationResult result) {
