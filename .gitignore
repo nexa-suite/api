@@ -44,3 +44,5 @@ build/
 
 # Local git worktrees
 .worktrees/
+playwright-report/
+test-results/
