@@ -24,13 +24,15 @@ public class JpaAccessPolicyAdapter implements AccessPolicyPort {
 	private final WorkspaceMembershipJpaRepository memberships;
 	private final WorkspaceJpaRepository workspaces;
 	private final TenantJpaRepository tenants;
+	private final WorkspaceMembershipRoleJpaRepository roleAssignments;
 
 	public JpaAccessPolicyAdapter(UserAccountJpaRepository users, WorkspaceMembershipJpaRepository memberships,
-			WorkspaceJpaRepository workspaces, TenantJpaRepository tenants) {
+			WorkspaceJpaRepository workspaces, TenantJpaRepository tenants, WorkspaceMembershipRoleJpaRepository roleAssignments) {
 		this.users = users;
 		this.memberships = memberships;
 		this.workspaces = workspaces;
 		this.tenants = tenants;
+		this.roleAssignments = roleAssignments;
 	}
 
 	@Override
@@ -53,14 +55,21 @@ public class JpaAccessPolicyAdapter implements AccessPolicyPort {
 
 	private Optional<AccessPolicy> policy(UserAccountJpaEntity user, WorkspaceMembershipJpaEntity membership,
 			WorkspaceJpaEntity workspace, TenantJpaEntity tenant, ClientSurface surface) {
-		MembershipRole role;
-		try { role = MembershipRole.from(membership.getRole()); } catch (RuntimeException exception) { return Optional.empty(); }
+		java.util.Set<MembershipRole> roles = rolesFor(membership);
+		if (roles.isEmpty()) return Optional.empty();
 		Surface requestedSurface = Surface.valueOf(surface.name());
-		if (!RoleSurfacePolicy.allows(role, requestedSurface) || !"ACTIVE".equals(workspace.getStatus()) || !"ACTIVE".equals(tenant.getStatus())) {
+		if (!RoleSurfacePolicy.allows(roles, requestedSurface) || !"ACTIVE".equals(workspace.getStatus()) || !"ACTIVE".equals(tenant.getStatus())) {
 			return Optional.empty();
 		}
-		var permissions = PermissionPolicy.permissionsFor(role).stream().map(Permission::code).collect(java.util.stream.Collectors.toUnmodifiableSet());
-		return Optional.of(new AccessPolicy(surface, role.name(), permissions, tenant.getId().toString(), tenant.getSlug(),
+		var permissions = PermissionPolicy.permissionsFor(roles).stream().map(Permission::code).collect(java.util.stream.Collectors.toUnmodifiableSet());
+		String roleValue = roles.stream().map(Enum::name).sorted().collect(java.util.stream.Collectors.joining(","));
+		return Optional.of(new AccessPolicy(surface, roleValue, permissions, tenant.getId().toString(), tenant.getSlug(),
 				workspace.getId().toString(), workspace.getSlug(), membership.getId().toString(), user.getDisplayName(), user.getPreferredLanguage()));
+	}
+
+	private java.util.Set<MembershipRole> rolesFor(WorkspaceMembershipJpaEntity membership) {
+		if ("BUYER".equals(membership.getMembershipType())) return java.util.Set.of(MembershipRole.BUYER);
+		return roleAssignments.findByMembershipId(membership.getId()).stream()
+				.map(value -> MembershipRole.from(value.getRole())).collect(java.util.stream.Collectors.toUnmodifiableSet());
 	}
 }

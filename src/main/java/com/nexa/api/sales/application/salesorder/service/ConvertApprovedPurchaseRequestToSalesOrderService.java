@@ -73,7 +73,7 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
     }
 
     private static void requireCommercialWrite(CurrentAccessContext context) {
-        if (context.role() != MembershipRole.SALES && context.role() != MembershipRole.COMPANY_OWNER) {
+        if (!context.hasRole(MembershipRole.SALES) && !context.hasRole(MembershipRole.COMPANY_OWNER)) {
             throw new AccessPolicyViolation("Commercial sales access is required");
         }
         context.requirePermission(Permission.SALES_WRITE);

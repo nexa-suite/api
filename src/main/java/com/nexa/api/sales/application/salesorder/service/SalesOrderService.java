@@ -95,13 +95,13 @@ public class SalesOrderService implements SalesOrderUseCase {
 
 	@Override
 	public SalesPage<FulfillmentCandidateView> fulfillmentCandidates(CurrentAccessContext context, SalesOrderFilter filter) {
-		if (context.role() != MembershipRole.WAREHOUSE && context.role() != MembershipRole.LOGISTICS) throw new AccessPolicyViolation("Only warehouse or logistics can read fulfillment candidates");
+		if (!context.hasRole(MembershipRole.WAREHOUSE) && !context.hasRole(MembershipRole.LOGISTICS)) throw new AccessPolicyViolation("Only warehouse or logistics can read fulfillment candidates");
 		context.requirePermission(Permission.FULFILLMENT_READ);
 		return persistence.fulfillmentCandidates(scope(context), workspace(context), filter);
 	}
 
 	private String buyerAccount(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.BUYER) {
+		if (!context.hasRole(MembershipRole.BUYER)) {
 			context.requirePermission(Permission.SALES_READ);
 			return null;
 		}
@@ -110,7 +110,7 @@ public class SalesOrderService implements SalesOrderUseCase {
 	}
 
 	private static void commercialWrite(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.SALES && context.role() != MembershipRole.COMPANY_OWNER) throw new AccessPolicyViolation("Commercial sales access is required");
+		if (!context.hasRole(MembershipRole.SALES) && !context.hasRole(MembershipRole.COMPANY_OWNER)) throw new AccessPolicyViolation("Commercial sales access is required");
 		context.requirePermission(Permission.SALES_WRITE);
 	}
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }

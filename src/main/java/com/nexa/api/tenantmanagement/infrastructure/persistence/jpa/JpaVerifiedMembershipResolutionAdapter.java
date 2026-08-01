@@ -23,12 +23,14 @@ public class JpaVerifiedMembershipResolutionAdapter implements VerifiedMembershi
 	private final WorkspaceMembershipJpaRepository memberships;
 	private final WorkspaceJpaRepository workspaces;
 	private final TenantJpaRepository tenants;
+	private final WorkspaceMembershipRoleJpaRepository roleAssignments;
 
 	public JpaVerifiedMembershipResolutionAdapter(WorkspaceMembershipJpaRepository memberships,
-			WorkspaceJpaRepository workspaces, TenantJpaRepository tenants) {
+			WorkspaceJpaRepository workspaces, TenantJpaRepository tenants, WorkspaceMembershipRoleJpaRepository roleAssignments) {
 		this.memberships = memberships;
 		this.workspaces = workspaces;
 		this.tenants = tenants;
+		this.roleAssignments = roleAssignments;
 	}
 
 	@Override
@@ -40,10 +42,16 @@ public class JpaVerifiedMembershipResolutionAdapter implements VerifiedMembershi
 			return memberships.findForScope(user, tenant, workspace).flatMap(m -> workspaces.findById(workspace)
 				.flatMap(w -> tenants.findById(tenant).map(t -> new VerifiedMembership(
 					new Membership(new MembershipId(m.getId().toString()), new UserId(m.getUserId().toString()), new TenantId(t.getId().toString()),
-						new WorkspaceId(w.getId().toString()), MembershipRole.from(m.getRole()), MembershipStatus.from(m.getStatus())),
+						new WorkspaceId(w.getId().toString()), rolesFor(m), MembershipStatus.from(m.getStatus())),
 					TenantStatus.from(t.getStatus()), WorkspaceStatus.from(w.getStatus())))));
 		} catch (IllegalArgumentException exception) {
 			return Optional.empty();
 		}
+	}
+
+	private java.util.Set<MembershipRole> rolesFor(WorkspaceMembershipJpaEntity membership) {
+		if ("BUYER".equals(membership.getMembershipType())) return java.util.Set.of(MembershipRole.BUYER);
+		return roleAssignments.findByMembershipId(membership.getId()).stream()
+				.map(value -> MembershipRole.from(value.getRole())).collect(java.util.stream.Collectors.toUnmodifiableSet());
 	}
 }

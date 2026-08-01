@@ -32,4 +32,8 @@ public record AccessPolicy(ClientSurface surface, String role, Set<String> permi
 	public boolean allows(String permission) {
 		return permission != null && (permissions.contains("*") || permissions.contains(permission));
 	}
+
+	public Set<String> roles() {
+		return role == null || role.isBlank() ? Set.of() : Set.of(role.split(","));
+	}
 }

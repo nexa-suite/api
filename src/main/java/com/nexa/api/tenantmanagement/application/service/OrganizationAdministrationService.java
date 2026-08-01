@@ -9,9 +9,11 @@ import com.nexa.api.tenantmanagement.domain.model.access.Permission;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
-import com.nexa.api.shared.presentation.error.ApiResourceNotFoundException;
+import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class OrganizationAdministrationService implements OrganizationAdministrationUseCase {
 	private final OrganizationAdministrationPort port;
@@ -60,13 +62,27 @@ public final class OrganizationAdministrationService implements OrganizationAdmi
 	@Override
 	public OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRole(CurrentAccessContext context, String membershipId,
 			MembershipRole role, long expectedVersion, String correlationId) {
+		if (role == null) throw new OrganizationAdministrationInvariantViolation("Membership role is required");
+		return changeRoles(context, membershipId, Set.of(role), expectedVersion, correlationId);
+	}
+
+	@Override
+	public OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRoles(CurrentAccessContext context, String membershipId,
+			Set<MembershipRole> roles, long expectedVersion, String correlationId) {
 		manage(context);
 		var current = findMembership(context, membershipId);
-		MembershipRole before = MembershipRole.from(current.role());
-		if (role == null || role == MembershipRole.BUYER || before == MembershipRole.BUYER) throw new OrganizationAdministrationInvariantViolation("Cross-surface role conversion is not allowed");
-		if (before == MembershipRole.COMPANY_OWNER && role != before && port.activeOwnerCount(current.workspaceId()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active company owner must remain");
-		if (port.updateRole(context.tenantId().toString(), current.id(), role.name(), expectedVersion) == 0) throw new ConcurrencyConflictException();
-		port.appendMembershipEvent("ROLE_CHANGED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), before.name(), current.status(), role.name(), current.status(), correlationId);
+		Set<MembershipRole> before = parseRoles(current);
+		if (roles == null || roles.isEmpty() || roles.contains(MembershipRole.BUYER) || before.contains(MembershipRole.BUYER)) {
+			throw new OrganizationAdministrationInvariantViolation("Cross-surface role conversion is not allowed");
+		}
+		if (before.contains(MembershipRole.TENANT_ADMIN) && !roles.contains(MembershipRole.TENANT_ADMIN)
+				&& port.activeTenantAdminCount(current.workspaceId()) <= 1) {
+			throw new OrganizationAdministrationInvariantViolation("At least one active tenant admin must remain");
+		}
+		Set<String> roleNames = roles.stream().map(Enum::name).collect(Collectors.toUnmodifiableSet());
+		if (port.updateRoles(context.tenantId().toString(), current.id(), roleNames, expectedVersion) == 0) throw new ConcurrencyConflictException();
+		port.appendMembershipEvent("ROLE_CHANGED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(),
+				String.join(",", before.stream().map(Enum::name).sorted().toList()), current.status(), String.join(",", roleNames.stream().sorted().toList()), current.status(), correlationId);
 		return new OrganizationAdministrationResult<>(findMembership(context, current.id()), expectedVersion + 1);
 	}
 
@@ -76,9 +92,9 @@ public final class OrganizationAdministrationService implements OrganizationAdmi
 		manage(context);
 		var current = findMembership(context, membershipId);
 		if ("DISABLED".equals(current.status())) return new OrganizationAdministrationResult<>(current, current.version());
-		if (MembershipRole.COMPANY_OWNER.name().equals(current.role()) && port.activeOwnerCount(current.workspaceId()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active company owner must remain");
+		if (parseRoles(current).contains(MembershipRole.TENANT_ADMIN) && port.activeTenantAdminCount(current.workspaceId()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active tenant admin must remain");
 		if (port.updateStatus(context.tenantId().toString(), current.id(), "DISABLED", expectedVersion) == 0) throw new ConcurrencyConflictException();
-		port.appendMembershipEvent("MEMBERSHIP_SUSPENDED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), current.role(), current.status(), current.role(), "DISABLED", correlationId);
+		port.appendMembershipEvent("MEMBERSHIP_SUSPENDED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), String.join(",", current.roles()), current.status(), String.join(",", current.roles()), "DISABLED", correlationId);
 		return new OrganizationAdministrationResult<>(findMembership(context, current.id()), expectedVersion + 1);
 	}
 
@@ -88,7 +104,7 @@ public final class OrganizationAdministrationService implements OrganizationAdmi
 		manage(context);
 		var current = findMembership(context, membershipId);
 		if (port.updateStatus(context.tenantId().toString(), current.id(), "ACTIVE", expectedVersion) == 0) throw new ConcurrencyConflictException();
-		port.appendMembershipEvent("MEMBERSHIP_REACTIVATED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), current.role(), current.status(), current.role(), "ACTIVE", correlationId);
+		port.appendMembershipEvent("MEMBERSHIP_REACTIVATED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), String.join(",", current.roles()), current.status(), String.join(",", current.roles()), "ACTIVE", correlationId);
 		return new OrganizationAdministrationResult<>(findMembership(context, current.id()), expectedVersion + 1);
 	}
 
@@ -98,6 +114,9 @@ public final class OrganizationAdministrationService implements OrganizationAdmi
 	}
 	private WorkspaceMembershipSummary findMembership(CurrentAccessContext context, String id) {
 		return port.findMembership(context.tenantId().toString(), id).filter(value -> value.workspaceId().equals(context.workspaceId().toString())).orElseThrow(() -> new ApiResourceNotFoundException("membership"));
+	}
+	private static Set<MembershipRole> parseRoles(WorkspaceMembershipSummary value) {
+		return value.roles().stream().map(MembershipRole::from).collect(Collectors.toUnmodifiableSet());
 	}
 	private static void read(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_READ); }
 	private static void manage(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_MANAGE); }

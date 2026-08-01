@@ -50,16 +50,21 @@ public class LocalDevelopmentBootstrap {
 			UUID userId = user(user, now);
 			if ("BUYER".equals(user.role())) buyerUserId = userId;
 			jdbc.update("insert into tenant_management.workspace_membership "
-					+ "(id, workspace_id, user_id, role, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
-					+ "on conflict (workspace_id, user_id) do update set role = excluded.role, status = 'ACTIVE', updated_at = excluded.updated_at",
-					UUID.randomUUID(), workspaceId, userId, user.role(), timestamp(now), timestamp(now));
+					+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
+					+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
+					UUID.randomUUID(), workspaceId, userId, "BUYER".equals(user.role()) ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
+			UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
+			if (!"BUYER".equals(user.role())) {
+				String[] roles = "COMPANY_OWNER".equals(user.role()) ? new String[] { "TENANT_ADMIN", "COMPANY_OWNER" } : new String[] { user.role() };
+				for (String role : roles) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,?,?) on conflict do nothing", membershipId, tenantId, workspaceId, role, timestamp(now));
+			}
 		}
 		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
 	}
 
 	private void seedClientAccounts(UUID tenantId, UUID workspaceId, UUID buyerUserId, Instant now) {
 		if (buyerUserId == null) return;
-		List<UUID> memberships = jdbc.query("select id from tenant_management.workspace_membership where workspace_id=? and user_id=? and role='BUYER' and status='ACTIVE'", (rs, row) -> rs.getObject(1, UUID.class), workspaceId, buyerUserId);
+		List<UUID> memberships = jdbc.query("select id from tenant_management.workspace_membership where workspace_id=? and user_id=? and membership_type='BUYER' and status='ACTIVE'", (rs, row) -> rs.getObject(1, UUID.class), workspaceId, buyerUserId);
 		if (memberships.isEmpty()) return;
 		UUID membershipId = memberships.get(0);
 		for (var seed : clientAccountSeedLoader.load()) {

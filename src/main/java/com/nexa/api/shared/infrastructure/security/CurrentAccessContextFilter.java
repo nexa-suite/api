@@ -63,6 +63,7 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		WorkspaceId workspaceId;
 		String membershipIdClaim;
 		String roleClaim;
+		String rolesClaim;
 		String sessionIdClaim;
 		try {
 			surface = Surface.valueOf(requiredClaim(jwt, "surface").toUpperCase(java.util.Locale.ROOT));
@@ -71,6 +72,7 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 			workspaceId = new WorkspaceId(requiredClaim(jwt, "workspace_id"));
 			membershipIdClaim = requiredClaim(jwt, "membership_id");
 			roleClaim = requiredClaim(jwt, "role");
+			rolesClaim = jwt.getClaimAsStringList("roles") == null ? roleClaim : String.join(",", jwt.getClaimAsStringList("roles"));
 			sessionIdClaim = requiredClaim(jwt, "sid");
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
@@ -93,7 +95,7 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		try {
 			resolved = accessContext.resolve(new CurrentAccessRequest(userId, tenantId, workspaceId, surface));
 			if (!resolved.membershipId().toString().equals(membershipIdClaim)
-					|| !resolved.role().name().equals(roleClaim)) {
+					|| !resolved.roles().stream().map(Enum::name).sorted().collect(java.util.stream.Collectors.joining(",")).equals(java.util.Arrays.stream(rolesClaim.split(",")).map(String::trim).sorted().collect(java.util.stream.Collectors.joining(",")))) {
 				throw new IllegalStateException("JWT access claims do not match the active workspace membership");
 			}
 		} catch (RuntimeException exception) {

@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "26.0.1"
+          java-version: "25"
           cache: maven
       - name: Verify API
         run: ./mvnw clean verify
