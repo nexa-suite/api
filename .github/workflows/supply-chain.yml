@@ -62,13 +62,14 @@ jobs:
         with:
           context: .
           push: false
-          load: true
+          outputs: type=oci,dest=/tmp/nexa-api.tar
           sbom: true
           provenance: mode=max
           tags: nexa/api:supply-chain-${{ github.sha }}
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: nexa/api:supply-chain-${{ github.sha }}
+          input: /tmp/nexa-api.tar
+          scan-type: image
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           exit-code: '1'
