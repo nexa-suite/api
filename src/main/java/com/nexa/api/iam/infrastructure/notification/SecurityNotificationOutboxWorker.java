@@ -49,6 +49,11 @@ public final class SecurityNotificationOutboxWorker {
                     delivery.sendReset(row.recipient(), row.surface(), token, Instant.parse(expires));
                 } else if ("PASSWORD_CHANGED".equals(row.type())) {
                     delivery.sendPasswordChanged(row.recipient(), row.surface());
+                } else if ("ORGANIZATION_INVITATION".equals(row.type())) {
+                    String displayName = payload.substring(payload.indexOf("displayName=") + 12, payload.indexOf('\n'));
+                    String token = payload.substring(payload.indexOf("token=") + 6, payload.indexOf('\n', payload.indexOf("token=")));
+                    String expires = payload.substring(payload.indexOf("expiresAt=") + 10);
+                    delivery.sendInvitation(row.recipient(), displayName, token, Instant.parse(expires));
                 } else throw new IllegalStateException("Unknown security notification type");
 				jdbc.update("update iam.security_notification_outbox set status='SENT',payload_ciphertext='',processing_started_at=null,locked_by=null,sent_at=current_timestamp,attempt_count=attempt_count+1,version=version+1 where id=? and status='PROCESSING' and locked_by=?", row.id(), workerId);
             } catch (RuntimeException exception) {

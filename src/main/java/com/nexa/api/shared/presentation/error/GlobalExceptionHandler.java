@@ -25,6 +25,11 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.security.access.AccessDeniedException;
 import com.nexa.api.tenantmanagement.domain.model.administration.OrganizationAdministrationInvariantViolation;
 import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
+import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationConflictException;
+import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyConflictException;
+import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyRequiredException;
+import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationInvalidException;
+import com.nexa.api.tenantmanagement.application.service.TenantConfigurationService.CustomFieldConflictException;
 import com.nexa.api.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
 import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
@@ -113,11 +118,48 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request);
 	}
 
+	@ExceptionHandler(InvitationInvalidException.class)
+	public ResponseEntity<ProblemDetail> handleInvitationInvalid(InvitationInvalidException exception, HttpServletRequest request) {
+		return response(HttpStatus.NOT_FOUND, ApiErrorCode.INVITATION_INVALID, "Invitation is invalid or expired", request);
+	}
+
+	@ExceptionHandler(InvitationConflictException.class)
+	public ResponseEntity<ProblemDetail> handleInvitationConflict(InvitationConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.INVITATION_CONFLICT, "Invitation cannot be completed", request);
+	}
+
+	@ExceptionHandler(InvitationIdempotencyRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleInvitationIdempotencyRequired(InvitationIdempotencyRequiredException exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request);
+	}
+
+	@ExceptionHandler(InvitationIdempotencyConflictException.class)
+	public ResponseEntity<ProblemDetail> handleInvitationIdempotencyConflict(InvitationIdempotencyConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different invitation", request);
+	}
+
+	@ExceptionHandler(CustomFieldConflictException.class)
+	public ResponseEntity<ProblemDetail> handleCustomFieldConflict(CustomFieldConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.CUSTOM_FIELD_CONFLICT, "Custom field key already exists", request);
+	}
+
 	@ExceptionHandler(OrganizationAdministrationInvariantViolation.class)
 	public ResponseEntity<ProblemDetail> handleOrganizationInvariant(OrganizationAdministrationInvariantViolation exception, HttpServletRequest request) {
-		ApiErrorCode code = exception.getMessage() != null && exception.getMessage().contains("Cross-surface")
-				? ApiErrorCode.ROLE_TRANSITION_NOT_ALLOWED : ApiErrorCode.LAST_ACTIVE_OWNER_REQUIRED;
+		String message = exception.getMessage() == null ? "" : exception.getMessage().toLowerCase(java.util.Locale.ROOT);
+		ApiErrorCode code = message.contains("cross-surface")
+				? ApiErrorCode.ROLE_TRANSITION_NOT_ALLOWED
+				: message.contains("usable administrative workspace")
+				? ApiErrorCode.LAST_USABLE_ADMINISTRATIVE_WORKSPACE_REQUIRED : ApiErrorCode.LAST_ACTIVE_OWNER_REQUIRED;
 		return response(HttpStatus.CONFLICT, code, "Organization membership policy prevents this change", request);
+	}
+
+	@ExceptionHandler(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationIdempotency(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request);
+	}
+	@ExceptionHandler(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationIdempotencyPayload(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different workspace", request);
 	}
 	@ExceptionHandler(AccessPolicyViolation.class)
 	public ResponseEntity<ProblemDetail> handleAccessPolicy(AccessPolicyViolation exception, HttpServletRequest request) {
@@ -143,10 +185,16 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
 		LOGGER.warn("Data integrity constraint rejected request {}", request.getRequestURI(), exception.getMostSpecificCause());
 		String message = exception.getMostSpecificCause() == null ? "" : String.valueOf(exception.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
-		ApiErrorCode code = message.contains("code") ? ApiErrorCode.CLIENT_ACCOUNT_CODE_CONFLICT
+		ApiErrorCode code = message.contains("uq_organization_registration_slug") ? ApiErrorCode.REGISTRATION_SLUG_CONFLICT
+				: message.contains("uq_workspace_tenant_slug") ? ApiErrorCode.WORKSPACE_SLUG_CONFLICT
+				: message.contains("uq_organization_invitation_active_email") ? ApiErrorCode.INVITATION_CONFLICT
+				: message.contains("uq_custom_field_definition_key") ? ApiErrorCode.CUSTOM_FIELD_CONFLICT
+				: message.contains("code") ? ApiErrorCode.CLIENT_ACCOUNT_CODE_CONFLICT
 				: message.contains("tax") ? ApiErrorCode.CLIENT_ACCOUNT_TAX_ID_CONFLICT
 				: message.contains("membership") ? ApiErrorCode.BUYER_MEMBERSHIP_ALREADY_ASSIGNED : ApiErrorCode.INVALID_REQUEST;
-		return response(HttpStatus.CONFLICT, code, "Sales resource conflicts with existing data", request);
+		String detail = code == ApiErrorCode.REGISTRATION_SLUG_CONFLICT
+				? "Organization workspace slug is already registered" : "Sales resource conflicts with existing data";
+		return response(HttpStatus.CONFLICT, code, detail, request);
 	}
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
@@ -245,6 +293,10 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(Exception.class)
 	public ResponseEntity<ProblemDetail> handleUnexpected(Exception exception, HttpServletRequest request) {
+		if ("REGISTRATION_SLUG_CONFLICT".equals(exception.getMessage())) {
+			return response(HttpStatus.CONFLICT, ApiErrorCode.REGISTRATION_SLUG_CONFLICT,
+					"Organization workspace slug is already registered", request);
+		}
 		LOGGER.error("Unexpected API exception correlationId={}", ApiProblemDetailFactory.correlationId(request), exception);
 		return response(HttpStatus.INTERNAL_SERVER_ERROR, ApiErrorCode.INTERNAL_ERROR, "Internal server error", request);
 	}

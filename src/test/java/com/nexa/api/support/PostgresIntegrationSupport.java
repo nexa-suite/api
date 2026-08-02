@@ -110,7 +110,8 @@ public abstract class PostgresIntegrationSupport {
 
 	protected String membershipId(String email) {
 		return jdbc.queryForObject("select m.id::text from tenant_management.workspace_membership m "
-				+ "join iam.user_account u on u.id = m.user_id where u.normalized_email = ?", String.class, email);
+				+ "join iam.user_account u on u.id = m.user_id where u.normalized_email = ? "
+				+ "and m.workspace_id = (select id from tenant_management.workspace where slug = ?)", String.class, email, WORKSPACE_SLUG);
 	}
 
 	protected String tenantId() {

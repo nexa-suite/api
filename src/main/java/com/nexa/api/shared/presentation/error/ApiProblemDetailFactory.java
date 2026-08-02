@@ -59,6 +59,8 @@ public final class ApiProblemDetailFactory {
 			case WORKSPACE_NOT_FOUND -> "Workspace not found";
 			case MEMBERSHIP_NOT_FOUND -> "Membership not found";
 			case LAST_ACTIVE_OWNER_REQUIRED -> "Last active owner required";
+			case LAST_USABLE_ADMINISTRATIVE_WORKSPACE_REQUIRED -> "Last usable administrative workspace required";
+			case WORKSPACE_SLUG_CONFLICT -> "Workspace slug conflict";
 			case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
 			case CONCURRENCY_CONFLICT -> "Concurrency conflict";
 			case INVALID_TRANSITION -> "Invalid transition";
@@ -109,6 +111,9 @@ public final class ApiProblemDetailFactory {
 				case REGISTRATION_SLUG_CONFLICT -> "Organization workspace slug conflict";
 				case FOUNDER_EMAIL_INCOMPATIBLE -> "Founder email is already used by an incompatible membership";
 				case REGISTRATION_NOT_PENDING -> "Organization registration is not pending";
+				case INVITATION_INVALID -> "Invitation invalid or expired";
+				case INVITATION_CONFLICT -> "Invitation conflict";
+				case CUSTOM_FIELD_CONFLICT -> "Custom field conflict";
 				case SYSTEM_OPERATOR_REQUIRED -> "System operator authorization required";
 				case REJECTION_REASON_REQUIRED -> "Rejection reason required";
 				case INTERNAL_ERROR -> "Internal server error";

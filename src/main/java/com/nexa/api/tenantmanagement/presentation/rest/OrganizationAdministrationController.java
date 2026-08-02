@@ -32,11 +32,24 @@ public class OrganizationAdministrationController {
 	@GetMapping("/workspaces")
 	public List<WorkspaceSummary> workspaces(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) { return administration.workspaces(context); }
 
+	@PostMapping("/workspaces")
+	public ResponseEntity<WorkspaceSummary> createWorkspace(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
+			@RequestHeader(name="Idempotency-Key", required=false) String idempotencyKey, @RequestBody WorkspaceCreate request, HttpServletRequest servletRequest) {
+		var result = administration.createWorkspace(context, request.name(), request.slug(), idempotencyKey, correlation(servletRequest));
+		return ResponseEntity.status(201).eTag(etag(result.value().version())).body(result.value());
+	}
+
 	@GetMapping("/workspaces/{workspaceId}")
 	public ResponseEntity<WorkspaceDetails> workspace(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String workspaceId) { var details=administration.workspace(context,workspaceId); return ResponseEntity.ok().eTag(etag(details.workspace().version())).body(details); }
 
 	@PatchMapping("/workspaces/{workspaceId}")
-	public ResponseEntity<WorkspaceSummary> updateWorkspace(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String workspaceId,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestBody WorkspacePatch patch,HttpServletRequest request) { var result=administration.updateWorkspace(context,workspaceId,patch.name(),patch.status()==null?null:WorkspaceStatus.from(patch.status()),version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
+	public ResponseEntity<WorkspaceSummary> updateWorkspace(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String workspaceId,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestBody WorkspacePatch patch,HttpServletRequest request) { var result=administration.updateWorkspace(context,workspaceId,patch.name(),patch.slug(),patch.status()==null?null:WorkspaceStatus.from(patch.status()),version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
+
+	@PostMapping("/workspaces/{workspaceId}/suspensions")
+	public ResponseEntity<WorkspaceSummary> suspendWorkspace(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String workspaceId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.suspendWorkspace(context,workspaceId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
+
+	@PostMapping("/workspaces/{workspaceId}/reactivations")
+	public ResponseEntity<WorkspaceSummary> reactivateWorkspace(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String workspaceId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.reactivateWorkspace(context,workspaceId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 
 	@GetMapping("/workspace-memberships")
 	public List<WorkspaceMembershipSummary> memberships(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) { return administration.memberships(context); }
@@ -62,7 +75,8 @@ public class OrganizationAdministrationController {
 	private static long version(String value) { if (value == null || value.isBlank()) throw new PreconditionRequiredException(); try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new PreconditionRequiredException(); } }
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
-	public record WorkspacePatch(String name,String status) { }
+	public record WorkspaceCreate(String name, String slug) { }
+	public record WorkspacePatch(String name,String slug,String status) { }
 	public record RolesPatch(Set<String> roles) { public RolesPatch { if (roles == null || roles.isEmpty()) throw new IllegalArgumentException("At least one role is required"); } }
 	public record OrganizationResponse(String id,String name,String slug,String status,String currentWorkspaceId,String currentWorkspaceName,long version) { static OrganizationResponse from(OrganizationSummary value){ return new OrganizationResponse(value.id(),value.name(),value.slug(),value.status(),value.currentWorkspaceId(),value.currentWorkspaceName(),value.version()); } }
 	public static final class PreconditionRequiredException extends RuntimeException { }

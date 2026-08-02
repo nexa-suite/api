@@ -48,13 +48,17 @@ public final class SystemOperatorAuthenticationFilter extends OncePerRequestFilt
             throws ServletException, IOException {
         if (!isInternalOperatorPath(request)) { chain.doFilter(request, response); return; }
         if (request.getHeader("Origin") != null) { reject(request, response, ApiErrorCode.ORIGIN_NOT_ALLOWED, "Request origin is not allowed"); return; }
-        String bucket = request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
-        if (isRateLimited(bucket)) { reject(request, response, ApiErrorCode.SYSTEM_OPERATOR_REQUIRED, "System operator authentication is temporarily limited"); return; }
-        String supplied = request.getHeader("X-Nexa-System-Operator");
-        if (credential.length < 32 || supplied == null || !MessageDigest.isEqual(credential, supplied.getBytes(StandardCharsets.UTF_8))) {
-            registerFailure(bucket, request);
-            reject(request, response, ApiErrorCode.SYSTEM_OPERATOR_REQUIRED, "System operator authentication is required");
-            return;
+		String supplied = request.getHeader("X-Nexa-System-Operator");
+		if (credential.length < 32 || supplied == null || !MessageDigest.isEqual(credential, supplied.getBytes(StandardCharsets.UTF_8))) {
+			String bucket = request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
+			if (!registerFailureIfAllowed(bucket)) {
+				reject(request, response, ApiErrorCode.SYSTEM_OPERATOR_REQUIRED, "System operator authentication is temporarily limited");
+				return;
+			}
+			appendAudit(new SecurityAuditPort.Event("SYSTEM_OPERATOR_AUTHENTICATION_FAILED", null, null, null, null, "SYSTEM",
+					correlation(request), trace(request), Instant.now(), Map.of("bucket", "network")));
+			reject(request, response, ApiErrorCode.SYSTEM_OPERATOR_REQUIRED, "System operator authentication is required");
+			return;
         }
         var principal = new SystemOperatorContext("system-operator", PERMISSION);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
@@ -64,18 +68,13 @@ public final class SystemOperatorAuthenticationFilter extends OncePerRequestFilt
         chain.doFilter(request, response);
     }
 
-    private void registerFailure(String bucket, HttpServletRequest request) {
-        if (jdbc != null) jdbc.update("insert into iam.system_operator_throttle_bucket (bucket_key_hash,window_started_at,failure_count,updated_at) values (?,current_timestamp,1,current_timestamp) on conflict (bucket_key_hash) do update set failure_count=case when iam.system_operator_throttle_bucket.window_started_at <= current_timestamp - interval '1 minute' then 1 else iam.system_operator_throttle_bucket.failure_count+1 end,window_started_at=case when iam.system_operator_throttle_bucket.window_started_at <= current_timestamp - interval '1 minute' then current_timestamp else iam.system_operator_throttle_bucket.window_started_at end,updated_at=current_timestamp", digest(bucket));
-        appendAudit(new SecurityAuditPort.Event("SYSTEM_OPERATOR_AUTHENTICATION_FAILED", null, null, null, null, "SYSTEM",
-                correlation(request), trace(request), Instant.now(), Map.of("bucket", "network")));
-    }
-
-    private boolean isRateLimited(String bucket) {
-        if (jdbc == null) return false;
-        Integer count = jdbc.query("select failure_count from iam.system_operator_throttle_bucket where bucket_key_hash=? and window_started_at > current_timestamp - interval '1 minute'",
-                (rs, row) -> rs.getInt(1), digest(bucket)).stream().findFirst().orElse(0);
-        return count >= 10;
-    }
+	private boolean registerFailureIfAllowed(String bucket) {
+		if (jdbc == null) return true;
+		String hash = digest(bucket);
+		jdbc.update("insert into iam.system_operator_throttle_bucket (bucket_key_hash,window_started_at,failure_count,updated_at) values (?,current_timestamp,0,current_timestamp) on conflict (bucket_key_hash) do nothing", hash);
+		return !jdbc.query("update iam.system_operator_throttle_bucket set failure_count=case when window_started_at <= current_timestamp - interval '1 minute' then 1 else failure_count+1 end,window_started_at=case when window_started_at <= current_timestamp - interval '1 minute' then current_timestamp else window_started_at end,updated_at=current_timestamp where bucket_key_hash=? and (window_started_at <= current_timestamp - interval '1 minute' or failure_count < 10) returning failure_count",
+				(rs, row) -> rs.getInt(1), hash).isEmpty();
+	}
 
     private void reject(HttpServletRequest request, HttpServletResponse response, ApiErrorCode code, String detail) throws IOException {
         var problem = ApiProblemDetailFactory.create(HttpStatus.FORBIDDEN, code, detail, request);

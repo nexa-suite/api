@@ -6,13 +6,16 @@ import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrat
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @Configuration(proxyBeanMethods = false)
 @Profile("!test")
 public class OrganizationAdministrationRuntimeConfiguration {
 	@Bean
 	OrganizationAdministrationUseCase organizationAdministrationUseCase(OrganizationAdministrationPort port,
-			com.nexa.api.shared.application.port.out.SecurityAuditPort audit) {
-		return new OrganizationAdministrationService(port, audit);
+			com.nexa.api.shared.application.port.out.SecurityAuditPort audit,
+			PlatformTransactionManager transactionManager) {
+		return TenantTransactionalProxy.required(new OrganizationAdministrationService(port, audit),
+				OrganizationAdministrationUseCase.class, transactionManager);
 	}
 }
