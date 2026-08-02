@@ -6,7 +6,9 @@ COPY pom.xml ./
 RUN mvn -B -ntp dependency:go-offline
 
 COPY src ./src
-RUN mvn -B -ntp package
+# GitHub runners can inject a Unix OTEL socket that is invalid for Spring's
+# build-time test context. Runtime observability remains deployment-configured.
+RUN OTEL_SDK_DISABLED=true mvn -B -ntp package
 
 FROM eclipse-temurin:25-jre-noble@sha256:2f1da100788559b397bcf48c736169ea5b070bde84e55f203bbee8e83d87a175
 
