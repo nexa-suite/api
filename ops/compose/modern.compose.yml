@@ -44,6 +44,15 @@ services:
       NEXA_SMTP_PORT: ${NEXA_SMTP_PORT:-1025}
       NEXA_SMTP_FROM: ${NEXA_SMTP_FROM:-no-reply@nexa.local}
       NEXA_SMTP_REQUIRED: ${NEXA_SMTP_REQUIRED:-true}
+      SPRING_MAIL_HOST: ${NEXA_SMTP_HOST:-modern-mailpit}
+      SPRING_MAIL_PORT: ${NEXA_SMTP_PORT:-1025}
+      SPRING_MAIL_USERNAME: ${NEXA_SMTP_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${NEXA_SMTP_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${NEXA_SMTP_AUTH:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${NEXA_SMTP_STARTTLS:-false}
+      NEXA_PASSWORD_RESET_THROTTLE_KEY: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:?Set NEXA_PASSWORD_RESET_THROTTLE_KEY in api/.env.local}
+      NEXA_NOTIFICATION_OUTBOX_KEY: ${NEXA_NOTIFICATION_OUTBOX_KEY:?Set NEXA_NOTIFICATION_OUTBOX_KEY in api/.env.local}
+      NEXA_SYSTEM_OPERATOR_TOKEN: ${NEXA_SYSTEM_OPERATOR_TOKEN:?Set NEXA_SYSTEM_OPERATOR_TOKEN in api/.env.local}
       NEXA_DEV_BOOTSTRAP_ENABLED: ${NEXA_DEV_BOOTSTRAP_ENABLED:-false}
       NEXA_DEV_TENANT_NAME: ${NEXA_DEV_TENANT_NAME:-}
       NEXA_DEV_TENANT_SLUG: ${NEXA_DEV_TENANT_SLUG:-}
@@ -136,13 +145,26 @@ services:
 
   modern-jaeger:
     profiles: [observability]
-    image: jaegertracing/all-in-one:1.76
+    image: jaegertracing/all-in-one:1.76.0
     container_name: nexa-modern-jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
       - "127.0.0.1:16686:16686"
       - "127.0.0.1:4318:4318"
+    networks:
+      - modern-edge
+
+  modern-otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.132.0
+    container_name: nexa-modern-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./otel-collector-config.yml:/etc/otelcol-contrib/config.yml:ro
+    depends_on:
+      modern-jaeger:
+        condition: service_started
     networks:
       - modern-edge
 
