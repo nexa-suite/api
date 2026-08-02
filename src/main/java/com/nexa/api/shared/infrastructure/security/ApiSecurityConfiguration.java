@@ -78,6 +78,7 @@ public class ApiSecurityConfiguration {
 					authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
 						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",
 						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
+						"/api/v1/organization-invitation-acceptances",
 						"/api/v1/tenant-management/organization-registrations",
 						"/api/v1/tenant-management/organization-registrations/**").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();

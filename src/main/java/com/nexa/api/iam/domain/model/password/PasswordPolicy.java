@@ -1,20 +1,13 @@
 package com.nexa.api.iam.domain.model.password;
 
-import java.text.Normalizer;
-import java.util.Set;
-
+/** Compatibility alias retaining the IAM-facing package for existing callers and tests. */
 public final class PasswordPolicy {
-	public static final int MINIMUM_LENGTH = 12;
-	public static final int MAXIMUM_LENGTH = 128;
-	private static final Set<String> COMMON_PASSWORDS = Set.of(
-			"password", "password123", "123456789012", "qwertyuiop", "letmeinplease", "welcome123", "admin123456");
+	public static final int MINIMUM_LENGTH = com.nexa.api.shared.domain.model.password.PasswordPolicy.MINIMUM_LENGTH;
+	public static final int MAXIMUM_LENGTH = com.nexa.api.shared.domain.model.password.PasswordPolicy.MAXIMUM_LENGTH;
 
-	private PasswordPolicy() {}
+	private PasswordPolicy() { }
 
 	public static boolean isValid(String password) {
-		if (password == null || password.length() < MINIMUM_LENGTH || password.length() > MAXIMUM_LENGTH) return false;
-		if (password.codePoints().anyMatch(Character::isISOControl)) return false;
-		String normalized = Normalizer.normalize(password, Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
-		return COMMON_PASSWORDS.stream().noneMatch(normalized::equals);
+		return com.nexa.api.shared.domain.model.password.PasswordPolicy.isValid(password);
 	}
 }

@@ -1,5 +1,6 @@
 package com.nexa.api.iam.infrastructure.security;
 
+import com.nexa.api.iam.application.exception.IamSecurityException;
 import com.nexa.api.iam.application.model.IamSecurityModels.Actor;
 import com.nexa.api.iam.application.model.IamSecurityModels.Profile;
 import com.nexa.api.iam.application.model.IamSecurityModels.ProfilePatch;
@@ -26,7 +27,7 @@ public final class JdbcUserProfilePersistenceAdapter implements UserProfilePersi
         int updated = jdbc.update("update iam.user_account set display_name=?,phone=?,preferred_language=?,timezone=?,updated_at=now(),version=version+1 where id=? and version=?",
                 patch.displayName().trim(), patch.phone() == null || patch.phone().isBlank() ? null : patch.phone().trim(),
                 patch.preferredLanguage(), patch.timezone(), actor.userId(), patch.version());
-        if (updated != 1) throw new IllegalStateException("PROFILE_VERSION_CONFLICT");
+        if (updated != 1) throw new IamSecurityException("PROFILE_VERSION_CONFLICT");
         return findOwnProfile(actor);
     }
 

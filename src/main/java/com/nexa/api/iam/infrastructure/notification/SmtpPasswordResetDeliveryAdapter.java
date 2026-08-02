@@ -48,6 +48,14 @@ public final class SmtpPasswordResetDeliveryAdapter implements PasswordResetDeli
         send(email, "Nexa password changed", "Your Nexa password was changed. If you did not request this change, contact your administrator.");
     }
 
+    @Override
+    public void sendInvitation(String email, String displayName, String token, Instant expiresAt) {
+        if (host.isBlank() && !required) return;
+        String invitationUrl = platformUrl.replace("/reset-password", "/accept-invitation") + "?token=" + token;
+        send(email, "Nexa workspace invitation", "Hello " + displayName + ",\n\nAccept your Nexa workspace invitation: " + invitationUrl
+                + "\n\nThis invitation expires at " + expiresAt + ".");
+    }
+
     private void send(String recipient, String subject, String body) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(from); message.setTo(recipient); message.setSubject(subject); message.setText(body);

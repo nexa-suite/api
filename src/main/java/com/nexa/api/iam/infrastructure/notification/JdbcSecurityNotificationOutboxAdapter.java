@@ -54,12 +54,19 @@ public final class JdbcSecurityNotificationOutboxAdapter implements SecurityNoti
         enqueue("PASSWORD_CHANGED", recipient, surface, "changed=true");
     }
 
+    @Override
+    public void enqueueInvitation(String recipient, String displayName, String token, Instant expiresAt) {
+        enqueue("ORGANIZATION_INVITATION", recipient, "PLATFORM", "displayName=" + safe(displayName) + "\ntoken=" + token + "\nexpiresAt=" + expiresAt);
+    }
+
     private void enqueue(String type, String recipient, String surface, String payload) {
         Instant now = Instant.now();
         String deliveryKey = UUID.randomUUID().toString();
         jdbc.update("insert into iam.security_notification_outbox (id,notification_type,recipient,surface,payload_ciphertext,status,attempt_count,next_attempt_at,created_at,delivery_key,payload_key_version,version) values (?,?,?,?,?,'PENDING',0,?,?,?,?,0)",
                 UUID.randomUUID(), type, recipient, surface, encrypt(payload), java.sql.Timestamp.from(now), java.sql.Timestamp.from(now), deliveryKey, keyVersion);
     }
+
+    private static String safe(String value) { return value == null ? "" : value.replace("\n", " ").replace("\r", " "); }
 
     public String decrypt(String value) {
         return decrypt(value, keyVersion);

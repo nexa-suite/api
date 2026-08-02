@@ -15,5 +15,7 @@ class ChangeFeedSessionRevocationIT extends PostgresIntegrationSupport {
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/authentication/sign-out").header("Authorization", "Bearer " + token).header("X-Nexa-Surface", "PLATFORM").header("Origin", ALLOWED_ORIGIN)).andExpect(status().isNoContent());
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/change-feed/stream").header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
     }
 }

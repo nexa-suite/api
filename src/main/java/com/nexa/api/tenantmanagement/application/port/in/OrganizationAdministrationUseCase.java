@@ -16,8 +16,11 @@ public interface OrganizationAdministrationUseCase {
 	OrganizationSummary organization(CurrentAccessContext context);
 	List<WorkspaceSummary> workspaces(CurrentAccessContext context);
 	WorkspaceDetails workspace(CurrentAccessContext context, String workspaceId);
+	OrganizationAdministrationResult<WorkspaceSummary> createWorkspace(CurrentAccessContext context, String name, String slug, String idempotencyKey, String correlationId);
 	OrganizationAdministrationResult<WorkspaceSummary> updateWorkspace(CurrentAccessContext context, String workspaceId,
-			String name, WorkspaceStatus status, long expectedVersion, String correlationId);
+			String name, String slug, WorkspaceStatus status, long expectedVersion, String correlationId);
+	OrganizationAdministrationResult<WorkspaceSummary> suspendWorkspace(CurrentAccessContext context, String workspaceId, long expectedVersion, String correlationId);
+	OrganizationAdministrationResult<WorkspaceSummary> reactivateWorkspace(CurrentAccessContext context, String workspaceId, long expectedVersion, String correlationId);
 	List<WorkspaceMembershipSummary> memberships(CurrentAccessContext context);
 	WorkspaceMembershipSummary membership(CurrentAccessContext context, String membershipId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRoles(CurrentAccessContext context, String membershipId,
