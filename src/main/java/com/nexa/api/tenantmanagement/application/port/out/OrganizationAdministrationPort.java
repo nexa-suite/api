@@ -16,7 +16,6 @@ public interface OrganizationAdministrationPort {
 	int updateWorkspace(String tenantId, String workspaceId, String name, String status, long expectedVersion);
 	int activeOwnerCount(String workspaceId);
 	default int activeTenantAdminCount(String workspaceId) { return activeOwnerCount(workspaceId); }
-	int updateRole(String tenantId, String membershipId, String role, long expectedVersion);
 	int updateRoles(String tenantId, String membershipId, java.util.Set<String> roles, long expectedVersion);
 	int updateStatus(String tenantId, String membershipId, String status, long expectedVersion);
 	void appendMembershipEvent(String type, String tenantId, String workspaceId, String targetMembershipId,

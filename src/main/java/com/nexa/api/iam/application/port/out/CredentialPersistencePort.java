@@ -1,8 +1,13 @@
 package com.nexa.api.iam.application.port.out;
 
-import com.nexa.api.iam.application.model.IamSecurityModels.Actor;
+import java.util.Optional;
+import java.util.UUID;
 
-/** Persistence intent for credential changes; policy and orchestration stay in Application. */
+/** Persistence intent for credentials; password policy and orchestration stay in Application. */
 public interface CredentialPersistencePort {
-    void changeOwnPassword(Actor actor, String currentPassword, String newPassword);
+    Optional<CredentialRecord> findByUserId(UUID userId);
+    Optional<CredentialRecord> findActiveByNormalizedEmail(String normalizedEmail);
+    void updateCredentialHash(UUID userId, String passwordHash, java.time.Instant changedAt);
+
+    record CredentialRecord(UUID userId, String email, String passwordHash) { }
 }

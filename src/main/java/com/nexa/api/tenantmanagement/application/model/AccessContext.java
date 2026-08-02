@@ -6,7 +6,6 @@ import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
 import com.nexa.api.tenantmanagement.domain.model.identity.UserId;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 
 import java.util.Set;
 
@@ -18,8 +17,6 @@ public interface AccessContext {
 	WorkspaceId workspaceId();
 
 	MembershipId membershipId();
-
-	MembershipRole role();
 
 	Surface surface();
 

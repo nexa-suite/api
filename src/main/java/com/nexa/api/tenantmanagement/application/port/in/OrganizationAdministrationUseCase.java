@@ -20,8 +20,6 @@ public interface OrganizationAdministrationUseCase {
 			String name, WorkspaceStatus status, long expectedVersion, String correlationId);
 	List<WorkspaceMembershipSummary> memberships(CurrentAccessContext context);
 	WorkspaceMembershipSummary membership(CurrentAccessContext context, String membershipId);
-	OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRole(CurrentAccessContext context, String membershipId,
-			MembershipRole role, long expectedVersion, String correlationId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRoles(CurrentAccessContext context, String membershipId,
 			Set<MembershipRole> roles, long expectedVersion, String correlationId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> suspendMembership(CurrentAccessContext context, String membershipId,

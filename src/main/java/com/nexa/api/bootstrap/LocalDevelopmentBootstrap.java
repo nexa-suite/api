@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.Clock;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -40,23 +41,22 @@ public class LocalDevelopmentBootstrap {
 		UUID tenantId = tenant(now);
 		UUID workspaceId = workspace(tenantId, now);
 		List<UserSeed> users = List.of(
-				new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", "COMPANY_OWNER"),
-				new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", "SALES"),
-				new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", "WAREHOUSE"),
-				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", "LOGISTICS"),
-				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", "BUYER"));
+				new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", Set.of("TENANT_ADMIN", "COMPANY_OWNER")),
+				new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", Set.of("SALES")),
+				new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", Set.of("WAREHOUSE")),
+				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", Set.of("LOGISTICS")),
+				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER")));
 		UUID buyerUserId = null;
 		for (UserSeed user : users) {
 			UUID userId = user(user, now);
-			if ("BUYER".equals(user.role())) buyerUserId = userId;
+			if (user.roles().contains("BUYER")) buyerUserId = userId;
 			jdbc.update("insert into tenant_management.workspace_membership "
 					+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
 					+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
-					UUID.randomUUID(), workspaceId, userId, "BUYER".equals(user.role()) ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
+					UUID.randomUUID(), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
 			UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
-			if (!"BUYER".equals(user.role())) {
-				String[] roles = "COMPANY_OWNER".equals(user.role()) ? new String[] { "TENANT_ADMIN", "COMPANY_OWNER" } : new String[] { user.role() };
-				for (String role : roles) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,?,?) on conflict do nothing", membershipId, tenantId, workspaceId, role, timestamp(now));
+			if (!user.roles().contains("BUYER")) {
+				for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,?,?) on conflict do nothing", membershipId, tenantId, workspaceId, role, timestamp(now));
 			}
 		}
 		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
@@ -131,5 +131,5 @@ public class LocalDevelopmentBootstrap {
 		return java.sql.Timestamp.from(instant);
 	}
 
-	private record UserSeed(String emailKey, String passwordKey, String role) {}
+	private record UserSeed(String emailKey, String passwordKey, Set<String> roles) {}
 }

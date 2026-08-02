@@ -9,5 +9,6 @@ import java.util.UUID;
 public interface RefreshSessionPersistencePort {
     List<Session> findOwnSessions(Actor actor);
     void revoke(Actor actor, UUID sessionId);
-    void revokeAllExceptCurrent(Actor actor);
+    int revokeAllExceptCurrent(Actor actor);
+    int revokeAllForUser(UUID userId, UUID exceptSessionId);
 }
