@@ -3,10 +3,21 @@ package com.nexa.api.iam.application.port.out;
 import com.nexa.api.iam.application.model.IamSecurityModels.Activation;
 import com.nexa.api.iam.application.model.IamSecurityModels.Registration;
 import com.nexa.api.iam.application.model.SystemOperatorContext;
+import com.nexa.api.tenantmanagement.domain.model.registration.OrganizationRegistration;
+import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Locked organization-registration transition intent. */
 public interface OrganizationActivationPersistencePort {
-    Activation activate(UUID registrationId, SystemOperatorContext operator, String correlationId, String traceId);
-    Registration reject(UUID registrationId, SystemOperatorContext operator, String reason, String correlationId, String traceId);
+    Optional<RegistrationSnapshot> findForUpdate(UUID registrationId);
+    ActivatedOrganization createActivatedOrganization(OrganizationRegistration registration, String organizationName,
+            String workspaceName, String initialPasswordHash, Instant now);
+    void markActivated(UUID registrationId, UUID tenantId, UUID workspaceId, Instant now);
+    void markRejected(UUID registrationId, String reason, Instant now);
+
+    record RegistrationSnapshot(UUID id, String displayName, String workspaceName, String workspaceSlug,
+            String founderEmail, String founderDisplayName, String termsVersion, String statusTokenHash,
+            String referencePlan, String status, Instant submittedAt) { }
+    record ActivatedOrganization(UUID tenantId, UUID workspaceId, UUID founderUserId, UUID membershipId, String founderEmail) { }
 }

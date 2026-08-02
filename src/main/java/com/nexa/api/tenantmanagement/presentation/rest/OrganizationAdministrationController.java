@@ -7,7 +7,6 @@ import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrat
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.constraints.NotBlank;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
@@ -45,9 +44,6 @@ public class OrganizationAdministrationController {
 	@GetMapping("/workspace-memberships/{membershipId}")
 	public ResponseEntity<WorkspaceMembershipSummary> membership(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId) { var value=administration.membership(context,membershipId); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
 
-	@PatchMapping("/workspace-memberships/{membershipId}/role")
-	public ResponseEntity<WorkspaceMembershipSummary> role(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestBody RolePatch patch,HttpServletRequest request) { var result=administration.changeRole(context,membershipId,MembershipRole.from(patch.role()),version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
-
 	@PatchMapping("/workspace-memberships/{membershipId}/roles")
 	public ResponseEntity<WorkspaceMembershipSummary> roles(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
 			@PathVariable String membershipId, @RequestHeader(name="If-Match", required=false) String ifMatch,
@@ -67,7 +63,6 @@ public class OrganizationAdministrationController {
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
 	public record WorkspacePatch(String name,String status) { }
-	public record RolePatch(@NotBlank String role) { }
 	public record RolesPatch(Set<String> roles) { public RolesPatch { if (roles == null || roles.isEmpty()) throw new IllegalArgumentException("At least one role is required"); } }
 	public record OrganizationResponse(String id,String name,String slug,String status,String currentWorkspaceId,String currentWorkspaceName,long version) { static OrganizationResponse from(OrganizationSummary value){ return new OrganizationResponse(value.id(),value.name(),value.slug(),value.status(),value.currentWorkspaceId(),value.currentWorkspaceName(),value.version()); } }
 	public static final class PreconditionRequiredException extends RuntimeException { }

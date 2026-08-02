@@ -86,7 +86,7 @@ class AccessPolicyTests {
 		TenantId tenantId = TenantId.random();
 		WorkspaceId workspaceId = WorkspaceId.random();
 		Membership membership = new Membership(MembershipId.random(), UserId.random(), tenantId, workspaceId,
-				MembershipRole.BUYER, MembershipStatus.ACTIVE);
+				Set.of(MembershipRole.BUYER), MembershipStatus.ACTIVE);
 		VerifiedMembership verified = new VerifiedMembership(membership, TenantStatus.ACTIVE, WorkspaceStatus.ACTIVE);
 
 		assertThat(verified.isAccessible()).isTrue();

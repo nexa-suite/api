@@ -58,7 +58,7 @@ class IamAuthenticationServicesTests {
 		var result = service.signIn(new SignInCommand("CARLOS@ICISA.PE", "correct", ClientSurface.PLATFORM));
 
 		assertThat(result.surface()).isEqualTo(ClientSurface.PLATFORM);
-		assertThat(result.role()).isEqualTo("commercial");
+		assertThat(result.roles()).containsExactly("commercial");
 		assertThat(result.permissions()).containsExactlyInAnyOrder("catalog:read", "sales:read");
 		assertThat(result.accessToken()).isEqualTo("access-1");
 		assertThat(fixture.passwords.checked).isTrue();
@@ -142,7 +142,7 @@ class IamAuthenticationServicesTests {
 	private static final class FakePolicies implements AccessPolicyPort {
 		@Override
 		public Optional<AccessPolicy> findFor(UserAccountId id, ClientSurface surface) {
-			return Optional.of(new AccessPolicy(surface, "commercial", Set.of("catalog:read", "sales:read")));
+			return Optional.of(new AccessPolicy(surface, Set.of("commercial"), Set.of("catalog:read", "sales:read"), null, null, null, null, null, null, null));
 		}
 	}
 

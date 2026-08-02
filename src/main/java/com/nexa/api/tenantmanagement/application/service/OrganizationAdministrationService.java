@@ -63,13 +63,6 @@ public final class OrganizationAdministrationService implements OrganizationAdmi
 	}
 
 	@Override
-	public OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRole(CurrentAccessContext context, String membershipId,
-			MembershipRole role, long expectedVersion, String correlationId) {
-		if (role == null) throw new OrganizationAdministrationInvariantViolation("Membership role is required");
-		return changeRoles(context, membershipId, Set.of(role), expectedVersion, correlationId);
-	}
-
-	@Override
 	public OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRoles(CurrentAccessContext context, String membershipId,
 			Set<MembershipRole> roles, long expectedVersion, String correlationId) {
 		manage(context);

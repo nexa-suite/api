@@ -31,7 +31,6 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	@Override public int updateWorkspace(String tenantId,String workspaceId,String name,String status,long version){ return jdbc.update("update tenant_management.workspace set name=?,status=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and id=? and version=?",name,status,uuid(tenantId),uuid(workspaceId),version); }
 	@Override public int activeOwnerCount(String workspaceId){ return activeTenantAdminCount(workspaceId); }
 	@Override public int activeTenantAdminCount(String workspaceId){ return jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.membership_role_assignment r on r.membership_id=m.id where m.workspace_id=? and r.role='TENANT_ADMIN' and m.status='ACTIVE'",Integer.class,uuid(workspaceId)); }
-	@Override @Transactional public int updateRole(String tenantId,String membershipId,String role,long version){ return updateRoles(tenantId,membershipId,Set.of(role),version); }
 	@Override @Transactional public int updateRoles(String tenantId,String membershipId,Set<String> roles,long version){
 		lockMembershipWorkspace(tenantId, membershipId);
 		int updated = jdbc.update("update tenant_management.workspace_membership m set updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.membership_type='INTERNAL' and m.version=? and (? or not exists (select 1 from tenant_management.membership_role_assignment current_role where current_role.membership_id=m.id and current_role.role='TENANT_ADMIN') or exists (select 1 from tenant_management.workspace_membership other join tenant_management.membership_role_assignment other_role on other_role.membership_id=other.id where other.workspace_id=m.workspace_id and other.id<>m.id and other.status='ACTIVE' and other_role.role='TENANT_ADMIN'))",uuid(tenantId),uuid(membershipId),version,roles.contains("TENANT_ADMIN"));
@@ -51,8 +50,7 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	private WorkspaceMembershipSummary membership(java.sql.ResultSet rs) throws java.sql.SQLException {
 		java.sql.Array array = rs.getArray(9);
 		Set<String> roles = array == null ? Set.of() : new LinkedHashSet<>(Arrays.asList((String[]) array.getArray()));
-		String primary = roles.stream().sorted().findFirst().orElse(null);
-		return new WorkspaceMembershipSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getObject(3).toString(),rs.getString(4),rs.getString(5),primary,rs.getString(7),rs.getLong(8),roles);
+		return new WorkspaceMembershipSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getObject(3).toString(),rs.getString(4),rs.getString(5),rs.getString(7),rs.getLong(8),roles);
 	}
 	private static java.util.UUID uuid(String value) { return java.util.UUID.fromString(value); }
 }
