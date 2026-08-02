@@ -1,4 +1,4 @@
-FROM maven:3.9-eclipse-temurin-25 AS build
+FROM maven:3.9-eclipse-temurin-25-noble AS build
 
 WORKDIR /workspace
 
@@ -8,7 +8,7 @@ RUN mvn -B -ntp dependency:go-offline
 COPY src ./src
 RUN mvn -B -ntp package -DskipTests
 
-FROM eclipse-temurin:25-jre
+FROM eclipse-temurin:25-jre-noble
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
