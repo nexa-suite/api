@@ -21,6 +21,7 @@ import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,7 +40,7 @@ class CurrentAccessContextTests {
 		assertThat(context.userId()).isEqualTo(verified.membership().userId());
 		assertThat(context.tenantId()).isEqualTo(verified.membership().tenantId());
 		assertThat(context.workspaceId()).isEqualTo(verified.membership().workspaceId());
-		assertThat(context.role()).isEqualTo(MembershipRole.BUYER);
+		assertThat(context.roles()).containsExactly(MembershipRole.BUYER);
 		assertThat(context.allows(Permission.SALES_BUYER_WRITE)).isTrue();
 		assertThat(context.allows(Permission.WAREHOUSE_WRITE)).isFalse();
 	}
@@ -76,7 +77,7 @@ class CurrentAccessContextTests {
 				.hasMessage("The requested tenant workspace is not accessible");
 
 		Membership crossTenantMembership = new Membership(MembershipId.random(), verified.membership().userId(),
-				TenantId.random(), verified.membership().workspaceId(), MembershipRole.SALES, MembershipStatus.ACTIVE);
+				TenantId.random(), verified.membership().workspaceId(), Set.of(MembershipRole.SALES), MembershipStatus.ACTIVE);
 		VerifiedMembership mismatched = new VerifiedMembership(crossTenantMembership, TenantStatus.ACTIVE,
 				WorkspaceStatus.ACTIVE);
 		ResolveCurrentAccessContextService crossTenant = new ResolveCurrentAccessContextService((userId, tenantId, workspaceId) ->
@@ -113,6 +114,6 @@ class CurrentAccessContextTests {
 	private VerifiedMembership verified(MembershipRole role, MembershipStatus membershipStatus,
 			TenantStatus tenantStatus, WorkspaceStatus workspaceStatus) {
 		return new VerifiedMembership(new Membership(MembershipId.random(), UserId.random(), TenantId.random(),
-				WorkspaceId.random(), role, membershipStatus), tenantStatus, workspaceStatus);
+				WorkspaceId.random(), Set.of(role), membershipStatus), tenantStatus, workspaceStatus);
 	}
 }
