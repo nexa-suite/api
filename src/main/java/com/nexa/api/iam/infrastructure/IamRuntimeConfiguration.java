@@ -9,6 +9,7 @@ import com.nexa.api.iam.application.port.out.AccessPolicyPort;
 import com.nexa.api.iam.application.port.out.AuthenticationTokenPort;
 import com.nexa.api.iam.application.port.out.PasswordVerificationPort;
 import com.nexa.api.iam.application.port.out.SessionPort;
+import com.nexa.api.shared.application.port.out.SecurityAuditPort;
 import com.nexa.api.iam.application.port.out.UserAccountQueryPort;
 import com.nexa.api.iam.application.service.CurrentSessionService;
 import com.nexa.api.iam.application.service.RefreshSessionService;
@@ -32,19 +33,19 @@ public class IamRuntimeConfiguration {
 	@Bean
 	SignInUseCase signInUseCase(UserAccountQueryPort users, PasswordVerificationPort passwords, AccessPolicyPort policies,
 			AuthenticationTokenPort tokens, SessionPort sessions, com.nexa.api.iam.application.port.out.AuthenticationThrottlePort throttle,
-			Clock clock) {
-		return new SignInService(users, passwords, policies, tokens, sessions, throttle, clock);
+			SecurityAuditPort audit, Clock clock) {
+		return new SignInService(users, passwords, policies, tokens, sessions, throttle, audit, clock);
 	}
 
 	@Bean
 	RefreshSessionUseCase refreshSessionUseCase(SessionPort sessions, AccessPolicyPort policies,
-			AuthenticationTokenPort tokens, Clock clock) {
-		return new RefreshSessionService(sessions, policies, tokens, clock);
+			AuthenticationTokenPort tokens, SecurityAuditPort audit, Clock clock) {
+		return new RefreshSessionService(sessions, policies, tokens, audit, clock);
 	}
 
 	@Bean
-	SignOutUseCase signOutUseCase(SessionPort sessions, Clock clock) {
-		return new SignOutService(sessions, clock);
+	SignOutUseCase signOutUseCase(SessionPort sessions, SecurityAuditPort audit, Clock clock) {
+		return new SignOutService(sessions, audit, clock);
 	}
 
 	@Bean

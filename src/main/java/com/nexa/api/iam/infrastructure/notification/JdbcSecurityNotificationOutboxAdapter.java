@@ -14,6 +14,8 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Component
@@ -21,13 +23,25 @@ import java.util.UUID;
 public final class JdbcSecurityNotificationOutboxAdapter implements SecurityNotificationOutboxPort {
     private static final SecureRandom RANDOM = new SecureRandom();
     private final JdbcTemplate jdbc;
-    private final byte[] key;
+    private final Map<String, byte[]> keys;
+    private final String keyVersion;
 
     public JdbcSecurityNotificationOutboxAdapter(JdbcTemplate jdbc,
-            @Value("${nexa.security.notification-outbox-key:}") String configuredKey) {
+            @Value("${nexa.security.notification-outbox-key:}") String configuredKey,
+            @Value("${nexa.security.notification-outbox-key-version:v1}") String keyVersion,
+            @Value("${nexa.security.notification-outbox-previous-keys:}") String previousKeys) {
         if (configuredKey == null || configuredKey.isBlank()) throw new IllegalStateException("Security notification outbox key is required");
         this.jdbc = jdbc;
-        this.key = sha256(configuredKey);
+        this.keyVersion = keyVersion == null || keyVersion.isBlank() ? "v1" : keyVersion.trim();
+        var configuredKeys = new HashMap<String, byte[]>();
+        configuredKeys.put(this.keyVersion, sha256(configuredKey));
+        if (previousKeys != null && !previousKeys.isBlank()) {
+            for (String entry : previousKeys.split(",")) {
+                String[] pair = entry.trim().split("=", 2);
+                if (pair.length == 2 && !pair[0].isBlank() && !pair[1].isBlank()) configuredKeys.put(pair[0].trim(), sha256(pair[1].trim()));
+            }
+        }
+        this.keys = Map.copyOf(configuredKeys);
     }
 
     @Override
@@ -42,12 +56,19 @@ public final class JdbcSecurityNotificationOutboxAdapter implements SecurityNoti
 
     private void enqueue(String type, String recipient, String surface, String payload) {
         Instant now = Instant.now();
-        jdbc.update("insert into iam.security_notification_outbox (id,notification_type,recipient,surface,payload_ciphertext,status,attempt_count,next_attempt_at,created_at,version) values (?,?,?,?,?,'PENDING',0,?,?,0)",
-                UUID.randomUUID(), type, recipient, surface, encrypt(payload), java.sql.Timestamp.from(now), java.sql.Timestamp.from(now));
+        String deliveryKey = UUID.randomUUID().toString();
+        jdbc.update("insert into iam.security_notification_outbox (id,notification_type,recipient,surface,payload_ciphertext,status,attempt_count,next_attempt_at,created_at,delivery_key,payload_key_version,version) values (?,?,?,?,?,'PENDING',0,?,?,?,?,0)",
+                UUID.randomUUID(), type, recipient, surface, encrypt(payload), java.sql.Timestamp.from(now), java.sql.Timestamp.from(now), deliveryKey, keyVersion);
     }
 
     public String decrypt(String value) {
+        return decrypt(value, keyVersion);
+    }
+
+    public String decrypt(String value, String payloadKeyVersion) {
         try {
+            byte[] key = keys.get(payloadKeyVersion);
+            if (key == null) throw new IllegalStateException("Unknown security notification payload key version: " + payloadKeyVersion);
             byte[] encoded = Base64.getUrlDecoder().decode(value);
             byte[] iv = java.util.Arrays.copyOfRange(encoded, 0, 12);
             byte[] ciphertext = java.util.Arrays.copyOfRange(encoded, 12, encoded.length);
@@ -61,7 +82,7 @@ public final class JdbcSecurityNotificationOutboxAdapter implements SecurityNoti
         try {
             byte[] iv = new byte[12]; RANDOM.nextBytes(iv);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(128, iv));
+            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(keys.get(keyVersion), "AES"), new GCMParameterSpec(128, iv));
             byte[] ciphertext = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
             byte[] result = new byte[iv.length + ciphertext.length];
             System.arraycopy(iv, 0, result, 0, iv.length); System.arraycopy(ciphertext, 0, result, iv.length, ciphertext.length);

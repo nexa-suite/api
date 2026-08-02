@@ -1,7 +1,7 @@
 package com.nexa.api.shared.infrastructure.security;
 
 import com.nexa.api.iam.application.model.SystemOperatorContext;
-import com.nexa.api.iam.application.port.out.SecurityAuditPort;
+import com.nexa.api.shared.application.port.out.SecurityAuditPort;
 import com.nexa.api.shared.presentation.error.ApiErrorCode;
 import com.nexa.api.shared.presentation.error.ApiProblemDetailFactory;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
@@ -10,7 +10,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -26,23 +25,22 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.ObjectProvider;
 
 @Component
-@Profile("!test")
 @Order(-90)
 public final class SystemOperatorAuthenticationFilter extends OncePerRequestFilter {
     public static final String PERMISSION = "system:organizations:activate";
     private final ObjectMapper objectMapper;
     private final SecurityAuditPort audit;
     private final byte[] credential;
-    private final ConcurrentHashMap<String, FailureWindow> failures = new ConcurrentHashMap<>();
+    private final JdbcTemplate jdbc;
 
-    public SystemOperatorAuthenticationFilter(ObjectMapper objectMapper, SecurityAuditPort audit,
-            @Value("${nexa.security.system-operator-token:}") String configuredCredential) {
-        if (configuredCredential == null || configuredCredential.isBlank()) throw new IllegalStateException("System operator credential is required when internal activation is enabled");
-        this.objectMapper = objectMapper; this.audit = audit; this.credential = configuredCredential.getBytes(StandardCharsets.UTF_8);
-        if (credential.length < 32) throw new IllegalStateException("System operator credential must contain at least 256 bits");
+    public SystemOperatorAuthenticationFilter(ObjectMapper objectMapper, ObjectProvider<SecurityAuditPort> audit,
+            ObjectProvider<JdbcTemplate> jdbc, @Value("${nexa.security.system-operator-token:}") String configuredCredential) {
+        this.objectMapper = objectMapper; this.audit = audit.getIfAvailable(); this.jdbc = jdbc.getIfAvailable();
+        this.credential = configuredCredential == null ? new byte[0] : configuredCredential.getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
@@ -53,31 +51,29 @@ public final class SystemOperatorAuthenticationFilter extends OncePerRequestFilt
         String bucket = request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
         if (isRateLimited(bucket)) { reject(request, response, ApiErrorCode.SYSTEM_OPERATOR_REQUIRED, "System operator authentication is temporarily limited"); return; }
         String supplied = request.getHeader("X-Nexa-System-Operator");
-        if (supplied == null || !MessageDigest.isEqual(credential, supplied.getBytes(StandardCharsets.UTF_8))) {
+        if (credential.length < 32 || supplied == null || !MessageDigest.isEqual(credential, supplied.getBytes(StandardCharsets.UTF_8))) {
             registerFailure(bucket, request);
             reject(request, response, ApiErrorCode.SYSTEM_OPERATOR_REQUIRED, "System operator authentication is required");
             return;
         }
-        failures.remove(bucket);
         var principal = new SystemOperatorContext("system-operator", PERMISSION);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
                 java.util.List.of(new SimpleGrantedAuthority(PERMISSION))));
-        audit.append(new SecurityAuditPort.Event("SYSTEM_OPERATOR_AUTHENTICATION_SUCCEEDED", null, null, null, null, "SYSTEM",
+        appendAudit(new SecurityAuditPort.Event("SYSTEM_OPERATOR_AUTHENTICATED", null, null, null, null, "SYSTEM",
                 correlation(request), trace(request), Instant.now(), Map.of("permission", PERMISSION)));
         chain.doFilter(request, response);
     }
 
     private void registerFailure(String bucket, HttpServletRequest request) {
-        failures.compute(bucket, (key, current) -> current == null || current.expiresAt().isBefore(Instant.now())
-                ? new FailureWindow(Instant.now().plusSeconds(60), 1)
-                : new FailureWindow(current.expiresAt(), current.count() + 1));
-        audit.append(new SecurityAuditPort.Event("SYSTEM_OPERATOR_AUTHENTICATION_FAILED", null, null, null, null, "SYSTEM",
+        if (jdbc != null) jdbc.update("insert into iam.system_operator_throttle_bucket (bucket_key_hash,window_started_at,failure_count,updated_at) values (?,current_timestamp,1,current_timestamp) on conflict (bucket_key_hash) do update set failure_count=case when iam.system_operator_throttle_bucket.window_started_at <= current_timestamp - interval '1 minute' then 1 else iam.system_operator_throttle_bucket.failure_count+1 end,window_started_at=case when iam.system_operator_throttle_bucket.window_started_at <= current_timestamp - interval '1 minute' then current_timestamp else iam.system_operator_throttle_bucket.window_started_at end,updated_at=current_timestamp", digest(bucket));
+        appendAudit(new SecurityAuditPort.Event("SYSTEM_OPERATOR_AUTHENTICATION_FAILED", null, null, null, null, "SYSTEM",
                 correlation(request), trace(request), Instant.now(), Map.of("bucket", "network")));
     }
 
     private boolean isRateLimited(String bucket) {
-        FailureWindow window = failures.get(bucket);
-        return window != null && window.expiresAt().isAfter(Instant.now()) && window.count() >= 10;
+        if (jdbc == null) return false;
+        Integer count = jdbc.queryForObject("select failure_count from iam.system_operator_throttle_bucket where bucket_key_hash=? and window_started_at > current_timestamp - interval '1 minute'", Integer.class, digest(bucket));
+        return count != null && count >= 10;
     }
 
     private void reject(HttpServletRequest request, HttpServletResponse response, ApiErrorCode code, String detail) throws IOException {
@@ -85,8 +81,12 @@ public final class SystemOperatorAuthenticationFilter extends OncePerRequestFilt
         response.setStatus(HttpStatus.FORBIDDEN.value()); response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
         objectMapper.writeValue(response.getWriter(), problem);
     }
-    private static boolean isInternalOperatorPath(HttpServletRequest request) { return request.getRequestURI().startsWith("/api/v1/internal/organization-registrations/"); }
+    private static boolean isInternalOperatorPath(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return path.matches("/api/v1/internal/organization-registrations/[^/]+/(activation|rejection)");
+    }
     private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
     private static String trace(HttpServletRequest request) { String value = request.getHeader("X-Trace-ID"); return value == null || value.isBlank() ? correlation(request) : value; }
-    private record FailureWindow(Instant expiresAt, int count) {}
+    private void appendAudit(SecurityAuditPort.Event event) { if (audit != null) audit.append(event); }
+    private static String digest(String value) { try { return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (Exception exception) { throw new IllegalStateException(exception); } }
 }

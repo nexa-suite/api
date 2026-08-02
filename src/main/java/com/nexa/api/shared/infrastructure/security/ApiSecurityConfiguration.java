@@ -11,6 +11,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.core.annotation.Order;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -27,11 +28,28 @@ import java.util.Set;
 @EnableMethodSecurity
 public class ApiSecurityConfiguration {
 	@Bean
+	@Order(-100)
+	SecurityFilterChain systemOperatorSecurityFilterChain(HttpSecurity http, SystemOperatorAuthenticationFilter operatorFilter,
+			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) throws Exception {
+		http.securityMatcher("/api/v1/internal/organization-registrations/*/activation",
+				"/api/v1/internal/organization-registrations/*/rejection")
+				.csrf(AbstractHttpConfigurer::disable)
+				.cors(AbstractHttpConfigurer::disable)
+				.formLogin(AbstractHttpConfigurer::disable)
+				.httpBasic(AbstractHttpConfigurer::disable)
+				.logout(AbstractHttpConfigurer::disable)
+				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+				.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint).accessDeniedHandler(accessDeniedHandler))
+				.addFilterBefore(operatorFilter, BearerTokenAuthenticationFilter.class)
+				.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated());
+		return http.build();
+	}
+
+	@Bean
 	SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, Environment environment,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
 			ObjectMapper objectMapper, JwtAuthenticationConverter jwtAuthenticationConverter,
-			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter,
-			ObjectProvider<SystemOperatorAuthenticationFilter> systemOperatorAuthenticationFilter) throws Exception {
+			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter) throws Exception {
 				boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
 				boolean observabilityProfile = environment.acceptsProfiles(Profiles.of("observability"));
 		Set<String> allowedOrigins = allowedOrigins(environment);
@@ -61,15 +79,12 @@ public class ApiSecurityConfiguration {
 						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",
 						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
 						"/api/v1/tenant-management/organization-registrations",
-						"/api/v1/tenant-management/organization-registrations/**",
-						"/api/v1/internal/organization-registrations/**").permitAll();
+						"/api/v1/tenant-management/organization-registrations/**").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();
 					authorize.anyRequest().denyAll();
 					});
 		CurrentAccessContextFilter accessFilter = currentAccessContextFilter.getIfAvailable();
 		if (accessFilter != null) http.addFilterAfter(accessFilter, BearerTokenAuthenticationFilter.class);
-		SystemOperatorAuthenticationFilter operatorFilter = systemOperatorAuthenticationFilter.getIfAvailable();
-		if (operatorFilter != null) http.addFilterBefore(operatorFilter, BearerTokenAuthenticationFilter.class);
 		return http.build();
 	}
 
@@ -97,8 +112,10 @@ public class ApiSecurityConfiguration {
 	}
 
 	@Bean
-	ProblemDetailAccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper) {
-		return new ProblemDetailAccessDeniedHandler(objectMapper);
+	ProblemDetailAccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.application.port.out.SecurityAuditPort> audit,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.infrastructure.observability.SecurityMetrics> metrics) {
+		return new ProblemDetailAccessDeniedHandler(objectMapper, audit, metrics);
 	}
 
 	@Bean
@@ -113,8 +130,10 @@ public class ApiSecurityConfiguration {
 	}
 
 	@Bean
-	AccessContextInvalidHandler accessContextInvalidHandler(ObjectMapper objectMapper) {
-		return new AccessContextInvalidHandler(objectMapper);
+	AccessContextInvalidHandler accessContextInvalidHandler(ObjectMapper objectMapper,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.application.port.out.SecurityAuditPort> audit,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.infrastructure.observability.SecurityMetrics> metrics) {
+		return new AccessContextInvalidHandler(objectMapper, audit, metrics);
 	}
 
 	@Bean
