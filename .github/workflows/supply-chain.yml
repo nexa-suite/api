@@ -58,7 +58,8 @@ jobs:
           name: api-checksum-${{ github.sha }}
           path: target/SHA256SUMS
           if-no-files-found: error
-      - uses: docker/build-push-action@v6
+      - name: Build attested OCI container
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
@@ -66,10 +67,18 @@ jobs:
           sbom: true
           provenance: mode=max
           tags: nexa/api:supply-chain-${{ github.sha }}
+      - name: Build local container for image scan
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          tags: nexa/api:supply-chain-scan-${{ github.sha }}
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
-          input: /tmp/nexa-api.tar
-          scan-type: image
+          image-ref: nexa/api:supply-chain-scan-${{ github.sha }}
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           exit-code: '1'
