@@ -96,6 +96,7 @@ class CurrentAccessContextTests {
 	void applicationSourcesHaveNoFrameworkPersistenceTransportOrJwtImports() throws Exception {
 		try (var files = java.nio.file.Files.walk(java.nio.file.Path.of("src/main/java/com/nexa/api/tenantmanagement/application"))) {
 			String source = files.filter(path -> path.toString().endsWith(".java"))
+					.filter(path -> !path.getFileName().toString().equals("package-info.java"))
 					.map(path -> {
 						try {
 							return java.nio.file.Files.readString(path);

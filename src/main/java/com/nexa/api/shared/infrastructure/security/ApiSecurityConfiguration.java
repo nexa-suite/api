@@ -30,8 +30,10 @@ public class ApiSecurityConfiguration {
 	SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, Environment environment,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
 			ObjectMapper objectMapper, JwtAuthenticationConverter jwtAuthenticationConverter,
-			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter) throws Exception {
-		boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
+			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter,
+			ObjectProvider<SystemOperatorAuthenticationFilter> systemOperatorAuthenticationFilter) throws Exception {
+				boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
+				boolean observabilityProfile = environment.acceptsProfiles(Profiles.of("observability"));
 		Set<String> allowedOrigins = allowedOrigins(environment);
 			http.csrf(AbstractHttpConfigurer::disable)
 				.headers(headers -> {
@@ -52,7 +54,8 @@ public class ApiSecurityConfiguration {
 				.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
 						.authenticationEntryPoint(authenticationEntryPoint))
 				.authorizeHttpRequests(authorize -> {
-					authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
+				authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
+					if (observabilityProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
 					if (localProfile) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
 					authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
 						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",
@@ -65,6 +68,8 @@ public class ApiSecurityConfiguration {
 					});
 		CurrentAccessContextFilter accessFilter = currentAccessContextFilter.getIfAvailable();
 		if (accessFilter != null) http.addFilterAfter(accessFilter, BearerTokenAuthenticationFilter.class);
+		SystemOperatorAuthenticationFilter operatorFilter = systemOperatorAuthenticationFilter.getIfAvailable();
+		if (operatorFilter != null) http.addFilterBefore(operatorFilter, BearerTokenAuthenticationFilter.class);
 		return http.build();
 	}
 
@@ -73,7 +78,7 @@ public class ApiSecurityConfiguration {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-System-Operator"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface"));
 		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-ID", "X-Trace-ID"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();

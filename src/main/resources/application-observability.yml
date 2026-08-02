@@ -1,0 +1,13 @@
+management:
+  tracing:
+    sampling:
+      probability: ${NEXA_OTEL_SAMPLING_PROBABILITY:1.0}
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${NEXA_OTEL_TRACES_ENDPOINT:http://modern-otel-collector:4318/v1/traces}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus

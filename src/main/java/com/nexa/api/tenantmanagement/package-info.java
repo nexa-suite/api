@@ -1,2 +1,2 @@
-@org.springframework.modulith.ApplicationModule(id = "tenantmanagement", type = org.springframework.modulith.ApplicationModule.Type.OPEN)
+@org.springframework.modulith.ApplicationModule(id = "tenantmanagement", allowedDependencies = { "shared" })
 package com.nexa.api.tenantmanagement;

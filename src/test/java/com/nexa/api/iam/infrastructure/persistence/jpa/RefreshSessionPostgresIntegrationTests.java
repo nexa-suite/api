@@ -25,7 +25,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("local")
-@TestPropertySource(properties = "spring.autoconfigure.exclude=")
+@TestPropertySource(properties = {
+		"spring.autoconfigure.exclude=",
+		"nexa.security.reset.throttle-key=integration-reset-throttle-key-012345678901234567890123456789",
+		"nexa.security.notification-outbox-key=integration-notification-outbox-key-012345678901234567890123456789",
+		"nexa.security.system-operator-token=integration-system-operator-token-0123456789-abcdefghijklmnopqrstuvwxyz"
+})
 @Testcontainers(disabledWithoutDocker = true)
 class RefreshSessionPostgresIntegrationTests {
 	private static final String PASSWORD = "refresh-test-password";
@@ -54,6 +59,7 @@ class RefreshSessionPostgresIntegrationTests {
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);
 		registry.add("NEXA_FLYWAY_ENABLED", () -> "true");
+		registry.add("nexa.jdbc.adapters-enabled", () -> "true");
 		registry.add("nexa.security.allow-ephemeral-keys", () -> "true");
 		registry.add("nexa.security.issuer", () -> "http://test.local");
 		registry.add("nexa.security.audience", () -> "nexa-test");

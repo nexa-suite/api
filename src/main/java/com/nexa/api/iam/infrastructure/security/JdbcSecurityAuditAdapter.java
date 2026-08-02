@@ -4,6 +4,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import com.nexa.api.iam.application.port.out.SecurityAuditPort;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -11,6 +12,7 @@ import java.sql.Types;
 
 @Repository
 @Profile("!test")
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class JdbcSecurityAuditAdapter implements SecurityAuditPort {
 	private final JdbcTemplate jdbc;
 	private final ObjectMapper mapper;

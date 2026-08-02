@@ -7,6 +7,10 @@ import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 import org.springframework.modulith.core.ApplicationModules;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
@@ -27,7 +31,7 @@ class ArchitectureConstitutionTests {
     @Test
     void domainDoesNotDependOnOuterLayers() { domainDoesNotDependOnOuterLayers.check(CLASSES); }
     private static final ArchRule domainDoesNotDependOnOuterLayers = noClasses()
-            .that().resideInAnyPackage("..domain..")
+            .that().resideInAnyPackage("..domain..").and().doNotHaveSimpleName("package-info")
             .should().dependOnClassesThat().resideInAnyPackage("..application..", "..infrastructure..", "..presentation..", "org.springframework..", "jakarta..", "com.fasterxml..", "tools.jackson..");
 
     @Test
@@ -47,4 +51,20 @@ class ArchitectureConstitutionTests {
     private static final ArchRule controllersStayInPresentation = classes()
             .that().haveSimpleNameEndingWith("Controller")
             .should().resideInAnyPackage("..presentation..");
+
+    @Test
+    void infrastructureCannotImplementInboundApplicationPorts() {
+        List<String> violations = CLASSES.stream()
+                .filter(type -> type.getPackageName().contains(".infrastructure."))
+                .filter(type -> type.getInterfaces().stream()
+                        .anyMatch(port -> port.toErasure().getPackageName().contains(".application.port.in")))
+                .map(type -> type.getName()).toList();
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void iamHasNoGodInboundSecurityInterface() {
+        assertThat(Files.exists(Path.of("src/main/java/com/nexa/api/iam/application/port/in/IamSecurityUseCase.java"))).isFalse();
+        assertThat(CLASSES.stream().map(type -> type.getSimpleName()).filter("IamSecurityUseCase"::equals)).isEmpty();
+    }
 }

@@ -2,6 +2,17 @@ spring:
   config:
     activate:
       on-profile: local
+  mail:
+    host: ${NEXA_SMTP_HOST:}
+    port: ${NEXA_SMTP_PORT:1025}
+    username: ${NEXA_SMTP_USERNAME:}
+    password: ${NEXA_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${NEXA_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${NEXA_SMTP_STARTTLS:false}
+      mail.smtp.connectiontimeout: ${NEXA_SMTP_CONNECTION_TIMEOUT_MS:5000}
+      mail.smtp.timeout: ${NEXA_SMTP_TIMEOUT_MS:5000}
+      mail.smtp.writetimeout: ${NEXA_SMTP_WRITE_TIMEOUT_MS:5000}
 
 springdoc:
   api-docs:
@@ -33,6 +44,8 @@ nexa:
       ttl: ${NEXA_PASSWORD_RESET_TTL:PT30M}
       platform-url: ${NEXA_PLATFORM_RESET_URL:http://localhost:4200/reset-password}
       portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4300/reset-password}
+      throttle-key: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:}
     system-operator-token: ${NEXA_SYSTEM_OPERATOR_TOKEN:}
+    notification-outbox-key: ${NEXA_NOTIFICATION_OUTBOX_KEY:}
   dev-bootstrap:
     enabled: ${NEXA_DEV_BOOTSTRAP_ENABLED:false}

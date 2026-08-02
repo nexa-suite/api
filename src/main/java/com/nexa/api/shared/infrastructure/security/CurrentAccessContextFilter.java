@@ -62,7 +62,6 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		TenantId tenantId;
 		WorkspaceId workspaceId;
 		String membershipIdClaim;
-		String roleClaim;
 		String rolesClaim;
 		String sessionIdClaim;
 		try {
@@ -71,8 +70,9 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 			tenantId = new TenantId(requiredClaim(jwt, "tenant_id"));
 			workspaceId = new WorkspaceId(requiredClaim(jwt, "workspace_id"));
 			membershipIdClaim = requiredClaim(jwt, "membership_id");
-			roleClaim = requiredClaim(jwt, "role");
-			rolesClaim = jwt.getClaimAsStringList("roles") == null ? roleClaim : String.join(",", jwt.getClaimAsStringList("roles"));
+			var canonicalRoles = jwt.getClaimAsStringList("roles");
+			if (canonicalRoles == null || canonicalRoles.isEmpty()) throw new IllegalArgumentException("Missing JWT claim roles");
+			rolesClaim = String.join(",", canonicalRoles);
 			sessionIdClaim = requiredClaim(jwt, "sid");
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();

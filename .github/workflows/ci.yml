@@ -19,5 +19,5 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - name: Verify API
-        run: ./mvnw clean verify
+      - name: Verify API with real PostgreSQL integrations
+        run: ./mvnw clean verify -Dnexa.integration.enabled=true
