@@ -72,8 +72,9 @@ public final class SystemOperatorAuthenticationFilter extends OncePerRequestFilt
 
     private boolean isRateLimited(String bucket) {
         if (jdbc == null) return false;
-        Integer count = jdbc.queryForObject("select failure_count from iam.system_operator_throttle_bucket where bucket_key_hash=? and window_started_at > current_timestamp - interval '1 minute'", Integer.class, digest(bucket));
-        return count != null && count >= 10;
+        Integer count = jdbc.query("select failure_count from iam.system_operator_throttle_bucket where bucket_key_hash=? and window_started_at > current_timestamp - interval '1 minute'",
+                (rs, row) -> rs.getInt(1), digest(bucket)).stream().findFirst().orElse(0);
+        return count >= 10;
     }
 
     private void reject(HttpServletRequest request, HttpServletResponse response, ApiErrorCode code, String detail) throws IOException {
