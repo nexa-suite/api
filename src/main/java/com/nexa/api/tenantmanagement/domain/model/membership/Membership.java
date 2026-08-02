@@ -40,8 +40,10 @@ public final class Membership {
 	public UserId userId() { return userId; }
 	public TenantId tenantId() { return tenantId; }
 	public WorkspaceId workspaceId() { return workspaceId; }
-	/** Compatibility accessor. Authorization must use roles() or hasRole(). */
-	public MembershipRole role() { return roles.iterator().next(); }
+	/** Deprecated response compatibility accessor. Authorization uses roles(). */
+	@Deprecated
+	public MembershipRole role() { return roles.stream().min(java.util.Comparator.comparingInt(Membership::rolePriority)).orElseThrow(); }
+	private static int rolePriority(MembershipRole role) { return switch (role) { case TENANT_ADMIN -> 0; case COMPANY_OWNER -> 1; case SALES -> 2; case WAREHOUSE -> 3; case LOGISTICS -> 4; case BUYER -> 5; }; }
 	public Set<MembershipRole> roles() { return roles; }
 	public boolean hasRole(MembershipRole role) { return roles.contains(Objects.requireNonNull(role)); }
 	public MembershipStatus status() { return status; }

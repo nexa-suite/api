@@ -65,10 +65,14 @@ public abstract class PostgresIntegrationSupport {
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);
 		registry.add("NEXA_FLYWAY_ENABLED", () -> "true");
+		registry.add("nexa.jdbc.adapters-enabled", () -> "true");
 		registry.add("nexa.security.allow-ephemeral-keys", () -> "true");
 		registry.add("nexa.security.issuer", () -> "http://test.local");
 		registry.add("nexa.security.audience", () -> "nexa-test");
 		registry.add("nexa.security.refresh-token-ttl", () -> "PT30M");
+		registry.add("nexa.security.system-operator-token", () -> "integration-system-operator-token-0123456789-abcdefghijklmnopqrstuvwxyz");
+		registry.add("nexa.security.reset.throttle-key", () -> "integration-reset-throttle-key-012345678901234567890123456789");
+		registry.add("nexa.security.notification-outbox-key", () -> "integration-notification-outbox-key-012345678901234567890123456789");
 		registry.add("NEXA_DEV_BOOTSTRAP_ENABLED", () -> "true");
 		registry.add("NEXA_DEV_TENANT_NAME", () -> "ICISA Test");
 		registry.add("NEXA_DEV_TENANT_SLUG", () -> WORKSPACE_SLUG);

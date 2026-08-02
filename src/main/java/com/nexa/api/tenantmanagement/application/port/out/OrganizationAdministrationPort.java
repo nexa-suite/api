@@ -17,10 +17,7 @@ public interface OrganizationAdministrationPort {
 	int activeOwnerCount(String workspaceId);
 	default int activeTenantAdminCount(String workspaceId) { return activeOwnerCount(workspaceId); }
 	int updateRole(String tenantId, String membershipId, String role, long expectedVersion);
-	default int updateRoles(String tenantId, String membershipId, java.util.Set<String> roles, long expectedVersion) {
-		if (roles == null || roles.size() != 1) throw new IllegalArgumentException("Role assignment requires adapter support for multiple roles");
-		return updateRole(tenantId, membershipId, roles.iterator().next(), expectedVersion);
-	}
+	int updateRoles(String tenantId, String membershipId, java.util.Set<String> roles, long expectedVersion);
 	int updateStatus(String tenantId, String membershipId, String status, long expectedVersion);
 	void appendMembershipEvent(String type, String tenantId, String workspaceId, String targetMembershipId,
 			String actorMembershipId, String beforeRole, String beforeStatus, String afterRole, String afterStatus,

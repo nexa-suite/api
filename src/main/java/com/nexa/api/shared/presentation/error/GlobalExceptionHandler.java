@@ -68,6 +68,7 @@ public final class GlobalExceptionHandler {
 		ApiErrorCode code = switch (exception.code()) {
 			case "RESET_RATE_LIMITED" -> ApiErrorCode.RESET_RATE_LIMITED;
 			case "PROFILE_VERSION_CONFLICT" -> ApiErrorCode.PROFILE_VERSION_CONFLICT;
+			case "PROFILE_PRECONDITION_REQUIRED" -> ApiErrorCode.PRECONDITION_REQUIRED;
 			case "PASSWORD_POLICY_INVALID" -> ApiErrorCode.PASSWORD_POLICY_INVALID;
 			case "PASSWORD_REUSE_NOT_ALLOWED" -> ApiErrorCode.PASSWORD_REUSE_NOT_ALLOWED;
 			case "PASSWORD_CHANGE_FAILED" -> ApiErrorCode.PASSWORD_CHANGE_FAILED;
@@ -83,6 +84,7 @@ public final class GlobalExceptionHandler {
 		HttpStatus status = switch (code) {
 			case RESET_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
 			case PROFILE_VERSION_CONFLICT, REGISTRATION_SLUG_CONFLICT, FOUNDER_EMAIL_INCOMPATIBLE, REGISTRATION_NOT_PENDING -> HttpStatus.CONFLICT;
+			case PRECONDITION_REQUIRED -> HttpStatus.PRECONDITION_REQUIRED;
 			case SYSTEM_OPERATOR_REQUIRED -> HttpStatus.FORBIDDEN;
 			default -> HttpStatus.BAD_REQUEST;
 		};

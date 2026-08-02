@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.EnumSet;
+import java.util.Set;
 
 public final class ChangeFeedStreamService implements AutoCloseable {
 	private static final int MAX_REPLAY = 100;
@@ -60,12 +62,12 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		AtomicBoolean closed = new AtomicBoolean(); AtomicLong cursor = new AtomicLong(last); long started = System.currentTimeMillis();
 		Runnable release = () -> { if (closed.compareAndSet(false, true)) { activeStreams.decrementAndGet(); lease.close(); } };
 		emitter.onCompletion(release); emitter.onTimeout(() -> { release.run(); emitter.complete(); }); emitter.onError(ignored -> release.run());
-		ChangeEventAudience audience = audience(initial);
+		Set<ChangeEventAudience> audiences = audiences(initial);
 		try {
 			verified = verify(jwt, initial);
 			String clientAccount = clientAccount(verified);
-			if (isTooOld(verified, clientAccount, audience, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
-			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audience, last, MAX_REPLAY), jwt, initial);
+			if (isTooOld(verified, clientAccount, audiences, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
+			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audiences, last, MAX_REPLAY), jwt, initial);
 		} catch (RuntimeException | IOException exception) {
 			release.run(); emitter.completeWithError(exception); return emitter;
 		}
@@ -74,8 +76,9 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 			if (System.currentTimeMillis() - started >= MAX_STREAM_MILLIS) { release.run(); emitter.complete(); return; }
 			try {
 				CurrentAccessContext current = verify(jwt, initial); String clientAccount = clientAccount(current); long position = cursor.get();
-				if (isTooOld(current, clientAccount, audience, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
-				sendBatch(emitter, cursor, feed.after(scope(current), workspace(current), clientAccount, audience, position, MAX_REPLAY), jwt, initial);
+				Set<ChangeEventAudience> currentAudiences = audiences(current);
+				if (isTooOld(current, clientAccount, currentAudiences, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
+				sendBatch(emitter, cursor, feed.after(scope(current), workspace(current), clientAccount, currentAudiences, position, MAX_REPLAY), jwt, initial);
 				emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
 			} catch (RuntimeException | IOException exception) { release.run(); emitter.completeWithError(exception); }
 		}, 15, 15, TimeUnit.SECONDS);
@@ -93,16 +96,17 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		}
 	}
 	private void sendResync(SseEmitter emitter) throws IOException { emitter.send(SseEmitter.event().name("resync-required").data("{\"reason\":\"replay-window-expired\"}", MediaType.APPLICATION_JSON)); }
-	private boolean isTooOld(CurrentAccessContext context, String clientAccount, ChangeEventAudience audience, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount, audience); return last > 0 && minimum > 0 && last < minimum - 1; }
-	private static ChangeEventAudience audience(CurrentAccessContext context) {
-		return switch (context.role()) {
-			case TENANT_ADMIN -> ChangeEventAudience.OWNER;
-			case COMPANY_OWNER -> ChangeEventAudience.OWNER;
-			case SALES -> ChangeEventAudience.SALES;
-			case WAREHOUSE -> ChangeEventAudience.WAREHOUSE;
-			case LOGISTICS -> ChangeEventAudience.LOGISTICS;
-			case BUYER -> ChangeEventAudience.BUYER;
-		};
+	private boolean isTooOld(CurrentAccessContext context, String clientAccount, Set<ChangeEventAudience> audiences, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount, audiences); return last > 0 && minimum > 0 && last < minimum - 1; }
+	private static Set<ChangeEventAudience> audiences(CurrentAccessContext context) {
+		EnumSet<ChangeEventAudience> result = EnumSet.noneOf(ChangeEventAudience.class);
+		for (var role : context.roles()) switch (role) {
+			case TENANT_ADMIN, COMPANY_OWNER -> result.add(ChangeEventAudience.OWNER);
+			case SALES -> result.add(ChangeEventAudience.SALES);
+			case WAREHOUSE -> result.add(ChangeEventAudience.WAREHOUSE);
+			case LOGISTICS -> result.add(ChangeEventAudience.LOGISTICS);
+			case BUYER -> result.add(ChangeEventAudience.BUYER);
+		}
+		return Set.copyOf(result);
 	}
 	private CurrentAccessContext verify(Jwt jwt, CurrentAccessContext expected) {
 		Surface surface = Surface.valueOf(required(jwt, "surface").toUpperCase(Locale.ROOT));

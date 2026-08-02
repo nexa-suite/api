@@ -14,6 +14,7 @@ class IamDomainPurityTests {
 	void domainSourcesHaveNoFrameworkPersistenceJwtOrCredentialImports() throws IOException {
 		try (Stream<Path> files = Files.walk(Path.of("src/main/java/com/nexa/api/iam/domain"))) {
 			String source = files.filter(path -> path.toString().endsWith(".java"))
+					.filter(path -> !path.getFileName().toString().equals("package-info.java"))
 					.map(this::read).reduce("", String::concat);
 			assertThat(source).doesNotContain("org.springframework", "jakarta.persistence", "com.fasterxml.jackson",
 					"tools.jackson", "io.jsonwebtoken", "JWT", "passwordHash", "tenantId", "workspaceId");

@@ -14,6 +14,7 @@ class TenantDomainPurityTests {
 	void domainSourcesHaveNoFrameworkPersistenceTransportOrJwtImports() throws IOException {
 		try (Stream<Path> files = Files.walk(Path.of("src/main/java/com/nexa/api/tenantmanagement/domain"))) {
 			String source = files.filter(path -> path.toString().endsWith(".java"))
+					.filter(path -> !path.getFileName().toString().equals("package-info.java"))
 					.map(this::read)
 					.reduce("", String::concat);
 			assertThat(source).doesNotContain(

@@ -67,9 +67,11 @@ public final class CurrentAccessContext implements AccessContext {
 	}
 
 	@Override
+	@Deprecated
 	public MembershipRole role() {
-		return verifiedMembership.membership().role();
+		return roles().stream().min(java.util.Comparator.comparingInt(CurrentAccessContext::rolePriority)).orElseThrow();
 	}
+	private static int rolePriority(MembershipRole role) { return switch (role) { case TENANT_ADMIN -> 0; case COMPANY_OWNER -> 1; case SALES -> 2; case WAREHOUSE -> 3; case LOGISTICS -> 4; case BUYER -> 5; }; }
 
 	public Set<MembershipRole> roles() { return verifiedMembership.membership().roles(); }
 

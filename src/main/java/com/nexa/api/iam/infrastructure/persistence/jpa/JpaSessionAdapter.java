@@ -13,9 +13,8 @@ import com.nexa.api.iam.domain.model.session.RefreshTokenFamilyId;
 import com.nexa.api.iam.domain.model.session.SessionId;
 import com.nexa.api.iam.domain.model.useraccount.EmailAddress;
 import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
-import com.nexa.api.tenantmanagement.infrastructure.persistence.jpa.WorkspaceJpaRepository;
-import com.nexa.api.tenantmanagement.infrastructure.persistence.jpa.WorkspaceMembershipJpaRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Repository;
 import org.springframework.context.annotation.Profile;
@@ -35,19 +34,17 @@ public class JpaSessionAdapter implements SessionPort {
 	private final RefreshSessionJpaRepository sessions;
 	private final UserAccountJpaRepository users;
 	private final AccessPolicyPort accessPolicies;
-	private final WorkspaceMembershipJpaRepository memberships;
-	private final WorkspaceJpaRepository workspaces;
+	private final JdbcTemplate jdbc;
 	private final JwtDecoder decoder;
 	private final Duration accessTokenTtl;
 
 	public JpaSessionAdapter(RefreshSessionJpaRepository sessions, UserAccountJpaRepository users, AccessPolicyPort accessPolicies,
-			WorkspaceMembershipJpaRepository memberships, WorkspaceJpaRepository workspaces, JwtDecoder decoder,
+			JdbcTemplate jdbc, JwtDecoder decoder,
 			@Value("${nexa.security.access-token-ttl:PT15M}") Duration accessTokenTtl) {
 		this.sessions = sessions;
 		this.users = users;
 		this.accessPolicies = accessPolicies;
-		this.memberships = memberships;
-		this.workspaces = workspaces;
+		this.jdbc = jdbc;
 		this.decoder = decoder;
 		this.accessTokenTtl = accessTokenTtl;
 	}
@@ -137,11 +134,11 @@ public class JpaSessionAdapter implements SessionPort {
 		try {
 			UserAccountId userId = new UserAccountId(entity.getUserId().toString());
 			ClientSurface surface = ClientSurface.valueOf(entity.getSurface());
-			var membership = memberships.findById(entity.getMembershipId()).orElse(null);
-			if (membership == null) return Optional.empty();
-			var workspace = workspaces.findById(membership.getWorkspaceId()).orElse(null);
-			if (workspace == null) return Optional.empty();
-			AccessPolicy policy = accessPolicies.findFor(userId, workspace.getSlug(), surface).orElse(null);
+			String workspaceSlug = jdbc.query("select w.slug from tenant_management.workspace_membership m "
+					+ "join tenant_management.workspace w on w.id = m.workspace_id where m.id = ?",
+				(rs, row) -> rs.getString("slug"), entity.getMembershipId()).stream().findFirst().orElse(null);
+			if (workspaceSlug == null) return Optional.empty();
+			AccessPolicy policy = accessPolicies.findFor(userId, workspaceSlug, surface).orElse(null);
 			if (policy == null) return Optional.empty();
 			var user = users.findById(entity.getUserId()).orElse(null);
 			if (user == null) return Optional.empty();
