@@ -16,14 +16,22 @@ public final class CatalogResponseMapper {
 		return new CatalogItemSummaryResponse(item.catalogItemId(), item.productId(), item.itemName(), item.brandName(),
 				item.categoryName(), item.presentation(), money(item.unitPriceAmount(), item.unitPriceCurrency()),
 				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()), item.status(),
-				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel());
+				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel(), money(item.pricing().basePrice(), item.pricing().currency()),
+				money(item.pricing().effectivePrice(), item.pricing().currency()), money(item.pricing().discountAmount(), item.pricing().currency()),
+				item.pricing().currency(), item.pricing().appliedPromotions().stream()
+						.map(promotion -> new com.nexa.api.catalogmanagement.presentation.rest.response.CatalogAppliedPromotionResponse(
+								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf());
 	}
 
 	public CatalogItemDetailResponse toDetail(CatalogItemDetail item) {
 		return new CatalogItemDetailResponse(item.catalogItemId(), item.productId(), item.itemName(), item.brandName(),
 				item.categoryName(), item.description(), item.presentation(), money(item.unitPriceAmount(), item.unitPriceCurrency()),
 				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()), item.status(),
-				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel());
+				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel(), money(item.pricing().basePrice(), item.pricing().currency()),
+				money(item.pricing().effectivePrice(), item.pricing().currency()), money(item.pricing().discountAmount(), item.pricing().currency()),
+				item.pricing().currency(), item.pricing().appliedPromotions().stream()
+						.map(promotion -> new com.nexa.api.catalogmanagement.presentation.rest.response.CatalogAppliedPromotionResponse(
+								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf());
 	}
 
 	public CatalogPageResponse toPage(CatalogPage<CatalogItemSummary> page) {

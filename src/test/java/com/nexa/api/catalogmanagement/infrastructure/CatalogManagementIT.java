@@ -1,16 +1,19 @@
 package com.nexa.api.catalogmanagement.infrastructure;
 
 import com.nexa.api.support.PostgresIntegrationSupport;
+import com.nexa.api.catalogmanagement.infrastructure.seed.CatalogPersistenceBootstrap;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -22,6 +25,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class CatalogManagementIT extends PostgresIntegrationSupport {
 	private static final JsonMapper JSON = JsonMapper.shared();
+	@Autowired
+	private CatalogPersistenceBootstrap seed;
 
 	@Test
 	void buyerReadsPersistentCatalogWithCoarseAvailabilityAndPrice() throws Exception {
@@ -101,5 +106,19 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 				.content("{\"slug\":\"warehouse-forbidden\",\"name\":\"Forbidden\"}"))
 			.andExpect(status().isForbidden())
 			.andExpect(jsonPath("$.code").value("FORBIDDEN"));
+	}
+
+	@Test
+	void managedCatalogEditsSurviveASeedRestartAndSeedHistoryIsOneShot() {
+		UUID tenant = UUID.fromString(tenantId());
+		UUID workspace = UUID.fromString(workspaceId());
+		UUID productId = jdbc.queryForObject("select id from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id='CAT-0001'",
+				UUID.class, tenant, workspace);
+		jdbc.update("update catalog_management.product set name='Managed edit survives restart',updated_at=current_timestamp where id=?", productId);
+		seed.importDeterministicSeed();
+		assertThat(jdbc.queryForObject("select name from catalog_management.product where id=?", String.class, productId))
+				.isEqualTo("Managed edit survives restart");
+		assertThat(jdbc.queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v1'",
+				Integer.class, tenant, workspace)).isEqualTo(1);
 	}
 }

@@ -11,6 +11,7 @@ import com.nexa.api.tenantmanagement.domain.model.invitation.OrganizationInvitat
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
@@ -88,6 +89,13 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 	}
 
 	@Override
+	public int expirePending(Instant now, int batchSize) {
+		int safeBatch = Math.max(1, Math.min(1000, batchSize));
+		return jdbc.update("with expired as (select id from tenant_management.organization_invitation where status='PENDING' and expires_at<=? order by expires_at,id for update skip locked limit ?) update tenant_management.organization_invitation i set status='EXPIRED',updated_at=?,version=version+1 from expired where i.id=expired.id and i.status='PENDING'",
+				Timestamp.from(now), safeBatch, Timestamp.from(now));
+	}
+
+	@Override
 	public Optional<InvitationSnapshot> findForUpdateByTokenHash(String tokenHash) {
 		return querySnapshot("select id,tenant_id,workspace_id,email,display_name,token_hash,status,expires_at,created_by_membership_id,version,created_at from tenant_management.organization_invitation where token_hash=? for update", tokenHash);
 	}
@@ -100,7 +108,8 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 
 	@Override
 	public Optional<UserRecord> findUserByEmail(String normalizedEmail) {
-		return jdbc.query("select id,email,status from iam.user_account where normalized_email=?", (rs, row) -> new UserRecord(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)), normalizedEmail).stream().findFirst();
+		return jdbc.query("select u.id,u.email,u.status,c.password_hash from iam.user_account u left join iam.password_credential c on c.user_id=u.id where u.normalized_email=?",
+				(rs, row) -> new UserRecord(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getString(4)), normalizedEmail).stream().findFirst();
 	}
 
 	@Override
@@ -116,7 +125,11 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 	@Override
 	public UUID createMembership(String tenantId, String workspaceId, UUID userId, Instant now) {
 		UUID membership = UUID.randomUUID();
-		jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)", membership, uuid(workspaceId), userId, Timestamp.from(now), Timestamp.from(now));
+		try {
+			jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)", membership, uuid(workspaceId), userId, Timestamp.from(now), Timestamp.from(now));
+		} catch (DuplicateKeyException exception) {
+			throw new InvitationPersistencePort.DuplicateMembershipException();
+		}
 		return membership;
 	}
 

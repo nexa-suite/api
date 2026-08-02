@@ -27,6 +27,11 @@ public final class Product {
     public static Product create(UUID id, String catalogItemId, String productCode, String slug, String name, String description) {
         return new Product(id, catalogItemId, productCode, slug, name, description);
     }
+    public static Product restore(UUID id, String catalogItemId, String productCode, String slug, String name, String description, CatalogItemStatus status) {
+        Product product = new Product(id, catalogItemId, productCode, slug, name, description);
+        product.status = Objects.requireNonNull(status, "Product status is required");
+        return product;
+    }
     public UUID id() { return id; }
     public String catalogItemId() { return catalogItemId; }
     public String productCode() { return productCode; }
@@ -34,11 +39,31 @@ public final class Product {
     public String name() { return name; }
     public String description() { return description; }
     public CatalogItemStatus status() { return status; }
-    public void activate() { if (status == CatalogItemStatus.ARCHIVED) throw new IllegalStateException("Archived product cannot be activated"); status = CatalogItemStatus.ACTIVE; }
-    public void deactivate() { if (status == CatalogItemStatus.ARCHIVED) throw new IllegalStateException("Archived product cannot be deactivated"); status = CatalogItemStatus.INACTIVE; }
-    public void discontinue() { status = CatalogItemStatus.DISCONTINUED; }
-    public void archive() { if (status == CatalogItemStatus.ACTIVE) throw new IllegalStateException("Active product cannot be archived"); status = CatalogItemStatus.ARCHIVED; }
+    public void activate() {
+        if (status != CatalogItemStatus.DRAFT && status != CatalogItemStatus.INACTIVE && status != CatalogItemStatus.ACTIVE) {
+            throw new IllegalStateException("Archived product cannot be activated");
+        }
+        status = CatalogItemStatus.ACTIVE;
+    }
+    public void deactivate() {
+        if (status != CatalogItemStatus.DRAFT && status != CatalogItemStatus.ACTIVE && status != CatalogItemStatus.INACTIVE) {
+            throw new IllegalStateException("Archived product cannot be deactivated");
+        }
+        status = CatalogItemStatus.INACTIVE;
+    }
+    public void discontinue() {
+        if (status == CatalogItemStatus.ARCHIVED) throw new IllegalStateException("Archived product cannot be discontinued");
+        status = CatalogItemStatus.DISCONTINUED;
+    }
+    public void archive() {
+        if (status == CatalogItemStatus.ACTIVE || status == CatalogItemStatus.ARCHIVED) {
+            throw new IllegalStateException(status == CatalogItemStatus.ACTIVE
+                    ? "Active product cannot be archived" : "Archived product cannot be archived");
+        }
+        status = CatalogItemStatus.ARCHIVED;
+    }
     public void rename(String value) { name = bounded(value, "Product name", 200); }
+    public void changeSlug(String value) { slug = bounded(value, "Product slug", 140); }
     public void rewriteDescription(String value) { description = bounded(value, "Product description", 4000); }
 
     private static String bounded(String value, String label, int max) {

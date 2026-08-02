@@ -22,7 +22,16 @@ public final class CatalogManagementModels {
     public record PromotionView(String id, String slug, String name, String description, String status,
             String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
             BigDecimal minimumQuantity, String stackingPolicy, List<String> productIds, List<String> categoryIds,
-            long version) {
-        public PromotionView { productIds = List.copyOf(productIds); categoryIds = List.copyOf(categoryIds); }
+            List<String> clientAccountIds, List<PromotionRuleView> rules, long version) {
+        public PromotionView { productIds = List.copyOf(productIds); categoryIds = List.copyOf(categoryIds); clientAccountIds = List.copyOf(clientAccountIds); rules = List.copyOf(rules); }
+
+        public PromotionView(String id, String slug, String name, String description, String status,
+                String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
+                BigDecimal minimumQuantity, String stackingPolicy, List<String> productIds, List<String> categoryIds,
+                long version) {
+            this(id, slug, name, description, status, discountType, discountValue, currency, startsAt, endsAt,
+                    minimumQuantity, stackingPolicy, productIds, categoryIds, List.of(), List.of(), version);
+        }
     }
+    public record PromotionRuleView(String type, String value) { }
 }

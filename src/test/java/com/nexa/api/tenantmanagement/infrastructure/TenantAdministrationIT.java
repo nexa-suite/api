@@ -2,6 +2,7 @@ package com.nexa.api.tenantmanagement.infrastructure;
 
 import com.nexa.api.iam.infrastructure.notification.JdbcSecurityNotificationOutboxAdapter;
 import com.nexa.api.support.PostgresIntegrationSupport;
+import com.nexa.api.tenantmanagement.infrastructure.InvitationExpirationJob;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +29,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class TenantAdministrationIT extends PostgresIntegrationSupport {
     @Autowired
     private JdbcSecurityNotificationOutboxAdapter notificationOutbox;
+
+    @Autowired
+    private InvitationExpirationJob invitationExpirationJob;
 
     @Test
     void organizationSettingsAreTypedAuditedAndOptimisticallyConcurrent() throws Exception {
@@ -141,6 +145,50 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                         .content("{\"token\":\"" + token + "\",\"password\":\"integration-test-password\",\"displayName\":\"Invited Operator\"}"))
                 .andExpect(status().isNotFound());
         assertThat(jdbc.queryForObject("select count(*) from tenant_management.membership_role_assignment r join tenant_management.workspace_membership m on m.id=r.membership_id join iam.user_account u on u.id=m.user_id where u.normalized_email=? and r.role='SALES'", Integer.class, email)).isEqualTo(1);
+    }
+
+    @Test
+    void existingUserInvitationAuthenticatesBeforeCreatingMembership() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "existing-invited-" + uuid().substring(0, 8) + "@example.test";
+        UUID userId = UUID.randomUUID();
+        String username = "existing_invited_" + userId.toString().replace("-", "").substring(0, 12);
+        String passwordHash = jdbc.queryForObject("select password_hash from iam.password_credential c join iam.user_account u on u.id=c.user_id where u.normalized_email=?", String.class, OWNER_EMAIL);
+        jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
+                userId, email, email, username, username, "Existing invitee", "en");
+        jdbc.update("insert into iam.password_credential (user_id,password_hash,algorithm,changed_at) values (?,?,'bcrypt',current_timestamp)", userId, passwordHash);
+
+        String key = "existing-invitation-" + uuid();
+        mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + email + "\",\"displayName\":\"Existing invitee\",\"roles\":[\"SALES\"]}"))
+                .andExpect(status().isCreated());
+        String encrypted = jdbc.queryForObject("select payload_ciphertext from iam.security_notification_outbox where notification_type='ORGANIZATION_INVITATION' and recipient=? order by created_at desc limit 1", String.class, email);
+        String payload = notificationOutbox.decrypt(encrypted);
+        String token = payload.substring(payload.indexOf("token=") + 6, payload.indexOf('\n', payload.indexOf("token=")));
+
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + token + "\",\"password\":\"wrong-existing-password\",\"displayName\":\"Ignored\"}"))
+                .andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership where user_id=?", Integer.class, userId)).isZero();
+
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + token + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"Ignored\"}"))
+                .andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership where user_id=?", Integer.class, userId)).isEqualTo(1);
+    }
+
+    @Test
+    void boundedInvitationJobExpiresPendingInvitations() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "expiring-invited-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult created = mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
+                        .header("Idempotency-Key", "expiry-invitation-" + uuid()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"displayName\":\"Expiring operator\",\"roles\":[\"WAREHOUSE\"]}"))
+                .andExpect(status().isCreated()).andReturn();
+        String invitationId = json(created).get("id").asText();
+        jdbc.update("update tenant_management.organization_invitation set expires_at=current_timestamp - interval '1 minute' where id=?", UUID.fromString(invitationId));
+        invitationExpirationJob.expireBatch();
+        assertThat(jdbc.queryForObject("select status from tenant_management.organization_invitation where id=?", String.class, UUID.fromString(invitationId))).isEqualTo("EXPIRED");
     }
 
     private int createWorkspaceStatus(String owner, String slug, String key) throws Exception {

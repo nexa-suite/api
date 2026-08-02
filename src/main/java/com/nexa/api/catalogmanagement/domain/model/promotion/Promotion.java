@@ -32,6 +32,11 @@ public final class Promotion {
     public static Promotion create(UUID id, DiscountType type, BigDecimal value, Instant startsAt, Instant endsAt) {
         return new Promotion(id, type, value, startsAt, endsAt);
     }
+    public static Promotion restore(UUID id, DiscountType type, BigDecimal value, Instant startsAt, Instant endsAt, PromotionStatus status) {
+        Promotion promotion = new Promotion(id, type, value, startsAt, endsAt);
+        promotion.status = Objects.requireNonNull(status, "Promotion status is required");
+        return promotion;
+    }
     public UUID id() { return id; }
     public DiscountType discountType() { return discountType; }
     public BigDecimal discountValue() { return discountValue; }
@@ -41,6 +46,12 @@ public final class Promotion {
     public void schedule() { require(PromotionStatus.DRAFT); status = PromotionStatus.SCHEDULED; }
     public void activate() { if (status != PromotionStatus.DRAFT && status != PromotionStatus.SCHEDULED && status != PromotionStatus.PAUSED) throw new IllegalStateException("Promotion cannot be activated"); status = PromotionStatus.ACTIVE; }
     public void pause() { require(PromotionStatus.ACTIVE); status = PromotionStatus.PAUSED; }
+    public void expire() {
+        if (status != PromotionStatus.SCHEDULED && status != PromotionStatus.ACTIVE && status != PromotionStatus.PAUSED) {
+            throw new IllegalStateException("Promotion cannot expire");
+        }
+        status = PromotionStatus.EXPIRED;
+    }
     public void cancel() { if (status == PromotionStatus.EXPIRED || status == PromotionStatus.CANCELLED) throw new IllegalStateException("Promotion is closed"); status = PromotionStatus.CANCELLED; }
 
     private void require(PromotionStatus expected) {

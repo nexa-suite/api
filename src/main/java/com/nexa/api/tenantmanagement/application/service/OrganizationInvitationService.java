@@ -4,6 +4,7 @@ import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.shared.application.port.out.SecurityAuditPort;
 import com.nexa.api.shared.application.port.out.OpaqueSecurityTokenPort;
 import com.nexa.api.shared.application.port.out.PasswordHashPort;
+import com.nexa.api.shared.application.port.out.PasswordVerificationPort;
 import com.nexa.api.shared.application.port.out.SecurityNotificationOutboxPort;
 import com.nexa.api.shared.domain.model.password.PasswordPolicy;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
@@ -38,17 +39,19 @@ public class OrganizationInvitationService implements InvitationUseCase {
 	private final TenantConfigurationPort configuration;
 	private final OpaqueSecurityTokenPort tokens;
 	private final PasswordHashPort hasher;
+	private final PasswordVerificationPort passwordVerifier;
 	private final SecurityNotificationOutboxPort outbox;
 	private final SecurityAuditPort audit;
 	private final Clock clock;
 
 	public OrganizationInvitationService(InvitationPersistencePort invitations, TenantConfigurationPort configuration,
 			OpaqueSecurityTokenPort tokens, PasswordHashPort hasher, SecurityNotificationOutboxPort outbox,
-			SecurityAuditPort audit, Clock clock) {
+			SecurityAuditPort audit, Clock clock, PasswordVerificationPort passwordVerifier) {
 		this.invitations = Objects.requireNonNull(invitations);
 		this.configuration = Objects.requireNonNull(configuration);
 		this.tokens = Objects.requireNonNull(tokens);
 		this.hasher = Objects.requireNonNull(hasher);
+		this.passwordVerifier = Objects.requireNonNull(passwordVerifier);
 		this.outbox = Objects.requireNonNull(outbox);
 		this.audit = Objects.requireNonNull(audit);
 		this.clock = Objects.requireNonNull(clock);
@@ -132,9 +135,11 @@ public class OrganizationInvitationService implements InvitationUseCase {
 
 	@Override
 	public InvitationModels.InvitationAcceptanceResult accept(String token, String password, String displayName, String correlationId) {
-		if (token == null || token.isBlank() || !PasswordPolicy.isValid(password)) throw new InvitationInvalidException();
+		if (token == null || token.isBlank()) throw new InvitationInvalidException();
 		var snapshot = invitations.findForUpdateByTokenHash(tokens.sha256(token)).orElseThrow(InvitationInvalidException::new);
 		OrganizationInvitation invitation = snapshot.invitation();
+		var settings = configuration.findTenantSecuritySettings(invitation.tenantId().toString()).orElseThrow(InvitationInvalidException::new);
+		if (!PasswordPolicy.isValid(password, settings.passwordMinLength())) throw new InvitationInvalidException();
 		try {
 			invitation.accept(clock);
 		} catch (TenantManagementInvariantViolation exception) {
@@ -143,9 +148,15 @@ public class OrganizationInvitationService implements InvitationUseCase {
 		if (invitations.findActiveMembershipByEmail(invitation.workspaceId().toString(), invitation.email()).isPresent()) throw new InvitationConflictException("Membership already exists");
 		UUID userId = invitations.findUserByEmail(invitation.email()).map(existing -> {
 			if (!"ACTIVE".equalsIgnoreCase(existing.status())) throw new InvitationConflictException("User account is not active");
+			if (!passwordVerifier.matches(password, existing.passwordHash())) throw new InvitationInvalidException();
 			return existing.userId();
 		}).orElseGet(() -> invitations.createUser(invitation.email(), displayName == null || displayName.isBlank() ? invitation.displayName() : displayName.strip(), hasher.encode(password), clock.instant()));
-		UUID membershipId = invitations.createMembership(invitation.tenantId().toString(), invitation.workspaceId().toString(), userId, clock.instant());
+		UUID membershipId;
+		try {
+			membershipId = invitations.createMembership(invitation.tenantId().toString(), invitation.workspaceId().toString(), userId, clock.instant());
+		} catch (InvitationPersistencePort.DuplicateMembershipException exception) {
+			throw new InvitationConflictException("Membership already exists");
+		}
 		Set<String> roleNames = invitation.roles().stream().map(Enum::name).collect(Collectors.toUnmodifiableSet());
 		invitations.assignRoles(membershipId, invitation.tenantId().toString(), invitation.workspaceId().toString(), roleNames, clock.instant());
 		if (invitations.updateStatus(invitation.tenantId().toString(), invitation.id(), InvitationStatus.ACCEPTED.name(), clock.instant(), userId, snapshot.version()) == 0) throw new ConcurrencyConflictException();

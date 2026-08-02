@@ -3,6 +3,7 @@ package com.nexa.api.tenantmanagement.infrastructure;
 import com.nexa.api.shared.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantmanagement.application.port.in.TenantConfigurationUseCase;
 import com.nexa.api.tenantmanagement.application.port.in.InvitationUseCase;
+import com.nexa.api.shared.application.port.out.PasswordVerificationPort;
 import com.nexa.api.tenantmanagement.application.port.out.InvitationPersistencePort;
 import com.nexa.api.tenantmanagement.application.port.out.OrganizationAdministrationPort;
 import com.nexa.api.tenantmanagement.application.port.out.TenantConfigurationPort;
@@ -31,8 +32,10 @@ public class TenantConfigurationRuntimeConfiguration {
 			com.nexa.api.shared.application.port.out.OpaqueSecurityTokenPort tokens,
 			com.nexa.api.shared.application.port.out.PasswordHashPort hasher,
 			com.nexa.api.shared.application.port.out.SecurityNotificationOutboxPort outbox,
-			SecurityAuditPort audit, Clock clock, PlatformTransactionManager transactionManager) {
-		return TenantTransactionalProxy.required(new OrganizationInvitationService(invitations, configuration, tokens, hasher, outbox, audit, clock),
+			SecurityAuditPort audit, Clock clock,
+				PasswordVerificationPort passwordVerifier,
+			PlatformTransactionManager transactionManager) {
+		return TenantTransactionalProxy.required(new OrganizationInvitationService(invitations, configuration, tokens, hasher, outbox, audit, clock, passwordVerifier),
 				InvitationUseCase.class, transactionManager);
 	}
 }

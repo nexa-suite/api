@@ -6,6 +6,10 @@ import com.nexa.api.catalogmanagement.application.port.out.CatalogPricingPort;
 import com.nexa.api.catalogmanagement.application.port.out.CatalogProductPort;
 import com.nexa.api.catalogmanagement.application.port.out.CatalogPromotionPort;
 import com.nexa.api.catalogmanagement.application.port.out.CatalogTaxonomyPort;
+import com.nexa.api.catalogmanagement.application.port.in.CatalogPricingUseCase;
+import com.nexa.api.catalogmanagement.application.port.in.CatalogProductUseCase;
+import com.nexa.api.catalogmanagement.application.port.in.CatalogPromotionUseCase;
+import com.nexa.api.catalogmanagement.application.port.in.CatalogTaxonomyUseCase;
 import com.nexa.api.catalogmanagement.application.service.CatalogQueryService;
 import com.nexa.api.catalogmanagement.application.service.CatalogPricingService;
 import com.nexa.api.catalogmanagement.application.service.CatalogProductService;
@@ -14,6 +18,7 @@ import com.nexa.api.catalogmanagement.application.service.CatalogTaxonomyService
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @Configuration(proxyBeanMethods = false)
 public class CatalogQueryConfiguration {
@@ -24,26 +29,30 @@ public class CatalogQueryConfiguration {
 
 	@Bean
 	@Profile("!test")
-	CatalogTaxonomyService catalogTaxonomyService(CatalogTaxonomyPort port, CatalogAuthorizationPort authorization) {
-		return new CatalogTaxonomyService(port, authorization);
+	CatalogTaxonomyUseCase catalogTaxonomyService(CatalogTaxonomyPort port, CatalogAuthorizationPort authorization,
+			PlatformTransactionManager transactionManager) {
+		return CatalogTransactionalProxy.required(new CatalogTaxonomyService(port, authorization), CatalogTaxonomyUseCase.class, transactionManager);
 	}
 
 	@Bean
 	@Profile("!test")
-	CatalogProductService catalogProductService(CatalogProductPort port, CatalogAuthorizationPort authorization) {
-		return new CatalogProductService(port, authorization);
+	CatalogProductUseCase catalogProductService(CatalogProductPort port, CatalogAuthorizationPort authorization,
+			PlatformTransactionManager transactionManager) {
+		return CatalogTransactionalProxy.required(new CatalogProductService(port, authorization), CatalogProductUseCase.class, transactionManager);
 	}
 
 	@Bean
 	@Profile("!test")
-	CatalogPricingService catalogPricingService(CatalogPricingPort port, CatalogAuthorizationPort authorization) {
-		return new CatalogPricingService(port, authorization);
+	CatalogPricingUseCase catalogPricingService(CatalogPricingPort port, CatalogAuthorizationPort authorization,
+			PlatformTransactionManager transactionManager) {
+		return CatalogTransactionalProxy.required(new CatalogPricingService(port, authorization), CatalogPricingUseCase.class, transactionManager);
 	}
 
 	@Bean
 	@Profile("!test")
-	CatalogPromotionService catalogPromotionService(CatalogPromotionPort port, CatalogAuthorizationPort authorization) {
-		return new CatalogPromotionService(port, authorization);
+	CatalogPromotionUseCase catalogPromotionService(CatalogPromotionPort port, CatalogAuthorizationPort authorization,
+			PlatformTransactionManager transactionManager) {
+		return CatalogTransactionalProxy.required(new CatalogPromotionService(port, authorization), CatalogPromotionUseCase.class, transactionManager);
 	}
 
 }

@@ -94,8 +94,14 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 
 	@Override
 	public int updateWorkspaceSettings(String workspaceId, String defaultBehavior, String warehouseStrategy, long expectedVersion) {
-		return jdbc.update("update tenant_management.workspace_settings set default_workspace_behavior=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
+		ensureWorkspaceDefaults(workspaceId);
+		int updated = jdbc.update("update tenant_management.workspace_settings set default_workspace_behavior=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
 				defaultBehavior, uuid(workspaceId), expectedVersion);
+		if (updated == 1) {
+			jdbc.update("update tenant_management.operational_settings set warehouse_preference_strategy=?,updated_at=current_timestamp,version=version+1 where workspace_id=?",
+					warehouseStrategy, uuid(workspaceId));
+		}
+		return updated;
 	}
 
 	@Override

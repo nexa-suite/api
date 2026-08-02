@@ -11,7 +11,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.sql.ResultSet;
@@ -71,7 +70,6 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.ProductView createProduct(CatalogScope scope, String catalogItemId, String productCode,
             String slug, String name, String description, UUID categoryId, UUID brandId, String storageTemperature,
             String presentation, String unitOfMeasure, boolean buyerVisible, String imagePath) {
@@ -87,7 +85,6 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.ProductView createProduct(CatalogScope scope, String catalogItemId, String productCode,
             String slug, String name, String description, UUID categoryId, UUID brandId, String storageTemperature,
             String presentation, String unitOfMeasure, boolean buyerVisible, String imagePath, String idempotencyKey) {
@@ -118,7 +115,6 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.ProductView updateProduct(CatalogScope scope, UUID id, String slug, String name,
             String description, UUID categoryId, UUID brandId, String storageTemperature, String presentation,
             String unitOfMeasure, boolean buyerVisible, String imagePath, long version) {
@@ -144,8 +140,6 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
     @Override
     public CatalogManagementModels.ProductView changeStatus(CatalogScope scope, UUID id, String status, long version) {
         String normalized = enumValue(status, "status", CatalogItemStatus.values());
-        CatalogManagementModels.ProductView current = product(scope, id).orElseThrow(() -> new CatalogResourceNotFoundException("product"));
-        if (!validTransition(current.status(), normalized)) throw new CatalogConflictException("CATALOG_CONFLICT");
         int updated = jdbc.update("update catalog_management.product set status=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
                 normalized, now(), scope.tenantId(), scope.workspaceId(), id, version);
         if (updated == 0) throw new CatalogConcurrencyException();
@@ -154,8 +148,8 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
 
     private String selectProductSql() {
         return "select p.id,p.catalog_item_id,p.product_code,p.slug,p.name,p.description," +
-                "p.category_id,c.name,p.brand_id,b.name,p.storage_temperature,p.status," +
-                "pp.presentation,pp.unit_of_measure,coalesce(pv.buyer_visible,false),asset.asset_path," +
+                "p.category_id,c.name category_name,p.brand_id,b.name brand_name,p.storage_temperature,p.status," +
+                "pp.presentation,pp.unit_of_measure,coalesce(pv.buyer_visible,false) buyer_visible,asset.asset_path," +
                 "current_price.id current_price_id,current_price.amount current_price_amount,current_price.currency current_price_currency," +
                 "current_price.valid_from current_price_from,current_price.valid_until current_price_until,current_price.source_code current_price_source_code," +
                 "current_price.source_description current_price_source_description,current_price.cancelled current_price_cancelled,current_price.version current_price_version,p.version " +
@@ -225,18 +219,6 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
 
     private static String temperature(String value) {
         return enumValue(value, "storageTemperature", new String[]{"AMBIENT", "REFRIGERATED", "FROZEN"});
-    }
-
-    private static boolean validTransition(String current, String target) {
-        if (current.equals(target)) return true;
-        return switch (current) {
-            case "DRAFT" -> target.equals("ACTIVE") || target.equals("INACTIVE") || target.equals("ARCHIVED");
-            case "ACTIVE" -> target.equals("INACTIVE") || target.equals("DISCONTINUED");
-            case "INACTIVE" -> target.equals("ACTIVE") || target.equals("DISCONTINUED") || target.equals("ARCHIVED");
-            case "DISCONTINUED" -> target.equals("ARCHIVED");
-            case "ARCHIVED" -> false;
-            default -> false;
-        };
     }
 
     private static String enumValue(String value, String field, CatalogItemStatus[] values) {
