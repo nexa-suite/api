@@ -61,6 +61,9 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          sbom: true
+          provenance: mode=max
           tags: nexa/api:supply-chain-${{ github.sha }}
       - uses: aquasecurity/trivy-action@0.28.0
         with:
