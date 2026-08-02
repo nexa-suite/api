@@ -170,7 +170,11 @@ public final class TenantConfigurationController {
 	@GetMapping("/plan-comparison")
 	public List<TenantConfigurationModels.PlanOptionView> planComparison(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) {
 		context.requirePermission(Permission.TENANT_READ);
-		return List.of(new TenantConfigurationModels.PlanOptionView("STARTER", BigDecimal.ZERO, 5, 1, 250, false), new TenantConfigurationModels.PlanOptionView("STANDARD", BigDecimal.ZERO, 10, 3, 1000, true), new TenantConfigurationModels.PlanOptionView("GROWTH", BigDecimal.ZERO, 50, 10, 10000, false));
+		return List.of(
+				new TenantConfigurationModels.PlanOptionView("STARTER", BigDecimal.ZERO, 5, 1, 250, false),
+				new TenantConfigurationModels.PlanOptionView("STANDARD", BigDecimal.ZERO, 10, 3, 1000, true),
+				new TenantConfigurationModels.PlanOptionView("PROFESSIONAL", BigDecimal.ZERO, 50, 10, 10000, false),
+				new TenantConfigurationModels.PlanOptionView("ENTERPRISE", BigDecimal.ZERO, 250, 50, 100000, false));
 	}
 
 	private static long version(String value) {

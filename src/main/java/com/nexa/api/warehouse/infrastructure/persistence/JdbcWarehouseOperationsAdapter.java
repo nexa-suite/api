@@ -307,7 +307,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         String catalogItemId = bounded(receipt.catalogItemId(), "catalogItemId", 64);
         requireActiveWarehouse(context, warehouse);
         requireActiveZone(context, warehouse, zone);
-        if (catalog.findActive(catalogItemId).isEmpty()) throw error("CATALOG_ITEM_NOT_FOUND", true);
+		if (catalog.findActive(catalogItemId, tenant(context), workspace(context)).isEmpty()) throw error("CATALOG_ITEM_NOT_FOUND", true);
         String unit = normalizedUnit(receipt.unit());
         String batch = bounded(receipt.batchNumber(), "batchNumber", 80);
         if (receipt.expirationDate() == null || !receipt.expirationDate().isAfter(LocalDate.now())) {

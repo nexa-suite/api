@@ -14,5 +14,15 @@ public record CatalogItemDetail(
 		String unitPriceCurrency,
 		String coldChainRequirement,
 		String imageUrl,
-		String imageFileName) {
+		String imageFileName,
+		String status,
+		String availabilityStatus,
+		boolean nearExpiry,
+		String promotionLabel) {
+	public CatalogItemDetail(String catalogItemId, String productId, String itemName, String brandName,
+			String categoryName, String description, String presentation, BigDecimal unitPriceAmount,
+			String unitPriceCurrency, String coldChainRequirement, String imageUrl, String imageFileName) {
+		this(catalogItemId, productId, itemName, brandName, categoryName, description, presentation, unitPriceAmount,
+				unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, "ACTIVE", "UNKNOWN", false, null);
+	}
 }

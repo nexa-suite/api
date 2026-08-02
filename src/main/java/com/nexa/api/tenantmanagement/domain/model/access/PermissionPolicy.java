@@ -18,18 +18,22 @@ public final class PermissionPolicy {
 					Permission.IAM_USER_READ, Permission.IAM_USER_MANAGE),
 			MembershipRole.COMPANY_OWNER, Set.of(
 					Permission.TENANT_READ, Permission.OWNER_DASHBOARD_READ,
-					Permission.SALES_READ, Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ),
+					Permission.SALES_READ, Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ,
+					Permission.CATALOG_READ, Permission.CATALOG_MANAGE, Permission.CATALOG_PRICE_MANAGE,
+					Permission.PROMOTION_READ, Permission.PROMOTION_MANAGE),
 			MembershipRole.SALES, Set.of(
-					Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE),
+					Permission.CATALOG_READ, Permission.CATALOG_MANAGE, Permission.CATALOG_PRICE_MANAGE,
+					Permission.PROMOTION_READ, Permission.SALES_READ, Permission.SALES_WRITE),
 			MembershipRole.WAREHOUSE, Set.of(
 					Permission.CATALOG_READ, Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
 					Permission.FULFILLMENT_READ),
 			MembershipRole.LOGISTICS, Set.of(
+					Permission.CATALOG_READ, Permission.PROMOTION_READ, Permission.PROMOTION_MANAGE,
 					Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE,
 					Permission.FULFILLMENT_READ),
 			MembershipRole.BUYER, Set.of(
 					Permission.CATALOG_READ, Permission.SALES_BUYER_READ, Permission.SALES_BUYER_WRITE,
-					Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ));
+					Permission.PROMOTION_READ, Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ));
 
 	private PermissionPolicy() {
 	}

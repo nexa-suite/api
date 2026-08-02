@@ -6,6 +6,7 @@ import com.nexa.api.shared.application.changefeed.ChangeFeedQueryPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 
@@ -24,8 +26,15 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
     @Autowired ChangeEventPersistencePort events;
     @Autowired ChangeFeedQueryPort feed;
 
+    @BeforeEach
+    void ensureSeedOwnerHasBothRoles() {
+        restoreSeedOwnerRoles();
+    }
+
     @AfterEach
     void restoreSeedOwnerRoles() {
+        jdbc.update("update tenant_management.workspace_membership set status='ACTIVE' where id=?",
+                java.util.UUID.fromString(membershipId(OWNER_EMAIL)));
         String membershipId = membershipId(OWNER_EMAIL);
         jdbc.update("delete from tenant_management.membership_role_assignment where membership_id=?", java.util.UUID.fromString(membershipId));
         jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) "
@@ -53,6 +62,10 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         var initialRoles = json(initialSession).at("/membership/roles");
         assertThat(initialRoles.toString()).contains("TENANT_ADMIN", "COMPANY_OWNER");
+        assertThat(jdbc.query("select r.role from tenant_management.membership_role_assignment r "
+                        + "where r.membership_id=? order by r.role", (rs, row) -> rs.getString(1),
+                java.util.UUID.fromString(membershipId(OWNER_EMAIL))))
+                .containsExactly("COMPANY_OWNER", "TENANT_ADMIN");
 
         String tenant = tenantId();
         String workspace = workspaceId();
@@ -68,6 +81,9 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
         assertThat(jdbc.queryForObject("select audiences::text from integration.change_event where tenant_id=? and workspace_id=? and aggregate_id=?",
                 String.class, java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace), java.util.UUID.fromString(ownerAggregate)))
                 .isEqualTo("{OWNER}");
+        assertThat(jdbc.queryForObject("select audiences::text from integration.change_event where tenant_id=? and workspace_id=? and aggregate_id=?",
+                String.class, java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace), java.util.UUID.fromString(salesAggregate)))
+                .isEqualTo("{SALES}");
 
         var ownerOnly = feed.after(tenant, workspace, null, Set.of(ChangeEventAudience.OWNER), cursor, 100);
         assertThat(ownerOnly).extracting(ChangeEventView::eventType)
@@ -77,6 +93,8 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
         assertThat(union).extracting(ChangeEventView::eventType)
                 .containsExactly("organization.membership.role-changed", "sales.purchase-request.created");
         assertThat(union.stream().filter(event -> event.eventType().equals("organization.membership.role-changed")).count()).isEqualTo(1);
+        assertThat(feed.after(tenant, uuid(), null, Set.of(ChangeEventAudience.OWNER, ChangeEventAudience.SALES), cursor, 100))
+                .isEmpty();
 
         String initialStream = streamBody(initialToken, cursor);
         assertThat(occurrences(initialStream, "organization.membership.role-changed")).isEqualTo(1);
@@ -96,6 +114,8 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
 
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + initialToken))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/change-feed/stream").header("Authorization", "Bearer " + initialToken))
+                .andExpect(status().isForbidden());
 
         String newToken = accessToken(OWNER_EMAIL, "PLATFORM");
         var newSession = mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + newToken))
@@ -107,6 +127,14 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
         String newStream = streamBody(newToken, cursor);
         assertThat(occurrences(newStream, "organization.membership.role-changed")).isEqualTo(1);
         assertThat(newStream).doesNotContain("sales.purchase-request.created");
+
+        mockMvc.perform(post("/api/v1/authentication/sign-out")
+                        .header("Authorization", "Bearer " + newToken)
+                        .header("Origin", ALLOWED_ORIGIN)
+                        .header("X-Nexa-Surface", "PLATFORM"))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/change-feed/stream").header("Authorization", "Bearer " + newToken))
+                .andExpect(status().isUnauthorized());
     }
 
     private String streamBody(String token, long cursor) throws Exception {
