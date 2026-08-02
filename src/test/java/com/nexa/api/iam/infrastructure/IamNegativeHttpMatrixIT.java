@@ -26,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
     private static final BCryptPasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder(12);
+    private static final String COMMON_PASSWORD = "123456789012";
 
     @BeforeEach
     void restoreOwnerFixturesBeforeEach() {
@@ -44,6 +45,7 @@ class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getHeader("ETag");
+        assertThat(originalEtag).as("original profile ETag").isNotBlank();
 
         mockMvc.perform(patch("/api/v1/me/profile")
                         .header("Authorization", "Bearer " + token)
@@ -52,12 +54,14 @@ class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isPreconditionRequired())
                 .andExpect(jsonPath("$.code").value("PRECONDITION_REQUIRED"));
 
-        mockMvc.perform(patch("/api/v1/me/profile")
+        MvcResult updated = mockMvc.perform(patch("/api/v1/me/profile")
                         .header("Authorization", "Bearer " + token)
                         .header("If-Match", originalEtag)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(profilePayload("Negative Matrix Owner", "+51987654321", "es", "America/Lima")))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk()).andReturn();
+        assertThat(updated.getResponse().getHeader("ETag"))
+                .as("updated profile ETag").isNotBlank().isNotEqualTo(originalEtag);
 
         mockMvc.perform(patch("/api/v1/me/profile")
                         .header("Authorization", "Bearer " + token)
@@ -109,7 +113,7 @@ class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(post("/api/v1/me/password-changes")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(passwordPayload("123456789012")))
+                        .content(passwordPayload(COMMON_PASSWORD)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PASSWORD_POLICY_INVALID"));
     }
@@ -160,8 +164,7 @@ class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
         assertThat(first.getResponse().getStatus()).isEqualTo(200);
 
         MvcResult duplicate = submitRegistration(slug, "it-neg-second-" + uuid() + "@example.test");
-        assertThat(duplicate.getResponse().getStatus()).isEqualTo(409);
-        assertThat(json(duplicate).get("code").asText()).isEqualTo("REGISTRATION_SLUG_CONFLICT");
+        assertRegistrationSlugConflict(duplicate);
     }
 
     @Test
@@ -185,7 +188,7 @@ class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
         assertThat(results).extracting(result -> result.getResponse().getStatus())
                 .containsExactlyInAnyOrder(200, 409);
         MvcResult conflict = results.stream().filter(result -> result.getResponse().getStatus() == 409).findFirst().orElseThrow();
-        assertThat(json(conflict).get("code").asText()).isEqualTo("REGISTRATION_SLUG_CONFLICT");
+        assertRegistrationSlugConflict(conflict);
     }
 
     private String profileEtag(String token) throws Exception {
@@ -206,6 +209,13 @@ class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
             barrier.await(10, TimeUnit.SECONDS);
             return submitRegistration(slug, email);
         };
+    }
+
+    private void assertRegistrationSlugConflict(MvcResult result) throws Exception {
+        assertThat(result.getResponse().getStatus()).isEqualTo(409);
+        String code = json(result).get("code").asText();
+        assertThat(code).as("duplicate organization slug Problem Details code").isNotEqualTo("INVALID_REQUEST");
+        assertThat(code).isEqualTo("REGISTRATION_SLUG_CONFLICT");
     }
 
     private void restoreOwnerFixtures() {

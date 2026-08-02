@@ -108,7 +108,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		aggregate.updateDetails(priorityValue, new RequestedDeliveryDate(deliveryDate), new DeliveryProfileSnapshot(deliveryProfile), paymentValue, new RequestComment(comment));
 		List<PurchaseRequestLineView> snapshots = new ArrayList<>();
 		for (RequestedLine requested : requestedLines == null ? List.<RequestedLine>of() : requestedLines) {
-			CatalogItemSnapshot item = catalog.findActive(requested.catalogItemId())
+			CatalogItemSnapshot item = catalog.findActive(requested.catalogItemId(), context.tenantId().value(), context.workspaceId().value())
 					.orElseThrow(() -> new SalesResourceNotFoundException("catalog-item"));
 			RequestedQuantity quantity = new RequestedQuantity(requested.quantity());
 			UUID lineId = UUID.randomUUID();
@@ -152,7 +152,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	public PurchaseRequestView addLine(CurrentAccessContext context, String id, String catalogItemId, BigDecimal quantity,
 			String unit, String notes, long version) {
 		PurchaseRequestView current = canEdit(context, id);
-		CatalogItemSnapshot item = catalog.findActive(catalogItemId)
+		CatalogItemSnapshot item = catalog.findActive(catalogItemId, context.tenantId().value(), context.workspaceId().value())
 				.orElseThrow(() -> new SalesResourceNotFoundException("catalog-item"));
 		if (current.lines().stream().anyMatch(line -> line.catalogItemId().equals(catalogItemId))) {
 			throw new SalesInvariantViolation("Catalog item already exists in request");

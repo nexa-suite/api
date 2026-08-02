@@ -58,6 +58,11 @@ public final class CatalogItem {
 	public void changeMedia(CatalogMedia newMedia) { media = required(newMedia, "Catalog media"); }
 	public void activate() { status = CatalogItemStatus.ACTIVE; }
 	public void deactivate() { status = CatalogItemStatus.INACTIVE; }
+	public void discontinue() { status = CatalogItemStatus.DISCONTINUED; }
+	public void archive() {
+		if (status == CatalogItemStatus.ACTIVE) throw new CatalogInvariantViolation("Active catalog item cannot be archived");
+		status = CatalogItemStatus.ARCHIVED;
+	}
 
 	private static <T> T required(T value, String label) {
 		if (value == null) throw new CatalogInvariantViolation(label + " is required");

@@ -48,6 +48,11 @@ import com.nexa.api.logistics.application.LogisticsOperationsService;
 import com.nexa.api.logistics.domain.dispatchorder.DispatchTransitionViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
+import com.nexa.api.catalogmanagement.application.exception.CatalogConcurrencyException;
+import com.nexa.api.catalogmanagement.application.exception.CatalogConflictException;
+import com.nexa.api.catalogmanagement.application.exception.CatalogIdempotencyKeyRequiredException;
+import com.nexa.api.catalogmanagement.application.exception.CatalogPreconditionRequiredException;
+import com.nexa.api.catalogmanagement.application.exception.CatalogResourceNotFoundException;
 
 import java.util.List;
 import java.util.Map;
@@ -118,6 +123,46 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request);
 	}
 
+	@ExceptionHandler(CatalogConcurrencyException.class)
+	public ResponseEntity<ProblemDetail> handleCatalogConcurrency(CatalogConcurrencyException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Catalog resource changed by another request", request);
+	}
+
+	@ExceptionHandler(CatalogPreconditionRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleCatalogPrecondition(CatalogPreconditionRequiredException exception, HttpServletRequest request) {
+		return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
+	}
+
+	@ExceptionHandler(CatalogResourceNotFoundException.class)
+	public ResponseEntity<ProblemDetail> handleCatalogNotFound(CatalogResourceNotFoundException exception, HttpServletRequest request) {
+		ApiErrorCode code = switch (exception.resource()) {
+			case "category" -> ApiErrorCode.CATALOG_CATEGORY_NOT_FOUND;
+			case "brand" -> ApiErrorCode.CATALOG_BRAND_NOT_FOUND;
+			case "product" -> ApiErrorCode.CATALOG_PRODUCT_NOT_FOUND;
+			case "price" -> ApiErrorCode.CATALOG_PRICE_NOT_FOUND;
+			case "promotion" -> ApiErrorCode.CATALOG_PROMOTION_NOT_FOUND;
+			default -> ApiErrorCode.RESOURCE_NOT_FOUND;
+		};
+		return response(HttpStatus.NOT_FOUND, code, "Catalog resource not found", request);
+	}
+
+	@ExceptionHandler(CatalogConflictException.class)
+	public ResponseEntity<ProblemDetail> handleCatalogConflict(CatalogConflictException exception, HttpServletRequest request) {
+		ApiErrorCode code = switch (exception.code()) {
+			case "CATALOG_CATEGORY_CYCLE" -> ApiErrorCode.CATALOG_CATEGORY_CYCLE;
+			case "CATALOG_PRICE_OVERLAP" -> ApiErrorCode.CATALOG_PRICE_OVERLAP;
+			case "CATALOG_CURRENCY_MISMATCH" -> ApiErrorCode.CATALOG_CURRENCY_MISMATCH;
+			case "PROMOTION_LIFECYCLE_INVALID" -> ApiErrorCode.PROMOTION_LIFECYCLE_INVALID;
+			default -> ApiErrorCode.CATALOG_CONFLICT;
+		};
+		return response(HttpStatus.CONFLICT, code, "Catalog operation conflicts with current state", request);
+	}
+
+	@ExceptionHandler(CatalogIdempotencyKeyRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleCatalogIdempotency(CatalogIdempotencyKeyRequiredException exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request);
+	}
+
 	@ExceptionHandler(InvitationInvalidException.class)
 	public ResponseEntity<ProblemDetail> handleInvitationInvalid(InvitationInvalidException exception, HttpServletRequest request) {
 		return response(HttpStatus.NOT_FOUND, ApiErrorCode.INVITATION_INVALID, "Invitation is invalid or expired", request);
@@ -185,7 +230,9 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
 		LOGGER.warn("Data integrity constraint rejected request {}", request.getRequestURI(), exception.getMostSpecificCause());
 		String message = exception.getMostSpecificCause() == null ? "" : String.valueOf(exception.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
-		ApiErrorCode code = message.contains("uq_organization_registration_slug") ? ApiErrorCode.REGISTRATION_SLUG_CONFLICT
+		ApiErrorCode code = message.contains("ex_catalog_price_no_overlap") ? ApiErrorCode.CATALOG_PRICE_OVERLAP
+				: message.contains("uq_catalog_category_slug") || message.contains("uq_catalog_brand_slug") || message.contains("uq_catalog_product_") || message.contains("uq_catalog_promotion_slug") ? ApiErrorCode.CATALOG_CONFLICT
+				: message.contains("uq_organization_registration_slug") ? ApiErrorCode.REGISTRATION_SLUG_CONFLICT
 				: message.contains("uq_workspace_tenant_slug") ? ApiErrorCode.WORKSPACE_SLUG_CONFLICT
 				: message.contains("uq_organization_invitation_active_email") ? ApiErrorCode.INVITATION_CONFLICT
 				: message.contains("uq_custom_field_definition_key") ? ApiErrorCode.CUSTOM_FIELD_CONFLICT

@@ -61,8 +61,9 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
                         .header("X-Correlation-ID", correlation)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + email + "\",\"surface\":\"PORTAL\"}"))
-                .andExpect(status().isOk());
+                        .andExpect(status().isOk());
         assertAuditDelta(before, "PASSWORD_RESET_REQUESTED", 1);
+        assertExactAuditDeltas(before, auditCounts(), Map.of("PASSWORD_RESET_REQUESTED", 1L));
         assertThat(jdbc.queryForObject("select count(*) from iam.security_audit_event where event_type='PASSWORD_RESET_REQUESTED' and correlation_id=? and metadata_json->>'accountResponse'='generic'",
                 Long.class, correlation)).isEqualTo(1L);
     }
@@ -129,6 +130,13 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
         assertAuditDelta(before, after, "PASSWORD_RESET_REQUESTED", 1);
         assertAuditDelta(before, after, "PASSWORD_RESET_COMPLETED", 1);
         assertAuditDelta(before, after, "PASSWORD_CHANGED", 1);
+        assertExactAuditDeltas(before, after, Map.of(
+                "LOGIN_SUCCEEDED", 1L,
+                "LOGIN_FAILED", 1L,
+                "AUTHENTICATION_THROTTLED", 1L,
+                "PASSWORD_RESET_REQUESTED", 1L,
+                "PASSWORD_RESET_COMPLETED", 1L,
+                "PASSWORD_CHANGED", 1L));
     }
 
     @Test
@@ -178,6 +186,13 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
         assertAuditDelta(before, after, "ROLE_ASSIGNMENT_CHANGED", 1);
         assertAuditDelta(before, after, "MEMBERSHIP_SUSPENDED", 1);
         assertAuditDelta(before, after, "MEMBERSHIP_REACTIVATED", 1);
+        assertExactAuditDeltas(before, after, Map.of(
+                "LOGIN_SUCCEEDED", 3L,
+                "ALL_OTHER_SESSIONS_REVOKED", 1L,
+                "SESSION_REVOKED", 1L,
+                "ROLE_ASSIGNMENT_CHANGED", 1L,
+                "MEMBERSHIP_SUSPENDED", 1L,
+                "MEMBERSHIP_REACTIVATED", 1L));
     }
 
     @Test
@@ -232,6 +247,14 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
         assertAuditDelta(before, after, "ORGANIZATION_REJECTED", 1);
         assertAuditDelta(before, after, "SYSTEM_OPERATOR_AUTHENTICATED", 2);
         assertAuditDelta(before, after, "SYSTEM_OPERATOR_AUTHENTICATION_FAILED", 1);
+        assertExactAuditDeltas(before, after, Map.of(
+                "LOGIN_SUCCEEDED", 1L,
+                "SENSITIVE_AUTHORIZATION_DENIED", 1L,
+                "ORGANIZATION_REGISTRATION_SUBMITTED", 2L,
+                "ORGANIZATION_ACTIVATED", 1L,
+                "ORGANIZATION_REJECTED", 1L,
+                "SYSTEM_OPERATOR_AUTHENTICATED", 2L,
+                "SYSTEM_OPERATOR_AUTHENTICATION_FAILED", 1L));
     }
 
     private Map<String, Long> auditCounts() {
@@ -252,6 +275,14 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
 
     private void assertAuditDelta(Map<String, Long> before, Map<String, Long> after, String event, long expected) {
         assertThat(after.get(event) - before.get(event)).as("audit event " + event).isEqualTo(expected);
+    }
+
+    private void assertExactAuditDeltas(Map<String, Long> before, Map<String, Long> after, Map<String, Long> expected) {
+        for (String event : REQUIRED_EVENTS) {
+            assertThat(after.get(event) - before.get(event))
+                    .as("exact audit delta for " + event)
+                    .isEqualTo(expected.getOrDefault(event, 0L));
+        }
     }
 
     private void restorePassword(String email) {

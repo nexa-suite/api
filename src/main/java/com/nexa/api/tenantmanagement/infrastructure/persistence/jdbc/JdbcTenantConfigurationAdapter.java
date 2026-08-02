@@ -75,27 +75,27 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	@Override
 	public Optional<OperationalSettings> findOperationalSettings(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
-		return jdbc.query("select default_warehouse_selection_policy,order_cutoff_policy,fulfillment_defaults,inventory_visibility_policy,buyer_availability_policy,operating_hours_start,operating_hours_end,order_cutoff_minutes,thermal_log_required,version from tenant_management.operational_settings where workspace_id=?",
+		return jdbc.query("select warehouse_preference_strategy,order_cutoff_policy,fulfillment_defaults,inventory_visibility_policy,buyer_availability_policy,operating_hours_start,operating_hours_end,order_cutoff_minutes,thermal_log_required,version from tenant_management.operational_settings where workspace_id=?",
 				(rs, row) -> new OperationalSettings(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getTime(6).toLocalTime(), rs.getTime(7).toLocalTime(), rs.getInt(8), rs.getBoolean(9), rs.getLong(10)), uuid(workspaceId)).stream().findFirst();
 	}
 
 	@Override
 	public int updateOperationalSettings(String workspaceId, OperationalSettings settings) {
-		return jdbc.update("update tenant_management.operational_settings set default_warehouse_selection_policy=?,order_cutoff_policy=?,fulfillment_defaults=?,inventory_visibility_policy=?,buyer_availability_policy=?,operating_hours_start=?,operating_hours_end=?,order_cutoff_minutes=?,thermal_log_required=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
+		return jdbc.update("update tenant_management.operational_settings set warehouse_preference_strategy=?,order_cutoff_policy=?,fulfillment_defaults=?,inventory_visibility_policy=?,buyer_availability_policy=?,operating_hours_start=?,operating_hours_end=?,order_cutoff_minutes=?,thermal_log_required=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
 				settings.defaultWarehouseSelectionPolicy(), settings.orderCutoffPolicy(), settings.fulfillmentDefaults(), settings.inventoryVisibilityPolicy(), settings.buyerAvailabilityPolicy(), Time.valueOf(settings.operatingHoursStart()), Time.valueOf(settings.operatingHoursEnd()), settings.orderCutoffMinutes(), settings.thermalLogRequired(), uuid(workspaceId), settings.version());
 	}
 
 	@Override
 	public Optional<TenantConfigurationModels.WorkspaceSettingsView> findWorkspaceSettings(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
-		return jdbc.query("select workspace_id,default_workspace_behavior,warehouse_preference_strategy,version from tenant_management.workspace_settings where workspace_id=?",
+		return jdbc.query("select ws.workspace_id,ws.default_workspace_behavior,os.warehouse_preference_strategy,ws.version from tenant_management.workspace_settings ws join tenant_management.operational_settings os on os.workspace_id=ws.workspace_id where ws.workspace_id=?",
 				(rs, row) -> new TenantConfigurationModels.WorkspaceSettingsView(rs.getObject(1).toString(), rs.getString(2), rs.getString(3), rs.getLong(4)), uuid(workspaceId)).stream().findFirst();
 	}
 
 	@Override
 	public int updateWorkspaceSettings(String workspaceId, String defaultBehavior, String warehouseStrategy, long expectedVersion) {
-		return jdbc.update("update tenant_management.workspace_settings set default_workspace_behavior=?,warehouse_preference_strategy=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
-				defaultBehavior, warehouseStrategy, uuid(workspaceId), expectedVersion);
+		return jdbc.update("update tenant_management.workspace_settings set default_workspace_behavior=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
+				defaultBehavior, uuid(workspaceId), expectedVersion);
 	}
 
 	@Override

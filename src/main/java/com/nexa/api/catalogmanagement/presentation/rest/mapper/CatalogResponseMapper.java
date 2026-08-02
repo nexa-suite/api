@@ -15,13 +15,15 @@ public final class CatalogResponseMapper {
 	public CatalogItemSummaryResponse toSummary(CatalogItemSummary item) {
 		return new CatalogItemSummaryResponse(item.catalogItemId(), item.productId(), item.itemName(), item.brandName(),
 				item.categoryName(), item.presentation(), money(item.unitPriceAmount(), item.unitPriceCurrency()),
-				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()));
+				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()), item.status(),
+				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel());
 	}
 
 	public CatalogItemDetailResponse toDetail(CatalogItemDetail item) {
 		return new CatalogItemDetailResponse(item.catalogItemId(), item.productId(), item.itemName(), item.brandName(),
 				item.categoryName(), item.description(), item.presentation(), money(item.unitPriceAmount(), item.unitPriceCurrency()),
-				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()));
+				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()), item.status(),
+				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel());
 	}
 
 	public CatalogPageResponse toPage(CatalogPage<CatalogItemSummary> page) {

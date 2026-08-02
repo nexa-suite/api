@@ -54,6 +54,16 @@ public final class ApiProblemDetailFactory {
 			case PERMISSION_DENIED -> "Permission denied";
 			case ORIGIN_NOT_ALLOWED -> "Origin not allowed";
 			case CATALOG_ITEM_NOT_FOUND -> "Catalog item not found";
+			case CATALOG_CATEGORY_NOT_FOUND -> "Catalog category not found";
+			case CATALOG_BRAND_NOT_FOUND -> "Catalog brand not found";
+			case CATALOG_PRODUCT_NOT_FOUND -> "Catalog product not found";
+			case CATALOG_PRICE_NOT_FOUND -> "Catalog price not found";
+			case CATALOG_PROMOTION_NOT_FOUND -> "Catalog promotion not found";
+			case CATALOG_CATEGORY_CYCLE -> "Catalog category cycle";
+			case CATALOG_PRICE_OVERLAP -> "Catalog price overlap";
+			case CATALOG_CURRENCY_MISMATCH -> "Catalog currency mismatch";
+			case CATALOG_CONFLICT -> "Catalog conflict";
+			case PROMOTION_LIFECYCLE_INVALID -> "Promotion lifecycle invalid";
 			case INVALID_CATALOG_QUERY -> "Invalid catalog query";
 			case ORGANIZATION_NOT_FOUND -> "Organization not found";
 			case WORKSPACE_NOT_FOUND -> "Workspace not found";

@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
@@ -27,24 +28,30 @@ class SystemOperatorSecurityIT extends PostgresIntegrationSupport {
     void rejectsMissingInvalidBrowserAndTenantCredentialsButAcceptsOnlyTheOperatorCredential() throws Exception {
         String id = uuid();
         mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("SYSTEM_OPERATOR_REQUIRED"));
         mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
                         .header("X-Nexa-System-Operator", "invalid-operator-credential"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("SYSTEM_OPERATOR_REQUIRED"));
         mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
                         .header("Origin", ALLOWED_ORIGIN)
                         .header("X-Nexa-System-Operator", OPERATOR_TOKEN))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ORIGIN_NOT_ALLOWED"));
         mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
                         .header("Origin", "https://evil.example")
                         .header("X-Nexa-System-Operator", OPERATOR_TOKEN))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ORIGIN_NOT_ALLOWED"));
         mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
                         .header("Authorization", "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM")))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("SYSTEM_OPERATOR_REQUIRED"));
         mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
                         .header("Authorization", "Bearer " + accessToken(BUYER_EMAIL, "PORTAL")))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("SYSTEM_OPERATOR_REQUIRED"));
         mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
                         .header("X-Nexa-System-Operator", OPERATOR_TOKEN))
                 .andExpect(status().isNotFound());

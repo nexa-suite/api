@@ -10,7 +10,7 @@ public record ReferencePlanAssignment(String planCode, BigDecimal monthlyPrice, 
 		int workspaceLimit, int transactionLimit, long version) {
 	public ReferencePlanAssignment {
 		planCode = planCode == null ? "" : planCode.strip().toUpperCase(Locale.ROOT);
-		if (!Set.of("STARTER", "STANDARD", "GROWTH").contains(planCode)) throw new TenantManagementInvariantViolation("Reference plan is invalid");
+		if (!Set.of("STARTER", "STANDARD", "PROFESSIONAL", "ENTERPRISE").contains(planCode)) throw new TenantManagementInvariantViolation("Reference plan is invalid");
 		if (monthlyPrice == null || monthlyPrice.signum() < 0 || seatLimit < 1 || workspaceLimit < 1 || transactionLimit < 1) throw new TenantManagementInvariantViolation("Reference plan limits are invalid");
 	}
 }

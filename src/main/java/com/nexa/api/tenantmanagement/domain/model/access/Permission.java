@@ -2,6 +2,10 @@ package com.nexa.api.tenantmanagement.domain.model.access;
 
 public enum Permission {
 	CATALOG_READ("catalog:read"),
+	CATALOG_MANAGE("catalog:manage"),
+	CATALOG_PRICE_MANAGE("catalog:price:manage"),
+	PROMOTION_READ("promotion:read"),
+	PROMOTION_MANAGE("promotion:manage"),
 	IAM_USER_READ("iam:user:read"),
 	IAM_USER_MANAGE("iam:user:manage"),
 	TENANT_READ("tenant:read"),

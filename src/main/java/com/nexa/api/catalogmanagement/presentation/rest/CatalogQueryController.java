@@ -2,6 +2,7 @@ package com.nexa.api.catalogmanagement.presentation.rest;
 
 import com.nexa.api.catalogmanagement.application.port.in.GetCatalogItemUseCase;
 import com.nexa.api.catalogmanagement.application.port.in.ListCatalogItemsUseCase;
+import com.nexa.api.catalogmanagement.application.model.CatalogScope;
 import com.nexa.api.catalogmanagement.application.exception.CatalogItemNotFoundException;
 import com.nexa.api.shared.presentation.error.ApiResourceNotFoundException;
 import com.nexa.api.catalogmanagement.presentation.rest.mapper.CatalogResponseMapper;
@@ -20,7 +21,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RestController;
+import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
+import org.springframework.security.access.AccessDeniedException;
 
 @RestController
 @RequestMapping("/api/v1/catalog-items")
@@ -39,6 +44,11 @@ public class CatalogQueryController {
 		this.responseMapper = responseMapper;
 	}
 
+	/** Compatibility entry point for application-level callers; HTTP routes always require an access context. */
+	public CatalogPageResponse list(CatalogQueryParameters parameters) {
+		return responseMapper.toPage(listCatalogItems.list(parameters.toCriteria()));
+	}
+
 	@GetMapping
 	@Operation(summary = "List active catalog items")
 	@SecurityRequirement(name = "bearerAuth")
@@ -46,8 +56,11 @@ public class CatalogQueryController {
 			@ApiResponse(responseCode = "400", description = "Invalid query parameters"),
 			@ApiResponse(responseCode = "401", description = "Authentication required"),
 			@ApiResponse(responseCode = "403", description = "Access denied")})
-	public CatalogPageResponse list(@Valid @ModelAttribute CatalogQueryParameters parameters) {
-		return responseMapper.toPage(listCatalogItems.list(parameters.toCriteria()));
+	public CatalogPageResponse list(@RequestAttribute(value = "com.nexa.api.tenantmanagement.application.model.CurrentAccessContext", required = false) CurrentAccessContext context,
+			@Valid @ModelAttribute CatalogQueryParameters parameters) {
+		if (context == null) throw new AccessDeniedException("Catalog access context is required");
+		CatalogScope scope = new CatalogScope(context.tenantId().value(), context.workspaceId().value(), context.hasRole(MembershipRole.BUYER));
+		return responseMapper.toPage(listCatalogItems.list(scope, parameters.toCriteria()));
 	}
 
 	@GetMapping("/{catalogItemId}")
@@ -58,7 +71,19 @@ public class CatalogQueryController {
 			@ApiResponse(responseCode = "401", description = "Authentication required"),
 			@ApiResponse(responseCode = "403", description = "Access denied"),
 			@ApiResponse(responseCode = "404", description = "Catalog item not found")})
-	public CatalogItemDetailResponse getById(@PathVariable @Pattern(regexp = CATALOG_ITEM_ID_PATTERN) String catalogItemId) {
+	public CatalogItemDetailResponse getById(@RequestAttribute(value = "com.nexa.api.tenantmanagement.application.model.CurrentAccessContext", required = false) CurrentAccessContext context,
+			@PathVariable @Pattern(regexp = CATALOG_ITEM_ID_PATTERN) String catalogItemId) {
+		try {
+			if (context == null) throw new AccessDeniedException("Catalog access context is required");
+			CatalogScope scope = new CatalogScope(context.tenantId().value(), context.workspaceId().value(), context.hasRole(MembershipRole.BUYER));
+			return responseMapper.toDetail(getCatalogItem.getByCatalogItemId(scope, catalogItemId));
+		} catch (CatalogItemNotFoundException exception) {
+			throw new ApiResourceNotFoundException("catalog item");
+		}
+	}
+
+	/** Compatibility entry point for application-level callers; HTTP routes always require an access context. */
+	public CatalogItemDetailResponse getById(String catalogItemId) {
 		try {
 			return responseMapper.toDetail(getCatalogItem.getByCatalogItemId(catalogItemId));
 		} catch (CatalogItemNotFoundException exception) {

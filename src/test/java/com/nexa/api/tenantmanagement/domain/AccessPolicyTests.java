@@ -55,9 +55,11 @@ class AccessPolicyTests {
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.COMPANY_OWNER))
 				.containsExactlyInAnyOrder(
 						Permission.TENANT_READ, Permission.OWNER_DASHBOARD_READ,
-						Permission.SALES_READ, Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ);
+						Permission.SALES_READ, Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ,
+						Permission.CATALOG_READ, Permission.CATALOG_MANAGE, Permission.CATALOG_PRICE_MANAGE,
+						Permission.PROMOTION_READ, Permission.PROMOTION_MANAGE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.COMPANY_OWNER))
-				.doesNotContain(Permission.CATALOG_READ, Permission.SALES_WRITE,
+				.doesNotContain(Permission.SALES_WRITE,
 						Permission.WAREHOUSE_WRITE, Permission.LOGISTICS_WRITE,
 						Permission.TENANT_MANAGE, Permission.IAM_USER_MANAGE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.TENANT_ADMIN))
@@ -65,18 +67,20 @@ class AccessPolicyTests {
 						Permission.IAM_USER_READ, Permission.IAM_USER_MANAGE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.SALES))
 				.containsExactlyInAnyOrder(
-						Permission.CATALOG_READ, Permission.SALES_READ, Permission.SALES_WRITE);
+						Permission.CATALOG_READ, Permission.CATALOG_MANAGE, Permission.CATALOG_PRICE_MANAGE,
+						Permission.PROMOTION_READ, Permission.SALES_READ, Permission.SALES_WRITE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.WAREHOUSE))
 				.containsExactlyInAnyOrder(
 						Permission.CATALOG_READ, Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
 						Permission.FULFILLMENT_READ);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.LOGISTICS))
 				.containsExactlyInAnyOrder(
+						Permission.CATALOG_READ, Permission.PROMOTION_READ, Permission.PROMOTION_MANAGE,
 						Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE,
 						Permission.FULFILLMENT_READ);
-			assertThat(PermissionPolicy.permissionsFor(MembershipRole.BUYER))
-					.containsExactlyInAnyOrder(Permission.CATALOG_READ, Permission.SALES_BUYER_READ,
-					Permission.SALES_BUYER_WRITE, Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ);
+				assertThat(PermissionPolicy.permissionsFor(MembershipRole.BUYER))
+						.containsExactlyInAnyOrder(Permission.CATALOG_READ, Permission.SALES_BUYER_READ,
+						Permission.SALES_BUYER_WRITE, Permission.PROMOTION_READ, Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ);
 		assertThat(PermissionPolicy.allows(MembershipRole.WAREHOUSE, Permission.WAREHOUSE_WRITE)).isTrue();
 		assertThat(PermissionPolicy.allows(MembershipRole.LOGISTICS, Permission.TENANT_MANAGE)).isFalse();
 	}
