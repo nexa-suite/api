@@ -20,12 +20,18 @@ public final class OrganizationRegistration {
         this.workspaceSlug = Objects.requireNonNull(workspaceSlug); this.terms = Objects.requireNonNull(terms);
         this.plan = Objects.requireNonNull(plan); this.statusTokenHash = Objects.requireNonNull(statusTokenHash);
         this.status = Objects.requireNonNull(status);
-        if (status == OrganizationRegistrationStatus.ACTIVE) throw new IllegalArgumentException("Public registration cannot start ACTIVE");
     }
 
     public static OrganizationRegistration submit(OrganizationRegistrationId id, FounderIdentity founder,
             WorkspaceSlug slug, TermsAcceptance terms, ReferencePlan plan, RegistrationStatusTokenHash tokenHash) {
         return new OrganizationRegistration(id, founder, slug, terms, plan, tokenHash, OrganizationRegistrationStatus.PENDING_ACTIVATION);
+    }
+
+    /** Rehydrates persisted state; callers cannot use this to create public ACTIVE registrations. */
+    public static OrganizationRegistration restore(OrganizationRegistrationId id, FounderIdentity founder,
+            WorkspaceSlug slug, TermsAcceptance terms, ReferencePlan plan, RegistrationStatusTokenHash tokenHash,
+            OrganizationRegistrationStatus status) {
+        return new OrganizationRegistration(id, founder, slug, terms, plan, tokenHash, status);
     }
 
     public void activate() { transition(OrganizationRegistrationStatus.ACTIVE); }

@@ -17,6 +17,7 @@ public final class SecurityNotificationOutboxWorker {
     private final JdbcSecurityNotificationOutboxAdapter outbox;
     private final PasswordResetDeliveryPort delivery;
     private final int maxAttempts;
+    private final String workerId = "nexa-outbox-" + UUID.randomUUID();
 
     public SecurityNotificationOutboxWorker(JdbcTemplate jdbc, JdbcSecurityNotificationOutboxAdapter outbox,
             PasswordResetDeliveryPort delivery,
@@ -26,13 +27,22 @@ public final class SecurityNotificationOutboxWorker {
 
     @Scheduled(fixedDelayString = "${nexa.security.notification-outbox.poll-delay:PT5S}")
     public void deliverPending() {
-		jdbc.update("update iam.security_notification_outbox set status='PENDING',next_attempt_at=current_timestamp,version=version+1 where status='PROCESSING' and created_at < current_timestamp - interval '10 minutes'");
-        List<Row> rows = jdbc.query("select id,notification_type,recipient,surface,payload_ciphertext,attempt_count from iam.security_notification_outbox where status='PENDING' and next_attempt_at<=current_timestamp order by created_at asc limit 20",
-                (rs, row) -> new Row(rs.getObject("id", UUID.class), rs.getString("notification_type"), rs.getString("recipient"), rs.getString("surface"), rs.getString("payload_ciphertext"), rs.getInt("attempt_count")));
+        jdbc.update("update iam.security_notification_outbox set status='PENDING',processing_started_at=null,locked_by=null,next_attempt_at=current_timestamp,version=version+1 where status='PROCESSING' and processing_started_at < current_timestamp - interval '10 minutes'");
+        List<Row> rows = jdbc.query("""
+                with claimed as (
+                    select id from iam.security_notification_outbox
+                    where status='PENDING' and next_attempt_at<=current_timestamp
+                    order by created_at asc, id asc
+                    for update skip locked limit 20
+                )
+                update iam.security_notification_outbox o
+                set status='PROCESSING', processing_started_at=current_timestamp, locked_by=?, version=version+1
+                from claimed c where o.id=c.id
+                    returning o.id,o.notification_type,o.recipient,o.surface,o.payload_ciphertext,o.payload_key_version,o.attempt_count
+                """, (rs, row) -> new Row(rs.getObject("id", UUID.class), rs.getString("notification_type"), rs.getString("recipient"), rs.getString("surface"), rs.getString("payload_ciphertext"), rs.getString("payload_key_version"), rs.getInt("attempt_count")), workerId);
         for (Row row : rows) {
-            if (jdbc.update("update iam.security_notification_outbox set status='PROCESSING',version=version+1 where id=? and status='PENDING'", row.id()) != 1) continue;
             try {
-                String payload = outbox.decrypt(row.payload());
+                String payload = outbox.decrypt(row.payload(), row.keyVersion());
                 if ("PASSWORD_RESET".equals(row.type())) {
                     String token = payload.substring(payload.indexOf("token=") + 6, payload.indexOf('\n'));
                     String expires = payload.substring(payload.indexOf("expiresAt=") + 10);
@@ -40,15 +50,15 @@ public final class SecurityNotificationOutboxWorker {
                 } else if ("PASSWORD_CHANGED".equals(row.type())) {
                     delivery.sendPasswordChanged(row.recipient(), row.surface());
                 } else throw new IllegalStateException("Unknown security notification type");
-                jdbc.update("update iam.security_notification_outbox set status='SENT',payload_ciphertext='',sent_at=current_timestamp,attempt_count=attempt_count+1,version=version+1 where id=? and status='PROCESSING'", row.id());
+				jdbc.update("update iam.security_notification_outbox set status='SENT',payload_ciphertext='',processing_started_at=null,locked_by=null,sent_at=current_timestamp,attempt_count=attempt_count+1,version=version+1 where id=? and status='PROCESSING' and locked_by=?", row.id(), workerId);
             } catch (RuntimeException exception) {
                 int attempts = row.attempts() + 1;
                 String status = attempts >= maxAttempts ? "DEAD_LETTER" : "PENDING";
-				jdbc.update("update iam.security_notification_outbox set status=?,payload_ciphertext=case when ?='DEAD_LETTER' then '' else payload_ciphertext end,attempt_count=?,next_attempt_at=current_timestamp + (? * interval '30 seconds'),last_error_code=?,version=version+1 where id=? and status='PROCESSING'",
-						status, status, attempts, attempts, exception.getClass().getSimpleName(), row.id());
+					jdbc.update("update iam.security_notification_outbox set status=?,payload_ciphertext=case when ?='DEAD_LETTER' then '' else payload_ciphertext end,processing_started_at=null,locked_by=null,attempt_count=?,next_attempt_at=current_timestamp + (? * interval '30 seconds'),last_error_code=?,version=version+1 where id=? and status='PROCESSING' and locked_by=?",
+						status, status, attempts, attempts, exception.getClass().getSimpleName(), row.id(), workerId);
             }
         }
     }
 
-    private record Row(UUID id, String type, String recipient, String surface, String payload, int attempts) {}
+    private record Row(UUID id, String type, String recipient, String surface, String payload, String keyVersion, int attempts) {}
 }

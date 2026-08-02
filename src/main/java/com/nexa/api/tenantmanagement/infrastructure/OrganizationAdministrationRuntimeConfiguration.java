@@ -11,7 +11,8 @@ import org.springframework.context.annotation.Profile;
 @Profile("!test")
 public class OrganizationAdministrationRuntimeConfiguration {
 	@Bean
-	OrganizationAdministrationUseCase organizationAdministrationUseCase(OrganizationAdministrationPort port) {
-		return new OrganizationAdministrationService(port);
+	OrganizationAdministrationUseCase organizationAdministrationUseCase(OrganizationAdministrationPort port,
+			com.nexa.api.shared.application.port.out.SecurityAuditPort audit) {
+		return new OrganizationAdministrationService(port, audit);
 	}
 }

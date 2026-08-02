@@ -9,16 +9,29 @@ import com.nexa.api.iam.application.model.IamSecurityModels.Registration;
 import com.nexa.api.iam.application.model.IamSecurityModels.RegistrationRequest;
 import com.nexa.api.iam.application.model.IamSecurityModels.Session;
 import com.nexa.api.iam.application.model.SystemOperatorContext;
-import com.nexa.api.iam.application.port.out.IamSecurityRepository;
-import com.nexa.api.iam.application.port.out.SecurityAuditPort;
+import com.nexa.api.iam.application.port.out.CredentialPersistencePort;
+import com.nexa.api.iam.application.port.out.MembershipRolePersistencePort;
+import com.nexa.api.iam.application.port.out.OpaqueSecurityTokenPort;
+import com.nexa.api.iam.application.port.out.OrganizationActivationPersistencePort;
+import com.nexa.api.iam.application.port.out.OrganizationRegistrationPersistencePort;
+import com.nexa.api.iam.application.port.out.PasswordResetPersistencePort;
+import com.nexa.api.iam.application.port.out.PasswordResetThrottlePort;
+import com.nexa.api.iam.application.port.out.RefreshSessionPersistencePort;
+import com.nexa.api.iam.application.port.out.UserProfilePersistencePort;
+import com.nexa.api.shared.application.port.out.SecurityAuditPort;
 import com.nexa.api.iam.application.port.out.SecurityNotificationOutboxPort;
 import com.nexa.api.iam.domain.model.password.PasswordPolicy;
+import com.nexa.api.iam.domain.model.passwordreset.PasswordResetRequest;
+import com.nexa.api.iam.domain.model.passwordreset.PasswordResetRequestId;
+import com.nexa.api.iam.domain.model.passwordreset.PasswordResetExpiry;
+import com.nexa.api.iam.domain.model.passwordreset.PasswordResetStatus;
+import com.nexa.api.iam.domain.model.passwordreset.PasswordResetTokenHash;
 import com.nexa.api.shared.infrastructure.observability.SecurityMetrics;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -34,10 +47,26 @@ import java.util.Set;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import com.nexa.api.tenantmanagement.domain.model.registration.FounderIdentity;
+import com.nexa.api.tenantmanagement.domain.model.registration.OrganizationRegistration;
+import com.nexa.api.tenantmanagement.domain.model.registration.OrganizationRegistrationId;
+import com.nexa.api.tenantmanagement.domain.model.registration.OrganizationRegistrationStatus;
+import com.nexa.api.tenantmanagement.domain.model.registration.ReferencePlan;
+import com.nexa.api.tenantmanagement.domain.model.registration.RegistrationStatusTokenHash;
+import com.nexa.api.tenantmanagement.domain.model.registration.TermsAcceptance;
+import com.nexa.api.tenantmanagement.domain.model.registration.WorkspaceSlug;
 
-@Service
+@Component
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
-public class JdbcIamSecurityAdapter implements IamSecurityRepository {
+/**
+ * Transitional JDBC implementation shared by the cohesive adapters below. It
+ * intentionally exposes no application-facing god interface; each adapter
+ * publishes one narrow port and can be replaced independently.
+ */
+class JdbcIamSecurityPersistence implements UserProfilePersistencePort, CredentialPersistencePort,
+        RefreshSessionPersistencePort, PasswordResetPersistencePort, PasswordResetThrottlePort,
+        OpaqueSecurityTokenPort, OrganizationRegistrationPersistencePort, OrganizationActivationPersistencePort,
+        MembershipRolePersistencePort {
 	private static final String GENERIC_RESET_MESSAGE = "If the account can receive a reset, instructions will be delivered.";
 	private static final String DUMMY_PASSWORD_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 	private static final SecureRandom RANDOM = new SecureRandom();
@@ -50,7 +79,7 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 	private final SecurityMetrics metrics;
 	private final String throttleKey;
 
-	public JdbcIamSecurityAdapter(JdbcTemplate jdbc, SecurityAuditPort audit, SecurityNotificationOutboxPort outbox,
+	public JdbcIamSecurityPersistence(JdbcTemplate jdbc, SecurityAuditPort audit, SecurityNotificationOutboxPort outbox,
 			@org.springframework.beans.factory.annotation.Value("${nexa.security.bcrypt-strength:12}") int bcryptStrength,
 			@org.springframework.beans.factory.annotation.Value("${nexa.security.reset.ttl:PT30M}") Duration resetTtl,
 			@org.springframework.beans.factory.annotation.Value("${nexa.security.reset.throttle-key:}") String throttleKey,
@@ -67,24 +96,24 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 	}
 
 	@Override
-	public Profile profile(Actor actor) {
+	public Profile findOwnProfile(Actor actor) {
 		return jdbc.queryForObject("select id,email,display_name,phone,preferred_language,timezone,version from iam.user_account where id=?",
 				(rs, row) -> new Profile(rs.getObject("id", UUID.class), rs.getString("email"), rs.getString("display_name"),
 						rs.getString("phone"), rs.getString("preferred_language"), rs.getString("timezone"), rs.getLong("version")), actor.userId());
 	}
 
 	@Override
-	public Profile updateProfile(Actor actor, ProfilePatch patch) {
+	public Profile updateOwn(Actor actor, ProfilePatch patch) {
 		validateProfile(patch);
 		int updated = jdbc.update("update iam.user_account set display_name=?,phone=?,preferred_language=?,timezone=?,updated_at=now(),version=version+1 where id=? and version=?",
 				patch.displayName().trim(), blankToNull(patch.phone()), patch.preferredLanguage(), patch.timezone(), actor.userId(), patch.version());
 		if (updated != 1) throw new IamSecurityException("PROFILE_VERSION_CONFLICT");
 		audit.append(event("PROFILE_UPDATED", actor, actor.userId(), Map.of("version", patch.version() + 1)));
-		return profile(actor);
+		return findOwnProfile(actor);
 	}
 
 	@Override
-	public void changePassword(Actor actor, String currentPassword, String newPassword) {
+	public void changeOwnPassword(Actor actor, String currentPassword, String newPassword) {
 		if (!PasswordPolicy.isValid(newPassword)) throw new IamSecurityException("PASSWORD_POLICY_INVALID");
 		String hash = jdbc.query("select password_hash from iam.password_credential where user_id=?", (rs, row) -> rs.getString(1), actor.userId())
 				.stream().findFirst().orElseThrow(() -> new IamSecurityException("PASSWORD_CHANGE_FAILED"));
@@ -100,7 +129,7 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 	}
 
 	@Override
-	public List<Session> sessions(Actor actor) {
+	public List<Session> findOwnSessions(Actor actor) {
 		return jdbc.query("select id,surface,created_at,coalesce(last_seen_at,last_used_at,created_at) as last_seen_at,expires_at,device_label,coarse_ip from iam.refresh_session where user_id=? and revoked_at is null and expires_at>now() order by created_at desc limit 50",
 				(rs, row) -> new Session(rs.getObject("id", UUID.class), rs.getString("surface"), rs.getTimestamp("created_at").toInstant(),
 					rs.getTimestamp("last_seen_at").toInstant(), rs.getTimestamp("expires_at").toInstant(), rs.getObject("id", UUID.class).equals(actor.sessionId()),
@@ -108,7 +137,7 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 	}
 
 	@Override
-	public void revokeSession(Actor actor, UUID sessionId) {
+	public void revoke(Actor actor, UUID sessionId) {
 		Instant now = clock.instant();
 		int changed = jdbc.update("update iam.refresh_session set revoked_at=?,family_revoked_at=? where id=? and user_id=? and revoked_at is null",
 				sql(now), sql(now), sessionId, actor.userId());
@@ -118,7 +147,7 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 	}
 
 	@Override
-	public void revokeOtherSessions(Actor actor) {
+	public void revokeAllExceptCurrent(Actor actor) {
 		Instant now = clock.instant();
 		int changed = jdbc.update("update iam.refresh_session set revoked_at=?,family_revoked_at=? where user_id=? and id<>? and revoked_at is null",
 				sql(now), sql(now), actor.userId(), actor.sessionId());
@@ -126,7 +155,6 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 		metrics.increment("session.other_revoked");
 	}
 
-	@Override
 	public String requestPasswordReset(String email, String surface, String clientAddress, String correlationId, String traceId) {
 		String normalized = normalizeEmail(email);
 		Instant now = clock.instant();
@@ -147,18 +175,22 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 		return GENERIC_RESET_MESSAGE;
 	}
 
-	@Override
 	public void resetPassword(String token, String newPassword, String correlationId, String traceId) {
 		if (token == null || token.isBlank() || !PasswordPolicy.isValid(newPassword)) throw new IamSecurityException("RESET_INVALID");
 		Instant now = clock.instant();
-		var rows = jdbc.query("select id,normalized_email,surface,status,expires_at from iam.password_reset_request where token_hash=? for update",
-				(rs, row) -> new Reset(rs.getObject("id", UUID.class), rs.getString("normalized_email"), rs.getString("surface"), rs.getString("status"), rs.getTimestamp("expires_at").toInstant()), sha256(token));
-		if (rows.isEmpty() || !"PENDING".equals(rows.get(0).status()) || !rows.get(0).expiresAt().isAfter(now)) throw new IamSecurityException("RESET_INVALID");
+		var rows = jdbc.query("select id,normalized_email,surface,status,token_hash,created_at,expires_at,attempts from iam.password_reset_request where token_hash=? for update",
+				(rs, row) -> new Reset(rs.getObject("id", UUID.class), rs.getString("normalized_email"), rs.getString("surface"),
+					PasswordResetStatus.valueOf(rs.getString("status")), rs.getString("token_hash"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("expires_at").toInstant(), rs.getInt("attempts")), sha256(token));
+		if (rows.isEmpty()) throw new IamSecurityException("RESET_INVALID");
 		Reset reset = rows.get(0);
+		PasswordResetRequest aggregate = PasswordResetRequest.restore(new PasswordResetRequestId(reset.id()), new PasswordResetTokenHash(reset.tokenHash()),
+				reset.createdAt(), new PasswordResetExpiry(reset.expiresAt()), reset.status(), reset.attempts());
+		aggregate.expire(now);
+		try { aggregate.consume(now); } catch (IllegalStateException exception) { throw new IamSecurityException("RESET_INVALID"); }
 		var users = jdbc.query("select id,email from iam.user_account where normalized_email=? and status='ACTIVE' for update", (rs, row) -> new User(rs.getObject("id", UUID.class), rs.getString("email")), reset.email());
 		if (users.isEmpty()) throw new IamSecurityException("RESET_INVALID");
 		User user = users.get(0);
-		int updated = jdbc.update("update iam.password_reset_request set status='CONSUMED',consumed_at=?,attempts=attempts+1 where id=? and status='PENDING'", sql(now), reset.id());
+		int updated = jdbc.update("update iam.password_reset_request set status=?,consumed_at=?,attempts=? where id=? and status='PENDING'", aggregate.status().name(), sql(now), aggregate.attempts(), reset.id());
 		if (updated != 1) throw new IamSecurityException("RESET_INVALID");
 		jdbc.update("update iam.password_credential set password_hash=?,algorithm='bcrypt',changed_at=? where user_id=?", encoder.encode(newPassword), sql(now), user.id());
 		jdbc.update("update iam.refresh_session set revoked_at=?,family_revoked_at=? where user_id=? and revoked_at is null", sql(now), sql(now), user.id());
@@ -167,7 +199,6 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 		outbox.enqueuePasswordChanged(user.email(), reset.surface());
 	}
 
-	@Override
 	public Registration submitRegistration(RegistrationRequest request, String correlationId, String traceId) {
 		validateRegistration(request);
 		Instant now = clock.instant();
@@ -183,7 +214,6 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 		return new Registration(id.toString(), "PENDING_ACTIVATION", now, statusToken);
 	}
 
-	@Override
 	public Registration registration(UUID registrationId, String statusToken) {
 		String sql = statusToken == null
 				? "select id,status,created_at from tenant_management.organization_registration where id=?"
@@ -195,14 +225,14 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 		return rows.get(0);
 	}
 
-	@Override
 	public Activation activate(UUID registrationId, SystemOperatorContext operator, String correlationId, String traceId) {
 		requireOperator(operator);
 		Instant now = clock.instant();
 		var rows = jdbc.query("select * from tenant_management.organization_registration where id=? for update", (rs, row) -> new RegistrationRow(rs), registrationId);
 		if (rows.isEmpty()) throw new ApiResourceNotFoundException("organization registration");
 		RegistrationRow registration = rows.get(0);
-		if (!"PENDING_ACTIVATION".equals(registration.status)) throw new IamSecurityException("REGISTRATION_NOT_PENDING");
+		OrganizationRegistration aggregate = registration.aggregate();
+		try { aggregate.activate(); } catch (IllegalStateException exception) { throw new IamSecurityException("REGISTRATION_NOT_PENDING"); }
 		UUID userId = jdbc.query("select id from iam.user_account where normalized_email=?", (rs, row) -> rs.getObject(1, UUID.class), registration.founderEmail).stream().findFirst().orElse(null);
 		if (userId != null && Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from tenant_management.workspace_membership where user_id=? and membership_type='BUYER' and status='ACTIVE')", Boolean.class, userId)))
 			throw new IamSecurityException("FOUNDER_EMAIL_INCOMPATIBLE");
@@ -227,14 +257,17 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 		jdbc.update("update tenant_management.organization_registration set status='ACTIVE',tenant_id=?,workspace_id=?,updated_at=?,version=version+1 where id=? and status='PENDING_ACTIVATION'", tenantId, workspaceId, sql(now), registrationId);
 		var actor = new Actor(null, null, "SYSTEM", tenantId, workspaceId, correlationId, traceId);
 		audit.append(event("ORGANIZATION_ACTIVATED", actor, userId, Map.of("registrationId", registrationId.toString())));
-		return new Activation(registrationId.toString(), "ACTIVE", tenantId, workspaceId, userId, Set.of("TENANT_ADMIN", "COMPANY_OWNER"));
+		return new Activation(registrationId.toString(), aggregate.status().name(), tenantId, workspaceId, userId, Set.of("TENANT_ADMIN", "COMPANY_OWNER"));
 	}
 
-	@Override
 	public Registration reject(UUID registrationId, SystemOperatorContext operator, String reason, String correlationId, String traceId) {
 		requireOperator(operator);
 		if (reason == null || reason.isBlank() || reason.length() > 500) throw new IamSecurityException("REJECTION_REASON_REQUIRED");
-		int changed = jdbc.update("update tenant_management.organization_registration set status='REJECTED',rejection_reason=?,updated_at=?,version=version+1 where id=? and status='PENDING_ACTIVATION'", reason.trim(), sql(clock.instant()), registrationId);
+		var rows = jdbc.query("select * from tenant_management.organization_registration where id=? for update", (rs, row) -> new RegistrationRow(rs), registrationId);
+		if (rows.isEmpty()) throw new ApiResourceNotFoundException("organization registration");
+		OrganizationRegistration aggregate = rows.get(0).aggregate();
+		try { aggregate.reject(); } catch (IllegalStateException exception) { throw new IamSecurityException("REGISTRATION_NOT_PENDING"); }
+		int changed = jdbc.update("update tenant_management.organization_registration set status=?,rejection_reason=?,updated_at=?,version=version+1 where id=? and status='PENDING_ACTIVATION'", aggregate.status().name(), reason.trim(), sql(clock.instant()), registrationId);
 		if (changed != 1) throw new ApiResourceNotFoundException("pending organization registration");
 		var actor = new Actor(null, null, "SYSTEM", null, null, correlationId, traceId);
 		audit.append(event("ORGANIZATION_REJECTED", actor, null, Map.of("registrationId", registrationId.toString())));
@@ -266,7 +299,7 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 	private static String blankToNull(String value) { return blank(value) ? null : value.trim(); }
 	private static String normalizeEmail(String value) { if (blank(value) || value.length() > 254) throw new IamSecurityException("RESET_INVALID"); return value.trim().toLowerCase(Locale.ROOT); }
 	private static String opaqueToken() { byte[] bytes = new byte[32]; RANDOM.nextBytes(bytes); return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
-	private static String sha256(String value) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (Exception exception) { throw new IllegalStateException(exception); } }
+	private static String sha256Value(String value) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); } catch (Exception exception) { throw new IllegalStateException(exception); } }
 	private long atomicThrottle(String normalizedEmail, String clientAddress, Instant now) {
 		String emailHash = hmac(normalizedEmail);
 		String addressHash = hmac(clientAddress == null || clientAddress.isBlank() ? "unknown" : clientAddress.trim());
@@ -280,13 +313,42 @@ public class JdbcIamSecurityAdapter implements IamSecurityRepository {
 		try { Mac mac = Mac.getInstance("HmacSHA256"); mac.init(new SecretKeySpec(throttleKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256")); return HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8))); }
 		catch (Exception exception) { throw new IllegalStateException("Password reset throttle key is invalid", exception); }
 	}
+	@Override
+	public String request(String email, String surface, String clientAddress, String correlationId, String traceId) {
+		return requestPasswordReset(email, surface, clientAddress, correlationId, traceId);
+	}
+	@Override
+	public void complete(String token, String newPassword, String correlationId, String traceId) {
+		resetPassword(token, newPassword, correlationId, traceId);
+	}
+	@Override
+	public Registration submit(RegistrationRequest request, String correlationId, String traceId) {
+		return submitRegistration(request, correlationId, traceId);
+	}
+	@Override
+	public Registration findStatus(UUID registrationId, String statusToken) {
+		return registration(registrationId, statusToken);
+	}
+	@Override
+	public long recordAttempt(String normalizedIdentifier, String clientAddress) {
+		return atomicThrottle(normalizeEmail(normalizedIdentifier), clientAddress, clock.instant());
+	}
+	@Override
+	public String generate() { return opaqueToken(); }
+	@Override
+	public String sha256(String value) { return sha256Value(value); }
+	@Override
+	public void assignFounderRoles(UUID membershipId, UUID tenantId, UUID workspaceId, Set<String> roles) {
+		for (String role : roles) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,?,current_timestamp)", membershipId, tenantId, workspaceId, role);
+	}
 	private static String valueOrUnknown(String value) { return value == null || value.isBlank() ? "unknown" : value; }
 	private static java.sql.Timestamp sql(Instant value) { return java.sql.Timestamp.from(value); }
 	private SecurityAuditPort.Event event(String type, Actor actor, UUID target, Map<String, Object> metadata) { return new SecurityAuditPort.Event(type, actor.userId(), target, actor.tenantId(), actor.workspaceId(), actor.surface(), valueOrUnknown(actor.correlationId()), valueOrUnknown(actor.traceId()), clock.instant(), metadata); }
 	private static record User(UUID id, String email) {}
-	private static record Reset(UUID id, String email, String surface, String status, Instant expiresAt) {}
+	private static record Reset(UUID id, String email, String surface, PasswordResetStatus status, String tokenHash, Instant createdAt, Instant expiresAt, int attempts) {}
 	private static final class RegistrationRow {
-		final UUID id; final String displayName; final String workspaceName; final String workspaceSlug; final String founderEmail; final String founderDisplayName; final String status;
-		RegistrationRow(java.sql.ResultSet rs) throws java.sql.SQLException { id=rs.getObject("id",UUID.class); displayName=rs.getString("display_name"); workspaceName=rs.getString("workspace_name"); workspaceSlug=rs.getString("workspace_slug"); founderEmail=rs.getString("founder_email"); founderDisplayName=rs.getString("founder_display_name"); status=rs.getString("status"); }
+		final UUID id; final String displayName; final String workspaceName; final String workspaceSlug; final String founderEmail; final String founderDisplayName; final OrganizationRegistrationStatus status; final String termsVersion; final String statusTokenHash; final String referencePlan;
+		RegistrationRow(java.sql.ResultSet rs) throws java.sql.SQLException { id=rs.getObject("id",UUID.class); displayName=rs.getString("display_name"); workspaceName=rs.getString("workspace_name"); workspaceSlug=rs.getString("workspace_slug"); founderEmail=rs.getString("founder_email"); founderDisplayName=rs.getString("founder_display_name"); status=OrganizationRegistrationStatus.valueOf(rs.getString("status")); termsVersion=rs.getString("terms_version"); statusTokenHash=rs.getString("status_token_hash"); referencePlan=rs.getString("reference_plan"); }
+		OrganizationRegistration aggregate() { return OrganizationRegistration.restore(new OrganizationRegistrationId(id), new FounderIdentity(founderEmail, founderDisplayName), new WorkspaceSlug(workspaceSlug), new TermsAcceptance(termsVersion, true), ReferencePlan.valueOf(referencePlan), new RegistrationStatusTokenHash(statusTokenHash), status); }
 	}
 }

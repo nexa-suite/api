@@ -14,7 +14,7 @@ public final class IamSecurityRetentionJob {
 
     public IamSecurityRetentionJob(JdbcTemplate jdbc,
             @org.springframework.beans.factory.annotation.Value("${nexa.security.retention.batch-size:200}") int batchSize,
-            @org.springframework.beans.factory.annotation.Value("${nexa.security.retention.reset-days:30}") int retentionDays) {
+            @org.springframework.beans.factory.annotation.Value("${nexa.security.retention.reset-days:90}") int retentionDays) {
         this.jdbc = jdbc; this.batchSize = Math.max(1, batchSize); this.retentionDays = Math.max(1, retentionDays);
     }
 

@@ -32,6 +32,7 @@ nexa:
     rsa-public-key: ${NEXA_SECURITY_RSA_PUBLIC_KEY:./.local-keys/access-token-public.pem}
     rsa-private-key: ${NEXA_SECURITY_RSA_PRIVATE_KEY:./.local-keys/access-token-private.pem}
     allowed-origins: ${NEXA_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4300}
+    trusted-proxies: ${NEXA_TRUSTED_PROXIES:}
     refresh-cookie-secure: ${NEXA_REFRESH_COOKIE_SECURE:false}
     bcrypt-strength: ${NEXA_BCRYPT_STRENGTH:12}
     smtp:
@@ -47,5 +48,11 @@ nexa:
       throttle-key: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:}
     system-operator-token: ${NEXA_SYSTEM_OPERATOR_TOKEN:}
     notification-outbox-key: ${NEXA_NOTIFICATION_OUTBOX_KEY:}
+    notification-outbox-key-version: ${NEXA_NOTIFICATION_OUTBOX_KEY_VERSION:v1}
+    notification-outbox-previous-keys: ${NEXA_NOTIFICATION_OUTBOX_PREVIOUS_KEYS:}
+    retention:
+      reset-days: ${NEXA_SECURITY_RESET_RETENTION_DAYS:90}
+      audit-days: ${NEXA_SECURITY_AUDIT_RETENTION_DAYS:365}
+      batch-size: ${NEXA_SECURITY_RETENTION_BATCH_SIZE:200}
   dev-bootstrap:
     enabled: ${NEXA_DEV_BOOTSTRAP_ENABLED:false}
