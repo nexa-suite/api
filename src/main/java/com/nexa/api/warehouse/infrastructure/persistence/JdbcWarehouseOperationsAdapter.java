@@ -166,7 +166,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
     public WarehouseOperationsService.OperationalProfile operationalProfile(CurrentAccessContext context, String id) {
         requireRead(context);
         WarehouseOperationsService.WarehouseSummary summary = warehouse(context, id);
-        return operationalProfile(context, summary, settings(context));
+        return operationalProfile(context, summary, settings(context), coordinates(context, uuid(id)));
     }
 
     @Override
@@ -193,12 +193,20 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         LocalTime startsAt = patch.operatingHoursStart() == null ? currentSettings.startsAt() : patch.operatingHoursStart();
         LocalTime endsAt = patch.operatingHoursEnd() == null ? currentSettings.endsAt() : patch.operatingHoursEnd();
         new WarehouseHours(startsAt, endsAt);
+        Coordinates currentCoordinates = coordinates(context, warehouseId);
+        BigDecimal latitude = patch.latitude() == null ? currentCoordinates.latitude() : patch.latitude();
+        BigDecimal longitude = patch.longitude() == null ? currentCoordinates.longitude() : patch.longitude();
+        validateCoordinates(latitude, longitude);
         boolean warehouseChanged = !java.util.Objects.equals(name, current.name())
                 || !java.util.Objects.equals(address, current.address())
                 || !java.util.Objects.equals(status, current.status());
         boolean settingsChanged = !selection.equals(currentSettings.selectionPolicy())
                 || !startsAt.equals(currentSettings.startsAt()) || !endsAt.equals(currentSettings.endsAt());
-        if (!warehouseChanged && !settingsChanged) return operationalProfile(context, current, currentSettings);
+        boolean coordinatesChanged = !java.util.Objects.equals(latitude, currentCoordinates.latitude())
+                || !java.util.Objects.equals(longitude, currentCoordinates.longitude());
+        if (!warehouseChanged && !settingsChanged && !coordinatesChanged) {
+            return operationalProfile(context, current, currentSettings, currentCoordinates);
+        }
         Timestamp changedAt = now();
         checkUpdated(jdbc.update(
                 "update warehouse.warehouse set name=?,address=?,status=?,updated_at=?,version=version+1 "
@@ -210,6 +218,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
             if (operationalSettings.update(tenant(context).toString(), workspace(context).toString(), selection,
                     startsAt, endsAt, currentSettings.version()) != 1) throw error("CONCURRENCY_CONFLICT", false);
         }
+        if (coordinatesChanged) upsertCoordinates(context, warehouseId, latitude, longitude, changedAt);
         appendEvent(context, warehouseId, "warehouse.operational-profile.updated", "warehouse");
         return operationalProfile(context, id);
     }
@@ -223,7 +232,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                 "select id,code,name,address,status,version from warehouse.warehouse "
                         + "where tenant_id=? and workspace_id=? and status='ACTIVE' order by code asc,id asc",
                 (rs, row) -> WarehousePersistenceSupport.warehouse(rs), tenant(context), workspace(context));
-        return summaries.stream().map(summary -> buyerProjection(summary, currentSettings)).toList();
+        return summaries.stream().map(summary -> buyerProjection(context, summary, currentSettings)).toList();
     }
 
     @Override
@@ -1024,7 +1033,7 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
 
     private WarehouseOperationsService.OperationalProfile operationalProfile(
             CurrentAccessContext context, WarehouseOperationsService.WarehouseSummary summary,
-            WarehouseOperationalSettingsPort.Snapshot settings) {
+            WarehouseOperationalSettingsPort.Snapshot settings, Coordinates coordinates) {
         WarehouseOperationalProfile profile = new WarehouseOperationalProfile(
                 new WarehouseProfile(uuid(summary.id()), summary.code(), summary.name(),
                         new WarehouseLocation(summary.address()), WarehouseStatus.valueOf(summary.status()), summary.version()),
@@ -1035,11 +1044,12 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
         return new WarehouseOperationsService.OperationalProfile(snapshot.warehouseId().toString(), snapshot.code(),
                 snapshot.name(), snapshot.address(), snapshot.status().name(), snapshot.hours().startsAt(),
                 snapshot.hours().endsAt(), snapshot.serviceability().serviceable(), snapshot.selectionPolicy().name(),
-                snapshot.warehouseVersion(), snapshot.settingsVersion());
+                snapshot.warehouseVersion(), snapshot.settingsVersion(), coordinates.latitude(), coordinates.longitude());
     }
 
     private WarehouseOperationsService.BuyerWarehouse buyerProjection(
-            WarehouseOperationsService.WarehouseSummary summary, WarehouseOperationalSettingsPort.Snapshot settings) {
+            CurrentAccessContext context, WarehouseOperationsService.WarehouseSummary summary,
+            WarehouseOperationalSettingsPort.Snapshot settings) {
         WarehouseOperationalProfile profile = new WarehouseOperationalProfile(
                 new WarehouseProfile(uuid(summary.id()), summary.code(), summary.name(),
                         new WarehouseLocation(summary.address()), WarehouseStatus.valueOf(summary.status()), summary.version()),
@@ -1047,10 +1057,39 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                 new WarehouseServiceability("ACTIVE".equals(summary.status())),
                 WarehouseSelectionPolicy.valueOf(settings.selectionPolicy()), settings.version());
         WarehouseBuyerProjection projection = profile.buyerProjection();
+        Coordinates coordinates = coordinates(context, uuid(summary.id()));
         return new WarehouseOperationsService.BuyerWarehouse(projection.warehouseId().toString(), projection.code(),
                 projection.name(), projection.address(), projection.hours().startsAt(), projection.hours().endsAt(),
-                projection.serviceable(), projection.version());
+                projection.serviceable(), projection.version(), coordinates.latitude(), coordinates.longitude());
     }
+
+    private Coordinates coordinates(CurrentAccessContext context, UUID warehouseId) {
+        return jdbc.query("select latitude,longitude from warehouse.warehouse_service_configuration "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=?",
+                rs -> rs.next() ? new Coordinates(rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"))
+                        : new Coordinates(null, null), tenant(context), workspace(context), warehouseId);
+    }
+
+    private void upsertCoordinates(CurrentAccessContext context, UUID warehouseId, BigDecimal latitude,
+                                   BigDecimal longitude, Timestamp changedAt) {
+        jdbc.update("insert into warehouse.warehouse_service_configuration "
+                        + "(warehouse_id,tenant_id,workspace_id,latitude,longitude,updated_at) values (?,?,?,?,?,?) "
+                        + "on conflict (warehouse_id) do update set latitude=excluded.latitude,longitude=excluded.longitude,"
+                        + "version=warehouse.warehouse_service_configuration.version+1,updated_at=excluded.updated_at",
+                warehouseId, tenant(context), workspace(context), latitude, longitude, changedAt);
+    }
+
+    private static void validateCoordinates(BigDecimal latitude, BigDecimal longitude) {
+        if ((latitude == null) != (longitude == null)
+                || latitude != null && (latitude.compareTo(BigDecimal.valueOf(-90)) < 0
+                || latitude.compareTo(BigDecimal.valueOf(90)) > 0
+                || longitude.compareTo(BigDecimal.valueOf(-180)) < 0
+                || longitude.compareTo(BigDecimal.valueOf(180)) > 0)) {
+            throw error("INVALID_REQUEST", false);
+        }
+    }
+
+    private record Coordinates(BigDecimal latitude, BigDecimal longitude) { }
 
     private void requireRead(CurrentAccessContext context) { context.requirePermission(Permission.WAREHOUSE_READ); }
     private void requireWrite(CurrentAccessContext context) { context.requirePermission(Permission.WAREHOUSE_WRITE); }

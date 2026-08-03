@@ -29,7 +29,22 @@ public final class SalesOrderSummaryExportController {
 	@GetMapping({"/api/v1/sales-orders/{id}/summary", "/api/v1/my-orders/{id}/summary"})
 	public ResponseEntity<byte[]> export(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable String id, @RequestParam(defaultValue = "PDF") String format) {
-		SalesOrderSummaryExportResult result = exports.export(context, id, SalesOrderSummaryExportFormat.from(format));
+		return response(exports.export(context, id, SalesOrderSummaryExportFormat.from(format)));
+	}
+
+	@GetMapping({"/api/v1/sales-orders/{id}/exports/summary.pdf", "/api/v1/buyer/orders/{id}/exports/summary.pdf"})
+	public ResponseEntity<byte[]> exportPdf(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+			@PathVariable String id) {
+		return response(exports.export(context, id, SalesOrderSummaryExportFormat.PDF));
+	}
+
+	@GetMapping({"/api/v1/sales-orders/{id}/exports/summary.csv", "/api/v1/buyer/orders/{id}/exports/summary.csv"})
+	public ResponseEntity<byte[]> exportCsv(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+			@PathVariable String id) {
+		return response(exports.export(context, id, SalesOrderSummaryExportFormat.CSV));
+	}
+
+	private ResponseEntity<byte[]> response(SalesOrderSummaryExportResult result) {
 		byte[] content = result.content();
 		return ResponseEntity.ok()
 				.contentType(MediaType.parseMediaType(result.contentType()))

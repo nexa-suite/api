@@ -40,9 +40,9 @@ public final class WarehouseController {
 
     @GetMapping({"/warehouses/{id}/location", "/warehouses/{id}/locations"})
     public ResponseEntity<LocationResponse> location(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        WarehouseResponse value = toWarehouse(service.warehouse(c, id));
+        OperationalProfileResponse value = operational(service.operationalProfile(c, id));
         return ResponseEntity.ok().eTag(etag(value.version()))
-                .body(new LocationResponse(value.id(), value.address(), value.version()));
+                .body(new LocationResponse(value.id(), value.address(), value.latitude(), value.longitude(), value.version()));
     }
 
     @GetMapping({"/warehouses/{id}/profile", "/warehouses/{id}/operational-profile"})
@@ -112,8 +112,8 @@ public final class WarehouseController {
     @GetMapping("/buyer/warehouses")
     public List<BuyerWarehouseResponse> buyerWarehouses(@RequestAttribute(ACCESS) CurrentAccessContext c) {
         return service.buyerWarehouses(c).stream()
-                .map(value -> new BuyerWarehouseResponse(value.id(), value.code(), value.name(), value.address(),
-                        value.operatingHoursStart(), value.operatingHoursEnd(), value.serviceable(), value.version()))
+                .map(value -> new BuyerWarehouseResponse(value.code(), value.name(), value.address(),
+                        value.operatingHoursStart(), value.operatingHoursEnd(), value.serviceable()))
                 .toList();
     }
 
@@ -134,9 +134,11 @@ public final class WarehouseController {
                                                             @PathVariable String id,
                                                             @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                             @RequestBody LocationPatchRequest request) {
-        WarehouseResponse value = toWarehouse(service.updateWarehouse(c, id, null, request.address(), null, version(ifMatch)));
+        OperationalPatchRequest patch = new OperationalPatchRequest(null, request.address(), null, null, null, null, null,
+                request.latitude(), request.longitude());
+        OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch)));
         return ResponseEntity.ok().eTag(etag(value.version()))
-                .body(new LocationResponse(value.id(), value.address(), value.version()));
+                .body(new LocationResponse(value.id(), value.address(), value.latitude(), value.longitude(), value.version()));
     }
 
     @GetMapping("/warehouses/{warehouseId}/zones")
@@ -245,7 +247,8 @@ public final class WarehouseController {
     private WarehouseResponse toWarehouse(WarehouseOperationsService.WarehouseSummary x) { return new WarehouseResponse(x.id(), x.code(), x.name(), x.address(), x.status(), x.version()); }
     private OperationalProfileResponse operational(WarehouseOperationsService.OperationalProfile x) {
         return new OperationalProfileResponse(x.id(), x.code(), x.name(), x.address(), x.status(), x.operatingHoursStart(),
-                x.operatingHoursEnd(), x.serviceable(), x.selectionPolicy(), x.version(), x.settingsVersion());
+                x.operatingHoursEnd(), x.serviceable(), x.selectionPolicy(), x.version(), x.settingsVersion(),
+                x.latitude(), x.longitude());
     }
     private ZoneResponse zone(WarehouseOperationsService.ZoneSummary x) { return new ZoneResponse(x.id(), x.warehouseId(), x.code(), x.name(), x.type(), x.temperatureMin(), x.temperatureMax(), x.status(), x.version()); }
     private LotResponse lot(WarehouseOperationsService.LotSummary x) { return new LotResponse(x.id(), x.warehouseId(), x.zoneId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.receivedAt(), x.onHand(), x.reserved(), x.available(), x.unit(), x.status(), x.version()); }
@@ -260,14 +263,15 @@ public final class WarehouseController {
 
     public record PageResponse<T>(List<T> items, int page, int size, long total) { }
     public record WarehouseResponse(String id, String code, String name, String address, String status, long version) { }
-    public record LocationResponse(String warehouseId, String address, long version) { }
+    public record LocationResponse(String warehouseId, String address, BigDecimal latitude, BigDecimal longitude, long version) { }
     public record OperationalProfileResponse(String id, String code, String name, String address, String status,
                                              LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                              boolean serviceable, String selectionPolicy, long version,
-                                             long settingsVersion) { }
-    public record BuyerWarehouseResponse(String id, String code, String name, String address,
+                                             long settingsVersion, BigDecimal latitude, BigDecimal longitude) { }
+    /** Buyer-safe projection: no internal warehouse id, stock, score or version crosses the boundary. */
+    public record BuyerWarehouseResponse(String code, String name, String address,
                                          LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
-                                         boolean serviceable, long version) { }
+                                         boolean serviceable) { }
     public record ZoneResponse(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
     public record LotResponse(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version) { }
     public record MovementResponse(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt) { }
@@ -280,14 +284,19 @@ public final class WarehouseController {
     public record ReadinessCandidateResponse(String reservationId, String salesOrderId, String orderNumber, String clientAccountId, int lineCount, BigDecimal totalReservedQuantity, Instant reservedAt, Instant expiresAt, String readinessStatus) { }
 
     public record WarehouseRequest(String code, String name, String address) { }
-    public record LocationPatchRequest(String address) { }
+    public record LocationPatchRequest(String address, BigDecimal latitude, BigDecimal longitude) { }
     public record WarehousePatch(String name, String address, String status) { }
     public record OperationalPatchRequest(String name, String address, String status, String selectionPolicy,
                                           LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
-                                          Boolean serviceable) {
+                                          Boolean serviceable, BigDecimal latitude, BigDecimal longitude) {
+        public OperationalPatchRequest(String name, String address, String status, String selectionPolicy,
+                                       LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
+                                       Boolean serviceable) {
+            this(name, address, status, selectionPolicy, operatingHoursStart, operatingHoursEnd, serviceable, null, null);
+        }
         WarehouseOperationsService.OperationalPatch toPatch() {
             return new WarehouseOperationsService.OperationalPatch(name, address, status, selectionPolicy,
-                    operatingHoursStart, operatingHoursEnd, serviceable);
+                    operatingHoursStart, operatingHoursEnd, serviceable, latitude, longitude);
         }
     }
     public record HoursPatchRequest(LocalTime operatingHoursStart, LocalTime operatingHoursEnd) { }

@@ -65,6 +65,14 @@ public final class ClientAccountAddressController {
         return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(AddressResponse.from(value));
     }
 
+    @DeleteMapping("/{addressId}")
+    public ResponseEntity<AddressResponse> deactivate(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+                                                      @PathVariable String clientAccountId, @PathVariable String addressId,
+                                                      @RequestHeader(name = "If-Match", required = false) String ifMatch) {
+        var value = addresses.deactivate(context, clientAccountId, addressId, SalesHttpHeaders.requireVersion(ifMatch));
+        return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(AddressResponse.from(value));
+    }
+
     public record CreateAddressRequest(@NotBlank @Size(max = 120) String label,
                                        @Valid @NotNull DeliveryAddressRequest address,
                                        boolean defaultAddress) { }
@@ -74,12 +82,19 @@ public final class ClientAccountAddressController {
 
     public record AddressResponse(UUID id, String clientAccountId, String label, String addressType, String line,
                                   String reference, String countryCode, String departmentCode, String provinceCode,
-                                  String districtCode, boolean defaultAddress, boolean active, long version) {
+                                  String districtCode, String recipientName, String recipientPhone, String roadType,
+                                  String streetName, String streetNumber, String interior, String postalCode,
+                                  String receivingInstructions, String receivingHours, java.math.BigDecimal latitude,
+                                  java.math.BigDecimal longitude, String placeId, String source,
+                                  boolean defaultAddress, boolean active, long version) {
         static AddressResponse from(ClientAccountAddressView value) {
             var address = value.address();
             return new AddressResponse(value.id(), value.clientAccountId(), value.label(), address.addressType(),
                     address.line(), address.reference(), address.countryCode(), address.departmentCode(),
-                    address.provinceCode(), address.districtCode(), value.defaultAddress(), value.active(), value.version());
+                    address.provinceCode(), address.districtCode(), address.recipientName(), address.recipientPhone(),
+                    address.roadType(), address.streetName(), address.streetNumber(), address.interior(), address.postalCode(),
+                    address.receivingInstructions(), address.receivingHours(), address.latitude(), address.longitude(),
+                    address.placeId(), address.source(), value.defaultAddress(), value.active(), value.version());
         }
     }
 }
