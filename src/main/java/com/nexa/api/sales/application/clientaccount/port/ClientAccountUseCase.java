@@ -7,6 +7,7 @@ import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 public interface ClientAccountUseCase {
 	SalesPage<ClientAccountView> list(CurrentAccessContext context, String search, String status, int page, int size);
 	ClientAccountView detail(CurrentAccessContext context, String id);
+	ClientAccountView buyerDetail(CurrentAccessContext context);
 	ClientAccountView create(CurrentAccessContext context, ClientAccountView command);
 	ClientAccountView update(CurrentAccessContext context, String id, ClientAccountView command, long version);
 	ClientAccountView changeStatus(CurrentAccessContext context, String id, String status, long version);

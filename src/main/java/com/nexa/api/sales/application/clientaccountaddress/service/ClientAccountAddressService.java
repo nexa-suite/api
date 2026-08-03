@@ -55,9 +55,7 @@ public class ClientAccountAddressService implements ClientAccountAddressUseCase 
         String accountId = scopedAccount(context, clientAccountId, true);
         if (command == null) throw new IllegalArgumentException("Address command is required");
         if (persistence.update(scope(context), workspace(context), accountId, addressId, command.label(),
-                command.address().addressType(), command.address().line(), command.address().reference(),
-                command.address().departmentCode(), command.address().provinceCode(), command.address().districtCode(),
-                expectedVersion) == 0) throw new SalesConcurrencyConflictException();
+                command.address(), expectedVersion) == 0) throw new SalesConcurrencyConflictException();
         return detail(context, accountId, addressId);
     }
 
@@ -72,6 +70,16 @@ public class ClientAccountAddressService implements ClientAccountAddressUseCase 
         if (persistence.setDefault(scope(context), workspace(context), accountId, addressId, expectedVersion, now()) == 0) {
             throw new SalesConcurrencyConflictException();
         }
+        return detail(context, accountId, addressId);
+    }
+
+    @Override
+    @Transactional
+    public ClientAccountAddressView deactivate(CurrentAccessContext context, String clientAccountId,
+                                               String addressId, long expectedVersion) {
+        String accountId = scopedAccount(context, clientAccountId, true);
+        if (persistence.deactivate(scope(context), workspace(context), accountId, addressId,
+                expectedVersion, now()) == 0) throw new SalesConcurrencyConflictException();
         return detail(context, accountId, addressId);
     }
 

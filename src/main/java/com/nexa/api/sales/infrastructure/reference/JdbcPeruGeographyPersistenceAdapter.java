@@ -29,6 +29,8 @@ public class JdbcPeruGeographyPersistenceAdapter implements PeruGeographyPersist
                     (rs, row) -> option(rs, PeruGeographyLevel.PROVINCE, rs.getString(3)), normalizedParent, normalizedParent);
             case DISTRICT -> jdbc.query("select code,name,province_code from reference_data.district where (? is null or province_code=?) order by code",
                     (rs, row) -> option(rs, PeruGeographyLevel.DISTRICT, rs.getString(3)), normalizedParent, normalizedParent);
+            case ROAD_TYPE -> jdbc.query("select code,name from reference_data.road_type order by code",
+                    (rs, row) -> option(rs, PeruGeographyLevel.ROAD_TYPE, null));
         };
     }
 

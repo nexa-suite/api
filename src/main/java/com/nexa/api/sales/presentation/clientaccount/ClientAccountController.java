@@ -48,6 +48,12 @@ public class ClientAccountController {
 		var value = sales.detail(context, id); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
 	}
 
+	@GetMapping("/me")
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Buyer client account returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Buyer client account not found")})
+	public ResponseEntity<ClientAccountDetailResponse> buyerDetail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context) {
+		var value = sales.buyerDetail(context); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	}
+
 	@PostMapping
 	@ApiResponses({@ApiResponse(responseCode = "201", description = "Client Account created", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "400", description = "Invalid request"), @ApiResponse(responseCode = "409", description = "Duplicate or concurrent request")})
 	public ResponseEntity<ClientAccountDetailResponse> create(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @Valid @RequestBody CreateClientAccountRequest request) {

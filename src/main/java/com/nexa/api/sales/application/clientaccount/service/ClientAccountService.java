@@ -23,6 +23,11 @@ public class ClientAccountService implements ClientAccountUseCase {
 	@Override public ClientAccountView detail(CurrentAccessContext context, String id) {
 		internal(context, Permission.SALES_READ); return persistence.find(scope(context), workspace(context), id).orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
 	}
+	@Override public ClientAccountView buyerDetail(CurrentAccessContext context) {
+		context.requirePermission(Permission.SALES_BUYER_READ);
+		return persistence.findForBuyer(scope(context), workspace(context), context.membershipId().toString())
+				.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
+	}
 	@Override @Transactional public ClientAccountView create(CurrentAccessContext context, ClientAccountView command) {
 		internal(context, Permission.SALES_WRITE); validateDomain(command);
 		UUID id = UUID.randomUUID(); persistence.insert(command, scope(context), workspace(context), id, now());

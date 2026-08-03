@@ -13,7 +13,8 @@ public record PeruGeographyOption(long id, PeruGeographyLevel level, String code
         if (level == PeruGeographyLevel.DEPARTMENT && parentCode != null) {
             throw new SalesInvariantViolation("Department cannot have a parent geography");
         }
-        if (level != PeruGeographyLevel.DEPARTMENT && (parentCode == null || parentCode.isBlank())) {
+        if (level != PeruGeographyLevel.DEPARTMENT && level != PeruGeographyLevel.ROAD_TYPE
+                && (parentCode == null || parentCode.isBlank())) {
             throw new SalesInvariantViolation("Child geography requires a parent");
         }
     }

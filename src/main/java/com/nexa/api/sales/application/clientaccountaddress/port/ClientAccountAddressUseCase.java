@@ -18,4 +18,7 @@ public interface ClientAccountAddressUseCase {
 
     ClientAccountAddressView setDefault(CurrentAccessContext context, String clientAccountId,
                                         String addressId, long expectedVersion);
+
+    ClientAccountAddressView deactivate(CurrentAccessContext context, String clientAccountId,
+                                        String addressId, long expectedVersion);
 }

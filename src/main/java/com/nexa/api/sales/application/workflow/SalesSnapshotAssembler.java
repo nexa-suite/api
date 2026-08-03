@@ -100,7 +100,9 @@ public final class SalesSnapshotAssembler {
                 .orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("warehouse"))
                 : warehouses.findActive(scope(context), workspace(context), warehouseId)
                 .orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("warehouse"));
-        WarehouseSnapshot warehouseSnapshot = new WarehouseSnapshot(warehouse.id(), warehouse.code(), warehouse.name(), warehouse.address());
+        WarehouseSnapshot warehouseSnapshot = new WarehouseSnapshot(warehouse.id(), warehouse.code(), warehouse.name(), warehouse.address(),
+                warehouse.selectionReason(), warehouse.serviceStatus(), warehouse.priority(), warehouse.preferred(), warehouse.selectedAt(),
+                warehouse.latitude(), warehouse.longitude());
         RouteSnapshot route = maps.preview(new MapRoutingPort.MapRouteRequest(warehouseSnapshot, addressSnapshot));
         if (paymentOption == null) throw new SalesInvariantViolation("Payment option is required");
         PaymentOption option = paymentOption;

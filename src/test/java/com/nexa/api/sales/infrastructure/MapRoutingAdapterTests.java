@@ -2,6 +2,7 @@ package com.nexa.api.sales.infrastructure;
 
 import com.nexa.api.sales.SalesTestFixtures;
 import com.nexa.api.sales.application.port.out.GoogleMapsBoundaryPort;
+import com.nexa.api.sales.application.port.out.MapCoordinate;
 import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.domain.model.delivery.DeliveryAddressSnapshot;
 import com.nexa.api.sales.domain.model.delivery.WarehouseSnapshot;
@@ -10,6 +11,7 @@ import com.nexa.api.sales.infrastructure.maps.LocalDeterministicMapAdapter;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
+import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -33,6 +35,37 @@ class MapRoutingAdapterTests {
         assertThat(route.provider()).isEqualTo("GOOGLE");
         assertThat(route.reference()).isEqualTo("google-ref");
         assertThat(route.distanceMeters()).isEqualTo(2500);
+    }
+
+    @Test
+    void localProviderExposesDeterministicPlaceGeocodeAndDistanceBoundaries() {
+        var adapter = new LocalDeterministicMapAdapter();
+        var origin = new MapCoordinate(new BigDecimal("-12.0464"), new BigDecimal("-77.0428"));
+        var destination = new MapCoordinate(new BigDecimal("-12.0500"), new BigDecimal("-77.0400"));
+
+        assertThat(adapter.search("Av. Real")).singleElement().extracting("placeId").isNotNull();
+        assertThat(adapter.geocode("Av. Real 250")).isPresent();
+        assertThat(adapter.reverseGeocode(destination)).isPresent();
+        assertThat(adapter.estimate(origin, destination)).get().extracting("provider").isEqualTo("LOCAL_DETERMINISTIC");
+    }
+
+    @Test
+    void localRouteCarriesWarehouseAndDestinationCoordinatesIntoTheSnapshot() {
+        var warehouse = new WarehouseSnapshot("warehouse", "WH-LIM-01", "Lima Warehouse", "Av. Warehouse 1",
+                "PREFERRED_OPERATIONAL", "OPERATIONAL", 10, true, java.time.Instant.EPOCH,
+                new BigDecimal("-12.0400"), new BigDecimal("-77.0300"));
+        var address = new DeliveryAddressSnapshot("address", "Main",
+                new com.nexa.api.sales.domain.model.address.Address("STREET", "Av. Lima 123", "Gate 4", "PE",
+                        "15", "1501", "150101", null, null, "STREET", "Lima", "123", null, null,
+                        null, null, new BigDecimal("-12.0500"), new BigDecimal("-77.0400"), null, "MAP_PIN"), true);
+
+        var route = new LocalDeterministicMapAdapter().preview(new MapRoutingPort.MapRouteRequest(warehouse, address));
+
+        assertThat(route.originLatitude()).isEqualByComparingTo("-12.0400");
+        assertThat(route.originLongitude()).isEqualByComparingTo("-77.0300");
+        assertThat(route.destinationLatitude()).isEqualByComparingTo("-12.0500");
+        assertThat(route.destinationLongitude()).isEqualByComparingTo("-77.0400");
+        assertThat(route.mode()).isEqualTo("DRIVING");
     }
 
     private static MapRoutingPort.MapRouteRequest request() {

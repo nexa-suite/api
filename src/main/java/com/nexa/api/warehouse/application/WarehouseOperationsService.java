@@ -61,13 +61,20 @@ public class WarehouseOperationsService {
     public record OperationalProfile(String id, String code, String name, String address, String status,
                                      LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                      boolean serviceable, String selectionPolicy, long version,
-                                     long settingsVersion) { }
+                                     long settingsVersion, BigDecimal latitude, BigDecimal longitude) { }
     public record BuyerWarehouse(String id, String code, String name, String address,
                                  LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
-                                 boolean serviceable, long version) { }
+                                 boolean serviceable, long version,
+                                 BigDecimal latitude, BigDecimal longitude) { }
     public record OperationalPatch(String name, String address, String status, String selectionPolicy,
                                    LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
-                                   Boolean serviceable) { }
+                                   Boolean serviceable, BigDecimal latitude, BigDecimal longitude) {
+        public OperationalPatch(String name, String address, String status, String selectionPolicy,
+                                LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
+                                Boolean serviceable) {
+            this(name, address, status, selectionPolicy, operatingHoursStart, operatingHoursEnd, serviceable, null, null);
+        }
+    }
     public record ZoneSummary(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
     public record LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version) { }
     public record MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt) { }

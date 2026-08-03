@@ -19,30 +19,33 @@ import java.util.UUID;
 @Profile("!test")
 public class ClientAccountAddressPersistenceAdapter
         implements ClientAccountAddressPersistencePort, ClientAccountAddressPort {
-    private static final String SELECT = "select id,tenant_id,workspace_id,client_account_id,label,coalesce(road_type,'STREET'),"
-            + "address_line,coalesce(reference,''),coalesce(department_code,''),coalesce(province_code,''),"
-            + "coalesce(district_code,''),default_address,status,version from sales.client_account_address";
+    private static final String SELECT = "select a.id,a.tenant_id,a.workspace_id,a.client_account_id,a.label,coalesce(a.recipient_name,''),"
+            + "coalesce(a.recipient_phone,''),coalesce(a.road_type,'STREET'),coalesce(a.street_name,''),coalesce(a.street_number,''),"
+            + "coalesce(a.interior,''),a.address_line,coalesce(a.postal_code,''),coalesce(a.reference,''),"
+            + "coalesce(a.receiving_instructions,''),coalesce(a.receiving_hours,''),a.latitude,a.longitude,coalesce(a.place_id,''),"
+            + "coalesce(a.source,'MANUAL'),coalesce(a.department_code,''),coalesce(a.province_code,''),coalesce(a.district_code,''),"
+            + "a.default_address,a.status,a.version from sales.client_account_address a";
     private final JdbcTemplate jdbc;
 
     public ClientAccountAddressPersistenceAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
     @Override
     public List<ClientAccountAddress> list(String tenantId, String workspaceId, String clientAccountId) {
-        return jdbc.query(SELECT + " where tenant_id=? and workspace_id=? and client_account_id=? and status='ACTIVE' "
-                        + "order by default_address desc,updated_at desc,id",
+        return jdbc.query(SELECT + " where a.tenant_id=? and a.workspace_id=? and a.client_account_id=? and a.status='ACTIVE' "
+                        + "order by a.default_address desc,a.updated_at desc,a.id",
                 (rs, row) -> address(rs), uuid(tenantId), uuid(workspaceId), uuid(clientAccountId));
     }
 
     @Override
     public Optional<ClientAccountAddress> find(String tenantId, String workspaceId, String clientAccountId, String addressId) {
-        return jdbc.query(SELECT + " where tenant_id=? and workspace_id=? and client_account_id=? and id=?",
+        return jdbc.query(SELECT + " where a.tenant_id=? and a.workspace_id=? and a.client_account_id=? and a.id=?",
                 rs -> rs.next() ? Optional.of(address(rs)) : Optional.empty(),
                 uuid(tenantId), uuid(workspaceId), uuid(clientAccountId), uuid(addressId));
     }
 
     @Override
     public Optional<ClientAccountAddress> findForBuyer(String tenantId, String workspaceId, String membershipId, String addressId) {
-        return jdbc.query(SELECT + " a join sales.client_account_membership m on m.client_account_id=a.client_account_id "
+        return jdbc.query(SELECT + " join sales.client_account_membership m on m.client_account_id=a.client_account_id "
                         + "and m.tenant_id=a.tenant_id and m.workspace_id=a.workspace_id "
                         + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? and a.id=? and a.status='ACTIVE'",
                 rs -> rs.next() ? Optional.of(address(rs)) : Optional.empty(),
@@ -51,7 +54,7 @@ public class ClientAccountAddressPersistenceAdapter
 
     @Override
     public Optional<ClientAccountAddress> findDefaultForBuyer(String tenantId, String workspaceId, String membershipId) {
-        return jdbc.query(SELECT + " a join sales.client_account_membership m on m.client_account_id=a.client_account_id "
+        return jdbc.query(SELECT + " join sales.client_account_membership m on m.client_account_id=a.client_account_id "
                         + "and m.tenant_id=a.tenant_id and m.workspace_id=a.workspace_id "
                         + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? "
                         + "and a.default_address and a.status='ACTIVE'",
@@ -61,23 +64,41 @@ public class ClientAccountAddressPersistenceAdapter
 
     @Override
     public void insert(ClientAccountAddress value, long nowEpochMillis) {
-        jdbc.update("insert into sales.client_account_address (id,tenant_id,workspace_id,client_account_id,label,recipient_name,"
-                        + "road_type,address_line,reference,department_code,province_code,district_code,source,default_address,status,version,created_at,updated_at) "
-                        + "values (?,?,?,?,?,?,?,?,?,?,?,?, 'MANUAL',?,?,0,?,?)",
-                value.id(), value.tenantId(), value.workspaceId(), uuid(value.clientAccountId()), value.label(), value.label(),
-                value.address().addressType(), value.address().line(), value.address().reference(),
-                value.address().departmentCode(), value.address().provinceCode(), value.address().districtCode(),
-                value.defaultAddress(), value.active() ? "ACTIVE" : "INACTIVE", timestamp(nowEpochMillis), timestamp(nowEpochMillis));
+                jdbc.update("insert into sales.client_account_address (id,tenant_id,workspace_id,client_account_id,label,recipient_name,"
+                        + "recipient_phone,road_type,street_name,street_number,interior,address_line,postal_code,reference,"
+                        + "receiving_instructions,receiving_hours,latitude,longitude,place_id,source,department_code,province_code,district_code,"
+                        + "default_address,status,version,created_at,updated_at) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                value.id(), value.tenantId(), value.workspaceId(), uuid(value.clientAccountId()), value.label(),
+                value.address().recipientName() == null ? value.label() : value.address().recipientName(), value.address().recipientPhone(),
+                value.address().roadType(), value.address().streetName(), value.address().streetNumber(), value.address().interior(),
+                value.address().line(), value.address().postalCode(), value.address().reference(), value.address().receivingInstructions(),
+                value.address().receivingHours(), value.address().latitude(), value.address().longitude(), value.address().placeId(),
+                value.address().source(), value.address().departmentCode(), value.address().provinceCode(), value.address().districtCode(),
+                value.defaultAddress(), value.active() ? "ACTIVE" : "INACTIVE", 0,
+                timestamp(nowEpochMillis), timestamp(nowEpochMillis));
     }
 
     @Override
     public int update(String tenantId, String workspaceId, String clientAccountId, String addressId, String label,
                       String addressType, String line, String reference, String departmentCode, String provinceCode,
                       String districtCode, long expectedVersion) {
-        return jdbc.update("update sales.client_account_address set label=?,recipient_name=?,road_type=?,address_line=?,reference=?,"
-                        + "department_code=?,province_code=?,district_code=?,updated_at=current_timestamp,version=version+1 "
+        return update(tenantId, workspaceId, clientAccountId, addressId, label,
+                new Address(addressType, line, reference, "PE", departmentCode, provinceCode, districtCode), expectedVersion);
+    }
+
+    @Override
+    public int update(String tenantId, String workspaceId, String clientAccountId, String addressId, String label,
+                      Address address, long expectedVersion) {
+        return jdbc.update("update sales.client_account_address set label=?,recipient_name=?,recipient_phone=?,road_type=?,street_name=?,"
+                        + "street_number=?,interior=?,address_line=?,postal_code=?,reference=?,receiving_instructions=?,receiving_hours=?,"
+                        + "latitude=?,longitude=?,place_id=?,source=?,department_code=?,province_code=?,district_code=?,"
+                        + "updated_at=current_timestamp,version=version+1 "
                         + "where tenant_id=? and workspace_id=? and client_account_id=? and id=? and status='ACTIVE' and version=?",
-                label, label, addressType, line, reference, departmentCode, provinceCode, districtCode,
+                label, address.recipientName() == null ? label : address.recipientName(), address.recipientPhone(), address.roadType(),
+                address.streetName(), address.streetNumber(), address.interior(), address.line(), address.postalCode(), address.reference(),
+                address.receivingInstructions(), address.receivingHours(), address.latitude(), address.longitude(), address.placeId(),
+                address.source(), address.departmentCode(), address.provinceCode(), address.districtCode(),
                 uuid(tenantId), uuid(workspaceId), uuid(clientAccountId), uuid(addressId), expectedVersion);
     }
 
@@ -97,11 +118,21 @@ public class ClientAccountAddressPersistenceAdapter
         return targetChanged == 1 ? changed + 1 : 0;
     }
 
+    @Override
+    public int deactivate(String tenantId, String workspaceId, String clientAccountId, String addressId,
+                          long expectedVersion, long nowEpochMillis) {
+        return jdbc.update("update sales.client_account_address set status='INACTIVE',default_address=false,updated_at=?,version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? and id=? and status='ACTIVE' and version=?",
+                timestamp(nowEpochMillis), uuid(tenantId), uuid(workspaceId), uuid(clientAccountId), uuid(addressId), expectedVersion);
+    }
+
     private static ClientAccountAddress address(java.sql.ResultSet rs) throws java.sql.SQLException {
         return ClientAccountAddress.rehydrate((UUID) rs.getObject(1), (UUID) rs.getObject(2), (UUID) rs.getObject(3),
-                rs.getObject(4).toString(), rs.getString(5), new Address(rs.getString(6), rs.getString(7), rs.getString(8),
-                        "PE", rs.getString(9), rs.getString(10), rs.getString(11)), rs.getBoolean(12),
-                "ACTIVE".equalsIgnoreCase(rs.getString(13)), rs.getLong(14));
+                rs.getObject(4).toString(), rs.getString(5), new Address(rs.getString(8), rs.getString(12), rs.getString(14),
+                        "PE", rs.getString(21), rs.getString(22), rs.getString(23), rs.getString(6), rs.getString(7),
+                        rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(13), rs.getString(15),
+                        rs.getString(16), rs.getBigDecimal(17), rs.getBigDecimal(18), rs.getString(19), rs.getString(20)),
+                rs.getBoolean(24), "ACTIVE".equalsIgnoreCase(rs.getString(25)), rs.getLong(26));
     }
 
     private static UUID uuid(String value) { return UUID.fromString(value); }
