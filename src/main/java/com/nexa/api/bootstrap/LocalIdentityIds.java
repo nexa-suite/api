@@ -33,6 +33,10 @@ public final class LocalIdentityIds {
 		return stable("client-account", Objects.requireNonNull(tenantId, "Tenant id is required") + ":" + normalize(code));
 	}
 
+	public static UUID forWarehouse(UUID tenantId, String code) {
+		return stable("warehouse", Objects.requireNonNull(tenantId, "Tenant id is required") + ":" + normalize(code));
+	}
+
 	private static UUID stable(String type, String key) {
 		return UUID.nameUUIDFromBytes((type + ":" + normalize(key)).getBytes(StandardCharsets.UTF_8));
 	}

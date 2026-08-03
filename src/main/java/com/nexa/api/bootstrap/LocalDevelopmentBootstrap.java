@@ -10,6 +10,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -64,6 +65,23 @@ public class LocalDevelopmentBootstrap {
 			}
 		}
 		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
+		seedWarehouse(tenantId, workspaceId, now);
+	}
+
+	private void seedWarehouse(UUID tenantId, UUID workspaceId, Instant now) {
+		String code = "ICISA-COLD-01";
+		UUID warehouseId = LocalIdentityIds.forWarehouse(tenantId, code);
+		jdbc.update("insert into warehouse.warehouse (id,tenant_id,workspace_id,code,name,address,status,created_at,updated_at) "
+				+ "values (?,?,?,?,?,?, 'ACTIVE',?,?) on conflict (tenant_id,workspace_id,code) do nothing",
+				warehouseId, tenantId, workspaceId, code, "ICISA Cold Chain Warehouse",
+				"Av. Argentina 1234, Callao, Lima, Peru", timestamp(now), timestamp(now));
+		UUID persistedWarehouseId = jdbc.queryForObject("select id from warehouse.warehouse where tenant_id=? and workspace_id=? and code=?",
+				UUID.class, tenantId, workspaceId, code);
+		jdbc.update("insert into warehouse.warehouse_service_configuration "
+				+ "(warehouse_id,tenant_id,workspace_id,service_status,priority,preferred,latitude,longitude,updated_at) "
+				+ "values (?,?,?,?,?,?,?,?,?) on conflict (warehouse_id) do nothing",
+				persistedWarehouseId, tenantId, workspaceId, "OPERATIONAL", 100, true,
+				new BigDecimal("-12.0464"), new BigDecimal("-77.0428"), timestamp(now));
 	}
 
 	private void seedClientAccounts(UUID tenantId, UUID workspaceId, UUID buyerUserId, Instant now) {
