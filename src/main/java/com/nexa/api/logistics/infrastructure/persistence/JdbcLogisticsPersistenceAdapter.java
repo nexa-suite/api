@@ -4,6 +4,8 @@ import com.nexa.api.logistics.application.LogisticsOperationsService;
 import com.nexa.api.logistics.application.LogisticsOperationsService.LogisticsException;
 import com.nexa.api.logistics.application.port.LogisticsPersistencePort;
 import com.nexa.api.logistics.application.port.DispatchRouteStartPort;
+import com.nexa.api.logistics.application.port.OperationalHandoffNotificationPort;
+import com.nexa.api.logistics.application.port.OperationalHandoffPort;
 import com.nexa.api.logistics.domain.dispatchorder.DeliveryWindow;
 import com.nexa.api.logistics.domain.dispatchorder.ClientAccountId;
 import com.nexa.api.logistics.domain.dispatchorder.DispatchOrder;
@@ -16,6 +18,7 @@ import com.nexa.api.logistics.domain.dispatchorder.TransportAssignment;
 import com.nexa.api.logistics.domain.incident.DeliveryIncident;
 import com.nexa.api.logistics.domain.incident.IncidentSeverity;
 import com.nexa.api.logistics.domain.incident.IncidentType;
+import com.nexa.api.logistics.domain.handoff.OperationalHandoffNote;
 import com.nexa.api.logistics.domain.proofofdelivery.ProofOfDeliveryRecord;
 import com.nexa.api.logistics.domain.proofofdelivery.ProofOfDeliveryStatus;
 import com.nexa.api.logistics.domain.temperaturereading.TemperatureReading;
@@ -24,6 +27,7 @@ import com.nexa.api.logistics.domain.temperaturereading.TemperatureScale;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.warehouse.application.port.WarehouseLogisticsFulfillmentPort;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,15 +49,24 @@ import java.util.UUID;
 
 @Repository
 @Profile("!test")
-public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort, DispatchRouteStartPort {
+public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort, DispatchRouteStartPort, OperationalHandoffPort {
     private static final int MAX_PAGE_SIZE = 100;
     private final JdbcTemplate jdbc;
     private final ChangeEventPersistencePort changeFeed;
     private final WarehouseLogisticsFulfillmentPort warehouseFulfillment;
+    private final OperationalHandoffNotificationPort handoffNotifications;
+
+    @Autowired
+    public JdbcLogisticsPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+                                           WarehouseLogisticsFulfillmentPort warehouseFulfillment,
+                                           OperationalHandoffNotificationPort handoffNotifications) {
+        this.jdbc = jdbc; this.changeFeed = changeFeed; this.warehouseFulfillment = warehouseFulfillment;
+        this.handoffNotifications = handoffNotifications;
+    }
 
     public JdbcLogisticsPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                            WarehouseLogisticsFulfillmentPort warehouseFulfillment) {
-        this.jdbc = jdbc; this.changeFeed = changeFeed; this.warehouseFulfillment = warehouseFulfillment;
+        this(jdbc, changeFeed, warehouseFulfillment, notification -> { });
     }
 
     @Override
@@ -86,6 +99,60 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         String visibility = clientAccountId == null ? "" : " and buyer_visible=true";
         return jdbc.query("select id,event_type,from_status,to_status,occurred_at,buyer_visible from logistics.dispatch_event where tenant_id=? and workspace_id=? and dispatch_order_id=?" + visibility + " order by occurred_at,id",
                 (rs, row) -> event(rs, clientAccountId != null), tenant, workspace, dispatch);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<LogisticsOperationsService.HandoffNoteView> notes(String tenantId, String workspaceId,
+                                                                   String clientAccountId, String dispatchId) {
+        UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), dispatch = uuid(dispatchId);
+        if (load(tenant, workspace, dispatch, clientAccountId == null ? null : uuid(clientAccountId), false) == null) {
+            throw error("RESOURCE_NOT_FOUND", true);
+        }
+        String clientScope = clientAccountId == null ? "" : " and d.client_account_id=?";
+        List<Object> args = new ArrayList<>(List.of(tenant, workspace, dispatch));
+        if (clientAccountId != null) args.add(uuid(clientAccountId));
+        return jdbc.query("select e.id,e.dispatch_order_id,e.reason,e.actor_membership_id,e.occurred_at,d.version "
+                        + "from logistics.dispatch_event e join logistics.dispatch_order d "
+                        + "on d.tenant_id=e.tenant_id and d.workspace_id=e.workspace_id and d.id=e.dispatch_order_id "
+                        + "where e.tenant_id=? and e.workspace_id=? and e.dispatch_order_id=? "
+                        + "and e.event_type='warehouse.logistics.handoff-note'" + clientScope
+                        + " order by e.occurred_at asc,e.id asc",
+                (rs, row) -> new LogisticsOperationsService.HandoffNoteView(rs.getObject("id").toString(),
+                        rs.getObject("dispatch_order_id").toString(), rs.getString("reason"),
+                        rs.getObject("actor_membership_id").toString(), rs.getTimestamp("occurred_at").toInstant(),
+                        rs.getLong("version")), args.toArray());
+    }
+
+    @Override
+    @Transactional
+    public LogisticsOperationsService.HandoffNoteView append(String tenantId, String workspaceId,
+                                                              String dispatchId, long expectedVersion,
+                                                              String actorMembershipId, String idempotencyKey,
+                                                              String note, long now) {
+        UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), dispatch = uuid(dispatchId), actor = uuid(actorMembershipId);
+        String hash = hash("dispatch-handoff-note", dispatchId, expectedVersion, note);
+        LogisticsOperationsService.HandoffNoteView replay = replayHandoff(tenant, workspace, idempotencyKey, hash);
+        if (replay != null) return replay;
+        DispatchRow row = locked(tenant, workspace, dispatch, null);
+        if (row == null) throw error("RESOURCE_NOT_FOUND", true);
+        if (row.version() != expectedVersion) throw error("CONCURRENCY_CONFLICT", false);
+        OperationalHandoffNote value = new OperationalHandoffNote(UUID.randomUUID(), dispatch, actor, note,
+                Instant.ofEpochMilli(now), expectedVersion + 1);
+        if (jdbc.update("update logistics.dispatch_order set updated_at=?,version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and id=? and version=?",
+                timestamp(now), tenant, workspace, dispatch, expectedVersion) != 1) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        jdbc.update("insert into logistics.dispatch_event(id,tenant_id,workspace_id,dispatch_order_id,event_type,"
+                        + "from_status,to_status,actor_membership_id,buyer_visible,reason,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?)",
+                value.id(), tenant, workspace, dispatch, "warehouse.logistics.handoff-note", row.status(), row.status(),
+                actor, false, value.note(), timestamp(now));
+        handoffNotifications.notify(new OperationalHandoffNotificationPort.Notification(
+                tenantId, workspaceId, row.clientAccountId().toString(), dispatchId,
+                "warehouse.logistics.handoff-note", "HANDOFF_NOTE", now));
+        saveIdempotency(tenant, workspace, "dispatch-handoff-note", idempotencyKey, hash, value.id(), now);
+        return valueView(value);
     }
 
     @Override
@@ -276,6 +343,34 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
     private LogisticsOperationsService.DispatchEventView event(ResultSet rs, boolean buyer) throws java.sql.SQLException { String type=rs.getString(2); return new LogisticsOperationsService.DispatchEventView(rs.getObject(1).toString(),buyer?buyerEvent(type):type,buyer?null:rs.getString(3),buyer?null:rs.getString(4),rs.getTimestamp(5).toInstant().toString(),rs.getBoolean(6),buyer?buyerSummary(type,rs.getString(4)):rs.getString(4)); }
     private static String buyerEvent(String type){return switch(type){case "logistics.dispatch.scheduled","logistics.dispatch.reprogrammed"->"DELIVERY_SCHEDULED";case "logistics.dispatch.route-started"->"IN_TRANSIT";case "logistics.dispatch.delivered","logistics.pod.completed"->"DELIVERED";case "logistics.dispatch.cancelled"->"DELIVERY_CANCELLED";case "logistics.dispatch.incident-recorded","logistics.dispatch.buyer-temperature-review"->"DELIVERY_REVIEW";default->"DELIVERY_UPDATED";};}
     private static String buyerSummary(String type,String to){return buyerEvent(type);}
+
+    private LogisticsOperationsService.HandoffNoteView replayHandoff(UUID tenant, UUID workspace, String key, String hash) {
+        lockIdempotency(tenant, workspace, "dispatch-handoff-note", key);
+        Idem value = jdbc.query("select response_json,request_hash from logistics.command_idempotency "
+                        + "where tenant_id=? and workspace_id=? and operation='dispatch-handoff-note' and idempotency_key=?",
+                rs -> rs.next() ? new Idem(rs.getString(1), rs.getString(2)) : null, tenant, workspace, key);
+        if (value == null) return null;
+        if (!value.hash().equalsIgnoreCase(hash)) throw error("IDEMPOTENCY_PAYLOAD_CONFLICT", false);
+        return handoffNoteById(tenant, workspace, uuid(value.resource()));
+    }
+
+    private LogisticsOperationsService.HandoffNoteView handoffNoteById(UUID tenant, UUID workspace, UUID id) {
+        return jdbc.query("select e.id,e.dispatch_order_id,e.reason,e.actor_membership_id,e.occurred_at,d.version "
+                        + "from logistics.dispatch_event e join logistics.dispatch_order d "
+                        + "on d.tenant_id=e.tenant_id and d.workspace_id=e.workspace_id and d.id=e.dispatch_order_id "
+                        + "where e.tenant_id=? and e.workspace_id=? and e.id=? "
+                        + "and e.event_type='warehouse.logistics.handoff-note'",
+                (rs, row) -> new LogisticsOperationsService.HandoffNoteView(rs.getObject("id").toString(),
+                        rs.getObject("dispatch_order_id").toString(), rs.getString("reason"),
+                        rs.getObject("actor_membership_id").toString(), rs.getTimestamp("occurred_at").toInstant(),
+                        rs.getLong("version")), tenant, workspace, id)
+                .stream().findFirst().orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
+    }
+
+    private static LogisticsOperationsService.HandoffNoteView valueView(OperationalHandoffNote value) {
+        return new LogisticsOperationsService.HandoffNoteView(value.id().toString(), value.dispatchOrderId().toString(),
+                value.note(), value.authorMembershipId().toString(), value.occurredAt(), value.dispatchVersion());
+    }
 
     private LogisticsOperationsService.DispatchView replay(UUID tenant, UUID workspace, String operation, String key, String hash) { lockIdempotency(tenant, workspace, operation, key); Idem value=jdbc.query("select response_json,request_hash from logistics.command_idempotency where tenant_id=? and workspace_id=? and operation=? and idempotency_key=?",rs->rs.next()?new Idem(rs.getString(1),rs.getString(2)):null,tenant,workspace,operation,key); if(value==null)return null; if(!value.hash().equalsIgnoreCase(hash))throw error("IDEMPOTENCY_PAYLOAD_CONFLICT",false); return detail(tenant.toString(),workspace.toString(),null,value.resource()); }
     private void lockIdempotency(UUID tenant, UUID workspace, String operation, String key) { jdbc.query("select pg_advisory_xact_lock(hashtext(?))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null, tenant + "|" + workspace + "|" + operation + "|" + key); }

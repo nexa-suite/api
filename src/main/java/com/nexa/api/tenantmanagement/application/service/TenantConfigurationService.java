@@ -52,7 +52,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		OrganizationProfile profile = new OrganizationProfile(request.legalName(), request.displayName(), request.businessIdentifier(), request.operationCategory(), expectedVersion);
 		if (port.updateOrganizationProfile(context.tenantId().toString(), profile) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "ORGANIZATION_UPDATED", correlationId, Map.of("section", "organization"));
-		return organizationProfile(context);
+		return view(new OrganizationProfile(profile.legalName(), profile.displayName(), profile.businessIdentifier(), profile.operationCategory(), expectedVersion + 1));
 	}
 
 	@Override
@@ -68,7 +68,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		String scopedWorkspace = requireWorkspace(context, workspaceId);
 		if (port.updateWorkspaceSettings(scopedWorkspace, request.defaultWorkspaceBehavior(), request.warehousePreferenceStrategy(), expectedVersion) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "OPERATIONAL_SETTINGS_CHANGED", correlationId, Map.of("section", "workspace-defaults"));
-		return workspaceSettings(context, scopedWorkspace);
+		return new TenantConfigurationModels.WorkspaceSettingsView(scopedWorkspace, request.defaultWorkspaceBehavior(), request.warehousePreferenceStrategy(), expectedVersion + 1);
 	}
 
 	@Override
@@ -84,7 +84,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		RegionalSettings settings = new RegionalSettings(request.timezone(), request.language(), request.currency(), request.countryRegion(), request.dateTimePolicy(), request.locale(), expectedVersion);
 		if (port.updateRegionalSettings(context.tenantId().toString(), settings) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "REGIONAL_SETTINGS_CHANGED", correlationId, Map.of("section", "regional"));
-		return regionalSettings(context);
+		return view(new RegionalSettings(settings.timezone(), settings.language(), settings.currency(), settings.countryRegion(), settings.dateTimePolicy(), settings.locale(), expectedVersion + 1));
 	}
 
 	@Override
@@ -100,7 +100,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		UnitPreferences preferences = new UnitPreferences(request.massUnit(), request.temperatureUnit(), request.distanceUnit(), request.volumeUnit(), expectedVersion);
 		if (port.updateUnitPreferences(context.tenantId().toString(), preferences) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "UNIT_PREFERENCES_CHANGED", correlationId, Map.of("section", "units"));
-		return unitPreferences(context);
+		return view(new UnitPreferences(preferences.massUnit(), preferences.temperatureUnit(), preferences.distanceUnit(), preferences.volumeUnit(), expectedVersion + 1));
 	}
 
 	@Override
@@ -118,7 +118,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		OperationalSettings settings = new OperationalSettings(request.defaultWarehouseSelectionPolicy(), request.orderCutoffPolicy(), request.fulfillmentDefaults(), request.inventoryVisibilityPolicy(), request.buyerAvailabilityPolicy(), request.operatingHoursStart(), request.operatingHoursEnd(), request.orderCutoffMinutes(), request.thermalLogRequired(), expectedVersion);
 		if (port.updateOperationalSettings(scopedWorkspace, settings) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "OPERATIONAL_SETTINGS_CHANGED", correlationId, Map.of("section", "operational"));
-		return operationalSettings(context, scopedWorkspace);
+		return view(scopedWorkspace, new OperationalSettings(settings.defaultWarehouseSelectionPolicy(), settings.orderCutoffPolicy(), settings.fulfillmentDefaults(), settings.inventoryVisibilityPolicy(), settings.buyerAvailabilityPolicy(), settings.operatingHoursStart(), settings.operatingHoursEnd(), settings.orderCutoffMinutes(), settings.thermalLogRequired(), expectedVersion + 1));
 	}
 
 	@Override
@@ -142,7 +142,10 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 			}
 		}
 		appendAudit(context, "NOTIFICATION_SETTINGS_CHANGED", correlationId, Map.of("section", "notifications"));
-		return notificationSettings(context, scopedWorkspace);
+		List<TenantConfigurationModels.NotificationPreferenceView> updated = request.preferences().stream()
+				.map(value -> new TenantConfigurationModels.NotificationPreferenceView(value.eventCategory(), value.channel(), value.enabled(), value.version() + 1))
+				.toList();
+		return new TenantConfigurationModels.NotificationSettingsView(updated, expectedVersion + 1);
 	}
 
 	@Override
@@ -158,7 +161,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		TenantSecuritySettings settings = new TenantSecuritySettings(request.passwordMinLength(), request.sessionDurationMinutes(), request.invitationExpirationHours(), request.requiredEmailDomain(), expectedVersion);
 		if (port.updateTenantSecuritySettings(context.tenantId().toString(), settings) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "TENANT_SECURITY_SETTINGS_CHANGED", correlationId, Map.of("section", "security"));
-		return tenantSecuritySettings(context);
+		return view(new TenantSecuritySettings(settings.passwordMinLength(), settings.sessionDurationMinutes(), settings.invitationExpirationHours(), settings.requiredEmailDomain(), expectedVersion + 1));
 	}
 
 	@Override

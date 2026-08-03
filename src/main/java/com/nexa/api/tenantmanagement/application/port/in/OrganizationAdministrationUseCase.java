@@ -25,6 +25,8 @@ public interface OrganizationAdministrationUseCase {
 	WorkspaceMembershipSummary membership(CurrentAccessContext context, String membershipId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRoles(CurrentAccessContext context, String membershipId,
 			Set<MembershipRole> roles, long expectedVersion, String correlationId);
+	OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRoleDefinitions(CurrentAccessContext context, String membershipId,
+			Set<String> roleDefinitionIds, long expectedVersion, String correlationId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> suspendMembership(CurrentAccessContext context, String membershipId,
 			long expectedVersion, String correlationId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> reactivateMembership(CurrentAccessContext context, String membershipId,

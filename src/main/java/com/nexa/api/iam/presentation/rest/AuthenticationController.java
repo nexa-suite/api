@@ -199,7 +199,7 @@ public class AuthenticationController {
 					Duration.between(result.issuedAt(), result.accessTokenExpiresAt()).toSeconds(),
 					new SessionContext(result.userAccountId().value(), result.displayName(), result.email().value(), result.preferredLanguage(),
 							result.tenantId(), result.tenantSlug(), result.workspaceId(), result.workspaceSlug(), result.membershipId(),
-							result.roles(), result.permissions(), result.surface().name()));
+							result.roles(), result.permissions(), result.roleDefinitionIds(), result.authorizationVersion(), result.surface().name()));
 		}
 	}
 
@@ -210,17 +210,19 @@ public class AuthenticationController {
 					new SessionUser(session.userAccountId().value(), session.displayName(), session.email().value(), session.preferredLanguage()),
 					new TenantContext(session.tenantId(), session.tenantSlug()),
 					new WorkspaceContext(session.workspaceId(), session.workspaceSlug()),
-					new MembershipContext(session.membershipId(), session.roles(), session.permissions()),
+					new MembershipContext(session.membershipId(), session.roles(), session.permissions(), session.roleDefinitionIds(), session.authorizationVersion()),
 					session.surface().name());
 		}
 	}
 
 	public record SessionContext(String userId, String displayName, String email, String preferredLanguage,
 			String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
-				java.util.Set<String> roles, java.util.Set<String> permissions, String surface) {}
+				java.util.Set<String> roles, java.util.Set<String> permissions, java.util.Set<String> roleDefinitionIds,
+				long authorizationVersion, String surface) {}
 
 	public record SessionUser(String userId, String displayName, String email, String preferredLanguage) {}
 	public record TenantContext(String tenantId, String tenantSlug) {}
 	public record WorkspaceContext(String workspaceId, String workspaceSlug) {}
-	public record MembershipContext(String membershipId, java.util.Set<String> roles, java.util.Set<String> permissions) {}
+	public record MembershipContext(String membershipId, java.util.Set<String> roles, java.util.Set<String> permissions,
+			java.util.Set<String> roleDefinitionIds, long authorizationVersion) {}
 }

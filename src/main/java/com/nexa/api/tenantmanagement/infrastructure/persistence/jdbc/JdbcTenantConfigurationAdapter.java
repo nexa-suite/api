@@ -13,6 +13,7 @@ import com.nexa.api.tenantmanagement.domain.model.configuration.UnitPreferences;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -34,6 +35,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	public JdbcTenantConfigurationAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<OrganizationProfile> findOrganizationProfile(String tenantId) {
 		ensureTenantDefaults(tenantId);
 		return jdbc.query("select legal_name,display_name,business_identifier,operation_category,version from tenant_management.organization_settings where tenant_id=?",
@@ -47,6 +49,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<RegionalSettings> findRegionalSettings(String tenantId) {
 		ensureTenantDefaults(tenantId);
 		return jdbc.query("select timezone,language,currency,country_region,date_time_policy,locale,version from tenant_management.regional_settings where tenant_id=?",
@@ -60,6 +63,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<UnitPreferences> findUnitPreferences(String tenantId) {
 		ensureTenantDefaults(tenantId);
 		return jdbc.query("select mass_unit,temperature_unit,distance_unit,volume_unit,version from tenant_management.unit_preferences where tenant_id=?",
@@ -73,6 +77,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<OperationalSettings> findOperationalSettings(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
 		return jdbc.query("select warehouse_preference_strategy,order_cutoff_policy,fulfillment_defaults,inventory_visibility_policy,buyer_availability_policy,operating_hours_start,operating_hours_end,order_cutoff_minutes,thermal_log_required,version from tenant_management.operational_settings where workspace_id=?",
@@ -86,6 +91,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<TenantConfigurationModels.WorkspaceSettingsView> findWorkspaceSettings(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
 		return jdbc.query("select ws.workspace_id,ws.default_workspace_behavior,os.warehouse_preference_strategy,ws.version from tenant_management.workspace_settings ws join tenant_management.operational_settings os on os.workspace_id=ws.workspace_id where ws.workspace_id=?",
@@ -105,6 +111,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public List<NotificationPreference> findNotificationPreferences(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
 		return jdbc.query("select event_category,channel,enabled,version from tenant_management.notification_preference where workspace_id=? order by event_category,channel",
@@ -112,6 +119,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public long notificationVersion(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
 		Long version = jdbc.queryForObject("select coalesce(max(version),0) from tenant_management.notification_preference where workspace_id=?", Long.class, uuid(workspaceId));
@@ -125,6 +133,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<TenantSecuritySettings> findTenantSecuritySettings(String tenantId) {
 		ensureTenantDefaults(tenantId);
 		return jdbc.query("select password_min_length,session_duration_minutes,invitation_expiration_hours,required_email_domain,version from tenant_management.tenant_security_settings where tenant_id=?",
@@ -173,6 +182,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<ReferencePlanAssignment> findReferencePlan(String tenantId) {
 		ensureTenantDefaults(tenantId);
 		return jdbc.query("select plan_code,monthly_price,seat_limit,workspace_limit,transaction_limit,version from tenant_management.reference_plan_assignment where tenant_id=?",
@@ -186,6 +196,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public TenantConfigurationModels.PlanUsageView planUsage(String tenantId, String workspaceId) {
 		ReferencePlanAssignment plan = findReferencePlan(tenantId).orElseThrow();
 		Integer activeUsers = jdbc.queryForObject("select count(*) from tenant_management.workspace_membership where workspace_id=? and status='ACTIVE'", Integer.class, uuid(workspaceId));

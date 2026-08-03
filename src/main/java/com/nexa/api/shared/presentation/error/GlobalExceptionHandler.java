@@ -53,6 +53,8 @@ import com.nexa.api.catalogmanagement.application.exception.CatalogConflictExcep
 import com.nexa.api.catalogmanagement.application.exception.CatalogIdempotencyKeyRequiredException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogPreconditionRequiredException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogResourceNotFoundException;
+import com.nexa.api.tenantmanagement.application.service.RoleDefinitionService;
+import com.nexa.api.tenantmanagement.application.exception.RoleDefinitionPersistenceUnavailableException;
 
 import java.util.List;
 import java.util.Map;
@@ -209,6 +211,36 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(AccessPolicyViolation.class)
 	public ResponseEntity<ProblemDetail> handleAccessPolicy(AccessPolicyViolation exception, HttpServletRequest request) {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
+	}
+
+	@ExceptionHandler(RoleDefinitionService.RoleDefinitionNotFoundException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionNotFound(RoleDefinitionService.RoleDefinitionNotFoundException exception, HttpServletRequest request) {
+		return response(HttpStatus.NOT_FOUND, ApiErrorCode.ROLE_DEFINITION_NOT_FOUND, "Role definition not found", request);
+	}
+
+	@ExceptionHandler(RoleDefinitionService.DuplicateRoleDefinitionException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionDuplicate(RoleDefinitionService.DuplicateRoleDefinitionException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.ROLE_DEFINITION_DUPLICATE, "Role definition code already exists", request);
+	}
+
+	@ExceptionHandler(RoleDefinitionService.ImmutableRoleDefinitionException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionImmutable(RoleDefinitionService.ImmutableRoleDefinitionException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.ROLE_DEFINITION_IMMUTABLE, "System role definitions are immutable", request);
+	}
+
+	@ExceptionHandler(RoleDefinitionService.ActiveRoleDefinitionAssignmentsException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionAssignments(RoleDefinitionService.ActiveRoleDefinitionAssignmentsException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.ROLE_DEFINITION_ASSIGNMENTS_ACTIVE, "Active memberships still use this role", request);
+	}
+
+	@ExceptionHandler(RoleDefinitionService.RoleDefinitionConcurrencyException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionConcurrency(RoleDefinitionService.RoleDefinitionConcurrencyException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Role definition changed by another request", request);
+	}
+
+	@ExceptionHandler(RoleDefinitionPersistenceUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionPersistenceUnavailable(RoleDefinitionPersistenceUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.ROLE_DEFINITION_STORAGE_UNAVAILABLE, "Role definition persistence is unavailable", request);
 	}
 
 	@ExceptionHandler(SalesResourceNotFoundException.class)

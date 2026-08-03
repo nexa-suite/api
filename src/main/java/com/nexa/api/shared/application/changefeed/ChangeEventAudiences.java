@@ -15,9 +15,13 @@ public final class ChangeEventAudiences {
 
 	private static final Map<String, Set<ChangeEventAudience>> INTERNAL = Map.ofEntries(
 			Map.entry("organization.membership.role-changed", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("organization.membership.role-definition-changed", EnumSet.of(ChangeEventAudience.OWNER)),
 			Map.entry("organization.membership.suspended", EnumSet.of(ChangeEventAudience.OWNER)),
 			Map.entry("organization.membership.reactivated", EnumSet.of(ChangeEventAudience.OWNER)),
 			Map.entry("organization.workspace.updated", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("tenant.role-definition.created", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("tenant.role-definition.updated", EnumSet.of(ChangeEventAudience.OWNER)),
+			Map.entry("tenant.role-definition.deactivated", EnumSet.of(ChangeEventAudience.OWNER)),
 			Map.entry("sales.client-account.created", EnumSet.of(ChangeEventAudience.SALES)),
 			Map.entry("sales.client-account.updated", EnumSet.of(ChangeEventAudience.SALES)),
 			Map.entry("sales.client-account.suspended", EnumSet.of(ChangeEventAudience.SALES)),
@@ -38,7 +42,8 @@ public final class ChangeEventAudiences {
 			Map.entry("sales.sales-order.confirmed", EnumSet.of(ChangeEventAudience.SALES, ChangeEventAudience.BUYER,
 					ChangeEventAudience.WAREHOUSE, ChangeEventAudience.LOGISTICS)),
 			Map.entry("warehouse.warehouse.created", EnumSet.of(ChangeEventAudience.WAREHOUSE)),
-			Map.entry("warehouse.warehouse.updated", EnumSet.of(ChangeEventAudience.WAREHOUSE)),
+				Map.entry("warehouse.warehouse.updated", EnumSet.of(ChangeEventAudience.WAREHOUSE)),
+				Map.entry("warehouse.operational-profile.updated", EnumSet.of(ChangeEventAudience.WAREHOUSE, ChangeEventAudience.LOGISTICS)),
 			Map.entry("warehouse.zone.created", EnumSet.of(ChangeEventAudience.WAREHOUSE)),
 			Map.entry("warehouse.zone.updated", EnumSet.of(ChangeEventAudience.WAREHOUSE)),
 			Map.entry("warehouse.lot.received", EnumSet.of(ChangeEventAudience.WAREHOUSE)),
@@ -64,7 +69,8 @@ public final class ChangeEventAudiences {
 			Map.entry("logistics.dispatch.cancelled", EnumSet.of(ChangeEventAudience.LOGISTICS, ChangeEventAudience.SALES)),
 			Map.entry("logistics.dispatch.delivered", EnumSet.of(ChangeEventAudience.LOGISTICS, ChangeEventAudience.SALES)),
 			Map.entry("logistics.pod.completed", EnumSet.of(ChangeEventAudience.LOGISTICS, ChangeEventAudience.SALES)),
-			Map.entry("logistics.dispatch.buyer-temperature-review", EnumSet.of(ChangeEventAudience.BUYER)));
+				Map.entry("logistics.dispatch.buyer-temperature-review", EnumSet.of(ChangeEventAudience.BUYER)),
+				Map.entry("warehouse.logistics.handoff-note", EnumSet.of(ChangeEventAudience.WAREHOUSE, ChangeEventAudience.LOGISTICS)));
 
 	public static Set<ChangeEventAudience> forEvent(String eventType, boolean explicitBuyerVisibility) {
 		if (eventType == null || eventType.isBlank()) {

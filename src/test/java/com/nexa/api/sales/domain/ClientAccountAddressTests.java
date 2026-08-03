@@ -1,0 +1,76 @@
+package com.nexa.api.sales.application;
+
+import com.nexa.api.sales.SalesTestFixtures;
+import com.nexa.api.sales.application.clientaccountaddress.model.CreateClientAccountAddressCommand;
+import com.nexa.api.sales.application.clientaccountaddress.port.ClientAccountAddressPersistencePort;
+import com.nexa.api.sales.application.clientaccountaddress.service.ClientAccountAddressService;
+import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
+import com.nexa.api.sales.application.port.out.ClientAccountCommercialPort;
+import com.nexa.api.sales.domain.model.clientaccount.ClientAccountAddress;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class ClientAccountAddressTests {
+    @Test
+    void addressCannotBeReadOutsideTenantWorkspaceAndAccountScope() {
+        ClientAccountAddress value = SalesTestFixtures.savedAddress(true, 4);
+
+        assertThat(value.belongsTo(SalesTestFixtures.TENANT, SalesTestFixtures.WORKSPACE, SalesTestFixtures.ACCOUNT)).isTrue();
+        assertThat(value.belongsTo(java.util.UUID.randomUUID(), SalesTestFixtures.WORKSPACE, SalesTestFixtures.ACCOUNT)).isFalse();
+        assertThat(value.belongsTo(SalesTestFixtures.TENANT, SalesTestFixtures.WORKSPACE, "another-account")).isFalse();
+        assertThat(value.withDefault(false, 5).defaultAddress()).isFalse();
+        assertThat(value.defaultAddress()).isTrue();
+    }
+
+    @Test
+    void staleDefaultAddressVersionIsRejectedAsConcurrencyConflict() {
+        ClientAccountAddress value = SalesTestFixtures.savedAddress(false, 7);
+        ClientAccountCommercialPort accounts = accountPort();
+        ClientAccountAddressPersistencePort persistence = new ClientAccountAddressPersistencePort() {
+            @Override public List<ClientAccountAddress> list(String tenant, String workspace, String account) { return List.of(value); }
+            @Override public Optional<ClientAccountAddress> find(String tenant, String workspace, String account, String id) { return Optional.of(value); }
+            @Override public void insert(ClientAccountAddress address, long now) { }
+            @Override public int update(String tenant, String workspace, String account, String id, String label, String type,
+                                        String line, String reference, String department, String province, String district, long expected) { return 0; }
+            @Override public int setDefault(String tenant, String workspace, String account, String id, long expected, long now) {
+                return expected == value.version() ? 1 : 0;
+            }
+        };
+        var service = new ClientAccountAddressService(persistence, accounts);
+        assertThatThrownBy(() -> service.setDefault(SalesTestFixtures.salesContext(), SalesTestFixtures.ACCOUNT,
+                value.id().toString(), value.version() - 1)).isInstanceOf(SalesConcurrencyConflictException.class);
+    }
+
+    @Test
+    void defaultCreationSurfacesAConcurrentDefaultConflict() {
+        ClientAccountCommercialPort accounts = accountPort();
+        ClientAccountAddressPersistencePort persistence = new ClientAccountAddressPersistencePort() {
+            @Override public List<ClientAccountAddress> list(String tenant, String workspace, String account) { return List.of(); }
+            @Override public Optional<ClientAccountAddress> find(String tenant, String workspace, String account, String id) { return Optional.empty(); }
+            @Override public void insert(ClientAccountAddress address, long now) { }
+            @Override public int update(String tenant, String workspace, String account, String id, String label, String type,
+                                        String line, String reference, String department, String province, String district, long expected) { return 0; }
+            @Override public int setDefault(String tenant, String workspace, String account, String id, long expected, long now) { return 0; }
+        };
+        var service = new ClientAccountAddressService(persistence, accounts);
+        assertThatThrownBy(() -> service.create(SalesTestFixtures.salesContext(), SalesTestFixtures.ACCOUNT,
+                new CreateClientAccountAddressCommand("New", SalesTestFixtures.address(), true)))
+                .isInstanceOf(SalesConcurrencyConflictException.class);
+    }
+
+    private static ClientAccountCommercialPort accountPort() {
+        return new ClientAccountCommercialPort() {
+            @Override public Optional<ClientAccountCommercialProfile> find(String tenant, String workspace, String account) {
+                return Optional.of(SalesTestFixtures.commercialProfile());
+            }
+            @Override public Optional<ClientAccountCommercialProfile> findForBuyer(String tenant, String workspace, String membership) {
+                return Optional.empty();
+            }
+        };
+    }
+}

@@ -27,7 +27,10 @@ public class OrganizationAdministrationController {
 	public OrganizationAdministrationController(OrganizationAdministrationUseCase administration) { this.administration = administration; }
 
 	@GetMapping("/organization/current")
-	public OrganizationResponse organization(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) { return OrganizationResponse.from(administration.organization(context)); }
+	public ResponseEntity<OrganizationResponse> organization(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) {
+		OrganizationResponse value = OrganizationResponse.from(administration.organization(context));
+		return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+	}
 
 	@GetMapping("/workspaces")
 	public List<WorkspaceSummary> workspaces(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) { return administration.workspaces(context); }
@@ -61,6 +64,10 @@ public class OrganizationAdministrationController {
 	public ResponseEntity<WorkspaceMembershipSummary> roles(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
 			@PathVariable String membershipId, @RequestHeader(name="If-Match", required=false) String ifMatch,
 			@RequestBody RolesPatch patch, HttpServletRequest request) {
+		if (patch.roleDefinitionIds() != null && !patch.roleDefinitionIds().isEmpty()) {
+			var result = administration.changeRoleDefinitions(context, membershipId, patch.roleDefinitionIds(), version(ifMatch), correlation(request));
+			return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value());
+		}
 		var roles = patch.roles().stream().map(MembershipRole::from).collect(Collectors.toUnmodifiableSet());
 		var result = administration.changeRoles(context, membershipId, roles, version(ifMatch), correlation(request));
 		return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value());
@@ -77,7 +84,14 @@ public class OrganizationAdministrationController {
 	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
 	public record WorkspaceCreate(String name, String slug) { }
 	public record WorkspacePatch(String name,String slug,String status) { }
-	public record RolesPatch(Set<String> roles) { public RolesPatch { if (roles == null || roles.isEmpty()) throw new IllegalArgumentException("At least one role is required"); } }
+	public record RolesPatch(Set<String> roles, Set<String> roleDefinitionIds) {
+		public RolesPatch(Set<String> roles) { this(roles, Set.of()); }
+		public RolesPatch {
+			roles = roles == null ? Set.of() : Set.copyOf(roles);
+			roleDefinitionIds = roleDefinitionIds == null ? Set.of() : Set.copyOf(roleDefinitionIds);
+			if (roles.isEmpty() && roleDefinitionIds.isEmpty()) throw new IllegalArgumentException("At least one role assignment is required");
+		}
+	}
 	public record OrganizationResponse(String id,String name,String slug,String status,String currentWorkspaceId,String currentWorkspaceName,long version) { static OrganizationResponse from(OrganizationSummary value){ return new OrganizationResponse(value.id(),value.name(),value.slug(),value.status(),value.currentWorkspaceId(),value.currentWorkspaceName(),value.version()); } }
 	public static final class PreconditionRequiredException extends RuntimeException { }
 }

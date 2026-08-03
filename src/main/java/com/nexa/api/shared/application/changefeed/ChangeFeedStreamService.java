@@ -99,30 +99,53 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 	private boolean isTooOld(CurrentAccessContext context, String clientAccount, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount); return last > 0 && minimum > 0 && last < minimum - 1; }
 	private static Set<ChangeEventAudience> audiences(CurrentAccessContext context) {
 		EnumSet<ChangeEventAudience> result = EnumSet.noneOf(ChangeEventAudience.class);
-		for (var role : context.roles()) switch (role) {
-			case TENANT_ADMIN, COMPANY_OWNER -> result.add(ChangeEventAudience.OWNER);
-			case SALES -> result.add(ChangeEventAudience.SALES);
-			case WAREHOUSE -> result.add(ChangeEventAudience.WAREHOUSE);
-			case LOGISTICS -> result.add(ChangeEventAudience.LOGISTICS);
-			case BUYER -> result.add(ChangeEventAudience.BUYER);
+		for (String role : context.roleCodes()) switch (role.toUpperCase(Locale.ROOT)) {
+			case "TENANT_ADMIN", "COMPANY_OWNER" -> result.add(ChangeEventAudience.OWNER);
+			case "SALES" -> result.add(ChangeEventAudience.SALES);
+			case "WAREHOUSE" -> result.add(ChangeEventAudience.WAREHOUSE);
+			case "LOGISTICS" -> result.add(ChangeEventAudience.LOGISTICS);
+			case "BUYER" -> result.add(ChangeEventAudience.BUYER);
+			default -> { }
+		}
+		/* OWNER is a deliberately isolated administrative audience. Its broad
+		 * commercial permissions must not silently subscribe it to SALES,
+		 * WAREHOUSE, LOGISTICS or BUYER operational streams. A custom non-owner
+		 * role may still derive an audience from its typed read permissions. */
+		if (!result.contains(ChangeEventAudience.OWNER)) {
+			if (allowsAny(context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.SALES_DASHBOARD_READ,
+					com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.SALES_PURCHASE_REQUEST_READ,
+					com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.SALES_ORDER_READ,
+					com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.CLIENT_READ)) result.add(ChangeEventAudience.SALES);
+			if (allowsAny(context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.WAREHOUSE_READ,
+					com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.INVENTORY_READ)) result.add(ChangeEventAudience.WAREHOUSE);
+			if (allowsAny(context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.LOGISTICS_READ,
+					com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.DISPATCH_READ)) result.add(ChangeEventAudience.LOGISTICS);
+			if (context.allows(com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.BUYER_ORDER_READ)) result.add(ChangeEventAudience.BUYER);
 		}
 		return Set.copyOf(result);
 	}
+	private static boolean allowsAny(CurrentAccessContext context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey... permissions) {
+		return java.util.Arrays.stream(permissions).anyMatch(context::allows);
+	}
 	private CurrentAccessContext verify(Jwt jwt, CurrentAccessContext expected) {
 		Surface surface = Surface.valueOf(required(jwt, "surface").toUpperCase(Locale.ROOT));
-		accessSession.validate(new SessionId(required(jwt, "sid")), new UserAccountId(jwt.getSubject()), ClientSurface.valueOf(surface.name()));
+		accessSession.validate(new SessionId(required(jwt, "sid")), new UserAccountId(jwt.getSubject()),
+				ClientSurface.valueOf(surface.name()), requiredLong(jwt, "authorization_version"));
 		CurrentAccessContext resolved = accessContext.resolve(new CurrentAccessRequest(new UserId(jwt.getSubject()),
 				new com.nexa.api.tenantmanagement.domain.model.identity.TenantId(required(jwt, "tenant_id")),
 				new com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId(required(jwt, "workspace_id")), surface));
-		if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.roles().equals(expected.roles())
+		if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.roleCodes().equals(expected.roleCodes())
+				|| !resolved.roleDefinitionIds().equals(expected.roleDefinitionIds())
 				|| !resolved.tenantId().equals(expected.tenantId()) || !resolved.workspaceId().equals(expected.workspaceId())
-				|| !resolved.surface().equals(expected.surface())) {
+				|| !resolved.surface().equals(expected.surface())
+				|| resolved.authorizationVersion() != requiredLong(jwt, "authorization_version")) {
 			throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Change feed access context changed");
 		}
 		return resolved;
 	}
 	private String clientAccount(CurrentAccessContext context) { return context.hasRole(com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole.BUYER) ? accounts.findForBuyer(scope(context), workspace(context), context.membershipId().toString()).map(ClientAccountView::id).orElseThrow() : null; }
 	private static String required(Jwt jwt, String name) { String value = jwt.getClaimAsString(name); if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing JWT claim " + name); return value; }
+	private static long requiredLong(Jwt jwt, String name) { Object raw = jwt.getClaims().get(name); try { long value = raw instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(raw)); if (value < 0) throw new NumberFormatException(); return value; } catch (RuntimeException exception) { throw new IllegalArgumentException("Missing or invalid JWT claim " + name, exception); } }
 	private static long parseLastEventId(String value) { if (value == null || value.isBlank()) return 0; try { long parsed = Long.parseLong(value); if (parsed < 0) throw new NumberFormatException(); return parsed; } catch (NumberFormatException exception) { throw new IllegalArgumentException("Last-Event-ID is invalid"); } }
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }
 	private static String workspace(CurrentAccessContext context) { return context.workspaceId().toString(); }

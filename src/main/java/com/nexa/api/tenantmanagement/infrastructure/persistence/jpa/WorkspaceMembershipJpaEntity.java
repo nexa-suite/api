@@ -26,4 +26,5 @@ public class WorkspaceMembershipJpaEntity {
 	public UUID getUserId() { return userId; }
 	public String getMembershipType() { return membershipType; }
 	public String getStatus() { return status; }
+	public long getVersion() { return version; }
 }

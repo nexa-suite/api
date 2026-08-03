@@ -6,6 +6,16 @@ import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.warehouse.application.port.WarehouseOperationsPort;
+import com.nexa.api.warehouse.application.port.WarehouseOperationalSettingsPort;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseBuyerProjection;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseHours;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseInternalSnapshot;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseLocation;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseOperationalProfile;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseProfile;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseSelectionPolicy;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseServiceability;
+import com.nexa.api.warehouse.domain.model.warehouse.WarehouseStatus;
 import com.nexa.api.warehouse.domain.policy.FefoAllocationPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +33,7 @@ import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -47,27 +58,39 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
     private final ChangeEventPersistencePort changeFeed;
     private final CatalogItemSnapshotLookupPort catalog;
     private final TransactionTemplate transactionTemplate;
+    private final WarehouseOperationalSettingsPort operationalSettings;
 
     @org.springframework.beans.factory.annotation.Autowired
     public JdbcWarehouseOperationsAdapter(
             JdbcTemplate jdbc,
             ChangeEventPersistencePort changeFeed,
             CatalogItemSnapshotLookupPort catalog,
-            org.springframework.transaction.PlatformTransactionManager transactionManager) {
+            org.springframework.transaction.PlatformTransactionManager transactionManager,
+            WarehouseOperationalSettingsPort operationalSettings) {
         this.jdbc = jdbc;
         this.changeFeed = changeFeed;
         this.catalog = catalog;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.operationalSettings = operationalSettings;
     }
 
     public JdbcWarehouseOperationsAdapter(
             JdbcTemplate jdbc,
             ChangeEventPersistencePort changeFeed,
             CatalogItemSnapshotLookupPort catalog) {
+        this(jdbc, changeFeed, catalog, null);
+    }
+
+    public JdbcWarehouseOperationsAdapter(
+            JdbcTemplate jdbc,
+            ChangeEventPersistencePort changeFeed,
+            CatalogItemSnapshotLookupPort catalog,
+            WarehouseOperationalSettingsPort operationalSettings) {
         this.jdbc = jdbc;
         this.changeFeed = changeFeed;
         this.catalog = catalog;
         this.transactionTemplate = null;
+        this.operationalSettings = operationalSettings;
     }
 
     @Override
@@ -136,6 +159,71 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
                 tenant(context), workspace(context), uuid(id), expected), "warehouse update", "CONCURRENCY_CONFLICT");
         appendEvent(context, uuid(id), "warehouse.warehouse.updated", "warehouse");
         return warehouse(context, id);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public WarehouseOperationsService.OperationalProfile operationalProfile(CurrentAccessContext context, String id) {
+        requireRead(context);
+        WarehouseOperationsService.WarehouseSummary summary = warehouse(context, id);
+        return operationalProfile(context, summary, settings(context));
+    }
+
+    @Override
+    @Transactional
+    public WarehouseOperationsService.OperationalProfile updateOperationalProfile(
+            CurrentAccessContext context, String id, WarehouseOperationsService.OperationalPatch patch,
+            long expected) {
+        requireWrite(context);
+        if (patch == null) throw error("INVALID_REQUEST", false);
+        UUID warehouseId = uuid(id);
+        WarehouseOperationsService.WarehouseSummary current = warehouseForUpdate(context, warehouseId);
+        if (current.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
+        WarehouseOperationalSettingsPort.Snapshot currentSettings = settings(context);
+        String status = patch.status() == null ? current.status() : enumValue(patch.status(), "status", "ACTIVE", "SUSPENDED");
+        if (patch.serviceable() != null) {
+            String serviceableStatus = patch.serviceable() ? "ACTIVE" : "SUSPENDED";
+            if (patch.status() != null && !serviceableStatus.equals(status)) throw error("INVALID_REQUEST", false);
+            status = serviceableStatus;
+        }
+        String name = patch.name() == null ? current.name() : bounded(patch.name(), "name", 160);
+        String address = patch.address() == null ? current.address() : boundedNullable(patch.address(), "address", 2000);
+        String selection = patch.selectionPolicy() == null ? currentSettings.selectionPolicy()
+                : enumValue(patch.selectionPolicy(), "selectionPolicy", "MANUAL", "PREFERRED");
+        LocalTime startsAt = patch.operatingHoursStart() == null ? currentSettings.startsAt() : patch.operatingHoursStart();
+        LocalTime endsAt = patch.operatingHoursEnd() == null ? currentSettings.endsAt() : patch.operatingHoursEnd();
+        new WarehouseHours(startsAt, endsAt);
+        boolean warehouseChanged = !java.util.Objects.equals(name, current.name())
+                || !java.util.Objects.equals(address, current.address())
+                || !java.util.Objects.equals(status, current.status());
+        boolean settingsChanged = !selection.equals(currentSettings.selectionPolicy())
+                || !startsAt.equals(currentSettings.startsAt()) || !endsAt.equals(currentSettings.endsAt());
+        if (!warehouseChanged && !settingsChanged) return operationalProfile(context, current, currentSettings);
+        Timestamp changedAt = now();
+        checkUpdated(jdbc.update(
+                "update warehouse.warehouse set name=?,address=?,status=?,updated_at=?,version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and id=? and version=?",
+                name, address, status, changedAt, tenant(context), workspace(context), warehouseId, expected),
+                "warehouse operational profile update", "CONCURRENCY_CONFLICT");
+        if (settingsChanged) {
+            if (operationalSettings == null) throw error("OPERATIONAL_SETTINGS_NOT_FOUND", true);
+            if (operationalSettings.update(tenant(context).toString(), workspace(context).toString(), selection,
+                    startsAt, endsAt, currentSettings.version()) != 1) throw error("CONCURRENCY_CONFLICT", false);
+        }
+        appendEvent(context, warehouseId, "warehouse.operational-profile.updated", "warehouse");
+        return operationalProfile(context, id);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<WarehouseOperationsService.BuyerWarehouse> buyerWarehouses(CurrentAccessContext context) {
+        context.requirePermission(Permission.TRACKING_BUYER_READ);
+        WarehouseOperationalSettingsPort.Snapshot currentSettings = settings(context);
+        List<WarehouseOperationsService.WarehouseSummary> summaries = jdbc.query(
+                "select id,code,name,address,status,version from warehouse.warehouse "
+                        + "where tenant_id=? and workspace_id=? and status='ACTIVE' order by code asc,id asc",
+                (rs, row) -> WarehousePersistenceSupport.warehouse(rs), tenant(context), workspace(context));
+        return summaries.stream().map(summary -> buyerProjection(summary, currentSettings)).toList();
     }
 
     @Override
@@ -915,6 +1003,53 @@ public class JdbcWarehouseOperationsAdapter implements WarehouseOperationsPort {
     private void requireActiveZone(CurrentAccessContext context, UUID warehouseId, UUID zoneId) {
         if (!exists("select 1 from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? and id=? and status='ACTIVE'",
                 tenant(context), workspace(context), warehouseId, zoneId)) throw error("STORAGE_ZONE_NOT_FOUND", true);
+    }
+
+    private WarehouseOperationsService.WarehouseSummary warehouseForUpdate(CurrentAccessContext context, UUID id) {
+        return jdbc.query(
+                        "select id,code,name,address,status,version from warehouse.warehouse "
+                                + "where tenant_id=? and workspace_id=? and id=? for update",
+                        (rs, row) -> WarehousePersistenceSupport.warehouse(rs), tenant(context), workspace(context), id)
+                .stream().findFirst().orElseThrow(() -> error("WAREHOUSE_NOT_FOUND", true));
+    }
+
+    private WarehouseOperationalSettingsPort.Snapshot settings(CurrentAccessContext context) {
+        if (operationalSettings == null) {
+            return new WarehouseOperationalSettingsPort.Snapshot("MANUAL", "WORKSPACE_HOURS", "STANDARD",
+                    "COARSE", "AVAILABLE_ONLY", LocalTime.of(8, 0), LocalTime.of(18, 0), 120, true, 0);
+        }
+        return operationalSettings.find(tenant(context).toString(), workspace(context).toString())
+                .orElseThrow(() -> error("OPERATIONAL_SETTINGS_NOT_FOUND", true));
+    }
+
+    private WarehouseOperationsService.OperationalProfile operationalProfile(
+            CurrentAccessContext context, WarehouseOperationsService.WarehouseSummary summary,
+            WarehouseOperationalSettingsPort.Snapshot settings) {
+        WarehouseOperationalProfile profile = new WarehouseOperationalProfile(
+                new WarehouseProfile(uuid(summary.id()), summary.code(), summary.name(),
+                        new WarehouseLocation(summary.address()), WarehouseStatus.valueOf(summary.status()), summary.version()),
+                new WarehouseHours(settings.startsAt(), settings.endsAt()),
+                new WarehouseServiceability("ACTIVE".equals(summary.status())),
+                WarehouseSelectionPolicy.valueOf(settings.selectionPolicy()), settings.version());
+        WarehouseInternalSnapshot snapshot = profile.internalSnapshot();
+        return new WarehouseOperationsService.OperationalProfile(snapshot.warehouseId().toString(), snapshot.code(),
+                snapshot.name(), snapshot.address(), snapshot.status().name(), snapshot.hours().startsAt(),
+                snapshot.hours().endsAt(), snapshot.serviceability().serviceable(), snapshot.selectionPolicy().name(),
+                snapshot.warehouseVersion(), snapshot.settingsVersion());
+    }
+
+    private WarehouseOperationsService.BuyerWarehouse buyerProjection(
+            WarehouseOperationsService.WarehouseSummary summary, WarehouseOperationalSettingsPort.Snapshot settings) {
+        WarehouseOperationalProfile profile = new WarehouseOperationalProfile(
+                new WarehouseProfile(uuid(summary.id()), summary.code(), summary.name(),
+                        new WarehouseLocation(summary.address()), WarehouseStatus.valueOf(summary.status()), summary.version()),
+                new WarehouseHours(settings.startsAt(), settings.endsAt()),
+                new WarehouseServiceability("ACTIVE".equals(summary.status())),
+                WarehouseSelectionPolicy.valueOf(settings.selectionPolicy()), settings.version());
+        WarehouseBuyerProjection projection = profile.buyerProjection();
+        return new WarehouseOperationsService.BuyerWarehouse(projection.warehouseId().toString(), projection.code(),
+                projection.name(), projection.address(), projection.hours().startsAt(), projection.hours().endsAt(),
+                projection.serviceable(), projection.version());
     }
 
     private void requireRead(CurrentAccessContext context) { context.requirePermission(Permission.WAREHOUSE_READ); }

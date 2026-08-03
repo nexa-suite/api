@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 
@@ -127,6 +128,18 @@ public class JpaSessionAdapter implements SessionPort {
 	public boolean isFamilyRevoked(RefreshTokenFamilyId familyId) {
 		return sessions.findByFamilyId(UUID.fromString(familyId.value())).stream()
 				.anyMatch(entity -> entity.getFamilyRevokedAt() != null);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public OptionalLong findAuthorizationVersion(SessionId sessionId) {
+		try {
+			return jdbc.query("select coalesce((select authorization_version from tenant_management.membership_authorization_state a where a.membership_id=m.id),m.version) "
+					+ "from iam.refresh_session s join tenant_management.workspace_membership m on m.id=s.membership_id where s.id=?",
+				rs -> rs.next() ? OptionalLong.of(rs.getLong(1)) : OptionalLong.empty(), UUID.fromString(sessionId.value()));
+		} catch (RuntimeException exception) {
+			return OptionalLong.empty();
+		}
 	}
 
 	private Optional<SessionRecord> toRecord(RefreshSessionJpaEntity entity, String accessToken, String refreshToken,

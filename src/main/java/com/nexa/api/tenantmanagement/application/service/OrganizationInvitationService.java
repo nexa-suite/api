@@ -15,6 +15,9 @@ import com.nexa.api.tenantmanagement.application.port.out.TenantConfigurationPor
 import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
 import com.nexa.api.tenantmanagement.domain.model.TenantManagementInvariantViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantmanagement.domain.model.access.AssignableRolePolicy;
+import com.nexa.api.tenantmanagement.domain.model.access.RoleCatalog;
 import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
@@ -77,11 +80,14 @@ public class OrganizationInvitationService implements InvitationUseCase {
 	@Override
 	public InvitationModels.InvitationView create(CurrentAccessContext context, String email, String displayName,
 			Set<String> roles, String idempotencyKey, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_MEMBER_INVITE);
 		if (idempotencyKey == null || idempotencyKey.isBlank()) throw new InvitationIdempotencyRequiredException();
 		String normalizedEmail = normalizeEmail(email);
 		String normalizedName = required(displayName, "Display name");
 		Set<MembershipRole> roleSet = roles(roles);
+		for (MembershipRole role : roleSet) {
+			AssignableRolePolicy.requireCanAssign(context.roleCodes(), context.permissionCodes(), RoleCatalog.definitionFor(role));
+		}
 		String requestHash = tokens.sha256(normalizedEmail + "|" + normalizedName + "|" + roleSet.stream().map(Enum::name).sorted().collect(Collectors.joining(",")));
 		if (invitations.idempotencyKeyHasDifferentPayload(context.tenantId().toString(), idempotencyKey, requestHash)) throw new InvitationIdempotencyConflictException();
 		var previous = invitations.findIdempotent(context.tenantId().toString(), idempotencyKey, requestHash);

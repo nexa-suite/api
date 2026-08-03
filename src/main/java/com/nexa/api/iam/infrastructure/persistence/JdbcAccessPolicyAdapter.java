@@ -5,13 +5,20 @@ import com.nexa.api.iam.application.port.out.AccessPolicyPort;
 import com.nexa.api.iam.domain.model.access.ClientSurface;
 import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantmanagement.domain.model.access.PermissionPolicy;
-import com.nexa.api.tenantmanagement.domain.model.access.RoleSurfacePolicy;
+import com.nexa.api.tenantmanagement.application.port.out.AuthorizationResolutionPort;
+import com.nexa.api.tenantmanagement.application.port.out.AuthorizationResolutionRequest;
+import com.nexa.api.tenantmanagement.domain.model.access.EffectiveAuthorization;
 import com.nexa.api.tenantmanagement.domain.model.access.Surface;
+import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
+import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
+import com.nexa.api.tenantmanagement.domain.model.identity.UserId;
+import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantmanagement.domain.model.membership.Membership;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.Locale;
 import java.util.Optional;
@@ -23,9 +30,16 @@ import java.util.stream.Collectors;
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 	private final JdbcTemplate jdbc;
+	private final AuthorizationResolutionPort authorization;
 
 	public JdbcAccessPolicyAdapter(JdbcTemplate jdbc) {
+		this(jdbc, request -> EffectiveAuthorization.fixed(request.fixedRoles(), request.authorizationVersion()));
+	}
+
+	@Autowired
+	public JdbcAccessPolicyAdapter(JdbcTemplate jdbc, AuthorizationResolutionPort authorization) {
 		this.jdbc = jdbc;
+		this.authorization = authorization;
 	}
 
 	@Override
@@ -42,7 +56,7 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 		} catch (IllegalArgumentException exception) {
 			return Optional.empty();
 		}
-		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, "
+		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
 				+ "w.id workspace_id, w.slug workspace_slug, w.status workspace_status, "
 				+ "t.id tenant_id, t.slug tenant_slug, t.status tenant_status, "
 				+ "u.display_name, u.preferred_language "
@@ -54,18 +68,28 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 		return jdbc.query(sql, rs -> {
 			if (!rs.next() || !"ACTIVE".equals(rs.getString("membership_status"))) return Optional.empty();
 			Set<MembershipRole> roles = roles(rs.getObject("membership_id", UUID.class), rs.getString("membership_type"));
-			if (roles.isEmpty() || !"ACTIVE".equals(rs.getString("workspace_status"))
+			if (!"ACTIVE".equals(rs.getString("workspace_status"))
 					|| !"ACTIVE".equals(rs.getString("tenant_status"))) return Optional.empty();
 			Surface requestedSurface = Surface.valueOf(surface.name());
-			if (!RoleSurfacePolicy.allows(roles, requestedSurface)) return Optional.empty();
-			Set<String> permissions = PermissionPolicy.permissionsFor(roles).stream().map(Permission::code)
-					.collect(Collectors.toUnmodifiableSet());
-			Set<String> roleValues = roles.stream().map(Enum::name).collect(Collectors.toUnmodifiableSet());
+			MembershipId membershipId = new MembershipId(rs.getObject("membership_id", UUID.class).toString());
+			UserId memberUserId = new UserId(userId);
+			TenantId memberTenantId = new TenantId(rs.getObject("tenant_id", UUID.class).toString());
+			WorkspaceId memberWorkspaceId = new WorkspaceId(rs.getObject("workspace_id", UUID.class).toString());
+			EffectiveAuthorization effective;
+			try {
+				effective = authorization.resolve(new AuthorizationResolutionRequest(membershipId, memberUserId,
+						memberTenantId, memberWorkspaceId, rs.getString("membership_type"), roles, rs.getLong("authorization_version")));
+			} catch (RuntimeException exception) {
+				return Optional.empty();
+			}
+			if (!effective.allowsSurface(requestedSurface)) return Optional.empty();
+			Set<String> permissions = effective.permissionCodes();
+			Set<String> roleValues = effective.roleCodes();
 			return Optional.of(new AccessPolicy(surface, roleValues, permissions,
 					rs.getObject("tenant_id", UUID.class).toString(), rs.getString("tenant_slug"),
 					rs.getObject("workspace_id", UUID.class).toString(), rs.getString("workspace_slug"),
-					rs.getObject("membership_id", UUID.class).toString(), rs.getString("display_name"),
-				rs.getString("preferred_language")));
+					 rs.getObject("membership_id", UUID.class).toString(), rs.getString("display_name"),
+					 rs.getString("preferred_language"), effective.authorizationVersion(), effective.roleDefinitionIds()));
 		}, userId, workspaceSlug.toLowerCase(Locale.ROOT));
 	}
 

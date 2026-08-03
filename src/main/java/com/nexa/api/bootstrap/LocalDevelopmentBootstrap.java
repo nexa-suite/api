@@ -56,8 +56,9 @@ public class LocalDevelopmentBootstrap {
 			jdbc.update("insert into tenant_management.workspace_membership "
 					+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
 					+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
-					UUID.randomUUID(), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
+					LocalIdentityIds.forMembership(workspaceId, userId), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
 			UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
+			jdbc.update("delete from tenant_management.membership_role_assignment where membership_id=?", membershipId);
 			if (!user.roles().contains("BUYER")) {
 				for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,?,?) on conflict do nothing", membershipId, tenantId, workspaceId, role, timestamp(now));
 			}
@@ -72,7 +73,7 @@ public class LocalDevelopmentBootstrap {
 		UUID membershipId = memberships.get(0);
 		for (var seed : clientAccountSeedLoader.load()) {
 			jdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) on conflict (tenant_id,code) do update set business_name=excluded.business_name,commercial_name=excluded.commercial_name,status=excluded.status,updated_at=excluded.updated_at",
-					UUID.randomUUID(), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
+					LocalIdentityIds.forClientAccount(tenantId, seed.code()), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
 			List<UUID> accounts = jdbc.query("select id from sales.client_account where tenant_id=? and workspace_id=? and code=?", (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, seed.code());
 			if (accounts.isEmpty() || !seed.portalAccess()) continue;
 			jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing", accounts.get(0), membershipId, tenantId, workspaceId, timestamp(now));
@@ -84,7 +85,7 @@ public class LocalDevelopmentBootstrap {
 		String name = required("NEXA_DEV_TENANT_NAME");
 		List<UUID> existing = jdbc.query("select id from tenant_management.tenant where slug = ?", (rs, row) -> rs.getObject(1, UUID.class), slug);
 		if (!existing.isEmpty()) return existing.get(0);
-		UUID id = UUID.randomUUID();
+		UUID id = LocalIdentityIds.forTenant(slug);
 		jdbc.update("insert into tenant_management.tenant (id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, 'ACTIVE', ?, ?, 0)", id, name, slug, timestamp(now), timestamp(now));
 		return id;
 	}
@@ -95,7 +96,7 @@ public class LocalDevelopmentBootstrap {
 		List<UUID> existing = jdbc.query("select id from tenant_management.workspace where tenant_id = ? and slug = ?",
 				(rs, row) -> rs.getObject(1, UUID.class), tenantId, slug);
 		if (!existing.isEmpty()) return existing.get(0);
-		UUID id = UUID.randomUUID();
+		UUID id = LocalIdentityIds.forWorkspace(tenantId, slug);
 		jdbc.update("insert into tenant_management.workspace (id, tenant_id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)",
 				id, tenantId, name, slug, timestamp(now), timestamp(now));
 		return id;
@@ -103,9 +104,9 @@ public class LocalDevelopmentBootstrap {
 
 	private UUID user(UserSeed seed, Instant now) {
 		String email = required(seed.emailKey()).toLowerCase(java.util.Locale.ROOT);
-		String password = required(seed.passwordKey());
+		String password = password(seed.passwordKey());
 		List<UUID> existing = jdbc.query("select id from iam.user_account where normalized_email = ?", (rs, row) -> rs.getObject(1, UUID.class), email);
-		UUID id = existing.isEmpty() ? UUID.randomUUID() : existing.get(0);
+		UUID id = existing.isEmpty() ? LocalIdentityIds.forUser(email) : existing.get(0);
 		if (existing.isEmpty()) {
 			jdbc.update("insert into iam.user_account (id, email, normalized_email, username, normalized_username, display_name, preferred_language, status, created_at, updated_at, version) values (?, ?, ?, ?, ?, ?, 'es', 'ACTIVE', ?, ?, 0)",
 					id, email, email, email, email, displayName(email), timestamp(now), timestamp(now));
@@ -120,6 +121,13 @@ public class LocalDevelopmentBootstrap {
 		String value = environment.getProperty(key);
 		if (value == null || value.isBlank()) throw new IllegalStateException("Missing local bootstrap variable " + key);
 		return value.trim();
+	}
+
+	private String password(String key) {
+		String configured = environment.getProperty(key);
+		if (configured == null || configured.isBlank()) configured = environment.getProperty("NEXA_DEV_DEMO_PASSWORD");
+		if (configured == null || configured.isBlank()) throw new IllegalStateException("Missing local bootstrap variable " + key);
+		return configured.trim();
 	}
 
 	private void addOptionalUser(List<UserSeed> users, String emailKey, String passwordKey, Set<String> roles) {

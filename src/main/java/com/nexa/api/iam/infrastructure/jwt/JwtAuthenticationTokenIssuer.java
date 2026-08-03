@@ -54,7 +54,9 @@ public final class JwtAuthenticationTokenIssuer implements AuthenticationTokenPo
 				.claim("tenant_id", policy.tenantId()).claim("tenant_slug", policy.tenantSlug())
 				.claim("workspace_id", policy.workspaceId()).claim("workspace_slug", policy.workspaceSlug())
 				.claim("membership_id", policy.membershipId()).claim("roles", policy.roles())
+				.claim("role_definition_ids", policy.roleDefinitionIds())
 				.claim("permissions", policy.permissions()).claim("surface", subject.surface().name())
+				.claim("authorization_version", policy.authorizationVersion())
 				.issuedAt(issuedAt).notBefore(issuedAt).expiresAt(accessExpiresAt).id(UUID.randomUUID().toString());
 		if (sessionId != null) claims.claim("sid", sessionId.value());
 		String accessToken = encoder.encode(JwtEncoderParameters.from(
