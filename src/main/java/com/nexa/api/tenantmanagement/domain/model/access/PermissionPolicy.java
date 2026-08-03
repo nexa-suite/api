@@ -39,7 +39,9 @@ public final class PermissionPolicy {
 	}
 
 	public static Set<Permission> permissionsFor(MembershipRole role) {
-		return PERMISSIONS_BY_ROLE.get(Objects.requireNonNull(role, "Membership role is required"));
+		Set<Permission> permissions = PERMISSIONS_BY_ROLE.get(Objects.requireNonNull(role, "Membership role is required"));
+		if (permissions == null) throw new AccessPolicyViolation("No permission catalog entry exists for membership role");
+		return permissions;
 	}
 
 	public static Set<Permission> permissionsFor(Set<MembershipRole> roles) {

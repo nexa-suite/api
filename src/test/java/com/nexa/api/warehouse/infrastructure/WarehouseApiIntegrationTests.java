@@ -5,12 +5,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
+    @Test void buyerWarehouseProjectionDoesNotWriteInsideReadOnlyRequest() throws Exception {
+        String token = accessToken(BUYER_EMAIL, "PORTAL");
+        mockMvc.perform(get("/api/v1/buyer/warehouses").header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk()).andExpect(jsonPath("$").isArray());
+    }
+
     @Test void warehouseZoneAndInboundReceiptAreScopedAndLedgered() throws Exception {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();

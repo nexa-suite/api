@@ -31,4 +31,17 @@ public final class ValidateAccessSessionService implements ValidateAccessSession
 		}
 		return new ValidatedAccessSession(record.session(), userId, surface);
 	}
+
+	@Override
+	public ValidatedAccessSession validate(SessionId sessionId, UserAccountId userId, ClientSurface surface,
+			long authorizationVersion) {
+		/*
+		 * Session lifecycle and membership authorization are separate boundaries.
+		 * A disabled membership or a changed role must be revalidated by the
+		 * tenant access context and return 403; it must not masquerade as a
+		 * revoked session (401). Explicit sign-out/revocation is handled by the
+		 * base validation above.
+		 */
+		return validate(sessionId, userId, surface);
+	}
 }

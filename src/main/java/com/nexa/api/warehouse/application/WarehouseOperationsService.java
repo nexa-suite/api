@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
 /** Warehouse application boundary. Persistence and SQL stay behind WarehouseOperationsPort. */
@@ -27,6 +28,11 @@ public class WarehouseOperationsService {
     public WarehouseSummary warehouse(CurrentAccessContext context, String id) { return operations.warehouse(context, id); }
     public WarehouseSummary createWarehouse(CurrentAccessContext context, String code, String name, String address) { return operations.createWarehouse(context, code, name, address); }
     public WarehouseSummary updateWarehouse(CurrentAccessContext context, String id, String name, String address, String status, long expected) { return operations.updateWarehouse(context, id, name, address, status, expected); }
+    public OperationalProfile operationalProfile(CurrentAccessContext context, String id) { return operations.operationalProfile(context, id); }
+    public OperationalProfile updateOperationalProfile(CurrentAccessContext context, String id, OperationalPatch patch, long expected) {
+        return operations.updateOperationalProfile(context, id, patch, expected);
+    }
+    public List<BuyerWarehouse> buyerWarehouses(CurrentAccessContext context) { return operations.buyerWarehouses(context); }
     public Page<ZoneSummary> zones(CurrentAccessContext context, String warehouseId, int page, int size) { return operations.zones(context, warehouseId, page, size); }
     public ZoneSummary createZone(CurrentAccessContext context, String warehouseId, String code, String name, String type, BigDecimal min, BigDecimal max) { return operations.createZone(context, warehouseId, code, name, type, min, max); }
     public ZoneSummary updateZone(CurrentAccessContext context, String warehouseId, String zoneId, String name, BigDecimal min, BigDecimal max, String status, long expected) { return operations.updateZone(context, warehouseId, zoneId, name, min, max, status, expected); }
@@ -52,6 +58,16 @@ public class WarehouseOperationsService {
         public Page { items = List.copyOf(items); }
     }
     public record WarehouseSummary(String id, String code, String name, String address, String status, long version) { }
+    public record OperationalProfile(String id, String code, String name, String address, String status,
+                                     LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
+                                     boolean serviceable, String selectionPolicy, long version,
+                                     long settingsVersion) { }
+    public record BuyerWarehouse(String id, String code, String name, String address,
+                                 LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
+                                 boolean serviceable, long version) { }
+    public record OperationalPatch(String name, String address, String status, String selectionPolicy,
+                                   LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
+                                   Boolean serviceable) { }
     public record ZoneSummary(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
     public record LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version) { }
     public record MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt) { }

@@ -71,7 +71,12 @@ public final class ApiProblemDetailFactory {
 			case LAST_ACTIVE_OWNER_REQUIRED -> "Last active owner required";
 			case LAST_USABLE_ADMINISTRATIVE_WORKSPACE_REQUIRED -> "Last usable administrative workspace required";
 			case WORKSPACE_SLUG_CONFLICT -> "Workspace slug conflict";
-			case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
+				case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
+				case ROLE_DEFINITION_NOT_FOUND -> "Role definition not found";
+				case ROLE_DEFINITION_DUPLICATE -> "Role definition duplicate";
+				case ROLE_DEFINITION_IMMUTABLE -> "Role definition immutable";
+				case ROLE_DEFINITION_ASSIGNMENTS_ACTIVE -> "Role definition has active assignments";
+				case ROLE_DEFINITION_STORAGE_UNAVAILABLE -> "Role definition storage unavailable";
 			case CONCURRENCY_CONFLICT -> "Concurrency conflict";
 			case INVALID_TRANSITION -> "Invalid transition";
 			case PRECONDITION_REQUIRED -> "Precondition required";
@@ -108,8 +113,9 @@ public final class ApiProblemDetailFactory {
 				case DISPATCH_ALREADY_EXISTS -> "Dispatch already exists";
 				case RESERVATION_NOT_FOUND -> "Reservation not found";
 				case RESERVATION_NOT_READY -> "Reservation is not ready";
-				case RESPONSIBLE_MEMBERSHIP_INVALID -> "Responsible membership is invalid";
-				case INVALID_INVENTORY_SORT -> "Invalid inventory sort";
+					case RESPONSIBLE_MEMBERSHIP_INVALID -> "Responsible membership is invalid";
+					case OPERATIONAL_SETTINGS_NOT_FOUND -> "Operational settings not found";
+					case INVALID_INVENTORY_SORT -> "Invalid inventory sort";
 				case PROFILE_INVALID -> "Profile invalid";
 				case PROFILE_VERSION_CONFLICT -> "Profile version conflict";
 				case PASSWORD_POLICY_INVALID -> "Password policy invalid";

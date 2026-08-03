@@ -12,6 +12,7 @@ import com.nexa.api.iam.domain.model.access.ClientSurface;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 public interface SessionPort {
 	SessionRecord start(AuthenticationSession session, AuthenticationSubject subject, IssuedAuthenticationTokens tokens);
@@ -39,4 +40,7 @@ public interface SessionPort {
 	void revokeFamily(RefreshTokenFamilyId familyId, Instant revokedAt);
 
 	default boolean isFamilyRevoked(RefreshTokenFamilyId familyId) { return false; }
+
+	/** Returns the current authorization version of the membership bound to a session. */
+	default OptionalLong findAuthorizationVersion(SessionId sessionId) { return OptionalLong.empty(); }
 }

@@ -89,11 +89,23 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	@Transactional
 	public PurchaseRequestView create(CurrentAccessContext context, String requestedClientAccountId, String priority,
 			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment, List<RequestedLine> requestedLines) {
-		buyerWrite(context);
-		String account = buyerAccount(context);
-		if (requestedClientAccountId != null && !requestedClientAccountId.isBlank()
-				&& !account.equals(requestedClientAccountId.trim())) {
-			throw new SalesResourceNotFoundException("client-account");
+		String account;
+		if (context.hasRole(MembershipRole.BUYER)) {
+			buyerWrite(context);
+			account = buyerAccount(context);
+			if (requestedClientAccountId != null && !requestedClientAccountId.isBlank()
+					&& !account.equals(requestedClientAccountId.trim())) {
+				throw new SalesResourceNotFoundException("client-account");
+			}
+		} else {
+			internal(context, Permission.SALES_WRITE);
+			if (requestedClientAccountId == null || requestedClientAccountId.isBlank()) {
+				throw new SalesInvariantViolation("Client Account is required for an internal Purchase Request");
+			}
+			account = accounts.find(scope(context), workspace(context), requestedClientAccountId.trim())
+					.filter(value -> "ACTIVE".equals(value.status()))
+					.map(ClientAccountView::id)
+					.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
 		}
 		PurchaseRequestPriority priorityValue = PurchaseRequestPriority.from(priority);
 		PaymentOption paymentValue = PaymentOption.from(paymentOption);
@@ -202,7 +214,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		String normalized = action == null ? "" : action.trim().toLowerCase(Locale.ROOT);
 		PurchaseRequestView current = detail(context, id);
 		if ("submit".equals(normalized)) {
-			buyerWrite(context);
+			if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
 			requireIdempotencyKey(idempotencyKey);
 			var prior = idempotency.find(scope(context), workspace(context), context.membershipId().toString(),
 					"purchase-request-submission", idempotencyKey);

@@ -29,6 +29,10 @@ public interface OrganizationAdministrationPort {
 	int activeOwnerCount(String workspaceId);
 	default int activeTenantAdminCount(String workspaceId) { return activeOwnerCount(workspaceId); }
 	int updateRoles(String tenantId, String membershipId, java.util.Set<String> roles, long expectedVersion);
+	/** Primary implements the dynamic assignment table and increments membership authorizationVersion. */
+	default int updateRoleDefinitionAssignments(String tenantId, String membershipId, java.util.Set<String> roleDefinitionIds, long expectedVersion) {
+		throw new UnsupportedOperationException("Dynamic role assignment persistence is not integrated");
+	}
 	int updateStatus(String tenantId, String membershipId, String status, long expectedVersion);
 	void appendMembershipEvent(String type, String tenantId, String workspaceId, String targetMembershipId,
 			String actorMembershipId, String beforeRole, String beforeStatus, String afterRole, String afterStatus,

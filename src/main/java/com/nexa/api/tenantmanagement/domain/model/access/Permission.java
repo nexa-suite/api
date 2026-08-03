@@ -38,4 +38,11 @@ public enum Permission {
 	public String code() {
 		return code;
 	}
+
+	/** Compatibility matcher used while legacy colon authorities and typed keys coexist. */
+	public boolean codeEqualsOrAlias(String candidate) {
+		if (candidate == null) return false;
+		return code.equals(candidate) || java.util.Arrays.stream(PermissionKey.values())
+				.anyMatch(key -> key.matches(candidate) && key.legacyCodes().contains(code));
+	}
 }

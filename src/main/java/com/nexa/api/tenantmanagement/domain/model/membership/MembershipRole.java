@@ -1,6 +1,8 @@
 package com.nexa.api.tenantmanagement.domain.model.membership;
 
 import com.nexa.api.tenantmanagement.domain.model.TenantManagementInvariantViolation;
+import com.nexa.api.tenantmanagement.domain.model.access.RoleCatalog;
+import com.nexa.api.tenantmanagement.domain.model.access.RoleDefinition;
 
 import java.util.Locale;
 
@@ -14,6 +16,14 @@ public enum MembershipRole {
 	WAREHOUSE,
 	LOGISTICS,
 	BUYER;
+
+	public RoleDefinition definition() {
+		return RoleCatalog.definitionFor(this);
+	}
+
+	public boolean isInternalAssignable() {
+		return RoleCatalog.internalAssignableRoles().contains(this);
+	}
 
 	public static MembershipRole from(String value) {
 		if (value == null || value.isBlank()) {
