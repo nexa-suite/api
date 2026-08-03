@@ -20,14 +20,11 @@ public class ChangeFeedQueryAdapter implements ChangeFeedQueryPort {
 	public ChangeFeedQueryAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
 	@Override
-	public long minimumId(String tenantId, String workspaceId, String clientAccountId, Set<ChangeEventAudience> audiences) {
-		if (audiences == null || audiences.isEmpty()) return 0;
+	public long minimumId(String tenantId, String workspaceId, String clientAccountId) {
 		String scope = clientAccountId == null ? "" : " and client_account_id=?";
-		String audiencePlaceholders = String.join(",", audiences.stream().map(value -> "?").toList());
 		List<Object> args = new ArrayList<>(List.of(UUID.fromString(tenantId), UUID.fromString(workspaceId)));
-		args.addAll(audiences.stream().map(Enum::name).toList());
 		if (clientAccountId != null) args.add(UUID.fromString(clientAccountId));
-		Long value = jdbc.queryForObject("select coalesce(min(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=? and audiences && array[" + audiencePlaceholders + "]::text[] and (expires_at is null or expires_at > current_timestamp)" + scope, Long.class, args.toArray());
+		Long value = jdbc.queryForObject("select coalesce(min(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=? and (expires_at is null or expires_at > current_timestamp)" + scope, Long.class, args.toArray());
 		return value == null ? 0 : value;
 	}
 
