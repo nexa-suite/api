@@ -143,7 +143,10 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			long expectedVersion, String correlationId) {
 		manage(context);
 		var current = findMembership(context, membershipId);
-		if ("DISABLED".equals(current.status())) return new OrganizationAdministrationResult<>(current, current.version());
+		if ("DISABLED".equals(current.status())) {
+			if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
+			return new OrganizationAdministrationResult<>(current, current.version());
+		}
 		if (parseRoles(current).contains(MembershipRole.TENANT_ADMIN)) { port.lockTenant(context.tenantId().toString()); if (port.activeTenantAdminCount(current.workspaceId()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active tenant admin must remain"); }
 		if (port.updateStatus(context.tenantId().toString(), current.id(), "DISABLED", expectedVersion) == 0) throw new ConcurrencyConflictException();
 		port.appendMembershipEvent("MEMBERSHIP_SUSPENDED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), String.join(",", current.roles()), current.status(), String.join(",", current.roles()), "DISABLED", correlationId);
@@ -156,6 +159,10 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			long expectedVersion, String correlationId) {
 		manage(context);
 		var current = findMembership(context, membershipId);
+		if ("ACTIVE".equals(current.status())) {
+			if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
+			return new OrganizationAdministrationResult<>(current, current.version());
+		}
 		if (port.updateStatus(context.tenantId().toString(), current.id(), "ACTIVE", expectedVersion) == 0) throw new ConcurrencyConflictException();
 		port.appendMembershipEvent("MEMBERSHIP_REACTIVATED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), String.join(",", current.roles()), current.status(), String.join(",", current.roles()), "ACTIVE", correlationId);
 		audit(context, "MEMBERSHIP_REACTIVATED", current.id(), correlationId, java.util.Map.of("status", "ACTIVE"));

@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Repository
@@ -73,8 +74,7 @@ public class JpaSessionAdapter implements SessionPort {
 	@Transactional(readOnly = true)
 	public Optional<SessionRecord> findBySessionId(SessionId sessionId) {
 		try {
-			return sessions.findById(UUID.fromString(sessionId.value())).flatMap(entity ->
-				toRecord(entity, null, null, entity.getCreatedAt(), entity.getCreatedAt().plus(accessTokenTtl)));
+			return sessions.findById(UUID.fromString(sessionId.value())).flatMap(this::toValidationRecord);
 		} catch (RuntimeException exception) {
 			return Optional.empty();
 		}
@@ -150,6 +150,28 @@ public class JpaSessionAdapter implements SessionPort {
 			Instant expires = accessExpiresAt == null ? issued.plus(accessTokenTtl) : accessExpiresAt;
 			var tokens = new IssuedAuthenticationTokens(accessToken == null ? "persisted-access-token" : accessToken,
 					refreshToken == null ? "persisted-refresh-token" : refreshToken, issued, expires, entity.getExpiresAt());
+			return Optional.of(new SessionRecord(session, subject, tokens));
+		} catch (RuntimeException exception) {
+			return Optional.empty();
+		}
+	}
+
+	/** Session validity is independent from current membership authorization. */
+	private Optional<SessionRecord> toValidationRecord(RefreshSessionJpaEntity entity) {
+		try {
+			UserAccountJpaEntity user = users.findById(entity.getUserId()).orElse(null);
+			if (user == null || !"ACTIVE".equals(user.getStatus())) return Optional.empty();
+			ClientSurface surface = ClientSurface.valueOf(entity.getSurface());
+			AccessPolicy policy = new AccessPolicy(surface, Set.of("SESSION_VALIDATION"), Set.of(), null, null, null, null,
+				entity.getMembershipId().toString(), user.getDisplayName(), user.getPreferredLanguage());
+			AuthenticationSubject subject = new AuthenticationSubject(new UserAccountId(entity.getUserId().toString()),
+				new EmailAddress(user.getEmail()), surface, policy);
+			AuthenticationSession session = AuthenticationSession.start(new SessionId(entity.getId().toString()), subject.userAccountId(),
+				surface, new RefreshTokenFamilyId(entity.getFamilyId().toString()), entity.getCreatedAt(), entity.getExpiresAt());
+			if (entity.getRevokedAt() != null) session.revoke(entity.getRevokedAt());
+			Instant expires = entity.getCreatedAt().plus(accessTokenTtl);
+			IssuedAuthenticationTokens tokens = new IssuedAuthenticationTokens("persisted-access-token", "persisted-refresh-token",
+				entity.getCreatedAt(), expires, entity.getExpiresAt());
 			return Optional.of(new SessionRecord(session, subject, tokens));
 		} catch (RuntimeException exception) {
 			return Optional.empty();

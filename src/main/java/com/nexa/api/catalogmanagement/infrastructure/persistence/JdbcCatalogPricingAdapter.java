@@ -11,7 +11,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.sql.ResultSet;
@@ -42,14 +41,12 @@ public class JdbcCatalogPricingAdapter implements CatalogPricingPort {
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.PriceView create(CatalogScope scope, UUID productId, BigDecimal amount, String currency,
             Instant validFrom, Instant validUntil, String sourceCode, String sourceDescription) {
         return create(scope, productId, amount, currency, validFrom, validUntil, sourceCode, sourceDescription, null);
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.PriceView create(CatalogScope scope, UUID productId, BigDecimal amount, String currency,
             Instant validFrom, Instant validUntil, String sourceCode, String sourceDescription, String idempotencyKey) {
         requireProduct(scope, productId);
@@ -75,7 +72,6 @@ public class JdbcCatalogPricingAdapter implements CatalogPricingPort {
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.PriceView cancel(CatalogScope scope, UUID priceId, long version) {
         if (!exists(scope, priceId)) throw new CatalogResourceNotFoundException("price");
         int updated = jdbc.update("update catalog_management.product_price set cancelled_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and cancelled_at is null",
@@ -87,8 +83,9 @@ public class JdbcCatalogPricingAdapter implements CatalogPricingPort {
     }
 
     private CatalogManagementModels.PriceView price(ResultSet rs) throws SQLException {
+        BigDecimal amount = rs.getBigDecimal("amount");
         return new CatalogManagementModels.PriceView(rs.getObject("id", UUID.class).toString(), rs.getObject("product_id", UUID.class).toString(),
-                rs.getBigDecimal("amount"), rs.getString("currency").strip(), instant(rs.getTimestamp("valid_from")),
+                amount == null ? null : amount.stripTrailingZeros(), rs.getString("currency").strip(), instant(rs.getTimestamp("valid_from")),
                 instant(rs.getTimestamp("valid_until")), rs.getString("source_code"), rs.getString("source_description"),
                 rs.getTimestamp("cancelled_at") != null, rs.getLong("version"));
     }

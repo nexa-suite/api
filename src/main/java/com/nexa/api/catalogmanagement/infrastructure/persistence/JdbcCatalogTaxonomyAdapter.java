@@ -9,7 +9,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -40,13 +39,11 @@ public class JdbcCatalogTaxonomyAdapter implements CatalogTaxonomyPort {
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.CategoryView createCategory(CatalogScope scope, UUID parentId, String slug, String name, String description) {
         return createCategory(scope, parentId, slug, name, description, null);
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.CategoryView createCategory(CatalogScope scope, UUID parentId, String slug, String name, String description, String idempotencyKey) {
         String normalizedSlug = clean(slug, 100);
         String normalizedName = clean(name, 160);
@@ -64,17 +61,20 @@ public class JdbcCatalogTaxonomyAdapter implements CatalogTaxonomyPort {
     @Override
     public CatalogManagementModels.CategoryView updateCategory(CatalogScope scope, UUID id, UUID parentId, String slug, String name, String description, long version) {
         requireCategory(scope, id);
-        if (id.equals(parentId)) throw new CatalogConflictException("CATALOG_CATEGORY_CYCLE");
-        if (parentId != null) {
-            requireCategory(scope, parentId);
-            Boolean cycle = jdbc.queryForObject("with recursive descendants(id) as (select id from catalog_management.category where tenant_id=? and workspace_id=? and id=? union all select c.id from catalog_management.category c join descendants d on c.parent_category_id=d.id where c.tenant_id=? and c.workspace_id=?) select exists(select 1 from descendants where id=?)",
-                    Boolean.class, scope.tenantId(), scope.workspaceId(), id, scope.tenantId(), scope.workspaceId(), parentId);
-            if (Boolean.TRUE.equals(cycle)) throw new CatalogConflictException("CATALOG_CATEGORY_CYCLE");
-        }
+        if (parentId != null) requireCategory(scope, parentId);
         int updated = jdbc.update("update catalog_management.category set parent_category_id=?,slug=?,name=?,description=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
                 parentId, clean(slug, 100), clean(name, 160), nullable(description, 2000), now(), scope.tenantId(), scope.workspaceId(), id, version);
         if (updated == 0) throw new com.nexa.api.catalogmanagement.application.exception.CatalogConcurrencyException();
         return category(scope, id).orElseThrow(() -> new CatalogResourceNotFoundException("category"));
+    }
+
+    @Override
+    public boolean categoryWouldCreateCycle(CatalogScope scope, UUID id, UUID parentId) {
+        if (id == null || parentId == null) return false;
+        if (id.equals(parentId)) return true;
+        Boolean cycle = jdbc.queryForObject("with recursive descendants(id) as (select id from catalog_management.category where tenant_id=? and workspace_id=? and id=? union all select c.id from catalog_management.category c join descendants d on c.parent_category_id=d.id where c.tenant_id=? and c.workspace_id=?) select exists(select 1 from descendants where id=?)",
+                Boolean.class, scope.tenantId(), scope.workspaceId(), id, scope.tenantId(), scope.workspaceId(), parentId);
+        return Boolean.TRUE.equals(cycle);
     }
 
     @Override
@@ -102,13 +102,11 @@ public class JdbcCatalogTaxonomyAdapter implements CatalogTaxonomyPort {
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.BrandView createBrand(CatalogScope scope, String slug, String name, String description) {
         return createBrand(scope, slug, name, description, null);
     }
 
     @Override
-    @Transactional
     public CatalogManagementModels.BrandView createBrand(CatalogScope scope, String slug, String name, String description, String idempotencyKey) {
         String normalizedSlug = clean(slug, 100);
         String normalizedName = clean(name, 160);

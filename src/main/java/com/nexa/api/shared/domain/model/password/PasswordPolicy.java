@@ -13,7 +13,12 @@ public final class PasswordPolicy {
     private PasswordPolicy() { }
 
     public static boolean isValid(String password) {
-        if (password == null || password.length() < MINIMUM_LENGTH || password.length() > MAXIMUM_LENGTH) return false;
+        return isValid(password, MINIMUM_LENGTH);
+    }
+
+    public static boolean isValid(String password, int minimumLength) {
+        int effectiveMinimum = Math.max(MINIMUM_LENGTH, minimumLength);
+        if (password == null || password.length() < effectiveMinimum || password.length() > MAXIMUM_LENGTH) return false;
         if (password.codePoints().anyMatch(Character::isISOControl)) return false;
         String normalized = Normalizer.normalize(password, Normalizer.Form.NFKC).toLowerCase(java.util.Locale.ROOT);
         return COMMON_PASSWORDS.stream().noneMatch(normalized::equals);

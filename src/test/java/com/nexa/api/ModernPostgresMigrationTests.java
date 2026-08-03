@@ -32,13 +32,20 @@ class ModernPostgresMigrationTests {
 			assertThat(tables(connection, "integration")).containsExactly("change_event");
 			assertThat(tables(connection, "warehouse")).containsExactlyInAnyOrder("warehouse", "storage_zone", "inventory_lot", "stock_movement", "inventory_event", "inventory_reservation", "inventory_reservation_line", "inventory_reservation_allocation", "reservation_shortage", "command_idempotency");
 			assertThat(tables(connection, "logistics")).containsExactlyInAnyOrder("dispatch_number_counter", "dispatch_order", "dispatch_event", "command_idempotency", "proof_of_delivery", "temperature_reading", "delivery_incident", "buyer_delivery_tracking");
-			assertThat(tables(connection, "catalog_management")).containsExactlyInAnyOrder("category", "brand", "product", "product_presentation", "product_asset_reference", "product_visibility", "product_price", "promotion", "promotion_product", "promotion_category", "promotion_client_account", "promotion_rule", "command_idempotency");
+			assertThat(tables(connection, "catalog_management")).containsExactlyInAnyOrder("category", "brand", "product", "product_presentation", "product_asset_reference", "product_visibility", "product_price", "promotion", "promotion_product", "promotion_category", "promotion_client_account", "promotion_rule", "command_idempotency", "seed_import_history");
 			assertThat(columns(connection, "integration", "change_event")).containsExactlyInAnyOrder(
 				"sequence", "event_id", "tenant_id", "workspace_id", "client_account_id", "aggregate_type",
 				"aggregate_id", "event_type", "aggregate_version", "public_status", "audiences", "occurred_at", "expires_at");
 			assertThat(columns(connection, "iam", "refresh_session")).containsExactlyInAnyOrder(
 				"id", "user_id", "membership_id", "surface", "token_hash", "family_id", "created_at", "last_used_at",
 				"expires_at", "revoked_at", "family_revoked_at", "replaced_by_session_id", "last_seen_at", "device_label", "coarse_ip", "version");
+			assertThat(columns(connection, "tenant_management", "workspace_settings")).containsExactlyInAnyOrder(
+				"workspace_id", "default_workspace_behavior", "version", "updated_at");
+			assertThat(columns(connection, "tenant_management", "operational_settings")).containsExactlyInAnyOrder(
+				"workspace_id", "warehouse_preference_strategy", "order_cutoff_policy", "fulfillment_defaults",
+				"inventory_visibility_policy", "buyer_availability_policy", "operating_hours_start",
+				"operating_hours_end", "order_cutoff_minutes", "thermal_log_required", "version", "updated_at");
+			assertThat(columns(connection, "catalog_management", "promotion")).contains("priority");
 		}
 	}
 

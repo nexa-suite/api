@@ -18,6 +18,7 @@ public interface InvitationPersistencePort {
 	int create(OrganizationInvitation invitation, Instant createdAt);
 	int rotateToken(String tenantId, UUID invitationId, String tokenHash, Instant expiresAt, long expectedVersion);
 	int updateStatus(String tenantId, UUID invitationId, String status, Instant changedAt, UUID acceptedUserId, long expectedVersion);
+	int expirePending(Instant now, int batchSize);
 	Optional<InvitationSnapshot> findForUpdateByTokenHash(String tokenHash);
 	Optional<MembershipRecord> findActiveMembershipByEmail(String workspaceId, String normalizedEmail);
 	Optional<UserRecord> findUserByEmail(String normalizedEmail);
@@ -27,5 +28,10 @@ public interface InvitationPersistencePort {
 
 	record InvitationSnapshot(OrganizationInvitation invitation, long version, Instant createdAt) { }
 	record MembershipRecord(UUID membershipId, UUID userId) { }
-	record UserRecord(UUID userId, String email, String status) { }
+	record UserRecord(UUID userId, String email, String status, String passwordHash) { }
+
+	/** Persistence-level signal for a concurrent acceptance of the same workspace membership. */
+	final class DuplicateMembershipException extends RuntimeException {
+		public DuplicateMembershipException() { super("Workspace membership already exists"); }
+	}
 }

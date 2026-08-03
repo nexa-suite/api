@@ -1,6 +1,8 @@
 package com.nexa.api.catalogmanagement.application.model;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 
 public record CatalogItemSummary(
 		String catalogItemId,
@@ -17,11 +19,22 @@ public record CatalogItemSummary(
 		String status,
 		String availabilityStatus,
 		boolean nearExpiry,
-		String promotionLabel) {
+		String promotionLabel,
+		CatalogPricingView pricing) {
 	public CatalogItemSummary(String catalogItemId, String productId, String itemName, String brandName,
 			String categoryName, String presentation, BigDecimal unitPriceAmount, String unitPriceCurrency,
 			String coldChainRequirement, String imageUrl, String imageFileName) {
 		this(catalogItemId, productId, itemName, brandName, categoryName, presentation, unitPriceAmount,
-				unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, "ACTIVE", "UNKNOWN", false, null);
+				unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, "ACTIVE", "UNKNOWN", false, null,
+				CatalogPricingView.base(unitPriceAmount, unitPriceCurrency, Instant.EPOCH));
+	}
+
+	public CatalogItemSummary(String catalogItemId, String productId, String itemName, String brandName,
+			String categoryName, String presentation, BigDecimal unitPriceAmount, String unitPriceCurrency,
+			String coldChainRequirement, String imageUrl, String imageFileName, String status,
+			String availabilityStatus, boolean nearExpiry, String promotionLabel) {
+		this(catalogItemId, productId, itemName, brandName, categoryName, presentation, unitPriceAmount,
+				unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, status, availabilityStatus,
+				nearExpiry, promotionLabel, CatalogPricingView.base(unitPriceAmount, unitPriceCurrency, Instant.EPOCH));
 	}
 }
