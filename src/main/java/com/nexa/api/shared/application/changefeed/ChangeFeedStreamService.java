@@ -66,7 +66,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		try {
 			verified = verify(jwt, initial);
 			String clientAccount = clientAccount(verified);
-			if (isTooOld(verified, clientAccount, audiences, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
+			if (isTooOld(verified, clientAccount, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
 			sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audiences, last, MAX_REPLAY), jwt, initial);
 		} catch (RuntimeException | IOException exception) {
 			release.run(); emitter.completeWithError(exception); return emitter;
@@ -77,7 +77,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 			try {
 				CurrentAccessContext current = verify(jwt, initial); String clientAccount = clientAccount(current); long position = cursor.get();
 				Set<ChangeEventAudience> currentAudiences = audiences(current);
-				if (isTooOld(current, clientAccount, currentAudiences, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
+				if (isTooOld(current, clientAccount, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
 				sendBatch(emitter, cursor, feed.after(scope(current), workspace(current), clientAccount, currentAudiences, position, MAX_REPLAY), jwt, initial);
 				emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
 			} catch (RuntimeException | IOException exception) { release.run(); emitter.completeWithError(exception); }
@@ -96,7 +96,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
 		}
 	}
 	private void sendResync(SseEmitter emitter) throws IOException { emitter.send(SseEmitter.event().name("resync-required").data("{\"reason\":\"replay-window-expired\"}", MediaType.APPLICATION_JSON)); }
-	private boolean isTooOld(CurrentAccessContext context, String clientAccount, Set<ChangeEventAudience> audiences, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount, audiences); return last > 0 && minimum > 0 && last < minimum - 1; }
+	private boolean isTooOld(CurrentAccessContext context, String clientAccount, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount); return last > 0 && minimum > 0 && last < minimum - 1; }
 	private static Set<ChangeEventAudience> audiences(CurrentAccessContext context) {
 		EnumSet<ChangeEventAudience> result = EnumSet.noneOf(ChangeEventAudience.class);
 		for (var role : context.roles()) switch (role) {

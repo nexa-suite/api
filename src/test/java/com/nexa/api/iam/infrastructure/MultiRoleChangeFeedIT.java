@@ -97,7 +97,13 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
                 .isEmpty();
 
         String initialStream = streamBody(initialToken, cursor);
-        assertThat(occurrences(initialStream, "organization.membership.role-changed")).isEqualTo(1);
+        long scopeMinimum = feed.minimumId(tenant, workspace, null);
+        long scopeMaximum = jdbc.queryForObject("select coalesce(max(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=?",
+                Long.class, java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace));
+        assertThat(occurrences(initialStream, "organization.membership.role-changed"))
+                .withFailMessage("Change-feed replay mismatch: cursor=%d, scopeMinimum=%d, scopeMaximum=%d, stream=%s",
+                        cursor, scopeMinimum, scopeMaximum, initialStream)
+                .isEqualTo(1);
         assertThat(initialStream).doesNotContain("sales.purchase-request.created");
 
         String ownerMembership = membershipId(OWNER_EMAIL);
