@@ -143,7 +143,12 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
                         .header("Last-Event-ID", Long.toString(cursor)))
                 .andExpect(request().asyncStarted()).andReturn();
         try {
-            return result.getResponse().getContentAsString();
+            String body = result.getResponse().getContentAsString();
+            for (int attempt = 0; body.isBlank() && attempt < 100; attempt++) {
+                Thread.sleep(10);
+                body = result.getResponse().getContentAsString();
+            }
+            return body;
         } finally {
             if (result.getRequest().isAsyncStarted()) result.getRequest().getAsyncContext().complete();
         }
