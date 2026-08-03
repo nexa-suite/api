@@ -46,14 +46,14 @@ public final class CatalogPromotionController {
     public ResponseEntity<CatalogManagementModels.PromotionView> create(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody PromotionRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
-        var value = promotions.create(CatalogHttpSupport.scope(context), request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), idempotencyKey);
+        var value = promotions.create(CatalogHttpSupport.scope(context), request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), idempotencyKey, request.priority());
         return ResponseEntity.status(201).eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
 
     @PatchMapping("/{id}")
     public ResponseEntity<CatalogManagementModels.PromotionView> update(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestBody PromotionRequest request) {
-        var value = promotions.update(CatalogHttpSupport.scope(context), id, request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), CatalogHttpSupport.version(ifMatch));
+        var value = promotions.update(CatalogHttpSupport.scope(context), id, request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), CatalogHttpSupport.version(ifMatch), request.priority());
         return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
 
@@ -84,12 +84,12 @@ public final class CatalogPromotionController {
     public record PromotionRequest(String slug, String name, String description, String discountType, BigDecimal discountValue,
             String currency, Instant startsAt, Instant endsAt, BigDecimal minimumQuantity, String stackingPolicy,
             List<UUID> productIds, List<UUID> categoryIds, List<UUID> clientAccountIds,
-            List<CatalogManagementModels.PromotionRuleView> rules) {
+            List<CatalogManagementModels.PromotionRuleView> rules, int priority) {
         public PromotionRequest(String slug, String name, String description, String discountType, BigDecimal discountValue,
                 String currency, Instant startsAt, Instant endsAt, BigDecimal minimumQuantity, String stackingPolicy,
                 List<UUID> productIds, List<UUID> categoryIds) {
             this(slug, name, description, discountType, discountValue, currency, startsAt, endsAt, minimumQuantity,
-                    stackingPolicy, productIds, categoryIds, List.of(), List.of());
+                    stackingPolicy, productIds, categoryIds, List.of(), List.of(), 0);
         }
     }
 }

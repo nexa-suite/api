@@ -1,7 +1,9 @@
 package com.nexa.api.catalogmanagement.domain.model.catalogitem;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Currency;
+import java.util.Objects;
 
 public record Money(BigDecimal amount, Currency currency) {
 	public Money {
@@ -21,5 +23,15 @@ public record Money(BigDecimal amount, Currency currency) {
 		} catch (IllegalArgumentException exception) {
 			throw new CatalogInvariantViolation("Currency must be a valid ISO 4217 code");
 		}
+	}
+
+	public Money multiply(BigDecimal quantity) {
+		Objects.requireNonNull(quantity, "Money quantity is required");
+		if (quantity.signum() < 0) throw new CatalogInvariantViolation("Money quantity cannot be negative");
+		return new Money(amount.multiply(quantity).setScale(2, RoundingMode.HALF_UP), currency);
+	}
+
+	public String currencyCode() {
+		return currency.getCurrencyCode();
 	}
 }

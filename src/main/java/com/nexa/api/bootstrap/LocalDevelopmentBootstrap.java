@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -40,12 +41,14 @@ public class LocalDevelopmentBootstrap {
 		Instant now = clock.instant();
 		UUID tenantId = tenant(now);
 		UUID workspaceId = workspace(tenantId, now);
-		List<UserSeed> users = List.of(
+		List<UserSeed> users = new ArrayList<>(List.of(
 				new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", Set.of("TENANT_ADMIN", "COMPANY_OWNER")),
 				new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", Set.of("SALES")),
 				new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", Set.of("WAREHOUSE")),
 				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", Set.of("LOGISTICS")),
-				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER")));
+				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER"))));
+		addOptionalUser(users, "NEXA_DEV_TENANT_ADMIN_EMAIL", "NEXA_DEV_TENANT_ADMIN_PASSWORD", Set.of("TENANT_ADMIN"));
+		addOptionalUser(users, "NEXA_DEV_COMPANY_OWNER_EMAIL", "NEXA_DEV_COMPANY_OWNER_PASSWORD", Set.of("COMPANY_OWNER"));
 		UUID buyerUserId = null;
 		for (UserSeed user : users) {
 			UUID userId = user(user, now);
@@ -117,6 +120,16 @@ public class LocalDevelopmentBootstrap {
 		String value = environment.getProperty(key);
 		if (value == null || value.isBlank()) throw new IllegalStateException("Missing local bootstrap variable " + key);
 		return value.trim();
+	}
+
+	private void addOptionalUser(List<UserSeed> users, String emailKey, String passwordKey, Set<String> roles) {
+		String email = environment.getProperty(emailKey);
+		String password = environment.getProperty(passwordKey);
+		if ((email == null || email.isBlank()) && (password == null || password.isBlank())) return;
+		if (email == null || email.isBlank() || password == null || password.isBlank()) {
+			throw new IllegalStateException("Pure role fixture requires both " + emailKey + " and " + passwordKey);
+		}
+		users.add(new UserSeed(emailKey, passwordKey, roles));
 	}
 
 	private static String displayName(String email) {

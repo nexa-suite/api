@@ -15,7 +15,7 @@ public final class Product {
     private CatalogItemStatus status;
 
     private Product(UUID id, String catalogItemId, String productCode, String slug, String name, String description) {
-        this.id = Objects.requireNonNull(id);
+        this.id = Objects.requireNonNull(id, "Product id is required");
         this.catalogItemId = bounded(catalogItemId, "Catalog item id", 64);
         this.productCode = bounded(productCode, "Product code", 64);
         this.slug = bounded(slug, "Product slug", 140);
@@ -40,14 +40,20 @@ public final class Product {
     public String description() { return description; }
     public CatalogItemStatus status() { return status; }
     public void activate() {
-        if (status != CatalogItemStatus.DRAFT && status != CatalogItemStatus.INACTIVE && status != CatalogItemStatus.ACTIVE) {
+        if (status == CatalogItemStatus.ARCHIVED) {
             throw new IllegalStateException("Archived product cannot be activated");
+        }
+        if (status == CatalogItemStatus.DISCONTINUED) {
+            throw new IllegalStateException("Discontinued product cannot be activated");
         }
         status = CatalogItemStatus.ACTIVE;
     }
     public void deactivate() {
-        if (status != CatalogItemStatus.DRAFT && status != CatalogItemStatus.ACTIVE && status != CatalogItemStatus.INACTIVE) {
+        if (status == CatalogItemStatus.ARCHIVED) {
             throw new IllegalStateException("Archived product cannot be deactivated");
+        }
+        if (status == CatalogItemStatus.DISCONTINUED) {
+            throw new IllegalStateException("Discontinued product cannot be deactivated");
         }
         status = CatalogItemStatus.INACTIVE;
     }

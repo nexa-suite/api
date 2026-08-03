@@ -11,7 +11,7 @@ public final class Category {
     private CategoryStatus status;
 
     private Category(CategoryId id, CategoryId parentId, String slug, String name, String description) {
-        this.id = Objects.requireNonNull(id);
+        this.id = Objects.requireNonNull(id, "Category id is required");
         this.parentId = parentId;
         this.slug = bounded(slug, "Category slug", 100);
         this.name = bounded(name, "Category name", 160);
@@ -36,9 +36,19 @@ public final class Category {
     public String name() { return name; }
     public String description() { return description; }
     public CategoryStatus status() { return status; }
-    public void activate() { if (status == CategoryStatus.ARCHIVED) throw new IllegalStateException("Archived category cannot be activated"); status = CategoryStatus.ACTIVE; }
-    public void deactivate() { if (status == CategoryStatus.ARCHIVED) throw new IllegalStateException("Archived category cannot be deactivated"); status = CategoryStatus.INACTIVE; }
-    public void archive() { if (status == CategoryStatus.ACTIVE) throw new IllegalStateException("Active category cannot be archived"); status = CategoryStatus.ARCHIVED; }
+    public void activate() {
+        if (status == CategoryStatus.ARCHIVED) throw new IllegalStateException("Archived category cannot be activated");
+        status = CategoryStatus.ACTIVE;
+    }
+    public void deactivate() {
+        if (status == CategoryStatus.ARCHIVED) throw new IllegalStateException("Archived category cannot be deactivated");
+        status = CategoryStatus.INACTIVE;
+    }
+    public void archive() {
+        if (status == CategoryStatus.ACTIVE) throw new IllegalStateException("Active category cannot be archived");
+        if (status == CategoryStatus.ARCHIVED) throw new IllegalStateException("Archived category cannot be archived");
+        status = CategoryStatus.ARCHIVED;
+    }
     public void rename(String value) { name = bounded(value, "Category name", 160); }
     public void changeSlug(String value) { slug = bounded(value, "Category slug", 100); }
     public void rewriteDescription(String value) { description = value == null ? null : bounded(value, "Category description", 2000); }

@@ -10,7 +10,7 @@ public final class Brand {
     private BrandStatus status;
 
     private Brand(BrandId id, String slug, String name, String description) {
-        this.id = Objects.requireNonNull(id);
+        this.id = Objects.requireNonNull(id, "Brand id is required");
         this.slug = bounded(slug, "Brand slug", 100);
         this.name = bounded(name, "Brand name", 160);
         this.description = description == null ? null : bounded(description, "Brand description", 2000);
@@ -30,9 +30,19 @@ public final class Brand {
     public String name() { return name; }
     public String description() { return description; }
     public BrandStatus status() { return status; }
-    public void activate() { if (status == BrandStatus.ARCHIVED) throw new IllegalStateException("Archived brand cannot be activated"); status = BrandStatus.ACTIVE; }
-    public void deactivate() { if (status == BrandStatus.ARCHIVED) throw new IllegalStateException("Archived brand cannot be deactivated"); status = BrandStatus.INACTIVE; }
-    public void archive() { if (status == BrandStatus.ACTIVE) throw new IllegalStateException("Active brand cannot be archived"); status = BrandStatus.ARCHIVED; }
+    public void activate() {
+        if (status == BrandStatus.ARCHIVED) throw new IllegalStateException("Archived brand cannot be activated");
+        status = BrandStatus.ACTIVE;
+    }
+    public void deactivate() {
+        if (status == BrandStatus.ARCHIVED) throw new IllegalStateException("Archived brand cannot be deactivated");
+        status = BrandStatus.INACTIVE;
+    }
+    public void archive() {
+        if (status == BrandStatus.ACTIVE) throw new IllegalStateException("Active brand cannot be archived");
+        if (status == BrandStatus.ARCHIVED) throw new IllegalStateException("Archived brand cannot be archived");
+        status = BrandStatus.ARCHIVED;
+    }
     public void rename(String value) { name = bounded(value, "Brand name", 160); }
     public void changeSlug(String value) { slug = bounded(value, "Brand slug", 100); }
     public void rewriteDescription(String value) { description = value == null ? null : bounded(value, "Brand description", 2000); }

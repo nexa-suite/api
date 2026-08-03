@@ -156,7 +156,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         String clientPredicate = scope.clientAccountId() == null
                 ? " and not exists (select 1 from catalog_management.promotion_client_account pca0 where pca0.tenant_id=pr.tenant_id and pca0.workspace_id=pr.workspace_id and pca0.promotion_id=pr.id)"
                 : " and (not exists (select 1 from catalog_management.promotion_client_account pca0 where pca0.tenant_id=pr.tenant_id and pca0.workspace_id=pr.workspace_id and pca0.promotion_id=pr.id) or exists (select 1 from catalog_management.promotion_client_account pca1 where pca1.tenant_id=pr.tenant_id and pca1.workspace_id=pr.workspace_id and pca1.promotion_id=pr.id and pca1.client_account_id=?))";
-        String sql = "select p.catalog_item_id,pr.id,pr.name,pr.discount_type,pr.discount_value,pr.currency,pr.starts_at,pr.ends_at,pr.minimum_quantity,pr.stacking_policy,pr.status " +
+		String sql = "select p.catalog_item_id,pr.id,pr.name,pr.slug,pr.discount_type,pr.discount_value,pr.currency,pr.starts_at,pr.ends_at,pr.minimum_quantity,pr.stacking_policy,pr.status,pr.priority " +
                 "from catalog_management.product p join catalog_management.promotion pr on pr.tenant_id=p.tenant_id and pr.workspace_id=p.workspace_id " +
                 "where p.tenant_id=? and p.workspace_id=? and p.catalog_item_id in (" + placeholders + ") and pr.status='ACTIVE' " +
                 "and (pr.starts_at is null or pr.starts_at<=current_timestamp) and (pr.ends_at is null or pr.ends_at>current_timestamp) " +
@@ -166,10 +166,10 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         Map<String, List<PromotionCandidate>> result = new HashMap<>();
 		jdbc.query(sql, (rs, row) -> {
 			String itemId = rs.getString(1);
-            PromotionCandidate candidate = new PromotionCandidate(rs.getObject(2, UUID.class), rs.getString(3),
-                    Promotion.DiscountType.valueOf(rs.getString(4)), rs.getBigDecimal(5), rs.getString(6),
-                    instant(rs.getTimestamp(7)), instant(rs.getTimestamp(8)), rs.getBigDecimal(9),
-                    Promotion.StackingPolicy.valueOf(rs.getString(10)), PromotionStatus.valueOf(rs.getString(11)));
+			PromotionCandidate candidate = new PromotionCandidate(rs.getObject(2, UUID.class), rs.getString(3), rs.getString(4),
+					Promotion.DiscountType.valueOf(rs.getString(5)), rs.getBigDecimal(6), rs.getString(7),
+					instant(rs.getTimestamp(8)), instant(rs.getTimestamp(9)), rs.getBigDecimal(10),
+					Promotion.StackingPolicy.valueOf(rs.getString(11)), PromotionStatus.valueOf(rs.getString(12)), rs.getInt(13), List.of(), List.of());
 			result.computeIfAbsent(itemId, ignored -> new ArrayList<>()).add(candidate);
 			return null;
 		}, parameters.toArray());
@@ -185,9 +185,10 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 					return null;
 				}, ruleParameters.toArray());
 		for (Map.Entry<String, List<PromotionCandidate>> entry : result.entrySet()) {
-			entry.setValue(entry.getValue().stream().map(candidate -> new PromotionCandidate(candidate.id(), candidate.name(),
+			entry.setValue(entry.getValue().stream().map(candidate -> new PromotionCandidate(candidate.id(), candidate.name(), candidate.stableCode(),
 					candidate.discountType(), candidate.discountValue(), candidate.currency(), candidate.startsAt(), candidate.endsAt(),
-					candidate.minimumQuantity(), candidate.stackingPolicy(), candidate.status(), rules.getOrDefault(candidate.id(), List.of()))).toList());
+					candidate.minimumQuantity(), candidate.stackingPolicy(), candidate.status(), candidate.priority(), candidate.clientAccountIds(),
+					rules.getOrDefault(candidate.id(), List.of()))).toList());
 		}
 		return result;
 	}

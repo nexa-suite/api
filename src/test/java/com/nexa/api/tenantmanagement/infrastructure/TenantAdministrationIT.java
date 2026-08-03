@@ -148,6 +148,120 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
     }
 
     @Test
+    void invitationLifecycleRotatesRevokesAndSerializesConcurrentAcceptance() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String resendEmail = "resend-invited-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult resendCreated = createInvitation(owner, resendEmail, "Resend operator", "resend-" + uuid());
+        String oldToken = invitationToken(resendEmail);
+        MvcResult resent = mockMvc.perform(post("/api/v1/organization-invitations/" + json(resendCreated).get("id").asText() + "/resends")
+                        .header("Authorization", "Bearer " + owner).header("If-Match", resendCreated.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andReturn();
+        String replacementToken = invitationToken(resendEmail);
+        assertThat(replacementToken).isNotEqualTo(oldToken);
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + oldToken + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"Old token\"}"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + replacementToken + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"Resend operator\"}"))
+                .andExpect(status().isCreated());
+        assertThat(json(resent).get("status").asText()).isEqualTo("PENDING");
+
+        String revokeEmail = "revoke-invited-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult revokeCreated = createInvitation(owner, revokeEmail, "Revoke operator", "revoke-" + uuid());
+        String revokedToken = invitationToken(revokeEmail);
+        mockMvc.perform(post("/api/v1/organization-invitations/" + json(revokeCreated).get("id").asText() + "/revocations")
+                        .header("Authorization", "Bearer " + owner).header("If-Match", revokeCreated.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + revokedToken + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"Revoked operator\"}"))
+                .andExpect(status().isNotFound());
+
+        String concurrentEmail = "concurrent-invited-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult concurrentCreated = createInvitation(owner, concurrentEmail, "Concurrent operator", "concurrent-" + uuid());
+        String concurrentToken = invitationToken(concurrentEmail);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+			List<Integer> statuses = executor.invokeAll(List.<Callable<Integer>>of(
+                    () -> acceptInvitationStatus(concurrentToken, "Concurrent operator"),
+                    () -> acceptInvitationStatus(concurrentToken, "Concurrent operator"))).stream().map(future -> {
+                        try { return future.get(); } catch (Exception exception) { throw new RuntimeException(exception); }
+                    }).toList();
+            assertThat(statuses).contains(201).containsAnyOf(404, 409);
+        } finally {
+            executor.shutdownNow();
+        }
+        UUID concurrentInvitationId = UUID.fromString(json(concurrentCreated).get("id").asText());
+        assertThat(jdbc.queryForObject("select status from tenant_management.organization_invitation where id=?", String.class, concurrentInvitationId)).isEqualTo("ACCEPTED");
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join iam.user_account u on u.id=m.user_id where u.normalized_email=?", Integer.class, concurrentEmail)).isEqualTo(1);
+    }
+
+    @Test
+    void membershipLifecycleUsesIfMatchAndRevalidatesTheExistingSession() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "lifecycle-member-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult created = createInvitation(owner, email, "Lifecycle member", "lifecycle-" + uuid());
+        String token = invitationToken(email);
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + token + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"Lifecycle member\"}"))
+                .andExpect(status().isCreated());
+        String memberToken = accessToken(email, "PLATFORM");
+        String membershipId = membershipId(email);
+        MvcResult detail = mockMvc.perform(get("/api/v1/workspace-memberships/" + membershipId).header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        String version = detail.getResponse().getHeader("ETag");
+        mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", version))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", version))
+                .andExpect(status().isConflict());
+
+        MvcResult suspended = mockMvc.perform(get("/api/v1/workspace-memberships/" + membershipId).header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/reactivations").header("Authorization", "Bearer " + owner).header("If-Match", suspended.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/authentication/sign-out").header("Authorization", "Bearer " + memberToken).header("X-Nexa-Surface", "PLATFORM").header("Origin", ALLOWED_ORIGIN))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void workspaceSettingsHaveOneCanonicalWarehouseStrategyAndCustomFieldsHaveAFullLifecycle() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String workspace = workspaceId();
+        MvcResult workspaceSettings = mockMvc.perform(get("/api/v1/workspaces/" + workspace + "/settings").header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult operational = mockMvc.perform(get("/api/v1/workspaces/" + workspace + "/operational-settings").header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(workspaceSettings).get("warehousePreferenceStrategy").asText())
+                .isEqualTo(json(operational).get("defaultWarehouseSelectionPolicy").asText());
+        assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema='tenant_management' and table_name='workspace_settings' and column_name='warehouse_preference_strategy'", Integer.class)).isZero();
+
+        String strategy = json(operational).get("defaultWarehouseSelectionPolicy").asText();
+        String settingsBody = "{\"defaultWorkspaceBehavior\":\"STANDARD\",\"warehousePreferenceStrategy\":\"" + strategy + "\"}";
+        mockMvc.perform(patch("/api/v1/workspaces/" + workspace + "/settings").header("Authorization", "Bearer " + owner)
+                        .header("If-Match", workspaceSettings.getResponse().getHeader("ETag")).contentType(MediaType.APPLICATION_JSON).content(settingsBody))
+                .andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("select warehouse_preference_strategy from tenant_management.operational_settings where workspace_id=?", String.class, UUID.fromString(workspace))).isEqualTo(strategy);
+
+        String fieldKey = "field" + uuid().replace("-", "").substring(0, 8);
+        MvcResult field = mockMvc.perform(post("/api/v1/custom-field-definitions").header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fieldKey\":\"" + fieldKey + "\",\"label\":\"Customer segment\",\"fieldKind\":\"TEXT\",\"scope\":\"CLIENT_ACCOUNT\",\"required\":true,\"uniqueValue\":true,\"displayOrder\":10,\"active\":true}"))
+                .andExpect(status().isCreated()).andReturn();
+        String fieldId = json(field).get("id").asText();
+        MvcResult edited = mockMvc.perform(patch("/api/v1/custom-field-definitions/" + fieldId).header("Authorization", "Bearer " + owner)
+                        .header("If-Match", field.getResponse().getHeader("ETag")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fieldKey\":\"" + fieldKey + "\",\"label\":\"Customer segment updated\",\"fieldKind\":\"TEXT\",\"scope\":\"CLIENT_ACCOUNT\",\"required\":true,\"uniqueValue\":true,\"displayOrder\":20,\"active\":true}"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult deactivated = mockMvc.perform(post("/api/v1/custom-field-definitions/" + fieldId + "/deactivations").header("Authorization", "Bearer " + owner)
+                        .header("If-Match", edited.getResponse().getHeader("ETag"))).andExpect(status().isOk()).andReturn();
+        assertThat(mockMvc.perform(get("/api/v1/custom-field-definitions").header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).doesNotContain(fieldId);
+        assertThat(mockMvc.perform(get("/api/v1/custom-field-definitions?includeInactive=true").header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).contains(fieldId);
+        mockMvc.perform(post("/api/v1/custom-field-definitions/" + fieldId + "/activations").header("Authorization", "Bearer " + owner)
+                        .header("If-Match", deactivated.getResponse().getHeader("ETag"))).andExpect(status().isOk());
+    }
+
+    @Test
     void existingUserInvitationAuthenticatesBeforeCreatingMembership() throws Exception {
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
         String email = "existing-invited-" + uuid().substring(0, 8) + "@example.test";
@@ -194,6 +308,25 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
     private int createWorkspaceStatus(String owner, String slug, String key) throws Exception {
         return mockMvc.perform(post("/api/v1/workspaces").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Race\",\"slug\":\"" + slug + "\"}")).andReturn().getResponse().getStatus();
+    }
+
+    private MvcResult createInvitation(String owner, String email, String displayName, String key) throws Exception {
+        return mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + email + "\",\"displayName\":\"" + displayName + "\",\"roles\":[\"SALES\"]}"))
+                .andExpect(status().isCreated()).andReturn();
+    }
+
+    private String invitationToken(String recipient) {
+        String encrypted = jdbc.queryForObject("select payload_ciphertext from iam.security_notification_outbox where notification_type='ORGANIZATION_INVITATION' and recipient=? order by created_at desc limit 1", String.class, recipient);
+        String payload = notificationOutbox.decrypt(encrypted);
+        int start = payload.indexOf("token=") + 6;
+        return payload.substring(start, payload.indexOf('\n', start));
+    }
+
+    private int acceptInvitationStatus(String token, String displayName) throws Exception {
+        return mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + token + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"" + displayName + "\"}"))
+                .andReturn().getResponse().getStatus();
     }
 
     private tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {

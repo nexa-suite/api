@@ -2,6 +2,7 @@ package com.nexa.api.catalogmanagement.application.model;
 
 import java.util.Objects;
 import java.util.UUID;
+import java.util.Locale;
 
 public record CatalogScope(UUID tenantId, UUID workspaceId, boolean buyerView, UUID clientAccountId,
                            String clientAccountSegment, String buyerTier) {
@@ -20,5 +21,12 @@ public record CatalogScope(UUID tenantId, UUID workspaceId, boolean buyerView, U
     public CatalogScope {
         tenantId = Objects.requireNonNull(tenantId, "Catalog tenant id is required");
         workspaceId = Objects.requireNonNull(workspaceId, "Catalog workspace id is required");
+        clientAccountSegment = normalize(clientAccountSegment);
+        buyerTier = normalize(buyerTier);
+    }
+
+    private static String normalize(String value) {
+        if (value == null || value.isBlank()) return null;
+        return value.strip().toUpperCase(Locale.ROOT);
     }
 }

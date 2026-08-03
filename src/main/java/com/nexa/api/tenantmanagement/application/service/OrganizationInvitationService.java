@@ -127,7 +127,14 @@ public class OrganizationInvitationService implements InvitationUseCase {
 		String token = tokens.generate();
 		var settings = configuration.findTenantSecuritySettings(context.tenantId().toString()).orElseThrow();
 		Instant expiresAt = clock.instant().plus(Duration.ofHours(settings.invitationExpirationHours()));
-		if (invitations.rotateToken(context.tenantId().toString(), invitationId, tokens.sha256(token), expiresAt, expectedVersion) == 0) throw new ConcurrencyConflictException();
+		InvitationTokenHash replacementHash = new InvitationTokenHash(tokens.sha256(token));
+		InvitationExpiry replacementExpiry = new InvitationExpiry(expiresAt);
+		try {
+			invitation.resend(replacementHash, replacementExpiry, clock);
+		} catch (TenantManagementInvariantViolation exception) {
+			throw new InvitationConflictException("Invitation is not pending");
+		}
+		if (invitations.rotateToken(context.tenantId().toString(), invitationId, replacementHash.value(), replacementExpiry.value(), expectedVersion) == 0) throw new ConcurrencyConflictException();
 		outbox.enqueueInvitation(invitation.email(), invitation.displayName(), token, expiresAt);
 		appendAudit(context, "INVITATION_RESENT", correlationId, Map.of("invitationId", invitationId.toString()));
 		return detail(context, invitationId);
@@ -136,8 +143,10 @@ public class OrganizationInvitationService implements InvitationUseCase {
 	@Override
 	public InvitationModels.InvitationAcceptanceResult accept(String token, String password, String displayName, String correlationId) {
 		if (token == null || token.isBlank()) throw new InvitationInvalidException();
-		var snapshot = invitations.findForUpdateByTokenHash(tokens.sha256(token)).orElseThrow(InvitationInvalidException::new);
+		InvitationTokenHash presentedHash = new InvitationTokenHash(tokens.sha256(token));
+		var snapshot = invitations.findForUpdateByTokenHash(presentedHash.value()).orElseThrow(InvitationInvalidException::new);
 		OrganizationInvitation invitation = snapshot.invitation();
+		if (!invitation.hasTokenHash(presentedHash)) throw new InvitationInvalidException();
 		var settings = configuration.findTenantSecuritySettings(invitation.tenantId().toString()).orElseThrow(InvitationInvalidException::new);
 		if (!PasswordPolicy.isValid(password, settings.passwordMinLength())) throw new InvitationInvalidException();
 		try {

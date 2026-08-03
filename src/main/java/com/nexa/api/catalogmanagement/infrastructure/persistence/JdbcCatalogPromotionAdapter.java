@@ -52,11 +52,11 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
         pageArgs.add((long) page * size);
-		List<PromotionRow> rows = jdbc.query("select id,slug,name,description,status,discount_type,discount_value,currency,starts_at,ends_at,minimum_quantity,stacking_policy,version from catalog_management.promotion" + where + " order by starts_at nulls last,name,id limit ? offset ?",
+			List<PromotionRow> rows = jdbc.query("select id,slug,name,description,status,discount_type,discount_value,currency,starts_at,ends_at,minimum_quantity,stacking_policy,priority,version from catalog_management.promotion" + where + " order by starts_at nulls last,name,id limit ? offset ?",
 				(rs, row) -> new PromotionRow(rs.getObject("id", UUID.class), rs.getString("slug"), rs.getString("name"),
 						rs.getString("description"), rs.getString("status"), rs.getString("discount_type"), rs.getBigDecimal("discount_value"),
 						strip(rs.getString("currency")), instant(rs.getTimestamp("starts_at")), instant(rs.getTimestamp("ends_at")),
-						rs.getBigDecimal("minimum_quantity"), rs.getString("stacking_policy"), rs.getLong("version")), pageArgs.toArray());
+						 rs.getBigDecimal("minimum_quantity"), rs.getString("stacking_policy"), rs.getInt("priority"), rs.getLong("version")), pageArgs.toArray());
 		Long total = jdbc.queryForObject("select count(*) from catalog_management.promotion" + where, Long.class, args.toArray());
 		List<UUID> ids = rows.stream().map(PromotionRow::id).toList();
 		Map<UUID, List<String>> products = targetStrings(scope, "promotion_product", "product_id", ids);
@@ -66,20 +66,20 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
 		List<CatalogManagementModels.PromotionView> items = rows.stream().map(row -> new CatalogManagementModels.PromotionView(
 				row.id().toString(), row.slug(), row.name(), row.description(), row.status(), row.discountType(), row.discountValue(),
 				row.currency(), row.startsAt(), row.endsAt(), row.minimumQuantity(), row.stackingPolicy(),
-				products.getOrDefault(row.id(), List.of()), categories.getOrDefault(row.id(), List.of()),
+				row.priority(), products.getOrDefault(row.id(), List.of()), categories.getOrDefault(row.id(), List.of()),
 				clients.getOrDefault(row.id(), List.of()), rules.getOrDefault(row.id(), List.of()), row.version())).toList();
 		return new CatalogManagementModels.Page<>(items, page, size, total == null ? 0 : total);
 	}
 
-    @Override
-    public CatalogManagementModels.PromotionView create(CatalogScope scope, String slug, String name, String description,
+	@Override
+	public CatalogManagementModels.PromotionView create(CatalogScope scope, String slug, String name, String description,
             String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
             BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds) {
         return create(scope, slug, name, description, discountType, discountValue, currency, startsAt, endsAt, minimumQuantity, stackingPolicy, productIds, categoryIds, List.of(), List.of(), null);
     }
 
     @Override
-    public CatalogManagementModels.PromotionView create(CatalogScope scope, String slug, String name, String description,
+	public CatalogManagementModels.PromotionView create(CatalogScope scope, String slug, String name, String description,
             String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
             BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds, String idempotencyKey) {
         return create(scope, slug, name, description, discountType, discountValue, currency, startsAt, endsAt,
@@ -89,31 +89,41 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
     @Override
     public CatalogManagementModels.PromotionView create(CatalogScope scope, String slug, String name, String description,
             String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
-            BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds,
-            List<UUID> clientAccountIds, List<CatalogManagementModels.PromotionRuleView> rules, String idempotencyKey) {
+			BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds,
+			List<UUID> clientAccountIds, List<CatalogManagementModels.PromotionRuleView> rules, String idempotencyKey) {
+		return create(scope, slug, name, description, discountType, discountValue, currency, startsAt, endsAt,
+				minimumQuantity, stackingPolicy, productIds, categoryIds, clientAccountIds, rules, idempotencyKey, 0);
+	}
+
+	@Override
+	public CatalogManagementModels.PromotionView create(CatalogScope scope, String slug, String name, String description,
+			String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
+			BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds,
+			List<UUID> clientAccountIds, List<CatalogManagementModels.PromotionRuleView> rules, String idempotencyKey, int priority) {
         List<UUID> products = distinct(productIds);
         List<UUID> categories = distinct(categoryIds);
         List<UUID> clients = distinct(clientAccountIds);
         List<CatalogManagementModels.PromotionRuleView> normalizedRules = rules == null ? List.of() : List.copyOf(rules);
         PromotionValues values = values(discountType, discountValue, currency, startsAt, endsAt, minimumQuantity, stackingPolicy);
         UUID candidate = UUID.randomUUID();
-        UUID id = idempotency.reserve(scope, "promotion:create", idempotencyKey,
-                CatalogCommandIdempotencySupport.hash(slug, name, description, values.discountType(), values.discountValue(), values.currency(), startsAt, endsAt, values.minimumQuantity(), values.stackingPolicy(), products, categories, clients, normalizedRules), candidate);
+		if (priority < -1_000_000 || priority > 1_000_000) throw new IllegalArgumentException("Promotion priority is invalid");
+		UUID id = idempotency.reserve(scope, "promotion:create", idempotencyKey,
+				CatalogCommandIdempotencySupport.hash(slug, name, description, values.discountType(), values.discountValue(), values.currency(), startsAt, endsAt, values.minimumQuantity(), values.stackingPolicy(), priority, products, categories, clients, normalizedRules), candidate);
         if (!id.equals(candidate)) return promotion(scope, id);
         products.forEach(value -> requireProduct(scope, value));
         categories.forEach(value -> requireCategory(scope, value));
         clients.forEach(value -> requireClientAccount(scope, value));
         Timestamp now = now();
-        jdbc.update("insert into catalog_management.promotion (id,tenant_id,workspace_id,slug,name,description,status,discount_type,discount_value,currency,starts_at,ends_at,minimum_quantity,stacking_policy,version,created_at,updated_at) values (?,?,?,?,?,?,'DRAFT',?,?,?,?,?,?,?,0,?,?)",
-                id, scope.tenantId(), scope.workspaceId(), required(slug, 140), required(name, 200), optional(description, 2000),
-                values.discountType(), values.discountValue(), values.currency(), timestamp(startsAt), timestamp(endsAt),
-                values.minimumQuantity(), values.stackingPolicy(), now, now);
+		jdbc.update("insert into catalog_management.promotion (id,tenant_id,workspace_id,slug,name,description,status,discount_type,discount_value,currency,starts_at,ends_at,minimum_quantity,stacking_policy,priority,version,created_at,updated_at) values (?,?,?,?,?,?,'DRAFT',?,?,?,?,?,?,?, ?,0,?,?)",
+				id, scope.tenantId(), scope.workspaceId(), required(slug, 140), required(name, 200), optional(description, 2000),
+				values.discountType(), values.discountValue(), values.currency(), timestamp(startsAt), timestamp(endsAt),
+				values.minimumQuantity(), values.stackingPolicy(), priority, now, now);
         writeTargets(scope, id, products, categories, clients, normalizedRules);
         return promotion(scope, id);
     }
 
     @Override
-    public CatalogManagementModels.PromotionView update(CatalogScope scope, UUID id, String slug, String name, String description,
+	public CatalogManagementModels.PromotionView update(CatalogScope scope, UUID id, String slug, String name, String description,
             String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
             BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds, long version) {
         requirePromotion(scope, id);
@@ -124,8 +134,17 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
     @Override
     public CatalogManagementModels.PromotionView update(CatalogScope scope, UUID id, String slug, String name, String description,
             String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
-            BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds,
-            List<UUID> clientAccountIds, List<CatalogManagementModels.PromotionRuleView> rules, long version) {
+			BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds,
+			List<UUID> clientAccountIds, List<CatalogManagementModels.PromotionRuleView> rules, long version) {
+		return update(scope, id, slug, name, description, discountType, discountValue, currency, startsAt, endsAt,
+				minimumQuantity, stackingPolicy, productIds, categoryIds, clientAccountIds, rules, version, 0);
+	}
+
+	@Override
+	public CatalogManagementModels.PromotionView update(CatalogScope scope, UUID id, String slug, String name, String description,
+			String discountType, BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt,
+			BigDecimal minimumQuantity, String stackingPolicy, List<UUID> productIds, List<UUID> categoryIds,
+			List<UUID> clientAccountIds, List<CatalogManagementModels.PromotionRuleView> rules, long version, int priority) {
         requirePromotion(scope, id);
         List<UUID> products = distinct(productIds);
         List<UUID> categories = distinct(categoryIds);
@@ -134,10 +153,11 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
         products.forEach(value -> requireProduct(scope, value));
         categories.forEach(value -> requireCategory(scope, value));
         clients.forEach(value -> requireClientAccount(scope, value));
-        PromotionValues values = values(discountType, discountValue, currency, startsAt, endsAt, minimumQuantity, stackingPolicy);
-        int updated = jdbc.update("update catalog_management.promotion set slug=?,name=?,description=?,discount_type=?,discount_value=?,currency=?,starts_at=?,ends_at=?,minimum_quantity=?,stacking_policy=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
-                required(slug, 140), required(name, 200), optional(description, 2000), values.discountType(), values.discountValue(),
-                values.currency(), timestamp(startsAt), timestamp(endsAt), values.minimumQuantity(), values.stackingPolicy(), now(),
+		PromotionValues values = values(discountType, discountValue, currency, startsAt, endsAt, minimumQuantity, stackingPolicy);
+		if (priority < -1_000_000 || priority > 1_000_000) throw new IllegalArgumentException("Promotion priority is invalid");
+		int updated = jdbc.update("update catalog_management.promotion set slug=?,name=?,description=?,discount_type=?,discount_value=?,currency=?,starts_at=?,ends_at=?,minimum_quantity=?,stacking_policy=?,priority=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
+				required(slug, 140), required(name, 200), optional(description, 2000), values.discountType(), values.discountValue(),
+				values.currency(), timestamp(startsAt), timestamp(endsAt), values.minimumQuantity(), values.stackingPolicy(), priority, now(),
                 scope.tenantId(), scope.workspaceId(), id, version);
         if (updated == 0) throw new CatalogConcurrencyException();
         writeTargets(scope, id, products, categories, clients, normalizedRules);
@@ -159,7 +179,7 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
     }
 
 	private CatalogManagementModels.PromotionView loadPromotion(CatalogScope scope, UUID id) {
-        List<CatalogManagementModels.PromotionView> result = jdbc.query("select id,slug,name,description,status,discount_type,discount_value,currency,starts_at,ends_at,minimum_quantity,stacking_policy,version from catalog_management.promotion where tenant_id=? and workspace_id=? and id=?",
+		List<CatalogManagementModels.PromotionView> result = jdbc.query("select id,slug,name,description,status,discount_type,discount_value,currency,starts_at,ends_at,minimum_quantity,stacking_policy,priority,version from catalog_management.promotion where tenant_id=? and workspace_id=? and id=?",
                 (rs, row) -> view(scope, rs), scope.tenantId(), scope.workspaceId(), id);
         if (result.isEmpty()) throw new CatalogResourceNotFoundException("promotion");
         return result.getFirst();
@@ -204,10 +224,10 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
                 (mapping, row) -> mapping.getObject(1, UUID.class).toString(), scope.tenantId(), scope.workspaceId(), promotionId);
         List<CatalogManagementModels.PromotionRuleView> rules = jdbc.query("select rule_type,rule_value from catalog_management.promotion_rule where tenant_id=? and workspace_id=? and promotion_id=? order by rule_type,rule_value",
                 (mapping, row) -> new CatalogManagementModels.PromotionRuleView(mapping.getString(1), mapping.getString(2)), scope.tenantId(), scope.workspaceId(), promotionId);
-        return new CatalogManagementModels.PromotionView(promotionId.toString(), rs.getString("slug"), rs.getString("name"), rs.getString("description"),
-                rs.getString("status"), rs.getString("discount_type"), rs.getBigDecimal("discount_value"), strip(rs.getString("currency")),
-                instant(rs.getTimestamp("starts_at")), instant(rs.getTimestamp("ends_at")), rs.getBigDecimal("minimum_quantity"),
-                rs.getString("stacking_policy"), products, categories, clients, rules, rs.getLong("version"));
+		return new CatalogManagementModels.PromotionView(promotionId.toString(), rs.getString("slug"), rs.getString("name"), rs.getString("description"),
+				rs.getString("status"), rs.getString("discount_type"), rs.getBigDecimal("discount_value"), strip(rs.getString("currency")),
+				instant(rs.getTimestamp("starts_at")), instant(rs.getTimestamp("ends_at")), rs.getBigDecimal("minimum_quantity"),
+				rs.getString("stacking_policy"), rs.getInt("priority"), products, categories, clients, rules, rs.getLong("version"));
     }
 
     private void writeTargets(CatalogScope scope, UUID promotionId, List<UUID> products, List<UUID> categories,
@@ -233,7 +253,7 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
         jdbc.update("delete from catalog_management.promotion_rule where tenant_id=? and workspace_id=? and promotion_id=?",
                 scope.tenantId(), scope.workspaceId(), promotionId);
         for (CatalogManagementModels.PromotionRuleView rule : rules) {
-            String type = enumValue(rule.type(), "ruleType", "MIN_ORDER_AMOUNT", "CLIENT_SEGMENT", "BUYER_TIER", "CURRENCY");
+            String type = enumValue(rule.type(), "ruleType", "MIN_ORDER_AMOUNT", "CLIENT_ACCOUNT", "CLIENT_ACCOUNT_ID", "CLIENT_SEGMENT", "BUYER_TIER", "CURRENCY");
             String value = required(rule.value(), 255);
             jdbc.update("insert into catalog_management.promotion_rule (id,promotion_id,tenant_id,workspace_id,rule_type,rule_value) values (?,?,?,?,?,?)",
                     UUID.randomUUID(), promotionId, scope.tenantId(), scope.workspaceId(), type, value);
@@ -320,5 +340,5 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
 	private record PromotionValues(String discountType, BigDecimal discountValue, String currency, BigDecimal minimumQuantity, String stackingPolicy) { }
 	private record PromotionRow(UUID id, String slug, String name, String description, String status, String discountType,
 			BigDecimal discountValue, String currency, Instant startsAt, Instant endsAt, BigDecimal minimumQuantity,
-			String stackingPolicy, long version) { }
+			String stackingPolicy, int priority, long version) { }
 }

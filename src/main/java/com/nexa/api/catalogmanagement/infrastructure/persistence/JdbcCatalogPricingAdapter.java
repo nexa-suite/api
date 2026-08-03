@@ -83,8 +83,9 @@ public class JdbcCatalogPricingAdapter implements CatalogPricingPort {
     }
 
     private CatalogManagementModels.PriceView price(ResultSet rs) throws SQLException {
+        BigDecimal amount = rs.getBigDecimal("amount");
         return new CatalogManagementModels.PriceView(rs.getObject("id", UUID.class).toString(), rs.getObject("product_id", UUID.class).toString(),
-                rs.getBigDecimal("amount"), rs.getString("currency").strip(), instant(rs.getTimestamp("valid_from")),
+                amount == null ? null : amount.stripTrailingZeros(), rs.getString("currency").strip(), instant(rs.getTimestamp("valid_from")),
                 instant(rs.getTimestamp("valid_until")), rs.getString("source_code"), rs.getString("source_description"),
                 rs.getTimestamp("cancelled_at") != null, rs.getLong("version"));
     }

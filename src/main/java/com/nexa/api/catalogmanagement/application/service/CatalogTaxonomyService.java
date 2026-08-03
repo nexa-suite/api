@@ -14,11 +14,15 @@ import com.nexa.api.catalogmanagement.domain.model.category.CategoryId;
 import com.nexa.api.catalogmanagement.domain.model.category.CategoryStatus;
 
 import java.util.UUID;
+import java.util.Objects;
 
 public final class CatalogTaxonomyService implements CatalogTaxonomyUseCase {
     private final CatalogTaxonomyPort port;
     private final CatalogAuthorizationPort authorization;
-    public CatalogTaxonomyService(CatalogTaxonomyPort port, CatalogAuthorizationPort authorization) { this.port = port; this.authorization = authorization; }
+    public CatalogTaxonomyService(CatalogTaxonomyPort port, CatalogAuthorizationPort authorization) {
+        this.port = Objects.requireNonNull(port, "Catalog taxonomy port is required");
+        this.authorization = Objects.requireNonNull(authorization, "Catalog authorization port is required");
+    }
     @Override public CatalogManagementModels.Page<CatalogManagementModels.CategoryView> categories(CatalogScope scope, int page, int size, String search) { authorization.require(CatalogPermissions.READ); return port.categories(scope, page, size, search); }
     @Override public CatalogManagementModels.CategoryView category(CatalogScope scope, UUID id) { authorization.require(CatalogPermissions.READ); return port.category(scope, id).orElseThrow(() -> new com.nexa.api.catalogmanagement.application.exception.CatalogResourceNotFoundException("category")); }
     @Override public CatalogManagementModels.CategoryView createCategory(CatalogScope scope, UUID parentId, String slug, String name, String description) {

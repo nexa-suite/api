@@ -178,7 +178,7 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
         UUID id = rs.getObject("current_price_id", UUID.class);
         if (id == null) return null;
         return new CatalogManagementModels.PriceView(id.toString(), rs.getObject("id", UUID.class).toString(),
-                rs.getBigDecimal("current_price_amount"), strip(rs.getString("current_price_currency")),
+                strip(rs.getBigDecimal("current_price_amount")), strip(rs.getString("current_price_currency")),
                 instant(rs.getTimestamp("current_price_from")), instant(rs.getTimestamp("current_price_until")),
                 rs.getString("current_price_source_code"), rs.getString("current_price_source_description"),
                 rs.getBoolean("current_price_cancelled"), rs.getLong("current_price_version"));
@@ -252,6 +252,7 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
 
     private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }
     private static Timestamp now() { return Timestamp.from(Instant.now()); }
+    private static BigDecimal strip(BigDecimal value) { return value == null ? null : value.stripTrailingZeros(); }
     private static String strip(String value) { return value == null ? null : value.strip(); }
     private static void pageCheck(int page, int size) { if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) throw new IllegalArgumentException("Invalid catalog pagination"); }
 }

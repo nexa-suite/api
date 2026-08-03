@@ -39,6 +39,13 @@ class ModernPostgresMigrationTests {
 			assertThat(columns(connection, "iam", "refresh_session")).containsExactlyInAnyOrder(
 				"id", "user_id", "membership_id", "surface", "token_hash", "family_id", "created_at", "last_used_at",
 				"expires_at", "revoked_at", "family_revoked_at", "replaced_by_session_id", "last_seen_at", "device_label", "coarse_ip", "version");
+			assertThat(columns(connection, "tenant_management", "workspace_settings")).containsExactlyInAnyOrder(
+				"workspace_id", "default_workspace_behavior", "version", "updated_at");
+			assertThat(columns(connection, "tenant_management", "operational_settings")).containsExactlyInAnyOrder(
+				"workspace_id", "warehouse_preference_strategy", "order_cutoff_policy", "fulfillment_defaults",
+				"inventory_visibility_policy", "buyer_availability_policy", "operating_hours_start",
+				"operating_hours_end", "order_cutoff_minutes", "thermal_log_required", "version", "updated_at");
+			assertThat(columns(connection, "catalog_management", "promotion")).contains("priority");
 		}
 	}
 
