@@ -61,7 +61,7 @@ public class CatalogQueryController {
 	}
 
 	@GetMapping
-	@Operation(summary = "List active catalog items")
+	@Operation(operationId = "listCatalogItems", summary = "List active catalog items")
 	@SecurityRequirement(name = "bearerAuth")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Catalog page returned"),
 			@ApiResponse(responseCode = "400", description = "Invalid query parameters"),
@@ -75,7 +75,7 @@ public class CatalogQueryController {
 	}
 
 	@GetMapping("/{catalogItemId}")
-	@Operation(summary = "Get an active catalog item")
+	@Operation(operationId = "getCatalogItem", summary = "Get an active catalog item")
 	@SecurityRequirement(name = "bearerAuth")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Catalog item returned"),
 			@ApiResponse(responseCode = "400", description = "Invalid catalog item ID"),

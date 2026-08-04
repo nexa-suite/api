@@ -113,39 +113,6 @@ public final class CatalogManagementController {
     public ResponseEntity<CatalogManagementModels.ProductView> product(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id) { var value = products.product(CatalogHttpSupport.scope(context), id); return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value); }
 
-    @PostMapping("/products")
-    public ResponseEntity<CatalogManagementModels.ProductView> createProduct(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody ProductRequest request) {
-        CatalogHttpSupport.requireIdempotency(idempotencyKey);
-        var value = products.createProduct(CatalogHttpSupport.scope(context), request.catalogItemId(), request.productCode(), request.slug(), request.name(), request.description(),
-                CatalogHttpSupport.uuid(request.categoryId()), CatalogHttpSupport.uuid(request.brandId()), request.storageTemperature(), request.presentation(), request.unitOfMeasure(), request.buyerVisible(), request.imagePath(), idempotencyKey);
-        return ResponseEntity.status(201).eTag(CatalogHttpSupport.etag(value.version())).body(value);
-    }
-
-    @PatchMapping("/products/{id}")
-    public ResponseEntity<CatalogManagementModels.ProductView> updateProduct(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
-            @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestBody ProductRequest request) {
-        var value = products.updateProduct(CatalogHttpSupport.scope(context), id, request.slug(), request.name(), request.description(), CatalogHttpSupport.uuid(request.categoryId()), CatalogHttpSupport.uuid(request.brandId()),
-                request.storageTemperature(), request.presentation(), request.unitOfMeasure(), request.buyerVisible(), request.imagePath(), CatalogHttpSupport.version(ifMatch));
-        return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
-    }
-
-    @PostMapping("/products/{id}/activations")
-    public ResponseEntity<CatalogManagementModels.ProductView> activateProduct(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
-            @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return productStatus(context, id, "ACTIVE", ifMatch); }
-
-    @PostMapping("/products/{id}/deactivations")
-    public ResponseEntity<CatalogManagementModels.ProductView> deactivateProduct(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
-            @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return productStatus(context, id, "INACTIVE", ifMatch); }
-
-    @PostMapping("/products/{id}/discontinuations")
-    public ResponseEntity<CatalogManagementModels.ProductView> discontinueProduct(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
-            @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return productStatus(context, id, "DISCONTINUED", ifMatch); }
-
-    @PostMapping("/products/{id}/archivings")
-    public ResponseEntity<CatalogManagementModels.ProductView> archiveProduct(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
-            @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return productStatus(context, id, "ARCHIVED", ifMatch); }
-
     private ResponseEntity<CatalogManagementModels.CategoryView> categoryStatus(CurrentAccessContext context, UUID id, String status, String ifMatch) {
         var value = taxonomy.changeCategoryStatus(CatalogHttpSupport.scope(context), id, status, CatalogHttpSupport.version(ifMatch));
         return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
@@ -154,14 +121,6 @@ public final class CatalogManagementController {
         var value = taxonomy.changeBrandStatus(CatalogHttpSupport.scope(context), id, status, CatalogHttpSupport.version(ifMatch));
         return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
-    private ResponseEntity<CatalogManagementModels.ProductView> productStatus(CurrentAccessContext context, UUID id, String status, String ifMatch) {
-        var value = products.changeStatus(CatalogHttpSupport.scope(context), id, status, CatalogHttpSupport.version(ifMatch));
-        return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
-    }
-
     public record CategoryRequest(String parentId, String slug, String name, String description) { }
     public record BrandRequest(String slug, String name, String description) { }
-    public record ProductRequest(String catalogItemId, String productCode, String slug, String name, String description,
-            String categoryId, String brandId, String storageTemperature, String presentation, String unitOfMeasure,
-            boolean buyerVisible, String imagePath) { }
 }

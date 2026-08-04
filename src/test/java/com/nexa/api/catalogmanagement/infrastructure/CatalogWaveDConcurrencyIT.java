@@ -58,6 +58,10 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         }
         if (priceProduct != null) {
             jdbc.update("delete from catalog_management.product_price where product_id=?", priceProduct);
+            jdbc.update("delete from catalog_management.sku_price where sku_id=?", priceProduct);
+            UUID familyId = jdbc.query("select family_id from catalog_management.sellable_sku where id=?", (rs, row) -> rs.getObject(1, UUID.class), priceProduct).stream().findFirst().orElse(null);
+            jdbc.update("delete from catalog_management.sellable_sku where id=?", priceProduct);
+            if (familyId != null) jdbc.update("delete from catalog_management.product_family where id=?", familyId);
             jdbc.update("delete from catalog_management.product_presentation where product_id=?", priceProduct);
             jdbc.update("delete from catalog_management.product_visibility where product_id=?", priceProduct);
             jdbc.update("delete from catalog_management.product_asset_reference where product_id=?", priceProduct);

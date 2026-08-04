@@ -63,6 +63,15 @@ public final class CatalogQueryService implements ListCatalogItemsUseCase, GetCa
 	public java.util.Optional<CatalogItemSnapshot> findActive(String catalogItemId, java.util.UUID tenantId, java.util.UUID workspaceId) {
 		CatalogItemDetail detail = queryPort.findByCatalogItemId(new CatalogScope(tenantId, workspaceId), new CatalogItemId(catalogItemId)).orElse(null);
 		return detail == null ? java.util.Optional.empty() : java.util.Optional.of(new CatalogItemSnapshot(
-				detail.catalogItemId(), detail.itemName(), detail.presentation(), detail.unitPriceAmount(), detail.unitPriceCurrency()));
+				 detail.catalogItemId(), detail.itemName(), detail.presentation(), detail.unitPriceAmount(), detail.unitPriceCurrency()));
+	}
+
+	@Override
+	public java.util.List<CatalogItemSnapshot> findActive(java.util.List<String> catalogItemIds, java.util.UUID tenantId, java.util.UUID workspaceId) {
+		if (catalogItemIds == null || catalogItemIds.isEmpty()) return java.util.List.of();
+		return queryPort.findByCatalogItemIds(new com.nexa.api.catalogmanagement.application.model.CatalogScope(tenantId, workspaceId),
+				catalogItemIds.stream().filter(id -> id != null && !id.isBlank()).distinct().map(CatalogItemId::new).toList()).stream()
+				.map(detail -> new CatalogItemSnapshot(detail.catalogItemId(), detail.itemName(), detail.presentation(), detail.unitPriceAmount(), detail.unitPriceCurrency()))
+				.toList();
 	}
 }
