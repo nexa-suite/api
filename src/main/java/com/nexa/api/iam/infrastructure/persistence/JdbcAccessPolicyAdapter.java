@@ -95,8 +95,17 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 
 	private Set<MembershipRole> roles(UUID membershipId, String membershipType) {
 		if ("BUYER".equals(membershipType)) return Set.of(MembershipRole.BUYER);
-		return jdbc.query("select role from tenant_management.membership_role_assignment where membership_id = ?",
-				(rs, row) -> MembershipRole.from(rs.getString("role")), membershipId)
-				.stream().collect(Collectors.toUnmodifiableSet());
+		return jdbc.query("select r.code from tenant_management.membership_role_definition a "
+				+ "join tenant_management.role_definition r on r.id=a.role_id "
+				+ "where a.membership_id=? and r.tenant_id is null and r.status='ACTIVE'",
+				(rs, row) -> rs.getString("code"), membershipId).stream()
+				.map(JdbcAccessPolicyAdapter::builtInRoleOrNull)
+				.filter(java.util.Objects::nonNull)
+				.collect(Collectors.toUnmodifiableSet());
+	}
+
+	private static MembershipRole builtInRoleOrNull(String code) {
+		try { return MembershipRole.from(code); }
+		catch (RuntimeException ignored) { return null; }
 	}
 }

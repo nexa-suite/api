@@ -116,14 +116,21 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 			return;
 		}
 
-		var authorities = java.util.stream.Stream.concat(resolved.permissionCodes().stream(),
-					resolved.permissions().stream().map(permission -> permission.code()))
-					.distinct().map(SimpleGrantedAuthority::new).toList();
+		/* The persisted authorization snapshot is the only HTTP authority.  The
+		 * legacy Permission enum remains available to application compatibility
+		 * code, but must never widen a canonical role into an old broad grant. */
+		var authorities = resolved.permissionCodes().stream()
+				.distinct().map(SimpleGrantedAuthority::new).toList();
 		var verifiedAuthentication = new JwtAuthenticationToken(jwt, authorities, jwtAuthentication.getName());
 		verifiedAuthentication.setDetails(jwtAuthentication.getDetails());
 		SecurityContextHolder.getContext().setAuthentication(verifiedAuthentication);
 		request.setAttribute(ACCESS_CONTEXT_ATTRIBUTE, resolved);
-		filterChain.doFilter(request, response);
+		RlsRequestScope.set(resolved.tenantId().value(), resolved.workspaceId().value());
+		try {
+			filterChain.doFilter(request, response);
+		} finally {
+			RlsRequestScope.clear();
+		}
 	}
 
 	private static String requiredClaim(Jwt jwt, String name) {

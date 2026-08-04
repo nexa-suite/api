@@ -5,6 +5,7 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.presentation.request.NotificationPreferencesRequest;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
@@ -32,6 +33,7 @@ public final class NotificationController {
 	public NotificationController(NotificationUseCase notifications) { this.notifications = notifications; }
 
 	@GetMapping({"/api/v1/notifications", "/api/v1/notifications/unread"})
+	@Operation(operationId = "listNotifications")
 	public NotificationPage inbox(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@RequestParam(defaultValue = "false") boolean unread,
 			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int limit) {

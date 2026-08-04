@@ -75,8 +75,9 @@ public class ApiSecurityConfiguration {
 				authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
 					if (observabilityProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
 					if (localProfile) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
-					authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
+						authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
 						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",
+						"/api/v1/integrations/stripe/webhooks",
 						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
 						"/api/v1/organization-invitation-acceptances",
 						"/api/v1/tenant-management/organization-registrations",

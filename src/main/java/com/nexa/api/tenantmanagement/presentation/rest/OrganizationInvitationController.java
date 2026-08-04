@@ -6,6 +6,7 @@ import com.nexa.api.tenantmanagement.application.model.InvitationModels;
 import com.nexa.api.tenantmanagement.application.port.in.InvitationUseCase;
 import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
@@ -36,16 +37,19 @@ public final class OrganizationInvitationController {
 	public OrganizationInvitationController(InvitationUseCase invitations) { this.invitations = invitations; }
 
 	@GetMapping("/organization-invitations")
+	@Operation(operationId = "listOrganizationInvitations")
 	public InvitationModels.InvitationList list(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int pageSize) { return invitations.list(context, page, pageSize); }
 
 	@GetMapping("/organization-invitations/{invitationId}")
+	@Operation(operationId = "getOrganizationInvitation")
 	public ResponseEntity<InvitationModels.InvitationView> detail(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context, @PathVariable UUID invitationId) {
 		var value = invitations.detail(context, invitationId);
 		return ResponseEntity.ok().eTag(etag(value.version())).body(value);
 	}
 
 	@PostMapping("/organization-invitations")
+	@Operation(operationId = "createOrganizationInvitation")
 	public ResponseEntity<InvitationModels.InvitationView> create(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody CreateInvitationRequest request, HttpServletRequest servletRequest) {
 		var value = invitations.create(context, request.email(), request.displayName(), request.roles(), idempotencyKey, correlation(servletRequest));
@@ -53,6 +57,7 @@ public final class OrganizationInvitationController {
 	}
 
 	@PostMapping("/organization-invitations/{invitationId}/revocations")
+	@Operation(operationId = "revokeOrganizationInvitation")
 	public ResponseEntity<InvitationModels.InvitationView> revoke(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable UUID invitationId, @RequestHeader(name = "If-Match", required = false) String ifMatch, HttpServletRequest servletRequest) {
 		var value = invitations.revoke(context, invitationId, version(ifMatch), correlation(servletRequest));
@@ -60,6 +65,7 @@ public final class OrganizationInvitationController {
 	}
 
 	@PostMapping("/organization-invitations/{invitationId}/resends")
+	@Operation(operationId = "resendOrganizationInvitation")
 	public ResponseEntity<InvitationModels.InvitationView> resend(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable UUID invitationId, @RequestHeader(name = "If-Match", required = false) String ifMatch, HttpServletRequest servletRequest) {
 		var value = invitations.resend(context, invitationId, version(ifMatch), correlation(servletRequest));
@@ -67,6 +73,7 @@ public final class OrganizationInvitationController {
 	}
 
 	@PostMapping("/organization-invitation-acceptances")
+	@Operation(operationId = "acceptOrganizationInvitation")
 	public ResponseEntity<InvitationModels.InvitationAcceptanceResult> accept(@RequestBody AcceptInvitationRequest request, HttpServletRequest servletRequest) {
 		return ResponseEntity.status(201).body(invitations.accept(request.token(), request.password(), request.displayName(), correlation(servletRequest)));
 	}

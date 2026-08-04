@@ -144,7 +144,7 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"" + token + "\",\"password\":\"integration-test-password\",\"displayName\":\"Invited Operator\"}"))
                 .andExpect(status().isNotFound());
-        assertThat(jdbc.queryForObject("select count(*) from tenant_management.membership_role_assignment r join tenant_management.workspace_membership m on m.id=r.membership_id join iam.user_account u on u.id=m.user_id where u.normalized_email=? and r.role='SALES'", Integer.class, email)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.membership_role_definition a join tenant_management.role_definition r on r.id=a.role_id join tenant_management.workspace_membership m on m.id=a.membership_id join iam.user_account u on u.id=m.user_id where u.normalized_email=? and r.code='sales'", Integer.class, email)).isEqualTo(1);
     }
 
     @Test
@@ -342,7 +342,9 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)", userId, email, email, username, username, "Pure Owner", "en");
         jdbc.update("insert into iam.password_credential (user_id,password_hash,algorithm,changed_at) values (?,?,'bcrypt',current_timestamp)", userId, passwordHash);
         jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)", membershipId, workspace, userId);
-        jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,'COMPANY_OWNER',current_timestamp)", membershipId, tenant, workspace);
+        jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+                + "select ?,?,?,r.id,current_timestamp from tenant_management.role_definition r where r.tenant_id is null and r.code='company_owner'",
+                membershipId, tenant, workspace);
         return accessToken(email, "PLATFORM");
     }
 }

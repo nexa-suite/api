@@ -24,7 +24,7 @@ class OrganizationActivationIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE")).andReturn();
         String tenantId = json(activated).get("tenantId").asText();
         String workspaceId = json(activated).get("workspaceId").asText();
-        var roles = jdbc.queryForList("select r.role from tenant_management.membership_role_assignment r join tenant_management.workspace_membership m on m.id=r.membership_id where m.user_id=? order by r.role", String.class,
+        var roles = jdbc.queryForList("select upper(r.code) from tenant_management.membership_role_definition a join tenant_management.role_definition r on r.id=a.role_id join tenant_management.workspace_membership m on m.id=a.membership_id where m.user_id=? order by r.code", String.class,
                 java.util.UUID.fromString(json(activated).get("founderUserId").asText()));
         assertThat(roles).containsExactly("COMPANY_OWNER", "TENANT_ADMIN");
         assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace where id=? and tenant_id=?", Integer.class,

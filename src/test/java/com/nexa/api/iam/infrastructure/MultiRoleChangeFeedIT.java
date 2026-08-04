@@ -36,13 +36,13 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
         jdbc.update("update tenant_management.workspace_membership set status='ACTIVE' where id=?",
                 java.util.UUID.fromString(membershipId(OWNER_EMAIL)));
         String membershipId = membershipId(OWNER_EMAIL);
-        jdbc.update("delete from tenant_management.membership_role_assignment where membership_id=?", java.util.UUID.fromString(membershipId));
-        jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) "
-                + "select m.id,w.tenant_id,m.workspace_id,?,current_timestamp from tenant_management.workspace_membership m "
-                + "join tenant_management.workspace w on w.id=m.workspace_id where m.id=?", "TENANT_ADMIN", java.util.UUID.fromString(membershipId));
-        jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) "
-                + "select m.id,w.tenant_id,m.workspace_id,?,current_timestamp from tenant_management.workspace_membership m "
-                + "join tenant_management.workspace w on w.id=m.workspace_id where m.id=?", "COMPANY_OWNER", java.util.UUID.fromString(membershipId));
+        jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", java.util.UUID.fromString(membershipId));
+        for (String role : java.util.List.of("tenant_admin", "company_owner")) {
+            jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+                    + "select m.id,w.tenant_id,m.workspace_id,r.id,current_timestamp from tenant_management.workspace_membership m "
+                    + "join tenant_management.workspace w on w.id=m.workspace_id join tenant_management.role_definition r "
+                    + "on r.tenant_id is null and r.code=? where m.id=?", role, java.util.UUID.fromString(membershipId));
+        }
     }
 
     @Test
@@ -62,8 +62,8 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         var initialRoles = json(initialSession).at("/membership/roles");
         assertThat(initialRoles.toString()).contains("TENANT_ADMIN", "COMPANY_OWNER");
-        assertThat(jdbc.query("select r.role from tenant_management.membership_role_assignment r "
-                        + "where r.membership_id=? order by r.role", (rs, row) -> rs.getString(1),
+        assertThat(jdbc.query("select upper(r.code) from tenant_management.membership_role_definition a "
+                        + "join tenant_management.role_definition r on r.id=a.role_id where a.membership_id=? order by r.code", (rs, row) -> rs.getString(1),
                 java.util.UUID.fromString(membershipId(OWNER_EMAIL))))
                 .containsExactly("COMPANY_OWNER", "TENANT_ADMIN");
 
