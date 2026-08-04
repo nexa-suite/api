@@ -48,6 +48,15 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
         return convert(createApprovedPurchaseRequest(), "convert-" + UUID.randomUUID());
     }
 
+    protected SalesOrderResource createConfirmedSalesOrder() throws Exception {
+        SalesOrderResource pending = createSalesOrder();
+        MvcResult confirmed = mockMvc.perform(post("/api/v1/sales-orders/" + pending.id() + "/confirmations")
+                        .header("Authorization", "Bearer " + pending.salesToken())
+                        .header("If-Match", pending.etag()))
+                .andExpect(status().isOk()).andReturn();
+        return new SalesOrderResource(pending.id(), confirmed.getResponse().getHeader("ETag"), pending.salesToken());
+    }
+
     protected DispatchResource createReservedDispatch() throws Exception {
         SalesOrderResource pending = createSalesOrder();
         MvcResult confirmed = mockMvc.perform(post("/api/v1/sales-orders/" + pending.id() + "/confirmations")

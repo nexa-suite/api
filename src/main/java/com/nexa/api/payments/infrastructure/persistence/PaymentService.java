@@ -1,7 +1,7 @@
 package com.nexa.api.payments.infrastructure.persistence;
 
-import com.nexa.api.payments.application.port.PaymentPort;
 import com.nexa.api.payments.application.model.PaymentModels;
+import com.nexa.api.payments.application.port.PaymentPersistencePort;
 import com.nexa.api.payments.application.port.StripePaymentProvider;
 import com.nexa.api.payments.domain.model.credit.CreditAccount;
 import com.nexa.api.payments.domain.model.credit.CreditReservation;
@@ -20,7 +20,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -40,10 +40,10 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
 
-/** Persistence adapter. Amounts, scope and final status stay server/webhook authoritative. */
+/** Persistence adapter for payment use cases. Amounts, scope and final status stay server/webhook authoritative. */
 @Profile("!test")
-@Repository
-public class PaymentService implements PaymentPort {
+@Component
+public class PaymentService implements PaymentPersistencePort {
     private final JdbcTemplate jdbc;
     private final StripePaymentProvider stripe;
     private final String publishableKey;
@@ -92,7 +92,7 @@ public class PaymentService implements PaymentPort {
     }
 
     @Transactional
-    public PaymentModels.ReceivableView createReceivable(CurrentAccessContext context, PaymentPort.ReceivableCommand request) {
+    public PaymentModels.ReceivableView createReceivable(CurrentAccessContext context, PaymentPersistencePort.ReceivableCommand request) {
         context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
         requireKey(request.idempotencyKey());
         lockIdempotencyKey(context, request.idempotencyKey());
@@ -198,7 +198,7 @@ public class PaymentService implements PaymentPort {
         }
         validateProofEvidence(context, receivable, proofEvidenceId);
         UUID paymentId = UUID.randomUUID(); Instant now = Instant.now();
-        int inserted = jdbc.update("insert into payments.payment (id,tenant_id,workspace_id,client_account_id,receivable_id,created_by_membership_id,method,status,amount,currency,provider,idempotency_key,bank_transfer_reference,bank_transfer_proof_evidence_id,created_at,updated_at) values (?,?,?,?,?,?, 'BANK_TRANSFER','PROCESSING',?,?, 'BANK_TRANSFER',?,?,?,?) on conflict (tenant_id,workspace_id,created_by_membership_id,idempotency_key) do nothing", paymentId, tenant(context), workspace(context), receivable.clientAccountId(), receivable.id(), context.membershipId().value(), amount, receivable.currency(), idempotencyKey, transferReference.trim(), proofEvidenceId, Timestamp.from(now), Timestamp.from(now));
+        int inserted = jdbc.update("insert into payments.payment (id,tenant_id,workspace_id,client_account_id,receivable_id,created_by_membership_id,method,status,amount,currency,provider,idempotency_key,bank_transfer_reference,bank_transfer_proof_evidence_id,created_at,updated_at) values (?,?,?,?,?,?, 'BANK_TRANSFER','PROCESSING',?,?, 'BANK_TRANSFER',?,?,?,?,?) on conflict (tenant_id,workspace_id,created_by_membership_id,idempotency_key) do nothing", paymentId, tenant(context), workspace(context), receivable.clientAccountId(), receivable.id(), context.membershipId().value(), amount, receivable.currency(), idempotencyKey, transferReference.trim(), proofEvidenceId, Timestamp.from(now), Timestamp.from(now));
         if (inserted == 0) {
             ExistingPayment concurrent = existingPayment(context, idempotencyKey);
             if (concurrent == null) throw new IllegalArgumentException("Payment idempotency claim was lost");
@@ -216,7 +216,7 @@ public class PaymentService implements PaymentPort {
         PaymentRow payment = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=? and p.method='BANK_TRANSFER' for update", (rs, n) -> paymentRow(rs), tenant(context), workspace(context), paymentId)
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Bank transfer payment not found"));
         String previousReviewKey = jdbc.query("select review_idempotency_key from payments.payment where tenant_id=? and workspace_id=? and id=? and method='BANK_TRANSFER'", (rs, n) -> rs.getString(1), tenant(context), workspace(context), paymentId)
-                .stream().findFirst().orElse(null);
+                .stream().filter(value -> value != null).findFirst().orElse(null);
         if (idempotencyKey.equals(previousReviewKey)) return paymentView(payment, "BANK_TRANSFER");
         if (!Set.of("PROCESSING", "FAILED").contains(payment.status())) throw new IllegalArgumentException("Bank transfer is not reviewable");
         String normalized = action == null ? "" : action.trim().toUpperCase(Locale.ROOT);
