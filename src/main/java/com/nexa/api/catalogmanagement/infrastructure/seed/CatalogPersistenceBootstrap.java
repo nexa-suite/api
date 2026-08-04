@@ -32,7 +32,7 @@ public class CatalogPersistenceBootstrap {
     }
 
     @EventListener(ApplicationReadyEvent.class)
-    @Order(Ordered.LOWEST_PRECEDENCE)
+    @Order(Ordered.LOWEST_PRECEDENCE - 20)
     @Transactional
     public void importDeterministicSeed() {
         List<Workspace> workspaces = jdbc.query("select t.id tenant_id,w.id workspace_id from tenant_management.tenant t join tenant_management.workspace w on w.tenant_id=t.id where t.status='ACTIVE' and w.status='ACTIVE' order by t.id,w.id",

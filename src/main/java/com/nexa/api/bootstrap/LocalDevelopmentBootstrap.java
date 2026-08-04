@@ -5,6 +5,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -37,6 +39,7 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	@EventListener(ApplicationReadyEvent.class)
+	@Order(Ordered.LOWEST_PRECEDENCE - 30)
 	@Transactional
 	public void seed() {
 		Instant now = clock.instant();
@@ -64,6 +67,19 @@ public class LocalDevelopmentBootstrap {
 			jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?,?,?,?,?) on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=excluded.updated_at", membershipId, tenantId, workspaceId, 0, timestamp(now));
 		}
 		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
+	}
+
+	/**
+	 * Warehouse lots depend on the canonical SKU projection. Run this after the
+	 * deterministic catalog import and Product Family/SKU reconciliation.
+	 */
+	@EventListener(ApplicationReadyEvent.class)
+	@Order(Ordered.LOWEST_PRECEDENCE)
+	@Transactional
+	public void seedWarehouseAfterCatalogReconciliation() {
+		Instant now = clock.instant();
+		UUID tenantId = tenant(now);
+		UUID workspaceId = workspace(tenantId, now);
 		seedWarehouse(tenantId, workspaceId, now);
 	}
 
