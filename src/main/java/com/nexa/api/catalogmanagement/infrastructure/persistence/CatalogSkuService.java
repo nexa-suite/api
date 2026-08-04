@@ -120,7 +120,7 @@ public class CatalogSkuService implements CatalogSkuPort {
                 packaging, unit, netWeight, grossWeight, packQuantity == null ? BigDecimal.ONE : packQuantity,
                 temperatureMin, temperatureMax, shelfLifeDays, minimumRemainingShelfLifeDays, lotTracking, expiryTracking,
                 taxCategory == null ? "STANDARD" : taxCategory, now);
-        jdbc.update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,sku_code,gtin,presentation,packaging_type,unit_of_measure,net_weight,gross_weight,pack_quantity,temperature_min,temperature_max,shelf_life_days,minimum_remaining_shelf_life_days,lot_tracking_required,expiry_tracking_required,tax_category,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DRAFT',true,0,?,?)",
+        jdbc.update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,sku_code,gtin,presentation,packaging_type,unit_of_measure,net_weight,gross_weight,pack_quantity,temperature_min,temperature_max,shelf_life_days,minimum_remaining_shelf_life_days,lot_tracking_required,expiry_tracking_required,tax_category,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DRAFT',true,0,?,?)",
                 sku.id(), sku.tenantId(), sku.workspaceId(), sku.familyId(), sku.skuCode(), sku.gtin(), sku.presentation(), sku.packagingType(), sku.unitOfMeasure(),
                 sku.netWeight(), sku.grossWeight(), sku.packQuantity(), sku.temperatureMin(), sku.temperatureMax(), sku.shelfLifeDays(), sku.minimumRemainingShelfLifeDays(),
                 sku.lotTrackingRequired(), sku.expiryTrackingRequired(), sku.taxCategory(), Timestamp.from(now), Timestamp.from(now));
