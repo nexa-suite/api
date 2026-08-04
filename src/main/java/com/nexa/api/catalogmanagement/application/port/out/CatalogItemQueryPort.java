@@ -8,6 +8,7 @@ import com.nexa.api.catalogmanagement.domain.model.catalogitem.CatalogItemId;
 import com.nexa.api.catalogmanagement.application.model.CatalogScope;
 
 import java.util.Optional;
+import java.util.List;
 
 public interface CatalogItemQueryPort {
 	CatalogPage<CatalogItemSummary> search(CatalogSearchCriteria criteria);
@@ -20,5 +21,14 @@ public interface CatalogItemQueryPort {
 
 	default Optional<CatalogItemDetail> findByCatalogItemId(CatalogScope scope, CatalogItemId catalogItemId) {
 		return findByCatalogItemId(catalogItemId);
+	}
+
+	default List<CatalogItemDetail> findByCatalogItemIds(CatalogScope scope, List<CatalogItemId> catalogItemIds) {
+		return catalogItemIds == null ? List.of() : catalogItemIds.stream()
+				.filter(java.util.Objects::nonNull)
+				.distinct()
+				.map(id -> findByCatalogItemId(scope, id).orElse(null))
+				.filter(java.util.Objects::nonNull)
+				.toList();
 	}
 }

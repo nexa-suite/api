@@ -124,7 +124,7 @@ final class WarehousePersistenceSupport {
                 rs.getString("catalog_item_id"), rs.getString("batch_number"),
                 rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
                 onHand, reserved, onHand.subtract(reserved), rs.getString("unit"),
-                rs.getString("status"), rs.getLong("version"));
+                rs.getString("status"), rs.getLong("version"), rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString());
     }
 
     static WarehouseOperationsService.MovementSummary movement(ResultSet rs) throws java.sql.SQLException {
@@ -133,7 +133,7 @@ final class WarehousePersistenceSupport {
                 rs.getString("movement_type"), rs.getBigDecimal("quantity"), rs.getString("unit"),
                 rs.getBigDecimal("quantity_before"), rs.getBigDecimal("quantity_after"),
                 rs.getBigDecimal("reserved_before"), rs.getBigDecimal("reserved_after"),
-                rs.getString("reason"), instant(rs, "occurred_at"));
+                rs.getString("reason"), instant(rs, "occurred_at"), rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString());
     }
 
     static Instant instant(ResultSet rs, String column) throws java.sql.SQLException {

@@ -4,6 +4,7 @@ import com.nexa.api.catalogmanagement.application.model.CatalogManagementModels;
 import com.nexa.api.catalogmanagement.application.port.in.CatalogPromotionUseCase;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
@@ -34,15 +35,18 @@ public final class CatalogPromotionController {
     public CatalogPromotionController(CatalogPromotionUseCase promotions) { this.promotions = promotions; }
 
     @GetMapping
+    @Operation(operationId = "listCatalogPromotions")
     public CatalogManagementModels.Page<CatalogManagementModels.PromotionView> list(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String status) { return promotions.promotions(CatalogHttpSupport.scope(context), page, size, status); }
 
     @GetMapping("/{id}")
+    @Operation(operationId = "getCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> detail(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id) { var value = promotions.promotion(CatalogHttpSupport.scope(context), id); return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value); }
 
     @PostMapping
+    @Operation(operationId = "createCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> create(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody PromotionRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
@@ -51,6 +55,7 @@ public final class CatalogPromotionController {
     }
 
     @PatchMapping("/{id}")
+    @Operation(operationId = "updateCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> update(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestBody PromotionRequest request) {
         var value = promotions.update(CatalogHttpSupport.scope(context), id, request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), CatalogHttpSupport.version(ifMatch), request.priority());
@@ -58,21 +63,27 @@ public final class CatalogPromotionController {
     }
 
     @PostMapping("/{id}/schedules")
+    @Operation(operationId = "scheduleCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> schedule(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return status(context, id, "SCHEDULED", ifMatch); }
     @PostMapping("/{id}/activations")
+    @Operation(operationId = "activateCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> activate(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return status(context, id, "ACTIVE", ifMatch); }
     @PostMapping("/{id}/pauses")
+    @Operation(operationId = "pauseCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> pause(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return status(context, id, "PAUSED", ifMatch); }
     @PostMapping("/{id}/resumptions")
+    @Operation(operationId = "resumeCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> resume(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return status(context, id, "ACTIVE", ifMatch); }
     @PostMapping("/{id}/cancellations")
+    @Operation(operationId = "cancelCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> cancel(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return status(context, id, "CANCELLED", ifMatch); }
     @PostMapping("/{id}/expirations")
+    @Operation(operationId = "expireCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> expire(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return status(context, id, "EXPIRED", ifMatch); }
 

@@ -1,14 +1,14 @@
 # ADR-012: Row-level security pilot boundary
 
-Status: Accepted — not enabled in FULL-PATCH-1
+Status: Accepted — selective RLS enabled in Service Foundation V1
 
 ## Context
 
-Nexa already enforces tenant and workspace scope in the verified access context, application use cases and parametrized persistence queries. PostgreSQL RLS was considered as an additional defense layer for a future pilot.
+Nexa enforces tenant and workspace scope in the verified access context, application use cases and parametrized persistence queries. Service Foundation V1 adds PostgreSQL RLS to the highest-risk Sales, Documents, Payments and Notification tables as a defense-in-depth boundary.
 
 ## Decision
 
-Do not enable RLS silently in this patch. A safe pilot requires a connection-pool-safe transaction boundary that sets and clears tenant/workspace context on every borrowed connection, migration coverage for every scoped table, and concurrency tests proving context cannot bleed between requests. Until those gates exist, the application remains the authoritative authorization boundary and the data network remains private.
+Enable selective RLS through a connection-pool-safe wrapper that sets and clears tenant/workspace context on every borrowed connection. `CurrentAccessContextFilter` sets the request scope only after the active membership and authorization version are revalidated. The application remains the primary authorization boundary; RLS is an additional database boundary, not a replacement for permissions.
 
 ## Evidence required before activation
 
@@ -18,4 +18,4 @@ Do not enable RLS silently in this patch. A safe pilot requires a connection-poo
 - negative BOLA tests proving both application and database denial;
 - runtime inspection showing no context survives connection return.
 
-RLS is therefore recorded as a bounded next step, not represented as implemented security.
+Known boundary: the local Compose database user owns the schemas, so PostgreSQL owner bypass remains available to controlled migrations/workers. Production deployment must use a non-owner runtime role and/or `FORCE ROW LEVEL SECURITY`, with worker scope propagation, before calling database isolation certification complete. The runtime wrapper still clears the settings before returning pooled connections.

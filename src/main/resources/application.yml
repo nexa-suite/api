@@ -41,6 +41,21 @@ info:
     name: Nexa API
     status: foundation
 
+nexa:
+  payments:
+    provider: ${NEXA_PAYMENTS_PROVIDER:}
+    secret-key: ${STRIPE_SECRET_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+  object-storage:
+    root: ${NEXA_OBJECT_STORAGE_ROOT:./.local-object-storage}
+    endpoint: ${NEXA_OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
+    bucket: ${NEXA_OBJECT_STORAGE_BUCKET:nexa-private}
+    access-key: ${NEXA_OBJECT_STORAGE_ACCESS_KEY:nexa-minio}
+    secret-key: ${NEXA_OBJECT_STORAGE_SECRET_KEY:nexa-minio-local-foundation}
+    region: ${NEXA_OBJECT_STORAGE_REGION:us-east-1}
+    timeout-ms: ${NEXA_OBJECT_STORAGE_TIMEOUT_MS:5000}
+
 springdoc:
   api-docs:
     enabled: false

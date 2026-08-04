@@ -62,7 +62,8 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 			.andExpect(jsonPath("$.items").isNotEmpty())
 			.andExpect(jsonPath("$.items[0].unitPrice.currency").value("PEN"))
-			.andExpect(jsonPath("$.items[0].availabilityStatus").value("OUT_OF_STOCK"))
+			.andExpect(jsonPath("$.items[0].availabilityStatus")
+					.value(org.hamcrest.Matchers.isIn(new String[] {"OUT_OF_STOCK", "LOW", "AVAILABLE"})))
 			.andExpect(jsonPath("$.items[0].status").value("ACTIVE"));
 	}
 

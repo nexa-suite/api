@@ -19,10 +19,10 @@ class BusinessDocumentArchitectureTests {
     }
 
     @Test void foundationHasNoControllerOrStorageBoundary() throws Exception {
-        try (var paths = Files.walk(INVOICING_SOURCE)) {
+        try (var paths = Files.walk(INVOICING_SOURCE.resolve("application"))) {
             for (Path path : paths.filter(Files::isRegularFile).toList()) {
                 String name = path.getFileName().toString().toLowerCase();
-                assertThat(name).doesNotContain("controller", "storage", "upload", "download", "persistence");
+                assertThat(name).doesNotContain("controller", "upload", "download", "persistence");
             }
         }
     }

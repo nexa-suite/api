@@ -6,6 +6,7 @@ dist/
 coverage/
 .env.local
 .local-keys/
+.local-object-storage/
 *.pem
 .DS_Store
 ._*

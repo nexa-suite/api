@@ -199,7 +199,8 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
     void authorizationOrganizationAndOperatorEventsHaveExactCounts() throws Exception {
         Map<String, Long> before = auditCounts();
         String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
-        jdbc.update("delete from tenant_management.membership_role_assignment where membership_id=(select id from tenant_management.workspace_membership where user_id=(select id from iam.user_account where normalized_email=?) and workspace_id=(select id from tenant_management.workspace where slug=?)) and role='COMPANY_OWNER'", OWNER_EMAIL, WORKSPACE_SLUG);
+        jdbc.update("delete from tenant_management.membership_role_definition a using tenant_management.role_definition r "
+                + "where a.role_id=r.id and a.membership_id=(select id from tenant_management.workspace_membership where user_id=(select id from iam.user_account where normalized_email=?) and workspace_id=(select id from tenant_management.workspace where slug=?)) and r.code='company_owner'", OWNER_EMAIL, WORKSPACE_SLUG);
         mockMvc.perform(get("/api/v1/session")
                         .header("Authorization", "Bearer " + ownerToken)
                         .header("X-Correlation-ID", "audit-sensitive-denied-" + uuid()))
@@ -293,11 +294,12 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
     private void restoreMembership(String email, String... roles) {
         UUID id = UUID.fromString(membershipId(email));
         jdbc.update("update tenant_management.workspace_membership set status='ACTIVE' where id=?", id);
-        jdbc.update("delete from tenant_management.membership_role_assignment where membership_id=?", id);
+        jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", id);
         for (String role : roles) {
-            jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) "
-                    + "select m.id,w.tenant_id,m.workspace_id,?,current_timestamp from tenant_management.workspace_membership m "
-                    + "join tenant_management.workspace w on w.id=m.workspace_id where m.id=?", role, id);
+            jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+                    + "select m.id,w.tenant_id,m.workspace_id,r.id,current_timestamp from tenant_management.workspace_membership m "
+                    + "join tenant_management.workspace w on w.id=m.workspace_id join tenant_management.role_definition r "
+                    + "on r.tenant_id is null and r.code=lower(?) where m.id=?", role, id);
         }
     }
 

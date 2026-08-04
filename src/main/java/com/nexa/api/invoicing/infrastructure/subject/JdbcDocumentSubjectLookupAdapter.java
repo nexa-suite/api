@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.UUID;
 
-/** Internal, read-only subject resolver. No document tables, files, endpoints or storage are involved. */
+/** Internal, read-only resolver for the bounded document subjects. It does not own document persistence or storage. */
 @Repository
 @Profile("!test")
 public class JdbcDocumentSubjectLookupAdapter implements DocumentSubjectLookupPort {
@@ -25,10 +25,24 @@ public class JdbcDocumentSubjectLookupAdapter implements DocumentSubjectLookupPo
         UUID id = uuid(subject.subjectId(), "subjectId");
         return switch (subject.type()) {
             case SALES_ORDER -> resolveSalesOrder(tenant, workspace, id, subject);
+            case PURCHASE_REQUEST -> resolvePurchaseRequest(tenant, workspace, id, subject);
+            case RECEIVABLE -> resolveReceivable(tenant, workspace, id, subject);
+            case PAYMENT -> resolvePayment(tenant, workspace, id, subject);
             case DISPATCH_ORDER -> resolveDispatchOrder(tenant, workspace, id, subject);
             case PROOF_OF_DELIVERY -> resolveProofOfDelivery(tenant, workspace, id, subject);
             case DELIVERY_INCIDENT -> resolveDeliveryIncident(tenant, workspace, id, subject);
         };
+    }
+
+    private DocumentSubjectSnapshot resolvePurchaseRequest(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {
+        return jdbc.query("select id,client_account_id,status from sales.purchase_request where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> snapshot(tenant, workspace, subject.type(), rs.getObject("id").toString(), rs.getObject("client_account_id").toString(), rs.getString("status"), true), tenant, workspace, id).stream().findFirst().orElseGet(() -> absent(tenant, workspace, subject));
+    }
+    private DocumentSubjectSnapshot resolveReceivable(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {
+        return jdbc.query("select id,client_account_id,status from payments.receivable where tenant_id=? and workspace_id=? and id=?", (rs, row) -> snapshot(tenant, workspace, subject.type(), rs.getObject("id").toString(), rs.getObject("client_account_id").toString(), rs.getString("status"), true), tenant, workspace, id).stream().findFirst().orElseGet(() -> absent(tenant, workspace, subject));
+    }
+    private DocumentSubjectSnapshot resolvePayment(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {
+        return jdbc.query("select id,client_account_id,status from payments.payment where tenant_id=? and workspace_id=? and id=?", (rs, row) -> snapshot(tenant, workspace, subject.type(), rs.getObject("id").toString(), nullable(rs.getObject("client_account_id")), rs.getString("status"), true), tenant, workspace, id).stream().findFirst().orElseGet(() -> absent(tenant, workspace, subject));
     }
 
     private DocumentSubjectSnapshot resolveSalesOrder(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {

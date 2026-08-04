@@ -11,4 +11,5 @@ if [ ! -f "${env_file}" ]; then
 fi
 
 docker compose --env-file "${env_file}" -f "${api_dir}/ops/compose/modern.compose.yml" up -d modern-api
+"${script_dir}/verify-local-workspace.sh"
 exec "${script_dir}/verify-local-demo-logins.sh"

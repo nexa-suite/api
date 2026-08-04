@@ -1,8 +1,5 @@
 package com.nexa.api.sales.infrastructure;
 
-import com.nexa.api.sales.application.buyerrequest.port.BuyerRequestBuilderUseCase;
-import com.nexa.api.sales.application.buyerrequest.port.BuyerRequestPersistencePort;
-import com.nexa.api.sales.application.buyerrequest.service.BuyerRequestBuilderService;
 import com.nexa.api.sales.application.clientaccountaddress.port.ClientAccountAddressPersistencePort;
 import com.nexa.api.sales.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.sales.application.clientaccountaddress.service.ClientAccountAddressService;
@@ -43,11 +40,10 @@ public class SalesRuntimeConfiguration {
 	}
 	@Bean SalesSnapshotAssembler salesSnapshotAssembler(ClientAccountCommercialPort accounts,
 			ClientAccountAddressPort addresses, WarehouseReferencePort warehouses, PeruGeographyPersistencePort geography,
-			MapRoutingPort maps, CatalogItemSnapshotLookupPort catalog) {
-		return new SalesSnapshotAssembler(accounts, addresses, warehouses, geography, maps, catalog);
+			MapRoutingPort maps, CatalogItemSnapshotLookupPort catalog,
+			com.nexa.api.sales.application.purchaserequest.port.SellableSkuSnapshotLookupPort sellableSkus) {
+		return new SalesSnapshotAssembler(accounts, addresses, warehouses, geography, maps, catalog, sellableSkus);
 	}
-	@Bean BuyerRequestBuilderUseCase buyerRequestBuilderUseCase(SalesSnapshotAssembler snapshots,
-			BuyerRequestPersistencePort persistence) { return new BuyerRequestBuilderService(snapshots, persistence); }
 	@Bean ManualSalesOrderUseCase manualSalesOrderUseCase(SalesSnapshotAssembler snapshots,
 			ManualSalesOrderPersistencePort persistence) { return new ManualSalesOrderService(snapshots, persistence); }
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,

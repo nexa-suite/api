@@ -29,6 +29,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -45,17 +46,27 @@ public final class SalesSnapshotAssembler {
     private final PeruGeographyPersistencePort geography;
     private final MapRoutingPort maps;
     private final com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort catalog;
+    private final com.nexa.api.sales.application.purchaserequest.port.SellableSkuSnapshotLookupPort sellableSkus;
 
     public SalesSnapshotAssembler(ClientAccountCommercialPort commercial, ClientAccountAddressPort addresses,
                                   WarehouseReferencePort warehouses, PeruGeographyPersistencePort geography,
                                   MapRoutingPort maps,
                                   com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort catalog) {
+        this(commercial, addresses, warehouses, geography, maps, catalog, null);
+    }
+
+    public SalesSnapshotAssembler(ClientAccountCommercialPort commercial, ClientAccountAddressPort addresses,
+                                  WarehouseReferencePort warehouses, PeruGeographyPersistencePort geography,
+                                  MapRoutingPort maps,
+                                  com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort catalog,
+                                  com.nexa.api.sales.application.purchaserequest.port.SellableSkuSnapshotLookupPort sellableSkus) {
         this.commercial = Objects.requireNonNull(commercial);
         this.addresses = Objects.requireNonNull(addresses);
         this.warehouses = Objects.requireNonNull(warehouses);
         this.geography = Objects.requireNonNull(geography);
         this.maps = Objects.requireNonNull(maps);
         this.catalog = Objects.requireNonNull(catalog);
+        this.sellableSkus = sellableSkus;
     }
 
     public BuyerAssembly buyer(CurrentAccessContext context, String clientAccountId, String addressId,
@@ -153,12 +164,15 @@ public final class SalesSnapshotAssembler {
                                                  CurrentAccessContext context) {
         List<PurchaseRequestLine> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
-        for (var line : requested == null ? List.<com.nexa.api.sales.application.buyerrequest.model.CreateBuyerRequestCommand.Line>of() : requested) {
+        List<com.nexa.api.sales.application.buyerrequest.model.CreateBuyerRequestCommand.Line> safeLines = requested == null ? List.of() : requested;
+        Map<String, CatalogItemSnapshot> snapshots = catalog.findActiveById(safeLines.stream().map(line -> line == null ? null : line.catalogItemId()).toList(),
+                context.tenantId().value(), context.workspaceId().value());
+        for (var line : safeLines) {
             if (line == null || line.catalogItemId() == null || !seen.add(line.catalogItemId().trim())) {
                 throw new SalesInvariantViolation("Buyer request line is duplicated or invalid");
             }
-            CatalogItemSnapshot item = catalog.findActive(line.catalogItemId(), context.tenantId().value(), context.workspaceId().value())
-                    .orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("catalog-item"));
+            CatalogItemSnapshot item = snapshots.get(line.catalogItemId().trim());
+            if (item == null) throw new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("catalog-item");
             var quantity = new RequestedQuantity(line.quantity());
             String unit = line.unit() == null || line.unit().isBlank() ? "unit" : line.unit();
             result.add(new PurchaseRequestLine(new PurchaseRequestLineId(UUID.randomUUID()), item, quantity, unit, line.notes()));
@@ -173,17 +187,37 @@ public final class SalesSnapshotAssembler {
         List<com.nexa.api.sales.domain.model.salesorder.SalesOrderLine> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         String currency = normalizeCurrency(requestedCurrency);
-        for (var line : requested == null ? List.<com.nexa.api.sales.application.salesorder.model.CreateManualSalesOrderCommand.Line>of() : requested) {
-            if (line == null || line.catalogItemId() == null || !seen.add(line.catalogItemId().trim())) {
+        List<com.nexa.api.sales.application.salesorder.model.CreateManualSalesOrderCommand.Line> safeLines = requested == null ? List.of() : requested;
+        Map<UUID, com.nexa.api.sales.application.purchaserequest.port.SellableSkuSnapshotLookupPort.Snapshot> skuSnapshots = sellableSkus == null
+                ? Map.of()
+                : sellableSkus.findActive(safeLines.stream().map(line -> line == null ? null : line.skuId()).toList(),
+                        context.tenantId().value(), context.workspaceId().value());
+        Map<String, CatalogItemSnapshot> catalogSnapshots = catalog.findActiveById(safeLines.stream()
+                        .filter(line -> line != null && line.skuId() == null)
+                        .map(com.nexa.api.sales.application.salesorder.model.CreateManualSalesOrderCommand.Line::catalogItemId).toList(),
+                context.tenantId().value(), context.workspaceId().value());
+        for (var line : safeLines) {
+            String identity = line == null ? null : line.skuId() != null ? "SKU:" + line.skuId() : line.catalogItemId();
+            if (line == null || (line.skuId() == null && (line.catalogItemId() == null || line.catalogItemId().isBlank())) || !seen.add(identity.trim())) {
                 throw new SalesInvariantViolation("Manual sales order line is duplicated or invalid");
             }
-            CatalogItemSnapshot item = catalog.findActive(line.catalogItemId(), context.tenantId().value(), context.workspaceId().value())
-                    .orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("catalog-item"));
-            if (!currency.equals(item.price().currency())) throw new SalesInvariantViolation("Order currency does not match catalog price");
             String unit = line.unit() == null || line.unit().isBlank() ? "unit" : line.unit();
             BigDecimal quantity = new RequestedQuantity(line.quantity()).value();
-            result.add(new com.nexa.api.sales.domain.model.salesorder.SalesOrderLine(item.catalogItemId(), item.itemName(),
-                    item.presentation(), quantity, unit, item.price().amount(), item.price().currency(), quantity.multiply(item.price().amount())));
+            if (line.skuId() != null) {
+                if (sellableSkus == null) throw new SalesInvariantViolation("Canonical SKU lookup is unavailable");
+                var sku = skuSnapshots.get(line.skuId());
+                if (sku == null) throw new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("sellable-sku");
+                if (!currency.equals(sku.currency())) throw new SalesInvariantViolation("Order currency does not match catalog price");
+                String legacyId = sku.legacyCatalogItemId() == null || sku.legacyCatalogItemId().isBlank() ? sku.skuCode() : sku.legacyCatalogItemId();
+                result.add(new com.nexa.api.sales.domain.model.salesorder.SalesOrderLine(legacyId, sku.familyName(), sku.presentation(), quantity,
+                        unit, sku.price(), sku.currency(), quantity.multiply(sku.price()), sku.skuId(), sku.familyId(), sku.skuCode(), sku.familyCode()));
+            } else {
+                CatalogItemSnapshot item = catalogSnapshots.get(line.catalogItemId().trim());
+                if (item == null) throw new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("catalog-item");
+                if (!currency.equals(item.price().currency())) throw new SalesInvariantViolation("Order currency does not match catalog price");
+                result.add(new com.nexa.api.sales.domain.model.salesorder.SalesOrderLine(item.catalogItemId(), item.itemName(),
+                        item.presentation(), quantity, unit, item.price().amount(), item.price().currency(), quantity.multiply(item.price().amount())));
+            }
         }
         if (result.isEmpty()) throw new SalesInvariantViolation("Manual sales order requires a line");
         return List.copyOf(result);

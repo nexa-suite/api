@@ -238,6 +238,13 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PurchaseRequestView result = detail(context, id);
 		events.append(UUID.randomUUID(), id, scope(context), workspace(context), context.membershipId().toString(),
 				target, current.status(), target, now());
+		if ("submit".equals(normalized)) {
+			events.appendCanonical("PURCHASE_REQUEST_SUBMITTED", id, scope(context), workspace(context),
+				"purchase-request-" + id, null, java.util.Map.of("purchaseRequestId", UUID.fromString(id), "status", target), now());
+		} else if ("approve".equals(normalized)) {
+			events.appendCanonical("PURCHASE_REQUEST_APPROVED", id, scope(context), workspace(context),
+				"purchase-request-" + id, null, java.util.Map.of("purchaseRequestId", UUID.fromString(id), "purchaseRequestVersion", result.version()), now());
+		}
 		appendChange(context, result, eventType(normalized), target);
 		if ("submit".equals(normalized)) {
 			idempotency.save(scope(context), workspace(context), context.membershipId().toString(),

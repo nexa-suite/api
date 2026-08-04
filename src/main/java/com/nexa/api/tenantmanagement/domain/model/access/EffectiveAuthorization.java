@@ -45,12 +45,28 @@ public record EffectiveAuthorization(Set<String> roleDefinitionIds, Set<String> 
 		for (RoleDefinition definition : definitions) {
 			if (definition.status() != RoleDefinitionStatus.ACTIVE) continue;
 			roleIds.add(definition.id().toString());
-			roleCodes.add(definition.code());
+			roleCodes.add(apiRoleCode(definition));
 			keys.addAll(definition.permissions());
 		}
 		if (roleCodes.isEmpty()) throw new AccessPolicyViolation("At least one active role is required");
 		LinkedHashSet<String> permissions = new LinkedHashSet<>(PermissionCatalog.compatibilityCodes(keys));
 		return new EffectiveAuthorization(roleIds, roleCodes, permissions, authorizationVersion);
+	}
+
+	/** Runtime authority: only persisted RoleDefinition/RolePermission assignments are evaluated. */
+	public static EffectiveAuthorization canonical(Collection<RoleDefinition> definitions, long authorizationVersion) {
+		Objects.requireNonNull(definitions, "Role definitions are required");
+		LinkedHashSet<String> roleIds = new LinkedHashSet<>();
+		LinkedHashSet<String> roleCodes = new LinkedHashSet<>();
+		java.util.EnumSet<PermissionKey> keys = java.util.EnumSet.noneOf(PermissionKey.class);
+		for (RoleDefinition definition : definitions) {
+			if (definition.status() != RoleDefinitionStatus.ACTIVE) continue;
+			roleIds.add(definition.id().toString());
+			roleCodes.add(apiRoleCode(definition));
+			keys.addAll(definition.permissions());
+		}
+		if (roleCodes.isEmpty()) throw new AccessPolicyViolation("At least one active canonical role is required");
+		return new EffectiveAuthorization(roleIds, roleCodes, PermissionCatalog.compatibilityCodes(keys), authorizationVersion);
 	}
 
 	public boolean allows(PermissionKey permission) { return permission != null && permissionCodes.contains(permission.code()); }
@@ -104,5 +120,13 @@ public record EffectiveAuthorization(Set<String> roleDefinitionIds, Set<String> 
 			normalized.add(preserveCase ? value.trim() : value.trim().toLowerCase(java.util.Locale.ROOT));
 		}
 		return Set.copyOf(normalized);
+	}
+
+	private static String apiRoleCode(RoleDefinition definition) {
+		return java.util.Arrays.stream(MembershipRole.values())
+				.filter(role -> role.name().equalsIgnoreCase(definition.code()))
+				.map(Enum::name)
+				.findFirst()
+				.orElse(definition.code());
 	}
 }

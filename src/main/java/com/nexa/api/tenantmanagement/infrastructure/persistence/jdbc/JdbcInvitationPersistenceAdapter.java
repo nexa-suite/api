@@ -135,7 +135,12 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 
 	@Override
 	public void assignRoles(UUID membershipId, String tenantId, String workspaceId, Set<String> roles, Instant now) {
-		for (String role : roles) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,?,?)", membershipId, uuid(tenantId), uuid(workspaceId), role, Timestamp.from(now));
+		for (String role : roles) jdbc.update("insert into tenant_management.membership_role_definition "
+				+ "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+				+ "select ?,?,?,r.id,? from tenant_management.role_definition r "
+				+ "where r.tenant_id is null and r.code=lower(?) and r.status='ACTIVE' "
+				+ "on conflict (membership_id,role_id) do nothing",
+				membershipId, uuid(tenantId), uuid(workspaceId), Timestamp.from(now), role);
 	}
 
 	private Optional<InvitationSnapshot> querySnapshot(String sql, Object... args) {

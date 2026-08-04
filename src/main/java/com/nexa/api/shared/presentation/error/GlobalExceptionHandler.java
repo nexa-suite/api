@@ -34,6 +34,8 @@ import com.nexa.api.tenantmanagement.presentation.rest.OrganizationAdministratio
 import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.sales.application.exception.PurchaseRequestAlreadyConvertedException;
+import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
+import com.nexa.api.sales.application.exception.PurchaseRequestDraftPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
@@ -48,6 +50,7 @@ import com.nexa.api.logistics.application.LogisticsOperationsService;
 import com.nexa.api.logistics.domain.dispatchorder.DispatchTransitionViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogConcurrencyException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogConflictException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogIdempotencyKeyRequiredException;
@@ -262,7 +265,7 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
 		LOGGER.warn("Data integrity constraint rejected request {}", request.getRequestURI(), exception.getMostSpecificCause());
 		String message = exception.getMostSpecificCause() == null ? "" : String.valueOf(exception.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
-		ApiErrorCode code = message.contains("ex_catalog_price_no_overlap") ? ApiErrorCode.CATALOG_PRICE_OVERLAP
+		ApiErrorCode code = message.contains("ex_catalog_price_no_overlap") || message.contains("ex_sku_price_no_overlap") ? ApiErrorCode.CATALOG_PRICE_OVERLAP
 				: message.contains("uq_catalog_category_slug") || message.contains("uq_catalog_brand_slug") || message.contains("uq_catalog_product_") || message.contains("uq_catalog_promotion_slug") ? ApiErrorCode.CATALOG_CONFLICT
 				: message.contains("uq_organization_registration_slug") ? ApiErrorCode.REGISTRATION_SLUG_CONFLICT
 				: message.contains("uq_workspace_tenant_slug") ? ApiErrorCode.WORKSPACE_SLUG_CONFLICT
@@ -275,15 +278,28 @@ public final class GlobalExceptionHandler {
 				? "Organization workspace slug is already registered" : "Sales resource conflicts with existing data";
 		return response(HttpStatus.CONFLICT, code, detail, request);
 	}
+	@ExceptionHandler(InvalidDataAccessApiUsageException.class)
+	public ResponseEntity<ProblemDetail> handleInvalidDataAccessUsage(InvalidDataAccessApiUsageException exception, HttpServletRequest request) {
+		String message = exception.getMessage() == null ? "" : exception.getMessage().toLowerCase(java.util.Locale.ROOT);
+		if (message.contains("evidence rejected") || message.contains("mime type mismatch") || message.contains("empty_file")
+				|| message.contains("malware") || message.contains("unknown_content_type")) {
+			return response(HttpStatus.BAD_REQUEST, ApiErrorCode.INVALID_REQUEST, "Evidence is invalid", request);
+		}
+		return handleUnexpected(exception, request);
+	}
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request); }
+	@ExceptionHandler(PurchaseRequestDraftConcurrencyException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.CONCURRENCY_CONFLICT, "Purchase request draft version is stale", request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
 	@ExceptionHandler(PurchaseRequestAlreadyConvertedException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestAlreadyConverted(PurchaseRequestAlreadyConvertedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_ALREADY_CONVERTED, "Purchase request has already been converted", request); }
 	@ExceptionHandler(SalesPreconditionRequiredException.class)
 	public ResponseEntity<ProblemDetail> handleSalesPrecondition(SalesPreconditionRequiredException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request); }
+	@ExceptionHandler(PurchaseRequestDraftPreconditionRequiredException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftPrecondition(PurchaseRequestDraftPreconditionRequiredException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request); }
 	@ExceptionHandler(IdempotencyKeyRequiredException.class)
 	public ResponseEntity<ProblemDetail> handleIdempotency(IdempotencyKeyRequiredException exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request); }
 		@ExceptionHandler(PurchaseRequestTransitionException.class)

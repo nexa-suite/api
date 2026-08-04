@@ -16,6 +16,7 @@ import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import org.springframework.stereotype.Repository;
 import org.springframework.context.annotation.Profile;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -28,23 +29,25 @@ public class JpaVerifiedMembershipResolutionAdapter implements VerifiedMembershi
 	private final TenantJpaRepository tenants;
 	private final WorkspaceMembershipRoleJpaRepository roleAssignments;
 	private final AuthorizationResolutionPort authorization;
+	private final JdbcTemplate jdbc;
 
 	public JpaVerifiedMembershipResolutionAdapter(WorkspaceMembershipJpaRepository memberships,
 			WorkspaceJpaRepository workspaces, TenantJpaRepository tenants, WorkspaceMembershipRoleJpaRepository roleAssignments) {
 		this(memberships, workspaces, tenants, roleAssignments,
 				request -> com.nexa.api.tenantmanagement.domain.model.access.EffectiveAuthorization.fixed(
-						request.fixedRoles(), request.authorizationVersion()));
+						request.fixedRoles(), request.authorizationVersion()), null);
 	}
 
 	@Autowired
 	public JpaVerifiedMembershipResolutionAdapter(WorkspaceMembershipJpaRepository memberships,
 			WorkspaceJpaRepository workspaces, TenantJpaRepository tenants, WorkspaceMembershipRoleJpaRepository roleAssignments,
-			AuthorizationResolutionPort authorization) {
+			AuthorizationResolutionPort authorization, JdbcTemplate jdbc) {
 		this.memberships = memberships;
 		this.workspaces = workspaces;
 		this.tenants = tenants;
 		this.roleAssignments = roleAssignments;
 		this.authorization = authorization;
+		this.jdbc = jdbc;
 	}
 
 	@Override
@@ -73,7 +76,13 @@ public class JpaVerifiedMembershipResolutionAdapter implements VerifiedMembershi
 
 	private java.util.Set<MembershipRole> rolesFor(WorkspaceMembershipJpaEntity membership) {
 		if ("BUYER".equals(membership.getMembershipType())) return java.util.Set.of(MembershipRole.BUYER);
-		return roleAssignments.findByMembershipId(membership.getId()).stream()
-				.map(value -> MembershipRole.from(value.getRole())).collect(java.util.stream.Collectors.toUnmodifiableSet());
+		/* RoleDefinition/RolePermission is the sole runtime authority. The old
+		 * membership_role_assignment entity remains only as an upgrade ledger. */
+		if (jdbc == null) throw new IllegalStateException("Canonical role authority is not configured");
+		return jdbc.query("select r.code from tenant_management.membership_role_definition a "
+				+ "join tenant_management.role_definition r on r.id=a.role_id "
+				+ "where a.membership_id=? and r.tenant_id is null and r.status='ACTIVE'",
+				(rs, row) -> MembershipRole.from(rs.getString(1)), membership.getId())
+				.stream().collect(java.util.stream.Collectors.toUnmodifiableSet());
 	}
 }

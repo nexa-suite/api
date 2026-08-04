@@ -1,2 +1,2 @@
-/** Stable TASK-011 Business Documents vocabulary only; no aggregate or persistence behavior. */
+/** Stable Business Documents vocabulary; generation and storage remain behind application ports. */
 package com.nexa.api.invoicing.domain.model.businessdocument;

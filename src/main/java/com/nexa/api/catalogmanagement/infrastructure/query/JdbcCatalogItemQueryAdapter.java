@@ -108,6 +108,23 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         return Optional.of(detail(scope, rows.getFirst(), enrichment));
     }
 
+    @Override
+    public List<CatalogItemDetail> findByCatalogItemIds(CatalogScope scope, List<CatalogItemId> ids) {
+        if (ids == null || ids.isEmpty()) return List.of();
+        List<String> values = ids.stream().filter(java.util.Objects::nonNull).map(CatalogItemId::value).distinct().toList();
+        if (values.isEmpty()) return List.of();
+        String placeholders = values.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        String predicate = " where p.tenant_id=? and p.workspace_id=? and p.catalog_item_id in (" + placeholders + ") and p.status='ACTIVE'"
+                + (scope.buyerView() ? " and pv.buyer_visible=true" : "");
+        List<Object> parameters = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
+        parameters.addAll(values);
+        List<Row> rows = jdbc.query("select p.id,p.catalog_item_id,p.product_code,p.name,c.id,c.name,b.name,pp.presentation,p.description,"
+                + "p.storage_temperature,p.status,coalesce(current_price.amount,0),coalesce(current_price.currency,'PEN'),"
+                + "asset.asset_path,asset.file_name " + fromClause() + predicate, this::row, parameters.toArray());
+        Enrichment enrichment = enrich(scope, rows);
+        return rows.stream().map(row -> detail(scope, row, enrichment)).toList();
+    }
+
     private CatalogItemSummary summary(CatalogScope scope, Row row, Enrichment enrichment) {
         CatalogPricingView value = enrichment.pricing().getOrDefault(row.catalogItemId(), CatalogPricingView.base(row.amount(), row.currency(), clock.instant()));
         String label = enrichment.promotions().getOrDefault(row.catalogItemId(), List.of()).stream()

@@ -7,6 +7,7 @@ import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrat
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import jakarta.servlet.http.HttpServletRequest;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +28,7 @@ public class OrganizationAdministrationController {
 	public OrganizationAdministrationController(OrganizationAdministrationUseCase administration) { this.administration = administration; }
 
 	@GetMapping("/organization/current")
+	@Operation(operationId = "getCurrentOrganization")
 	public ResponseEntity<OrganizationResponse> organization(@RequestAttribute("com.nexa.api.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) {
 		OrganizationResponse value = OrganizationResponse.from(administration.organization(context));
 		return ResponseEntity.ok().eTag(etag(value.version())).body(value);

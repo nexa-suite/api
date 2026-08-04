@@ -13,7 +13,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
  * role-definition persistence. It still produces the canonical typed union.
  */
 @Component
-@Profile("!test")
+@Profile("test")
 @ConditionalOnProperty(prefix = "nexa.tenant.roles", name = "persistence-enabled", havingValue = "false")
 public final class FixedAuthorizationResolutionAdapter implements AuthorizationResolutionPort {
 	@Override

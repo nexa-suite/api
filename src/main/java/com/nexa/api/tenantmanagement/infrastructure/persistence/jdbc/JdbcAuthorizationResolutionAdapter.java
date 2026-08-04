@@ -27,7 +27,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** Resolves fixed and tenant-defined role permissions on every access-context build. */
+/** Resolves the persisted canonical RoleDefinition authority on every access-context build. */
 @Component
 @Profile("!test")
 @ConditionalOnProperty(prefix = "nexa.tenant.roles", name = "persistence-enabled", havingValue = "true", matchIfMissing = true)
@@ -48,7 +48,7 @@ public final class JdbcAuthorizationResolutionAdapter implements AuthorizationRe
 		 * invalidate an access snapshot. */
 		Long version = jdbc.queryForObject("select coalesce((select authorization_version from tenant_management.membership_authorization_state where membership_id=?),0)", Long.class,
 				membershipId);
-		return EffectiveAuthorization.of(definitions, request.fixedRoles(), version == null ? 0 : version);
+		return EffectiveAuthorization.canonical(definitions, version == null ? 0 : version);
 	}
 
 	private static RoleDefinition restore(ResultSet rs) throws SQLException {

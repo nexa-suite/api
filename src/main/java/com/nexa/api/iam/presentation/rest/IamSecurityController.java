@@ -168,7 +168,7 @@ public final class IamSecurityController {
 	}
 
 	@PostMapping("/internal/organization-registrations/{registrationId}/rejection")
-	@Operation(summary = "Reject an organization using the system-only boundary")
+	@Operation(operationId = "rejectOrganizationRegistration", summary = "Reject an organization using the system-only boundary")
 	public RegistrationResponse reject(@PathVariable UUID registrationId, Authentication authentication,
 			@Valid @RequestBody RejectionRequest request, HttpServletRequest httpRequest) {
 		return toResponse(rejectRegistration.reject(registrationId, operator(authentication), request.reason(), correlation(httpRequest), trace(httpRequest)));
