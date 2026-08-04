@@ -3,6 +3,7 @@ package com.nexa.api.sales.presentation.salesorder;
 import com.nexa.api.sales.application.salesorder.model.CreateManualSalesOrderCommand;
 import com.nexa.api.sales.application.salesorder.model.ManualSalesOrderView;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderUseCase;
+import com.nexa.api.sales.presentation.SalesHttpHeaders;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.sales.presentation.request.DeliveryAddressRequest;
@@ -13,12 +14,14 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -37,10 +40,12 @@ public final class ManualSalesOrderController {
     @PostMapping
     @Operation(operationId = "createManualSalesOrder", summary = "Create a manual sales order")
     public ResponseEntity<ManualSalesOrderView> create(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
-                                                       @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+                                                       @Parameter(name = "Idempotency-Key", required = true)
+                                                       @RequestHeader(name = "Idempotency-Key") String idempotencyKey,
                                                        @Valid @RequestBody CreateRequest request) {
         var value = orders.create(context, request.command(), idempotencyKey);
-        return ResponseEntity.status(201).body(value);
+        return ResponseEntity.created(URI.create("/api/v1/sales-orders/" + value.id()))
+                .eTag(SalesHttpHeaders.etag(value.version())).body(value);
     }
 
     public record CreateRequest(@NotBlank @Size(max = 64) String clientAccountId,

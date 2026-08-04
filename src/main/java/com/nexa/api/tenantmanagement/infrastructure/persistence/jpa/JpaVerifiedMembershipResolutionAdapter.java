@@ -82,7 +82,13 @@ public class JpaVerifiedMembershipResolutionAdapter implements VerifiedMembershi
 		return jdbc.query("select r.code from tenant_management.membership_role_definition a "
 				+ "join tenant_management.role_definition r on r.id=a.role_id "
 				+ "where a.membership_id=? and r.tenant_id is null and r.status='ACTIVE'",
-				(rs, row) -> MembershipRole.from(rs.getString(1)), membership.getId())
-				.stream().collect(java.util.stream.Collectors.toUnmodifiableSet());
+				(rs, row) -> rs.getString(1), membership.getId())
+				.stream().map(this::fixedRoleOrNull).filter(java.util.Objects::nonNull)
+				.collect(java.util.stream.Collectors.toUnmodifiableSet());
+	}
+
+	private MembershipRole fixedRoleOrNull(String code) {
+		try { return MembershipRole.from(code); }
+		catch (RuntimeException ignored) { return null; }
 	}
 }

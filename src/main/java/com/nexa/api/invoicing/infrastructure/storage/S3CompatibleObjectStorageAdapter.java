@@ -6,11 +6,14 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
@@ -46,12 +49,37 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     }
 
     @Override
-    public StoredObject put(String objectKey, byte[] content, String contentType) {
-        validate(objectKey, content);
-        String hash = sha256(content);
-        HttpResponse<byte[]> response = sendBytes("PUT", objectKey, content, contentType, hash);
-        requireSuccess(response.statusCode(), response.body());
-        return new StoredObject(objectKey, hash, contentType, content.length);
+    public StoredObject put(String objectKey, InputStream content, long contentLength, String contentType) {
+        validateKey(objectKey);
+        if (content == null || contentLength < 0 || contentLength > 52428800) throw new IllegalArgumentException("Object size is invalid");
+        Path temporary = null;
+        try {
+            temporary = Files.createTempFile("nexa-object-", ".part");
+            long total = 0;
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (OutputStream output = Files.newOutputStream(temporary)) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = content.read(buffer)) >= 0) {
+                    if (read == 0) continue;
+                    total += read;
+                    if (total > 52428800) throw new IllegalArgumentException("Object size is invalid");
+                    digest.update(buffer, 0, read);
+                    output.write(buffer, 0, read);
+                }
+            }
+            if (total != contentLength) throw new IllegalArgumentException("Object length does not match declared length");
+            String hash = HexFormat.of().formatHex(digest.digest());
+            HttpResponse<byte[]> response = sendFile("PUT", objectKey, temporary, contentType, hash);
+            requireSuccess(response.statusCode(), response.body());
+            return new StoredObject(objectKey, hash, contentType, total);
+        } catch (IOException exception) {
+            throw new IllegalStateException("S3-compatible object write failed", exception);
+        } catch (java.security.GeneralSecurityException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        } finally {
+            if (temporary != null) try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
+        }
     }
 
     @Override
@@ -97,6 +125,23 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
         throw new IllegalStateException("S3-compatible object write failed");
     }
 
+    private HttpResponse<byte[]> sendFile(String method, String objectKey, Path content, String contentType, String hash) {
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                HttpRequest.Builder builder = requestBuilder(method, objectKey, HttpRequest.BodyPublishers.ofFile(content), hash);
+                if (contentType != null && !contentType.isBlank()) builder.header("content-type", contentType);
+                HttpResponse<byte[]> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+                if (response.statusCode() < 500 || attempt == 2) return response;
+            } catch (IOException exception) {
+                if (attempt == 2) throw new IllegalStateException("S3-compatible object write failed", exception);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("S3-compatible object write interrupted", exception);
+            }
+        }
+        throw new IllegalStateException("S3-compatible object write failed");
+    }
+
     private HttpRequest request(String method, String objectKey, byte[] content, String contentType, String hash) {
         HttpRequest.Builder builder = requestBuilder(method, objectKey, content, hash);
         if (contentType != null && !contentType.isBlank()) builder.header("content-type", contentType);
@@ -104,6 +149,11 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     }
 
     private HttpRequest.Builder requestBuilder(String method, String objectKey, byte[] content, String hash) {
+        HttpRequest.BodyPublisher body = method.equals("GET") || method.equals("DELETE") ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(content);
+        return requestBuilder(method, objectKey, body, hash);
+    }
+
+    private HttpRequest.Builder requestBuilder(String method, String objectKey, HttpRequest.BodyPublisher body, String hash) {
         Instant now = Instant.now();
         String amzDate = AMZ_DATE.format(now);
         String shortDate = DATE.format(now);
@@ -116,7 +166,6 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
         String stringToSign = "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n" + sha256(canonicalRequest.getBytes(StandardCharsets.UTF_8));
         String signature = HexFormat.of().formatHex(hmac(signingKey(shortDate), stringToSign));
         String authorization = "AWS4-HMAC-SHA256 Credential=" + accessKey + "/" + scope + ", SignedHeaders=" + signedHeaders + ", Signature=" + signature;
-        HttpRequest.BodyPublisher body = method.equals("GET") || method.equals("DELETE") ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(content);
         return HttpRequest.newBuilder(endpoint.resolve(path)).timeout(timeout).method(method, body)
                 .header("x-amz-content-sha256", hash).header("x-amz-date", amzDate).header("authorization", authorization);
     }
@@ -141,7 +190,6 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     private byte[] signingKey(String shortDate) { return hmac(hmac(hmac(hmac(("AWS4" + secretKey).getBytes(StandardCharsets.UTF_8), shortDate), region), "s3"), "aws4_request"); }
     private static byte[] hmac(byte[] key, String value) { try { Mac mac = Mac.getInstance("HmacSHA256"); mac.init(new SecretKeySpec(key, "HmacSHA256")); return mac.doFinal(value.getBytes(StandardCharsets.UTF_8)); } catch (Exception exception) { throw new IllegalStateException("S3 signing failed", exception); } }
     private static String sha256(byte[] content) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)); } catch (Exception exception) { throw new IllegalStateException("SHA-256 unavailable", exception); } }
-    private static void validate(String key, byte[] content) { validateKey(key); if (content == null || content.length > 52428800) throw new IllegalArgumentException("Object size is invalid"); }
     private static void validateKey(String key) { if (key == null || key.isBlank() || key.startsWith("/") || key.contains("..") || key.contains("\\")) throw new IllegalArgumentException("Object key is invalid"); }
     private static String required(String value, String label) { if (value == null || value.isBlank()) throw new IllegalStateException("S3-compatible " + label + " is required"); return value; }
     private static void requireSuccess(int status, byte[] body) { if (status < 200 || status >= 300) throw new IllegalStateException("S3-compatible storage rejected request: HTTP " + status + " " + new String(body == null ? new byte[0] : body, StandardCharsets.UTF_8)); }

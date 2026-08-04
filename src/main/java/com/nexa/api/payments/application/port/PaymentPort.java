@@ -8,14 +8,18 @@ import java.time.Instant;
 import java.util.UUID;
 
 public interface PaymentPort {
+    PaymentModels.Page<PaymentModels.ReceivableView> listReceivables(CurrentAccessContext context, int page, int size);
     PaymentModels.ReceivableView getReceivable(CurrentAccessContext context, UUID receivableId);
     PaymentModels.PaymentView getPayment(CurrentAccessContext context, UUID paymentId);
     PaymentModels.ReceivableView createReceivable(CurrentAccessContext context, ReceivableCommand request);
     PaymentModels.PaymentIntentView createCardPaymentIntent(CurrentAccessContext context, UUID receivableId, String idempotencyKey);
     PaymentModels.PaymentView createCreditLinePayment(CurrentAccessContext context, UUID receivableId, String idempotencyKey);
-    PaymentModels.PaymentView createBankTransfer(CurrentAccessContext context, UUID receivableId, String idempotencyKey);
+    PaymentModels.PaymentView createBankTransfer(CurrentAccessContext context, UUID receivableId, String idempotencyKey,
+                                                 String transferReference, UUID proofEvidenceId);
+    PaymentModels.PaymentView reviewBankTransfer(CurrentAccessContext context, UUID paymentId, String action,
+                                                 String reason, String idempotencyKey);
     PaymentModels.WebhookReceipt receiveStripeWebhook(String payload, String signature);
     void processStripeWebhookInbox();
 
-    record ReceivableCommand(UUID clientAccountId, String subjectType, UUID subjectId, BigDecimal amount, String currency, Instant dueAt) { }
+    record ReceivableCommand(String subjectType, UUID subjectId, Instant dueAt, String idempotencyKey) { }
 }

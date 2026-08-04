@@ -65,6 +65,11 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
     }
 
     @Override
+    public Optional<ManualSalesOrderView> findById(String tenantId, String workspaceId, String salesOrderId) {
+        return find(tenantId, workspaceId, salesOrderId);
+    }
+
+    @Override
     public ManualSalesOrderView save(ManualSalesOrder order, String actorMembershipId, String idempotencyKey,
                                      String requestHash, long nowEpochMillis) {
         UUID id = uuid(order.id().value());

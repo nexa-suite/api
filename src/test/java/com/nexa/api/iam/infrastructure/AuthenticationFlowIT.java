@@ -3,11 +3,14 @@ package com.nexa.api.iam.infrastructure;
 import com.nexa.api.support.PostgresIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.containsString;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class AuthenticationFlowIT extends PostgresIntegrationSupport {
@@ -15,7 +18,28 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/authentication/sign-in").header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON).content("{\"identifier\":\"" + SALES_EMAIL + "\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}" )).andExpect(status().isUnauthorized());
-        mockMvc.perform(post("/api/v1/authentication/sign-out").header("Authorization", "Bearer " + token).header("X-Nexa-Surface", "PLATFORM").header("Origin", ALLOWED_ORIGIN)).andExpect(status().isNoContent());
+        mockMvc.perform(post("/api/v1/authentication/sign-out").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("X-Nexa-Surface", "PLATFORM").header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
+                .andExpect(status().isNoContent())
+                .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("Max-Age=0")));
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+    }
+
+    @Test void signOutRemainsAvailableAfterMembershipSuspension() throws Exception {
+        String token = accessToken(SALES_EMAIL, "PLATFORM");
+        String membershipId = membershipId(SALES_EMAIL);
+        jdbc.update("update tenant_management.workspace_membership set status='DISABLED' where id=?",
+                java.util.UUID.fromString(membershipId));
+        try {
+            mockMvc.perform(post("/api/v1/authentication/sign-out")
+                            .header("Authorization", "Bearer " + token)
+                            .header("X-Nexa-Surface", "PLATFORM")
+                            .header("Origin", ALLOWED_ORIGIN))
+                    .andExpect(status().isNoContent());
+            mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token))
+                    .andExpect(status().isUnauthorized());
+        } finally {
+            jdbc.update("update tenant_management.workspace_membership set status='ACTIVE' where id=?",
+                    java.util.UUID.fromString(membershipId));
+        }
     }
 }

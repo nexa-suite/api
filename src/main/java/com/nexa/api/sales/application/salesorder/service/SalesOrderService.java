@@ -110,7 +110,6 @@ public class SalesOrderService implements SalesOrderUseCase {
 	}
 
 	private static void commercialWrite(CurrentAccessContext context) {
-		if (!context.hasRole(MembershipRole.SALES) && !context.hasRole(MembershipRole.COMPANY_OWNER)) throw new AccessPolicyViolation("Commercial sales access is required");
 		context.requirePermission(Permission.SALES_WRITE);
 	}
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }

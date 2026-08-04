@@ -2,17 +2,19 @@ package com.nexa.api.warehouse.infrastructure.persistence;
 
 import com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.warehouse.application.port.WarehouseOperationalSettingsPort;
 import com.nexa.api.warehouse.application.port.WarehouseReservationPersistencePort;
+import com.nexa.api.warehouse.domain.model.inventorylot.InventoryLot;
+import com.nexa.api.warehouse.domain.model.inventorylot.InventoryLotStatus;
+import com.nexa.api.warehouse.domain.model.inventoryreservation.InventoryReservation;
+import com.nexa.api.warehouse.domain.model.inventoryreservation.InventoryReservationStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,13 +48,14 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
     public WarehouseOperationsService.ReservationPreview preview(CurrentAccessContext context, String orderId) {
         requireFulfillmentRead(context);
         OrderData order = loadOrder(context, uuid(orderId), false);
-        List<WarehouseOperationsService.ProposalLine> proposals = lines(order.id()).stream().map(line -> proposal(context, line, false)).toList();
+        UUID selectedWarehouseId = selectedWarehouseId(order);
+        List<WarehouseOperationsService.ProposalLine> proposals = lines(context, order.id()).stream()
+                .map(line -> proposal(context, line, false, selectedWarehouseId)).toList();
         return new WarehouseOperationsService.ReservationPreview(order.id().toString(), order.number(), proposals,
                 proposals.stream().allMatch(WarehouseOperationsService.ProposalLine::complete), Instant.now(),
                 "Preview only — inventory is not reserved.");
     }
 
-    @Transactional
     public WarehouseOperationsService.ReservationDetail reserve(CurrentAccessContext context, String orderId, long expected,
                                                                   String key, String correlation) {
         requireWrite(context);
@@ -72,20 +75,27 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         // consumer won the race, the existing reservation is the idempotent
         // result and must not become a duplicate or a false conflict.
         if (existing != null) return loadReservation(context, existing, false);
-        List<LineData> lines = lines(order.id());
+        List<LineData> lines = lines(context, order.id());
         if (lines.isEmpty()) throw error("FULFILLMENT_CANDIDATE_NOT_ELIGIBLE", false);
-        List<WarehouseOperationsService.ProposalLine> proposals = lines.stream().map(line -> proposal(context, line, true)).toList();
+        UUID selectedWarehouseId = selectedWarehouseId(order);
+        List<WarehouseOperationsService.ProposalLine> proposals = lines.stream()
+                .map(line -> proposal(context, line, true, selectedWarehouseId)).toList();
         boolean complete = proposals.stream().allMatch(WarehouseOperationsService.ProposalLine::complete);
         UUID reservationId = UUID.randomUUID();
+        InventoryReservation aggregate = InventoryReservation.rehydrate(reservationId.toString(),
+                InventoryReservationStatus.PENDING, proposals.stream().flatMap(value -> value.allocations().stream())
+                        .map(value -> new InventoryReservation.Allocation(value.lotId(), value.quantity())).toList());
+        if (complete) aggregate.reserve(aggregate.allocations());
+        else aggregate.recordShortage();
         Timestamp created = now();
-        String status = complete ? "RESERVED" : "SHORTAGE";
+        String status = aggregate.status().name();
         checkUpdated(jdbc.update("insert into warehouse.inventory_reservation(id,tenant_id,workspace_id,sales_order_id,order_number,client_account_id,status,created_at,updated_at,reserved_at,expires_at) values (?,?,?,?,?,?,?, ?,?,?,?)",
                 reservationId, tenant(context), workspace(context), order.id(), order.number(), order.clientAccountId(), status, created, created,
                 complete ? created : null, Timestamp.from(created.toInstant().plusSeconds(7200))), "reservation insert");
         for (WarehouseOperationsService.ProposalLine proposal : proposals) {
             UUID lineId = UUID.randomUUID();
-            checkUpdated(jdbc.update("insert into warehouse.inventory_reservation_line(id,reservation_id,catalog_item_id,requested_quantity,unit,shortage_quantity) values (?,?,?,?,?,?)",
-                    lineId, reservationId, proposal.catalogItemId(), proposal.requested(), proposal.unit(), proposal.shortage()), "reservation line insert");
+            checkUpdated(jdbc.update("insert into warehouse.inventory_reservation_line(id,reservation_id,catalog_item_id,sku_id,requested_quantity,unit,shortage_quantity) values (?,?,?,?,?,?,?)",
+                    lineId, reservationId, proposal.catalogItemId(), uuidNullable(proposal.skuId()), proposal.requested(), proposal.unit(), proposal.shortage()), "reservation line insert");
             if (!complete) {
                 if (proposal.shortage().signum() > 0) checkUpdated(jdbc.update("insert into warehouse.reservation_shortage(id,reservation_line_id,quantity,reason) values (?,?,?,?)",
                         UUID.randomUUID(), lineId, proposal.shortage(), "Insufficient available stock"), "reservation shortage insert");
@@ -93,7 +103,11 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
             }
             for (WarehouseOperationsService.AllocationView allocation : proposal.allocations()) {
                 WarehouseOperationsService.LotSummary lot = loadLot(context, uuid(allocation.lotId()), true);
-                if (!lot.status().equals("AVAILABLE") || !lot.unit().equals(allocation.unit()) || lot.available().compareTo(allocation.quantity()) < 0) throw error("INVENTORY_SHORTAGE", false);
+                InventoryLot lotAggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
+                        InventoryLotStatus.valueOf(lot.status()));
+                if (!lot.unit().equals(allocation.unit())) throw error("INVENTORY_SHORTAGE", false);
+                try { lotAggregate.reserve(allocation.quantity()); }
+                catch (IllegalStateException exception) { throw error("INVENTORY_SHORTAGE", false); }
                 checkUpdated(jdbc.update("insert into warehouse.inventory_reservation_allocation(id,reservation_line_id,lot_id,quantity,unit,expiration_date) values (?,?,?,?,?,?)",
                         UUID.randomUUID(), lineId, uuid(allocation.lotId()), allocation.quantity(), allocation.unit(), allocation.expirationDate()), "allocation insert");
                 checkUpdated(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity+?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and stock_quantity-reserved_quantity>=?",
@@ -106,14 +120,9 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         appendEvent(context, reservationId, complete ? "warehouse.reservation.created" : "warehouse.reservation.shortage", "reservation");
         saveIdempotency(context, "reservation", key, hash, reservationId.toString());
         WarehouseOperationsService.ReservationDetail result = loadReservation(context, reservationId, false);
-        if (complete) CanonicalOutbox.append(jdbc, "FULFILLMENT_READY", "InventoryReservation", reservationId,
-                tenant(context), workspace(context), Instant.now(), "reservation-" + reservationId, null, "1.0",
-                java.util.Map.of("reservationId", reservationId, "reservationVersion", result.version(), "salesOrderId", order.id(),
-                        "salesOrderNumber", order.number(), "status", result.status()));
         return result;
     }
 
-    @Transactional
     public WarehouseOperationsService.ReservationDetail release(CurrentAccessContext context, String reservationId, long expected,
                                                                   String key, String reason, String correlation, boolean expiry) {
         requireWrite(context);
@@ -128,8 +137,17 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         if (!reservation.status().equals("RESERVED")) throw error("INVENTORY_RESERVATION_TRANSITION_INVALID", false);
         if (reservation.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
         Timestamp occurred = now();
-        for (WarehouseOperationsService.AllocationView allocation : allocations(uuid(reservationId))) {
+        List<WarehouseOperationsService.AllocationView> reservationAllocations = allocations(tenant(context), workspace(context), uuid(reservationId));
+        InventoryReservation aggregate = InventoryReservation.rehydrate(reservation.id(),
+                InventoryReservationStatus.RESERVED, reservationAllocations.stream()
+                        .map(value -> new InventoryReservation.Allocation(value.lotId(), value.quantity())).toList());
+        if (expiry) aggregate.expire(); else aggregate.release();
+        for (WarehouseOperationsService.AllocationView allocation : reservationAllocations) {
             WarehouseOperationsService.LotSummary lot = loadLot(context, uuid(allocation.lotId()), true);
+            InventoryLot lotAggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
+                    InventoryLotStatus.valueOf(lot.status()));
+            try { lotAggregate.releaseReservation(allocation.quantity()); }
+            catch (IllegalStateException exception) { throw error("CONCURRENCY_CONFLICT", false); }
             checkUpdated(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity-?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and reserved_quantity>=?",
                     allocation.quantity(), tenant(context), workspace(context), uuid(allocation.lotId()), lot.version(), allocation.quantity()), "reservation release lot update", "CONCURRENCY_CONFLICT");
             insertMovement(context, uuid(lot.warehouseId()), uuid(lot.zoneId()), uuid(allocation.lotId()), lot.catalogItemId(), uuidNullable(lot.skuId()),
@@ -166,7 +184,6 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         return loadReservation(context, uuid(id), false);
     }
 
-    @Scheduled(fixedDelay = 60000L)
     public void expireReservations() {
         List<ScopeId> expired = jdbc.query("select tenant_id,workspace_id,id from warehouse.inventory_reservation where status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100 for update skip locked",
                 (rs, row) -> new ScopeId(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class)));
@@ -184,8 +201,17 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         WarehouseOperationsService.ReservationDetail reservation = loadReservation(candidate.tenantId(), candidate.workspaceId(), candidate.id(), true);
         if (!reservation.status().equals("RESERVED")) return;
         Timestamp occurred = now();
-        for (WarehouseOperationsService.AllocationView allocation : allocations(reservationId(reservation))) {
+        List<WarehouseOperationsService.AllocationView> reservationAllocations = allocations(candidate.tenantId(), candidate.workspaceId(), reservationId(reservation));
+        InventoryReservation aggregate = InventoryReservation.rehydrate(reservation.id(),
+                InventoryReservationStatus.RESERVED, reservationAllocations.stream()
+                        .map(value -> new InventoryReservation.Allocation(value.lotId(), value.quantity())).toList());
+        aggregate.expire();
+        for (WarehouseOperationsService.AllocationView allocation : reservationAllocations) {
             WarehouseOperationsService.LotSummary lot = loadLot(candidate.tenantId(), candidate.workspaceId(), uuid(allocation.lotId()), true);
+            InventoryLot lotAggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
+                    InventoryLotStatus.valueOf(lot.status()));
+            try { lotAggregate.releaseReservation(allocation.quantity()); }
+            catch (IllegalStateException exception) { throw error("CONCURRENCY_CONFLICT", false); }
             checkUpdated(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity-?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and reserved_quantity>=?",
                     allocation.quantity(), candidate.tenantId(), candidate.workspaceId(), uuid(allocation.lotId()), lot.version(), allocation.quantity()), "expiry lot update", "CONCURRENCY_CONFLICT");
             insertMovement(candidate.tenantId(), candidate.workspaceId(), uuid(lot.warehouseId()), uuid(lot.zoneId()), uuid(allocation.lotId()), lot.catalogItemId(), uuidNullable(lot.skuId()),

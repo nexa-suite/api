@@ -1,12 +1,13 @@
 package com.nexa.api.catalogmanagement.presentation.rest;
 
 import com.nexa.api.catalogmanagement.application.model.CatalogSkuModels;
-import com.nexa.api.catalogmanagement.application.service.CatalogSkuServiceFacade;
+import com.nexa.api.catalogmanagement.application.port.in.CatalogSkuUseCase;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,8 +24,8 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class CatalogSkuController {
     private static final String ACCESS = CatalogHttpSupport.ACCESS_CONTEXT;
-    private final CatalogSkuServiceFacade service;
-    public CatalogSkuController(CatalogSkuServiceFacade service) { this.service = service; }
+    private final CatalogSkuUseCase service;
+    public CatalogSkuController(CatalogSkuUseCase service) { this.service = service; }
 
     @GetMapping("/product-families")
     @Operation(operationId = "listProductFamilies")
@@ -43,10 +44,10 @@ public final class CatalogSkuController {
     }
     @PostMapping("/product-families/{familyId}/activations")
     @Operation(operationId = "activateProductFamily")
-    public ResponseEntity<CatalogSkuModels.FamilyView> activateFamily(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return statusFamily(context, familyId, "ACTIVE", ifMatch); }
+    public ResponseEntity<CatalogSkuModels.FamilyView> activateFamily(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestHeader(HttpHeaders.IF_MATCH) String ifMatch) { return statusFamily(context, familyId, "ACTIVE", ifMatch); }
     @PostMapping("/product-families/{familyId}/deactivations")
     @Operation(operationId = "deactivateProductFamily")
-    public ResponseEntity<CatalogSkuModels.FamilyView> deactivateFamily(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return statusFamily(context, familyId, "INACTIVE", ifMatch); }
+    public ResponseEntity<CatalogSkuModels.FamilyView> deactivateFamily(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestHeader(HttpHeaders.IF_MATCH) String ifMatch) { return statusFamily(context, familyId, "INACTIVE", ifMatch); }
 
     @GetMapping("/product-families/{familyId}/skus")
     @Operation(operationId = "listFamilySkus")
@@ -65,14 +66,16 @@ public final class CatalogSkuController {
     }
     @PostMapping("/skus/{skuId}/deactivations")
     @Operation(operationId = "deactivateSellableSku")
-    public ResponseEntity<CatalogSkuModels.SkuView> deactivateSku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return statusSku(context, skuId, "INACTIVE", ifMatch); }
+    public ResponseEntity<CatalogSkuModels.SkuView> deactivateSku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId, @RequestHeader(HttpHeaders.IF_MATCH) String ifMatch) { return statusSku(context, skuId, "INACTIVE", ifMatch); }
     @PostMapping("/skus/{skuId}/activations")
     @Operation(operationId = "activateSellableSku")
-    public ResponseEntity<CatalogSkuModels.SkuView> activateSku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return statusSku(context, skuId, "ACTIVE", ifMatch); }
+    public ResponseEntity<CatalogSkuModels.SkuView> activateSku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId, @RequestHeader(HttpHeaders.IF_MATCH) String ifMatch) { return statusSku(context, skuId, "ACTIVE", ifMatch); }
     @PostMapping("/skus/{skuId}/prices")
     @Operation(operationId = "createSkuPrice")
-    public ResponseEntity<CatalogSkuModels.PriceView> createPrice(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId, @RequestBody PriceRequest request) {
-        CatalogSkuModels.PriceView value = service.createPrice(CatalogHttpSupport.scope(context), skuId, request.amount(), request.currency(), request.validFrom(), request.validUntil(), request.sourceCode(), request.sourceDescription());
+    public ResponseEntity<CatalogSkuModels.PriceView> createPrice(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody PriceRequest request) {
+        CatalogHttpSupport.requireIdempotency(idempotencyKey);
+        CatalogSkuModels.PriceView value = service.createPrice(CatalogHttpSupport.scope(context), skuId, request.amount(), request.currency(), request.validFrom(), request.validUntil(), request.sourceCode(), request.sourceDescription(), idempotencyKey);
         return ResponseEntity.created(URI.create("/api/v1/skus/" + skuId + "/prices/" + value.id())).body(value);
     }
     @GetMapping("/skus/{skuId}/prices")

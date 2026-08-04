@@ -20,7 +20,9 @@ public final class CatalogResponseMapper {
 				money(item.pricing().effectivePrice(), item.pricing().currency()), money(item.pricing().discountAmount(), item.pricing().currency()),
 				item.pricing().currency(), item.pricing().appliedPromotions().stream()
 						.map(promotion -> new com.nexa.api.catalogmanagement.presentation.rest.response.CatalogAppliedPromotionResponse(
-								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf());
+								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf(),
+				item.productFamilyId(), item.productFamilyCode(), item.productFamilyName(), item.sellableSkuId(), item.skuCode(),
+				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf());
 	}
 
 	public CatalogItemDetailResponse toDetail(CatalogItemDetail item) {
@@ -31,7 +33,9 @@ public final class CatalogResponseMapper {
 				money(item.pricing().effectivePrice(), item.pricing().currency()), money(item.pricing().discountAmount(), item.pricing().currency()),
 				item.pricing().currency(), item.pricing().appliedPromotions().stream()
 						.map(promotion -> new com.nexa.api.catalogmanagement.presentation.rest.response.CatalogAppliedPromotionResponse(
-								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf());
+								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf(),
+				item.productFamilyId(), item.productFamilyCode(), item.productFamilyName(), item.sellableSkuId(), item.skuCode(),
+				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf());
 	}
 
 	public CatalogPageResponse toPage(CatalogPage<CatalogItemSummary> page) {

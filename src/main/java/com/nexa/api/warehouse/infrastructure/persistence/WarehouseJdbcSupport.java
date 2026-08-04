@@ -6,6 +6,7 @@ import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.warehouse.application.port.WarehouseOperationalSettingsPort;
+import com.nexa.api.warehouse.domain.model.inventorylot.InventoryLotStatus;
 import com.nexa.api.warehouse.domain.model.warehouse.WarehouseBuyerProjection;
 import com.nexa.api.warehouse.domain.model.warehouse.WarehouseHours;
 import com.nexa.api.warehouse.domain.model.warehouse.WarehouseInternalSnapshot;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import tools.jackson.databind.json.JsonMapper;
 
 import static com.nexa.api.warehouse.infrastructure.persistence.WarehousePersistenceSupport.*;
 
@@ -172,61 +174,95 @@ abstract class WarehouseJdbcSupport {
                                 rs.getObject("id").toString(), rs.getObject("sales_order_id").toString(),
                                 rs.getString("order_number"), rs.getString("status"), instant(rs, "created_at"),
                                 instantNullable(rs, "reserved_at"), instant(rs, "expires_at"), rs.getLong("version"),
-                                rs.getObject("client_account_id").toString(), allocations(rs.getObject("id", UUID.class))),
-                        tenantId, workspaceId, id)
+                                rs.getObject("client_account_id").toString(), allocations(tenantId, workspaceId, rs.getObject("id", UUID.class))),
+                tenantId, workspaceId, id)
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_RESERVATION_NOT_FOUND", true));
     }
 
-    protected List<WarehouseOperationsService.AllocationView> allocations(UUID reservationId) {
+    protected List<WarehouseOperationsService.AllocationView> allocations(UUID tenantId, UUID workspaceId, UUID reservationId) {
         return jdbc.query(
                 "select a.lot_id,a.quantity,a.unit,a.expiration_date "
                         + "from warehouse.inventory_reservation_allocation a "
                         + "join warehouse.inventory_reservation_line l on l.id=a.reservation_line_id "
-                        + "where l.reservation_id=? order by a.lot_id asc",
+                        + "join warehouse.inventory_reservation r on r.id=l.reservation_id "
+                        + "join warehouse.inventory_lot lot on lot.id=a.lot_id "
+                        + "and lot.tenant_id=r.tenant_id and lot.workspace_id=r.workspace_id "
+                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by a.lot_id asc",
                 (rs, row) -> new WarehouseOperationsService.AllocationView(
                         rs.getObject("lot_id").toString(), rs.getBigDecimal("quantity"), rs.getString("unit"),
-                        rs.getObject("expiration_date", LocalDate.class)), reservationId);
+                        rs.getObject("expiration_date", LocalDate.class)), tenantId, workspaceId, reservationId);
     }
 
-    protected List<LineData> lines(UUID orderId) {
-        return jdbc.query("select sku_id,catalog_item_id,quantity,unit from sales.sales_order_line "
-                        + "where sales_order_id=? order by coalesce(sku_id::text,catalog_item_id),id",
+    protected List<LineData> lines(CurrentAccessContext context, UUID orderId) {
+        return jdbc.query("select line.sku_id,line.catalog_item_id,line.quantity,line.unit from sales.sales_order_line line "
+                        + "join sales.sales_order order_header on order_header.id=line.sales_order_id "
+                        + "where order_header.tenant_id=? and order_header.workspace_id=? and line.sales_order_id=? "
+                        + "order by coalesce(line.sku_id::text,line.catalog_item_id),line.id",
                 (rs, row) -> new LineData(rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"),
-                        rs.getBigDecimal("quantity"), rs.getString("unit")), orderId);
+                        rs.getBigDecimal("quantity"), rs.getString("unit")),
+                tenant(context), workspace(context), orderId);
     }
 
     protected OrderData loadOrder(CurrentAccessContext context, UUID id, boolean lock) {
         return jdbc.query(
-                        "select id,number,status,version,client_account_id from sales.sales_order "
+                        "select id,number,status,version,client_account_id,delivery_snapshot from sales.sales_order "
                                 + "where tenant_id=? and workspace_id=? and id=?" + (lock ? " for update" : ""),
                         (rs, row) -> new OrderData(rs.getObject("id", UUID.class), rs.getString("number"),
-                                rs.getString("status"), rs.getLong("version"), rs.getObject("client_account_id", UUID.class)),
+                                rs.getString("status"), rs.getLong("version"), rs.getObject("client_account_id", UUID.class),
+                                rs.getString("delivery_snapshot")),
                         tenant(context), workspace(context), id)
                 .stream().findFirst().orElseThrow(() -> error("FULFILLMENT_CANDIDATE_NOT_ELIGIBLE", true));
     }
 
-    protected WarehouseOperationsService.ProposalLine proposal(CurrentAccessContext context, LineData line, boolean lock) {
-        String lockClause = lock ? " for update" : "";
-        String skuPredicate = line.skuId() == null ? "l.catalog_item_id=?" : "l.sku_id=?";
-        Object skuArgument = line.skuId() == null ? line.catalogItemId() : line.skuId();
+    protected WarehouseOperationsService.ProposalLine proposal(CurrentAccessContext context, LineData line, boolean lock,
+                                                               UUID selectedWarehouseId) {
+        SkuReference resolved = line.skuId() == null ? resolveSku(context, null, line.catalogItemId()) : null;
+        UUID effectiveSkuId = line.skuId() == null ? resolved.id() : line.skuId();
+        String skuPredicate = effectiveSkuId == null ? "l.catalog_item_id=?" : "l.sku_id=?";
+        Object skuArgument = effectiveSkuId == null ? line.catalogItemId() : effectiveSkuId;
+        lockSkuScope(context, effectiveSkuId == null ? "legacy:" + line.catalogItemId() : effectiveSkuId.toString());
+        String warehousePredicate = selectedWarehouseId == null ? "" : " and l.warehouse_id=?";
+        List<Object> queryArguments = new ArrayList<>(List.of(tenant(context), workspace(context), skuArgument));
+        if (selectedWarehouseId != null) queryArguments.add(selectedWarehouseId);
         List<FefoAllocationPolicy.LotSnapshot> candidates = jdbc.query(
-                "select l.id,l.stock_quantity-l.reserved_quantity available,l.unit,l.expiration_date,l.received_at "
+                "select l.id,l.sku_id,l.warehouse_id,l.status,l.stock_quantity-l.reserved_quantity available,l.unit,l.expiration_date,l.received_at "
                         + "from warehouse.inventory_lot l "
                         + "join warehouse.warehouse w on w.id=l.warehouse_id and w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id "
                         + "join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
                         + "where l.tenant_id=? and l.workspace_id=? and " + skuPredicate + " and l.status='AVAILABLE' "
                         + "and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity "
                         + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
-                        + "order by l.expiration_date,l.received_at,l.id" + lockClause,
+                        + warehousePredicate + " order by l.expiration_date,l.received_at,l.id"
+                        + (lock ? " for update of l" : ""),
                 (rs, row) -> new FefoAllocationPolicy.LotSnapshot(
                         rs.getObject("id").toString(), rs.getBigDecimal("available"), rs.getString("unit"),
-                        rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at")),
-                tenant(context), workspace(context), skuArgument);
-        FefoAllocationPolicy.Result result = FefoAllocationPolicy.allocate(candidates, line.quantity(), line.unit());
+                        rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
+                        InventoryLotStatus.valueOf(rs.getString("status")),
+                        rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString(),
+                        rs.getObject("warehouse_id").toString()), queryArguments.toArray());
+        FefoAllocationPolicy.Result result = FefoAllocationPolicy.allocate(candidates, line.quantity(), line.unit(),
+                effectiveSkuId == null ? null : effectiveSkuId.toString(),
+                selectedWarehouseId == null ? null : selectedWarehouseId.toString(), LocalDate.now());
         return new WarehouseOperationsService.ProposalLine(line.catalogItemId(), line.quantity(), line.unit(),
                 result.allocations().stream().map(item -> new WarehouseOperationsService.AllocationView(
                         item.lotId(), item.quantity(), item.unit(), item.expirationDate())).toList(),
-                result.shortage(), result.complete(), line.skuId() == null ? null : line.skuId().toString());
+                result.shortage(), result.complete(), effectiveSkuId == null ? null : effectiveSkuId.toString());
+    }
+
+    protected UUID selectedWarehouseId(OrderData order) {
+        if (order.deliverySnapshot() == null || order.deliverySnapshot().isBlank()) return null;
+        try {
+            var warehouse = JsonMapper.shared().readTree(order.deliverySnapshot()).path("warehouse").path("id");
+            return warehouse.isTextual() && !warehouse.asText().isBlank() ? uuid(warehouse.asText()) : null;
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    protected void lockSkuScope(CurrentAccessContext context, String skuKey) {
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?, 0))",
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
+                tenant(context) + "|" + workspace(context) + "|warehouse-sku|" + skuKey);
     }
 
     protected SkuReference resolveSku(CurrentAccessContext context, String requestedSkuId, String legacyCatalogItemId) {
@@ -245,10 +281,10 @@ abstract class WarehouseJdbcSupport {
             matches = List.of();
         }
         if (!matches.isEmpty()) return matches.getFirst();
-        if (legacyCatalogItemId == null || catalog.findActive(legacyCatalogItemId, tenant(context), workspace(context)).isEmpty()) {
-            throw error("CATALOG_ITEM_NOT_FOUND", true);
-        }
-        return new SkuReference(null, legacyCatalogItemId, legacyCatalogItemId);
+        // V57 makes SKU identity mandatory for persisted Warehouse rows. A
+        // legacy catalog item remains an input compatibility key, not a
+        // second inventory identity.
+        throw error("CATALOG_ITEM_NOT_FOUND", true);
     }
 
     protected void insertMovement(CurrentAccessContext context, UUID warehouseId, UUID zoneId, UUID lotId,
@@ -351,7 +387,8 @@ abstract class WarehouseJdbcSupport {
     protected record IdempotencyRecord(String resourceId, String requestHash) { }
     protected record LineData(UUID skuId, String catalogItemId, BigDecimal quantity, String unit) { }
     protected record SkuReference(UUID id, String legacyCatalogItemId, String skuCode) { }
-    protected record OrderData(UUID id, String number, String status, long version, UUID clientAccountId) { }
+    protected record OrderData(UUID id, String number, String status, long version, UUID clientAccountId,
+                               String deliverySnapshot) { }
     protected record ScopeId(UUID tenantId, UUID workspaceId, UUID id) { }
 
     protected static UUID uuid(String value, boolean nullable) {

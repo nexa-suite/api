@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -40,11 +41,11 @@ public class LocalDevelopmentBootstrap {
 
 	@EventListener(ApplicationReadyEvent.class)
 	@Order(Ordered.LOWEST_PRECEDENCE - 30)
-	@Transactional
 	public void seed() {
 		Instant now = clock.instant();
 		UUID tenantId = tenant(now);
 		UUID workspaceId = workspace(tenantId, now);
+		RlsRequestScope.set(tenantId, workspaceId);
 		List<UserSeed> users = new ArrayList<>(List.of(
 				new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", Set.of("TENANT_ADMIN", "COMPANY_OWNER")),
 				new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", Set.of("SALES")),
@@ -67,6 +68,7 @@ public class LocalDevelopmentBootstrap {
 			jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?,?,?,?,?) on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=excluded.updated_at", membershipId, tenantId, workspaceId, 0, timestamp(now));
 		}
 		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
+		RlsRequestScope.clear();
 	}
 
 	/**

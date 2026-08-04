@@ -129,6 +129,33 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(get("/api/v1/logistics/operational-analytics").header("Authorization", "Bearer " + dispatch.logisticsToken())).andExpect(status().isOk());
     }
 
+    @Test void staleAndMissingIfMatchAreControlledDispatchPreconditions() throws Exception {
+        var dispatch = createReservedDispatch();
+        MvcResult stale = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/preparation-starts")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken())
+                        .header("If-Match", "\"999999\"")
+                        .header("Idempotency-Key", "stale-etag-" + dispatch.id())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andReturn();
+        assertThat(stale.getResponse().getStatus()).isEqualTo(409);
+        mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/preparation-starts")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken())
+                        .header("Idempotency-Key", "missing-etag-" + dispatch.id())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isPreconditionRequired());
+    }
+
+    @Test void dispatchResponseCarriesPersistedBusinessCardFields() throws Exception {
+        var dispatch = createReservedDispatch();
+        MvcResult detail = mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id())
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken()))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(detail).get("clientCode").asText()).isNotBlank();
+        assertThat(json(detail).get("clientName").asText()).isNotBlank();
+        assertThat(json(detail).get("priority").asText()).isIn("NORMAL", "HIGH", "URGENT");
+        assertThat(json(detail).get("temperatureStatus").asText()).isNotBlank();
+    }
+
     private DispatchResource prepare(DispatchResource value) throws Exception { return mutate(value, "/preparation-starts", "{}", "prepare-" + value.id()); }
     private DispatchResource assign(DispatchResource value) throws Exception { return mutate(value, "/assignments", "{\"responsibleMembershipId\":\"" + membershipId(LOGISTICS_EMAIL) + "\",\"vehicleReference\":\"TRUCK-1\",\"routeName\":\"Route 1\"}", "assign-" + value.id()); }
     private DispatchResource schedule(DispatchResource value) throws Exception { Instant start = Instant.now().plusSeconds(3600); Instant end = start.plusSeconds(7200); return mutate(value, "/schedules", "{\"deliveryWindowStart\":\"" + start + "\",\"deliveryWindowEnd\":\"" + end + "\",\"eta\":\"" + start.plusSeconds(3600) + "\"}", "schedule-" + value.id()); }

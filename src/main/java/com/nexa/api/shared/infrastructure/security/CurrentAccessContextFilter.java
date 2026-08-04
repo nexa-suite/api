@@ -50,6 +50,13 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
+		if (isSignOutRequest(request)) {
+			/* Logout must remain callable with a still-valid JWT after the active
+			 * membership was suspended or its authorization snapshot changed. */
+			filterChain.doFilter(request, response);
+			return;
+		}
+
 		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 		if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)) {
 			filterChain.doFilter(request, response);
@@ -131,6 +138,10 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		} finally {
 			RlsRequestScope.clear();
 		}
+	}
+
+	private static boolean isSignOutRequest(HttpServletRequest request) {
+		return "/api/v1/authentication/sign-out".equals(request.getRequestURI());
 	}
 
 	private static String requiredClaim(Jwt jwt, String name) {

@@ -71,7 +71,6 @@ public enum PermissionKey {
 	DOCUMENT_DOWNLOAD("document.download", PermissionGroup.DOCUMENTS),
 	PAYMENT_READ("payment.read", PermissionGroup.PAYMENTS),
 	PAYMENT_CREATE("payment.create", PermissionGroup.PAYMENTS),
-	PAYMENT_REFUND("payment.refund", PermissionGroup.PAYMENTS),
 	PAYMENT_RECONCILE("payment.reconcile", PermissionGroup.PAYMENTS),
 	CLIENT_CREDIT_MANAGE("client.credit.manage", PermissionGroup.CLIENT_ACCOUNTS),
 	ANALYTICS_EXECUTIVE_READ("analytics.executive.read", PermissionGroup.ANALYTICS, "owner:dashboard:read"),

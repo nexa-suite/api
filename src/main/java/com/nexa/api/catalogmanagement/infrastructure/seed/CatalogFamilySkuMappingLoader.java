@@ -27,7 +27,7 @@ public final class CatalogFamilySkuMappingLoader {
         MappingDocument document = load();
         Map<String, MappingItem> mappings = document.items().stream()
                 .collect(Collectors.toUnmodifiableMap(MappingItem::legacyCatalogItemId, Function.identity()));
-        if (mappings.size() != 50 || !new HashSet<>(mappings.keySet()).containsAll(expectedIds())) {
+        if (mappings.size() != 50 || document.items().size() != 50 || !new HashSet<>(mappings.keySet()).containsAll(expectedIds())) {
             throw new IllegalStateException("Catalog family/SKU mapping must contain CAT-0001 through CAT-0050");
         }
         return mappings;
@@ -55,7 +55,7 @@ public final class CatalogFamilySkuMappingLoader {
 
     private static void validate(MappingItem item) {
         if (item == null || blank(item.legacyCatalogItemId()) || blank(item.legacyProductCode())
-                || blank(item.familyCode()) || blank(item.skuCode()) || blank(item.presentation())) {
+                || blank(item.familyCode()) || blank(item.familyName()) || blank(item.skuCode()) || blank(item.presentation())) {
             throw new IllegalStateException("Catalog family/SKU mapping contains an incomplete item");
         }
     }
@@ -71,5 +71,5 @@ public final class CatalogFamilySkuMappingLoader {
                                   List<MappingItem> items) { }
 
     public record MappingItem(String legacyCatalogItemId, String legacyProductCode,
-                              String familyCode, String skuCode, String presentation) { }
+                              String familyCode, String familyName, String skuCode, String presentation) { }
 }

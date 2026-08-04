@@ -15,7 +15,12 @@ import javax.sql.DataSource;
 public class FlywayRuntimeConfiguration {
 	@Bean
 	Flyway flyway(DataSource dataSource, Environment environment) {
-		return Flyway.configure().dataSource(dataSource)
+		String url = environment.getProperty("NEXA_DATABASE_URL", environment.getProperty("spring.datasource.url"));
+		String username = environment.getProperty("NEXA_DATABASE_MIGRATOR_USERNAME",
+				environment.getProperty("NEXA_DATABASE_USERNAME", environment.getProperty("spring.datasource.username")));
+		String password = environment.getProperty("NEXA_DATABASE_MIGRATOR_PASSWORD",
+				environment.getProperty("NEXA_DATABASE_PASSWORD", environment.getProperty("spring.datasource.password", "")));
+		return Flyway.configure().dataSource(url, username, password)
 				.locations(environment.getProperty("spring.flyway.locations", "classpath:db/migration"))
 				.load();
 	}

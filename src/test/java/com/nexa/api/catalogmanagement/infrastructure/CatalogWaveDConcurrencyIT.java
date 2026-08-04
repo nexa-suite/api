@@ -19,6 +19,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import javax.sql.DataSource;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -78,8 +79,8 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         Instant validUntil = validFrom.plusSeconds(3_600);
         String body = "{\"amount\":12.30,\"currency\":\"" + currency + "\",\"validFrom\":\"" + validFrom
                 + "\",\"validUntil\":\"" + validUntil + "\",\"sourceCode\":\"WAVE-D\",\"sourceDescription\":\"Wave D\"}";
-        String firstKey = remember("price:create", "wave-d-price-a-" + UUID.randomUUID());
-        String secondKey = remember("price:create", "wave-d-price-b-" + UUID.randomUUID());
+        String firstKey = remember("sku-price:create", "wave-d-price-a-" + UUID.randomUUID());
+        String secondKey = remember("sku-price:create", "wave-d-price-b-" + UUID.randomUUID());
         CyclicBarrier barrier = new CyclicBarrier(2);
 
         List<HttpResult> results = runConcurrently(
@@ -93,7 +94,7 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         HttpResult conflict = results.stream().filter(result -> result.status() == 409).findFirst().orElseThrow();
         assertThat(JSON.readTree(conflict.body()).get("code").asText()).isEqualTo("CATALOG_PRICE_OVERLAP");
         assertThat(jdbc.queryForObject(
-                "select count(*) from catalog_management.product_price where product_id=? and cancelled_at is null",
+                "select count(*) from catalog_management.sku_price where sku_id=? and cancelled_at is null",
                 Integer.class, priceProduct)).isEqualTo(1);
     }
 
@@ -172,6 +173,13 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
                 product, tenant, workspace, "WAVE-D-" + suffix, "WAVE-D-" + suffix, "wave-d-" + suffix,
                 "Wave D price product", "Concurrency test product", category, brand, "REFRIGERATED",
                 Timestamp.from(now), Timestamp.from(now));
+        UUID family = UUID.randomUUID();
+        jdbc.update("insert into catalog_management.product_family (id,tenant_id,workspace_id,family_code,name,description,category_id,brand_id,storage_family,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
+                family, tenant, workspace, "WAVE-D-FAM-" + suffix, "Wave D price family", "Concurrency test family", category, brand,
+                "REFRIGERATED", Timestamp.from(now), Timestamp.from(now));
+        jdbc.update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,legacy_product_id,legacy_catalog_item_id,sku_code,presentation,packaging_type,unit_of_measure,pack_quantity,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',true,0,?,?)",
+                product, tenant, workspace, family, product, "WAVE-D-" + suffix, "WAVE-D-" + suffix, "UNIT", "UNSPECIFIED", "UNIT", BigDecimal.ONE,
+                Timestamp.from(now), Timestamp.from(now));
         return product;
     }
 
@@ -191,7 +199,7 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
     private HttpResult priceAttempt(CyclicBarrier barrier, String owner, String key, String body) {
         try {
             barrier.await(10, TimeUnit.SECONDS);
-            MvcResult result = mockMvc.perform(post("/api/v1/catalog/products/" + priceProduct + "/prices")
+            MvcResult result = mockMvc.perform(post("/api/v1/skus/" + priceProduct + "/prices")
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + owner)
                             .header("Idempotency-Key", key)
                             .contentType(MediaType.APPLICATION_JSON)

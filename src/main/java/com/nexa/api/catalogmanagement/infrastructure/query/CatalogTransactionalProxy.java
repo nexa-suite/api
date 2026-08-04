@@ -7,10 +7,10 @@ import org.springframework.transaction.interceptor.MatchAlwaysTransactionAttribu
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 
 /** Makes Catalog command boundaries explicit without leaking Spring into Application. */
-final class CatalogTransactionalProxy {
+public final class CatalogTransactionalProxy {
     private CatalogTransactionalProxy() { }
 
-    static <T> T required(T target, Class<T> contract, PlatformTransactionManager transactionManager) {
+    public static <T> T required(T target, Class<T> contract, PlatformTransactionManager transactionManager) {
         MatchAlwaysTransactionAttributeSource attributes = new MatchAlwaysTransactionAttributeSource();
         attributes.setTransactionAttribute(new DefaultTransactionAttribute());
         ProxyFactory factory = new ProxyFactory(target);
