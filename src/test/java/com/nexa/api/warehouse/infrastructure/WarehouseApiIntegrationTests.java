@@ -30,7 +30,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String receipt = mockMvc.perform(post("/api/v1/inventory/inbound-receipts").header("Authorization", "Bearer "+token).header("Idempotency-Key", "inbound-test-1").contentType(MediaType.APPLICATION_JSON).content("{\"warehouseId\":\""+warehouseId+"\",\"zoneId\":\""+zoneId+"\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"B-001\",\"expirationDate\":\"2099-01-01\",\"quantity\":\"10\",\"unit\":\"UNIT\"}"))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.available").value(10)).andReturn().getResponse().getContentAsString();
         String lotId = tools.jackson.databind.json.JsonMapper.shared().readTree(receipt).get("id").asText();
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where catalog_item_id='CAT-0002'", Integer.class)).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class, java.util.UUID.fromString(lotId))).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=? and event_type='warehouse.lot.received'", Integer.class, java.util.UUID.fromString(lotId))).isEqualTo(1);
     }
 }

@@ -8,7 +8,7 @@ spring:
     username: ${NEXA_DATABASE_USERNAME:nexa}
     password: ${NEXA_DATABASE_PASSWORD:}
     hikari:
-      maximum-pool-size: ${NEXA_DATABASE_POOL_MAX:10}
+      maximum-pool-size: ${NEXA_DATABASE_POOL_MAX:20}
   jpa:
     open-in-view: false
     hibernate:
