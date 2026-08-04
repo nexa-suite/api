@@ -2,20 +2,24 @@ package com.nexa.api.shared.infrastructure.events;
 
 import com.nexa.api.invoicing.application.port.BusinessDocumentPort;
 import com.nexa.api.logistics.application.LogisticsOperationsService;
+import com.nexa.api.logistics.application.port.out.LogisticsEventContextQueryPort;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
-import com.nexa.api.sales.application.purchaserequest.port.PurchaseRequestUseCase;
-import com.nexa.api.sales.application.salesorder.model.SalesOrderFilter;
+import com.nexa.api.payments.application.port.PaymentPort;
+import com.nexa.api.sales.application.port.out.SalesEventContextQueryPort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderUseCase;
+import com.nexa.api.shared.events.PaymentEventContextQueryPort;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.tenantmanagement.application.port.out.TenantEventContextQueryPort;
 import com.nexa.api.tenantmanagement.domain.model.access.Surface;
 import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
 import com.nexa.api.tenantmanagement.domain.model.identity.UserId;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
+import com.nexa.api.warehouse.application.port.out.WarehouseEventContextQueryPort;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +30,6 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
-import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HashSet;
@@ -49,30 +52,45 @@ public final class CanonicalOutboxEventProcessor {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final NotificationProjectionPort notifications;
+    private final TenantEventContextQueryPort tenantContext;
+    private final SalesEventContextQueryPort salesContext;
+    private final WarehouseEventContextQueryPort warehouseContext;
+    private final LogisticsEventContextQueryPort logisticsContext;
+    private final PaymentEventContextQueryPort paymentContext;
     private final ResolveCurrentAccessContextUseCase access;
-    private final PurchaseRequestUseCase purchaseRequests;
     private final SalesOrderUseCase salesOrders;
     private final WarehouseOperationsService warehouse;
     private final LogisticsOperationsService logistics;
     private final BusinessDocumentPort documents;
+    private final PaymentPort payments;
 
     public CanonicalOutboxEventProcessor(JdbcTemplate jdbc, ObjectMapper mapper,
                                          @Qualifier("notificationProjectionPort") NotificationProjectionPort notifications,
+                                         TenantEventContextQueryPort tenantContext,
+                                         SalesEventContextQueryPort salesContext,
+                                         WarehouseEventContextQueryPort warehouseContext,
+                                         LogisticsEventContextQueryPort logisticsContext,
+                                         PaymentEventContextQueryPort paymentContext,
                                          ResolveCurrentAccessContextUseCase access,
-                                         PurchaseRequestUseCase purchaseRequests,
                                          SalesOrderUseCase salesOrders,
                                          WarehouseOperationsService warehouse,
                                          LogisticsOperationsService logistics,
-                                         BusinessDocumentPort documents) {
+                                         BusinessDocumentPort documents,
+                                         PaymentPort payments) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.notifications = notifications;
+        this.tenantContext = tenantContext;
+        this.salesContext = salesContext;
+        this.warehouseContext = warehouseContext;
+        this.logisticsContext = logisticsContext;
+        this.paymentContext = paymentContext;
         this.access = access;
-        this.purchaseRequests = purchaseRequests;
         this.salesOrders = salesOrders;
         this.warehouse = warehouse;
         this.logistics = logistics;
         this.documents = documents;
+        this.payments = payments;
     }
 
     @Scheduled(fixedDelayString = "${nexa.integration.outbox-delay-ms:1000}")
@@ -105,11 +123,14 @@ public final class CanonicalOutboxEventProcessor {
                 case "PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED", "SALES_ORDER_CONFIRMED", "DISPATCH_DELIVERED", "DELIVERY_COMPLETED", "POD_COMPLETED", "PAYMENT_SUCCEEDED" -> {
                     projectNotification(event, payload);
                     if ("PURCHASE_REQUEST_APPROVED".equals(event.eventType())) convertApproved(event, payload);
-                    if ("SALES_ORDER_CONFIRMED".equals(event.eventType())) reserveConfirmed(event, payload);
+                    if ("SALES_ORDER_CONFIRMED".equals(event.eventType())) {
+                        reserveConfirmed(event, payload);
+                    }
                     if ("DISPATCH_DELIVERED".equals(event.eventType())) generateDeliveryDocuments(event, payload);
                 }
                 case "FULFILLMENT_READY" -> createDispatch(event, payload);
-                case "INVOICE_ISSUED", "BUSINESS_DOCUMENT_GENERATION_REQUESTED" -> { /* durable facts; source service owns the effect */ }
+                case "INVOICE_ISSUED" -> createReceivable(event, payload);
+                case "BUSINESS_DOCUMENT_GENERATION_REQUESTED" -> { /* durable fact; source service owns the generation effect */ }
                 default -> { /* forward-compatible event: durable inbox records that it was observed */ }
             }
             jdbc.update("insert into integration.inbox_event(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) values (?,?,?,?,?,'PROCESSED') on conflict (consumer_name,event_id) do nothing", CONSUMER, event.eventId(), event.tenantId(), event.workspaceId(), Timestamp.from(Instant.now()));
@@ -120,28 +141,44 @@ public final class CanonicalOutboxEventProcessor {
 
     private void convertApproved(EventRow event, Map<String, Object> payload) {
         UUID requestId = uuid(payload.getOrDefault("purchaseRequestId", event.aggregateId()));
-        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.sales_order where tenant_id=? and workspace_id=? and source_purchase_request_id=?)", Boolean.class, event.tenantId(), event.workspaceId(), requestId))) return;
-        long version = number(payload.get("purchaseRequestVersion"), jdbc.queryForObject("select version from sales.purchase_request where tenant_id=? and workspace_id=? and id=?", Long.class, event.tenantId(), event.workspaceId(), requestId));
-        CurrentAccessContext context = actor(event, "sales");
+        if (salesContext.findSalesOrderBySourcePurchaseRequest(event.tenantId(), event.workspaceId(), requestId).isPresent()) return;
+        long version = number(payload.get("purchaseRequestVersion"), salesContext
+                .findPurchaseRequest(event.tenantId(), event.workspaceId(), requestId)
+                .orElseThrow(() -> new IllegalStateException("Purchase request context is unavailable"))
+                .version());
+        CurrentAccessContext context = actor(event);
         salesOrders.convert(context, requestId.toString(), version, "outbox-conversion-" + event.eventId(), "Automatic conversion after purchase request approval");
     }
 
     private void reserveConfirmed(EventRow event, Map<String, Object> payload) {
         UUID orderId = uuid(payload.getOrDefault("salesOrderId", event.aggregateId()));
-        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and sales_order_id=? and status in ('PENDING','RESERVED'))", Boolean.class, event.tenantId(), event.workspaceId(), orderId))) return;
-        long version = number(payload.get("salesOrderVersion"), jdbc.queryForObject("select version from sales.sales_order where tenant_id=? and workspace_id=? and id=?", Long.class, event.tenantId(), event.workspaceId(), orderId));
-        warehouse.reserve(actor(event, "warehouse"), orderId.toString(), version, "outbox-reservation-" + event.eventId(), event.correlationId());
+        if (warehouseContext.findActiveReservationForSalesOrder(event.tenantId(), event.workspaceId(), orderId).isPresent()) return;
+        long version = number(payload.get("salesOrderVersion"), salesContext
+                .findSalesOrder(event.tenantId(), event.workspaceId(), orderId)
+                .orElseThrow(() -> new IllegalStateException("Sales order context is unavailable"))
+                .version());
+        warehouse.reserve(actor(event), orderId.toString(), version, "outbox-reservation-" + event.eventId(), event.correlationId());
+    }
+
+    private void createReceivable(EventRow event, Map<String, Object> payload) {
+        UUID orderId = uuid(payload.getOrDefault("salesOrderId", event.aggregateId()));
+        CurrentAccessContext context = actor(event);
+        payments.createReceivable(context, new PaymentPort.ReceivableCommand(
+                "SALES_ORDER", orderId, null, "outbox-receivable-" + event.eventId()));
     }
 
     private void createDispatch(EventRow event, Map<String, Object> payload) {
         UUID reservationId = uuid(payload.getOrDefault("reservationId", event.aggregateId()));
-        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.dispatch_order where tenant_id=? and workspace_id=? and inventory_reservation_id=?)", Boolean.class, event.tenantId(), event.workspaceId(), reservationId))) return;
-        long version = number(payload.get("reservationVersion"), jdbc.queryForObject("select version from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and id=?", Long.class, event.tenantId(), event.workspaceId(), reservationId));
-        logistics.create(actor(event, "logistics"), reservationId.toString(), version, "outbox-dispatch-" + event.eventId());
+        if (logisticsContext.findDispatchByReservation(event.tenantId(), event.workspaceId(), reservationId).isPresent()) return;
+        long version = number(payload.get("reservationVersion"), warehouseContext
+                .findReservation(event.tenantId(), event.workspaceId(), reservationId)
+                .orElseThrow(() -> new IllegalStateException("Inventory reservation context is unavailable"))
+                .version());
+        logistics.create(actor(event), reservationId.toString(), version, "outbox-dispatch-" + event.eventId());
     }
 
     private void generateDeliveryDocuments(EventRow event, Map<String, Object> payload) {
-        CurrentAccessContext context = actor(event, "company_owner");
+        CurrentAccessContext context = actor(event);
         UUID dispatchId = uuid(payload.getOrDefault("dispatchOrderId", event.aggregateId()));
         requestDocument(context, event, "DISPATCH_ORDER", dispatchId, "DELIVERY_GUIDE_DRAFT", "PDF", "delivery-guide");
         UUID podId = payload.get("podId") == null ? null : uuid(payload.get("podId"));
@@ -162,49 +199,46 @@ public final class CanonicalOutboxEventProcessor {
     private void projectNotification(EventRow event, Map<String, Object> payload) {
         String clientAccountId = clientAccount(event, payload);
         Set<String> recipientIds = new HashSet<>();
-        recipientIds.addAll(memberships(event, Set.of("sales", "company_owner", "tenant_admin"), null));
+        recipientIds.addAll(tenantContext.findActiveMembershipIdsByRoleCodes(event.tenantId(), event.workspaceId(),
+                        Set.of("sales", "company_owner", "tenant_admin"))
+                .stream().map(UUID::toString).toList());
         if (clientAccountId != null && Set.of("DISPATCH_DELIVERED", "PAYMENT_SUCCEEDED").contains(event.eventType())) {
-            recipientIds.addAll(memberships(event, Set.of(), clientAccountId));
+            recipientIds.addAll(salesContext.findBuyerMembershipIds(event.tenantId(), event.workspaceId(),
+                            UUID.fromString(clientAccountId)).stream().map(UUID::toString).toList());
         }
         if (!recipientIds.isEmpty()) notifications.project(new NotificationProjection(event.eventId().toString(), event.tenantId().toString(), event.workspaceId().toString(), clientAccountId, event.aggregateType(), event.aggregateId().toString(), event.eventType(), string(payload.get("status")), event.occurredAt(), recipientIds));
-    }
-
-    private Set<String> memberships(EventRow event, Set<String> roles, String clientAccountId) {
-        String roleClause = roles.isEmpty() ? "" : " and lower(r.code) in (" + String.join(",", roles.stream().map(ignored -> "?").toList()) + ")";
-        List<Object> args = new java.util.ArrayList<>(List.of(event.tenantId(), event.workspaceId()));
-        if (clientAccountId != null) args.add(UUID.fromString(clientAccountId));
-        args.addAll(roles);
-        String sql = "select distinct m.id from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id "
-                + "join tenant_management.membership_role_definition mr on mr.membership_id=m.id and mr.tenant_id=? and mr.workspace_id=? "
-                + "join tenant_management.role_definition r on r.id=mr.role_id where w.tenant_id=? and m.workspace_id=? and m.status='ACTIVE'";
-        // Keep scope values explicit in every join; the first two placeholders belong to mr.
-        args = new java.util.ArrayList<>(List.of(event.tenantId(), event.workspaceId(), event.tenantId(), event.workspaceId()));
-        if (clientAccountId != null) {
-            sql += " and exists(select 1 from sales.client_account_membership cam where cam.tenant_id=? and cam.workspace_id=? and cam.client_account_id=? and cam.workspace_membership_id=m.id)";
-            args.add(event.tenantId()); args.add(event.workspaceId()); args.add(UUID.fromString(clientAccountId));
-        }
-        sql += roleClause;
-        args.addAll(roles);
-        return new HashSet<>(jdbc.query(sql, (rs, n) -> rs.getObject(1).toString(), args.toArray()));
     }
 
     private String clientAccount(EventRow event, Map<String, Object> payload) {
         Object explicit = payload.get("clientAccountId");
         if (explicit != null) return explicit.toString();
-        String table = switch (event.aggregateType()) {
-            case "PurchaseRequest" -> "sales.purchase_request";
-            case "SalesOrder" -> "sales.sales_order";
-            case "DispatchOrder" -> "logistics.dispatch_order";
-            case "Receivable", "Payment" -> "payments." + ("Receivable".equals(event.aggregateType()) ? "receivable" : "payment");
+        return switch (event.aggregateType()) {
+            case "PurchaseRequest" -> salesContext.findPurchaseRequest(event.tenantId(), event.workspaceId(), event.aggregateId())
+                    .map(SalesEventContextQueryPort.PurchaseRequestSnapshot::clientAccountId).map(UUID::toString).orElse(null);
+            case "SalesOrder" -> salesContext.findSalesOrder(event.tenantId(), event.workspaceId(), event.aggregateId())
+                    .map(SalesEventContextQueryPort.SalesOrderSnapshot::clientAccountId).map(UUID::toString).orElse(null);
+            case "DispatchOrder" -> logisticsContext.findDispatch(event.tenantId(), event.workspaceId(), event.aggregateId())
+                    .map(LogisticsEventContextQueryPort.DispatchSnapshot::clientAccountId).map(UUID::toString).orElse(null);
+            case "ProofOfDelivery" -> {
+                Object dispatchId = payload.get("dispatchOrderId");
+                yield dispatchId == null ? null : logisticsContext.findDispatch(event.tenantId(), event.workspaceId(), uuid(dispatchId))
+                        .map(LogisticsEventContextQueryPort.DispatchSnapshot::clientAccountId).map(UUID::toString).orElse(null);
+            }
+            case "Receivable", "Payment" -> paymentContext.findClientAccountId(event.tenantId(), event.workspaceId(),
+                    event.aggregateType(), event.aggregateId()).map(UUID::toString).orElse(null);
             default -> null;
         };
-        if (table == null) return null;
-        return jdbc.query("select client_account_id from " + table + " where tenant_id=? and workspace_id=? and id=?", rs -> rs.next() && rs.getObject(1) != null ? rs.getObject(1).toString() : null, event.tenantId(), event.workspaceId(), event.aggregateId());
     }
 
-    private CurrentAccessContext actor(EventRow event, String role) {
-        UUID userId = jdbc.queryForObject("select m.user_id from tenant_management.workspace_membership m join tenant_management.membership_role_definition mr on mr.membership_id=m.id and mr.tenant_id=? and mr.workspace_id=? join tenant_management.role_definition r on r.id=mr.role_id where m.workspace_id=? and m.status='ACTIVE' and lower(r.code)=? order by m.id limit 1", UUID.class, event.tenantId(), event.workspaceId(), event.workspaceId(), role);
-        CurrentAccessContext context = access.resolve(new CurrentAccessRequest(new UserId(userId.toString()), new TenantId(event.tenantId().toString()), new WorkspaceId(event.workspaceId().toString()), Surface.PLATFORM));
+    private CurrentAccessContext actor(EventRow event) {
+        TenantEventContextQueryPort.WorkflowActor principal = tenantContext.findSystemWorkflowActor(event.tenantId(), event.workspaceId());
+        CurrentAccessContext context = access.resolve(new CurrentAccessRequest(new UserId(principal.userId()),
+                new TenantId(event.tenantId()), new WorkspaceId(event.workspaceId()), Surface.PLATFORM));
+        if (!principal.membershipId().equals(context.membershipId().value())
+                || !principal.userId().equals(context.userId().value())
+                || !context.hasRoleCode(TenantEventContextQueryPort.SYSTEM_WORKFLOW_ROLE_CODE)) {
+            throw new IllegalStateException("Resolved workflow actor is not the explicit SYSTEM_WORKFLOW/NEXA_AUTOMATION principal");
+        }
         return context;
     }
 

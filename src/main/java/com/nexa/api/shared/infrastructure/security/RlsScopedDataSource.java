@@ -12,7 +12,7 @@ import java.util.logging.Logger;
 
 /** Applies and clears the request tenant/workspace scope on every pooled connection. */
 final class RlsScopedDataSource implements DataSource {
-    private static final String SET_SCOPE_SQL = "select set_config('app.current_tenant_id', ?, false), set_config('app.current_workspace_id', ?, false)";
+    private static final String SET_SCOPE_SQL = "select set_config('app.current_tenant_id', ?, ?), set_config('app.current_workspace_id', ?, ?)";
     private final DataSource delegate;
 
     RlsScopedDataSource(DataSource delegate) {
@@ -30,21 +30,22 @@ final class RlsScopedDataSource implements DataSource {
     }
 
     private static Connection scoped(Connection connection) throws SQLException {
-        var scope = RlsRequestScope.current();
-        try (var statement = connection.prepareStatement(SET_SCOPE_SQL)) {
-            statement.setString(1, scope == null ? "" : scope.tenantId().toString());
-            statement.setString(2, scope == null ? "" : scope.workspaceId().toString());
-            statement.execute();
+        try {
+            applyScope(connection, RlsRequestScope.current(), false);
         } catch (SQLException exception) {
             try { connection.close(); } catch (SQLException closeException) { exception.addSuppressed(closeException); }
             throw exception;
         }
         InvocationHandler handler = (proxy, method, args) -> {
+            if (method.getName().equals("setAutoCommit") && args != null && args.length == 1 && args[0] instanceof Boolean autoCommit) {
+                Object result = method.invoke(connection, args);
+                if (!autoCommit) applyScope(connection, RlsRequestScope.current(), true);
+                else applyScope(connection, null, false);
+                return result;
+            }
             if (method.getName().equals("close") && method.getParameterCount() == 0) {
-                try (var statement = connection.prepareStatement(SET_SCOPE_SQL)) {
-                    statement.setString(1, "");
-                    statement.setString(2, "");
-                    statement.execute();
+                try {
+                    applyScope(connection, null, false);
                 } finally {
                     connection.close();
                 }
@@ -57,6 +58,16 @@ final class RlsScopedDataSource implements DataSource {
             }
         };
         return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[]{Connection.class}, handler);
+    }
+
+    private static void applyScope(Connection connection, RlsRequestScope.Scope scope, boolean local) throws SQLException {
+        try (var statement = connection.prepareStatement(SET_SCOPE_SQL)) {
+            statement.setString(1, scope == null ? "" : scope.tenantId().toString());
+            statement.setBoolean(2, local);
+            statement.setString(3, scope == null ? "" : scope.workspaceId().toString());
+            statement.setBoolean(4, local);
+            statement.execute();
+        }
     }
 
     @Override public PrintWriter getLogWriter() throws SQLException { return delegate.getLogWriter(); }

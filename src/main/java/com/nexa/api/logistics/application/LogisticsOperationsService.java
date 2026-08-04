@@ -78,8 +78,8 @@ public class LogisticsOperationsService {
         else throw new AccessPolicyViolation("Logistics access is not available");
         return null;
     }
-    private static void logisticsRead(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS)) throw new AccessPolicyViolation("Logistics access is required"); c.requirePermission(Permission.LOGISTICS_READ); }
-    private static void write(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS)) throw new AccessPolicyViolation("Logistics write access is required"); c.requirePermission(Permission.LOGISTICS_WRITE); }
+    private static void logisticsRead(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS) && !c.hasRoleCode("system_workflow")) throw new AccessPolicyViolation("Logistics access is required"); c.requirePermission(Permission.LOGISTICS_READ); }
+    private static void write(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS) && !c.hasRoleCode("system_workflow")) throw new AccessPolicyViolation("Logistics write access is required"); c.requirePermission(Permission.LOGISTICS_WRITE); }
     private static void handoffRead(CurrentAccessContext c) {
         if (c.hasRole(MembershipRole.WAREHOUSE)) c.requirePermission(Permission.FULFILLMENT_READ);
         else if (c.hasRole(MembershipRole.LOGISTICS)) c.requirePermission(Permission.LOGISTICS_READ);
@@ -99,16 +99,18 @@ public class LogisticsOperationsService {
     private static String tenant(CurrentAccessContext c) { return c.tenantId().toString(); } private static String workspace(CurrentAccessContext c) { return c.workspaceId().toString(); } private static String actor(CurrentAccessContext c) { return c.membershipId().toString(); } private static long now() { return System.currentTimeMillis(); }
     private static LogisticsException error(String code, boolean notFound) { return new LogisticsException(code, notFound); }
 
-    public record DispatchView(String id, String dispatchNumber, String reservationId, String salesOrderId, String salesOrderNumber, String clientAccountId, String status,
-                                String destination, Instant deliveryWindowStart, Instant deliveryWindowEnd, Instant eta,
+    public record DispatchView(String id, String dispatchNumber, String reservationId, String salesOrderId, String salesOrderNumber,
+                                String clientAccountId, String clientCode, String clientName, String status,
+                                String destination, String deliveryArea, String priority,
+                                Instant deliveryWindowStart, Instant deliveryWindowEnd, Instant eta,
                                 AssignmentView assignment, BigDecimal temperatureMin, BigDecimal temperatureMax, String temperatureUnit,
                                 String temperatureStatus, String podId, String podStatus, long version, Instant updatedAt, List<String> alerts) {
         public DispatchView { alerts = alerts == null ? List.of() : List.copyOf(alerts); }
-        public DispatchView buyerSafe() { return new DispatchView(id, dispatchNumber, null, null, salesOrderNumber, null, buyerStatus(status), destination,
+        public DispatchView buyerSafe() { return new DispatchView(id, dispatchNumber, null, null, salesOrderNumber, null, clientCode, clientName, buyerStatus(status), destination, deliveryArea, priority,
                 deliveryWindowStart, deliveryWindowEnd, eta, null, null, null, null, null, podId, podStatus, version, updatedAt, buyerAlerts(alerts)); }
-        public DispatchView salesSafe() { return new DispatchView(id, dispatchNumber, null, null, salesOrderNumber, null, buyerStatus(status), destination,
+        public DispatchView salesSafe() { return new DispatchView(id, dispatchNumber, null, null, salesOrderNumber, null, clientCode, clientName, buyerStatus(status), destination, deliveryArea, priority,
                 deliveryWindowStart, deliveryWindowEnd, eta, null, null, null, null, null, podId, podStatus, version, updatedAt, buyerAlerts(alerts)); }
-        public DispatchView warehouseSafe() { return new DispatchView(id, dispatchNumber, reservationId, null, salesOrderNumber, null, status, destination,
+        public DispatchView warehouseSafe() { return new DispatchView(id, dispatchNumber, reservationId, null, salesOrderNumber, null, clientCode, clientName, status, destination, deliveryArea, priority,
                 deliveryWindowStart, deliveryWindowEnd, eta, null, null, null, null, null, podId, podStatus, version, updatedAt, List.of()); }
         private static String buyerStatus(String value) { return switch (value) { case "READY_FOR_OPERATIONS", "PREPARING", "ASSIGNED" -> "PREPARING_DELIVERY"; case "SCHEDULED", "READY_FOR_ROUTE" -> "DELIVERY_SCHEDULED"; case "IN_ROUTE" -> "IN_TRANSIT"; case "INCIDENT" -> "DELIVERY_REVIEW"; case "REPROGRAMMED" -> "DELIVERY_RESCHEDULED"; case "DELIVERED" -> "DELIVERED"; case "CANCELLED" -> "DELIVERY_CANCELLED"; case "PREPARING_DELIVERY", "DELIVERY_SCHEDULED", "IN_TRANSIT", "DELIVERY_REVIEW", "DELIVERY_RESCHEDULED", "DELIVERY_CANCELLED", "UNKNOWN" -> value; default -> "UNKNOWN"; }; }
         private static List<String> buyerAlerts(List<String> values) { return values.stream().filter(value -> value.equals("DELIVERY_REVIEW") || value.equals("TEMPERATURE_ALERT")).map(value -> value.equals("TEMPERATURE_ALERT") ? "DELIVERY_REVIEW" : value).distinct().toList(); }

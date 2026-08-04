@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 
 /** Official Stripe adapter. Secrets remain server-side and card data never enters Nexa. */
 @Component
@@ -49,14 +51,34 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     }
 
     @Override
+    public Optional<StripePaymentProvider.PaymentIntent> retrievePaymentIntent(String providerId) {
+        if (providerId == null || providerId.isBlank()) return Optional.empty();
+        try {
+            RequestOptions options = RequestOptions.builder().setApiKey(secretKey).build();
+            com.stripe.model.PaymentIntent intent = com.stripe.model.PaymentIntent.retrieve(providerId, options);
+            return Optional.of(new StripePaymentProvider.PaymentIntent(intent.getId(), intent.getClientSecret(), intent.getStatus()));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Stripe PaymentIntent retrieval failed", exception);
+        }
+    }
+
+    @Override
     public StripeWebhookEvent verifyWebhook(String payload, String signature) {
         try {
             Event event = Webhook.constructEvent(payload, signature, webhookSecret);
-            StripeObject object = event.getDataObjectDeserializer().getObject().orElse(null);
-            if (object instanceof com.stripe.model.PaymentIntent intent) {
-                return new StripeWebhookEvent(event.getId(), event.getType(), intent.getId(), intent.getStatus(), intent.getAmount(), intent.getCurrency());
+            var deserializer = event.getDataObjectDeserializer();
+            StripeObject object = deserializer.getObject().orElse(null);
+            if (object == null) {
+                /* A signed event can legitimately carry a newer Stripe API
+                 * version than the SDK. The unsafe path still deserializes
+                 * the verified raw object without accepting an unverified body. */
+                object = deserializer.deserializeUnsafe();
             }
-            return new StripeWebhookEvent(event.getId(), event.getType(), null, null, null, null);
+            if (object instanceof com.stripe.model.PaymentIntent intent) {
+                Map<String, String> metadata = intent.getMetadata() == null ? Map.of() : intent.getMetadata();
+                return new StripeWebhookEvent(event.getId(), event.getType(), intent.getId(), intent.getStatus(), intent.getAmount(), intent.getCurrency(), metadata);
+            }
+            return new StripeWebhookEvent(event.getId(), event.getType(), null, null, null, null, Map.of());
         } catch (SignatureVerificationException exception) {
             throw new IllegalArgumentException("Stripe webhook signature is invalid", exception);
         } catch (Exception exception) {

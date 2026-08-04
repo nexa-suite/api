@@ -4,6 +4,7 @@ import com.nexa.api.invoicing.application.model.BusinessDocumentModels;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.util.UUID;
+import java.io.InputStream;
 
 public interface BusinessDocumentPort {
     BusinessDocumentModels.GenerationRequestView request(CurrentAccessContext context, String subjectType, UUID subjectId, String documentType, String format, String idempotencyKey);
@@ -12,5 +13,11 @@ public interface BusinessDocumentPort {
     BusinessDocumentModels.GenerationRequestView regenerate(CurrentAccessContext context, UUID documentId, String idempotencyKey);
     BusinessDocumentModels.Download download(CurrentAccessContext context, UUID documentId);
     BusinessDocumentModels.EvidenceView uploadEvidence(CurrentAccessContext context, String subjectType, UUID subjectId, String originalFilename, String declaredContentType, byte[] content);
+    BusinessDocumentModels.EvidenceView requestEvidence(CurrentAccessContext context, String subjectType, UUID subjectId, String originalFilename, String declaredContentType, String idempotencyKey);
+    BusinessDocumentModels.EvidenceView completeEvidence(CurrentAccessContext context, UUID evidenceId, String originalFilename, String declaredContentType, InputStream content, long contentLength, String idempotencyKey);
+    BusinessDocumentModels.EvidenceView evidence(CurrentAccessContext context, UUID evidenceId);
+    BusinessDocumentModels.Page<BusinessDocumentModels.EvidenceView> listEvidence(CurrentAccessContext context, String subjectType, UUID subjectId, int page, int size);
+    BusinessDocumentModels.Download downloadEvidence(CurrentAccessContext context, UUID evidenceId);
+    void deleteEvidence(CurrentAccessContext context, UUID evidenceId);
     void processPendingGenerationRequests();
 }

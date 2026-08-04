@@ -8,9 +8,7 @@ import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersis
 import com.nexa.api.sales.domain.model.salesorder.SalesOrder;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -73,9 +71,6 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
     }
 
     private static void requireCommercialWrite(CurrentAccessContext context) {
-        if (!context.hasRole(MembershipRole.SALES) && !context.hasRole(MembershipRole.COMPANY_OWNER)) {
-            throw new AccessPolicyViolation("Commercial sales access is required");
-        }
         context.requirePermission(Permission.SALES_WRITE);
     }
 

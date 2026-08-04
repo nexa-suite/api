@@ -20,13 +20,35 @@ public record CatalogItemDetail(
 		String availabilityStatus,
 		boolean nearExpiry,
 		String promotionLabel,
-		CatalogPricingView pricing) {
+		CatalogPricingView pricing,
+		String productFamilyId,
+		String productFamilyCode,
+		String productFamilyName,
+		String sellableSkuId,
+		String skuCode,
+		String unitOfMeasure,
+		String packagingType,
+		BigDecimal netWeight,
+		BigDecimal grossWeight,
+		Instant availabilityAsOf) {
+	public CatalogItemDetail(String catalogItemId, String productId, String itemName, String brandName,
+			String categoryName, String description, String presentation, BigDecimal unitPriceAmount,
+			String unitPriceCurrency, String coldChainRequirement, String imageUrl, String imageFileName,
+			String status, String availabilityStatus, boolean nearExpiry, String promotionLabel,
+			CatalogPricingView pricing) {
+		this(catalogItemId, productId, itemName, brandName, categoryName, description, presentation,
+				unitPriceAmount, unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, status,
+				availabilityStatus, nearExpiry, promotionLabel, pricing, null, null, null, null, null, null,
+				null, null, null, Instant.EPOCH);
+	}
+
 	public CatalogItemDetail(String catalogItemId, String productId, String itemName, String brandName,
 			String categoryName, String description, String presentation, BigDecimal unitPriceAmount,
 			String unitPriceCurrency, String coldChainRequirement, String imageUrl, String imageFileName) {
 		this(catalogItemId, productId, itemName, brandName, categoryName, description, presentation, unitPriceAmount,
 				unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, "ACTIVE", "UNKNOWN", false, null,
-				CatalogPricingView.base(unitPriceAmount, unitPriceCurrency, Instant.EPOCH));
+				CatalogPricingView.base(unitPriceAmount, unitPriceCurrency, Instant.EPOCH), null, null, null, null, null,
+				null, null, null, null, Instant.EPOCH);
 	}
 
 	public CatalogItemDetail(String catalogItemId, String productId, String itemName, String brandName,
@@ -35,6 +57,7 @@ public record CatalogItemDetail(
 			String status, String availabilityStatus, boolean nearExpiry, String promotionLabel) {
 		this(catalogItemId, productId, itemName, brandName, categoryName, description, presentation, unitPriceAmount,
 				unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, status, availabilityStatus,
-				nearExpiry, promotionLabel, CatalogPricingView.base(unitPriceAmount, unitPriceCurrency, Instant.EPOCH));
+				nearExpiry, promotionLabel, CatalogPricingView.base(unitPriceAmount, unitPriceCurrency, Instant.EPOCH),
+				null, null, null, null, null, null, null, null, null, Instant.EPOCH);
 	}
 }

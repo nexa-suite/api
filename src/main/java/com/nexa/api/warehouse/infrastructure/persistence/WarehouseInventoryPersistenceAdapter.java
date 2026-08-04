@@ -5,6 +5,8 @@ import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.warehouse.application.port.WarehouseInventoryPersistencePort;
+import com.nexa.api.warehouse.domain.model.inventorylot.InventoryLot;
+import com.nexa.api.warehouse.domain.model.inventorylot.InventoryLotStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -86,7 +88,6 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         return loadLot(context, uuid(id), false);
     }
 
-    @Transactional
     public WarehouseOperationsService.LotSummary receive(CurrentAccessContext context, WarehouseOperationsService.Receipt receipt,
                                                           String key, String correlation) {
         requireWrite(context);
@@ -109,6 +110,9 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         if (receipt.quantity() == null || receipt.quantity().signum() <= 0) throw error("INVALID_REQUEST", false);
         validateTemperature(receipt.temperatureReading());
         String notes = boundedNullable(receipt.notes(), "notes", 2000);
+        InventoryLot lotAggregate = InventoryLot.rehydrate("new-lot", BigDecimal.ZERO, BigDecimal.ZERO, unit,
+                InventoryLotStatus.AVAILABLE);
+        lotAggregate.receive(receipt.quantity());
         UUID id = UUID.randomUUID();
         Timestamp occurred = now();
         checkUpdated(jdbc.update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,temperature_value) values (?,?,?,?,?,?,?,?,?,?,?,0,?,'AVAILABLE',?,?)",
@@ -121,13 +125,11 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         return loadLot(context, id, false);
     }
 
-    @Transactional
     public WarehouseOperationsService.LotSummary adjust(CurrentAccessContext context, String lotId, BigDecimal quantity,
                                                          boolean inbound, String reason, long expected, String key, String correlation) {
         return mutateStock(context, lotId, quantity, inbound ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT", reason, expected, key, correlation);
     }
 
-    @Transactional
     public WarehouseOperationsService.LotSummary waste(CurrentAccessContext context, String lotId, BigDecimal quantity,
                                                         String reason, long expected, String key, String correlation) {
         return mutateStock(context, lotId, quantity, "WASTE", reason, expected, key, correlation);
@@ -150,10 +152,17 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         if (movementType.equals("ADJUSTMENT_OUT") && !lot.status().equals("AVAILABLE")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         if (movementType.equals("WASTE") && lot.status().equals("EXPIRED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         BigDecimal before = lot.onHand();
-        BigDecimal after = movementType.equals("ADJUSTMENT_IN") ? before.add(quantity) : before.subtract(quantity);
-        if (after.signum() < 0 || (!movementType.equals("ADJUSTMENT_IN") && lot.available().compareTo(quantity) < 0)) throw error("INSUFFICIENT_AVAILABLE_STOCK", false);
-        String nextStatus = lot.status();
-        if (lot.status().equals("AVAILABLE") && after.signum() == 0) nextStatus = "DEPLETED";
+        InventoryLot lotAggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
+                InventoryLotStatus.valueOf(lot.status()));
+        try {
+            if (movementType.equals("ADJUSTMENT_IN")) lotAggregate.adjustIn(quantity);
+            else if (movementType.equals("WASTE")) lotAggregate.recordWaste(quantity);
+            else lotAggregate.adjustOut(quantity);
+        } catch (IllegalStateException exception) {
+            throw error(movementType.equals("ADJUSTMENT_IN") ? "INVENTORY_LOT_NOT_ALLOCATABLE" : "INSUFFICIENT_AVAILABLE_STOCK", false);
+        }
+        BigDecimal after = lotAggregate.onHand();
+        String nextStatus = lotAggregate.status().name();
         checkUpdated(jdbc.update("update warehouse.inventory_lot set stock_quantity=?,status=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
                 after, nextStatus, tenant(context), workspace(context), lotIdValue, expected), "lot stock update", "CONCURRENCY_CONFLICT");
         insertMovement(context, uuid(lot.warehouseId()), uuid(lot.zoneId()), lotIdValue, lot.catalogItemId(), uuidNullable(lot.skuId()), movementType,
@@ -163,17 +172,14 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         return loadLot(context, lotIdValue, false);
     }
 
-    @Transactional
     public WarehouseOperationsService.LotSummary blockLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) {
         return transitionLot(context, lotId, "BLOCKED", "warehouse.lot.blocked", reason, expected, key, correlation);
     }
 
-    @Transactional
     public WarehouseOperationsService.LotSummary quarantineLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) {
         return transitionLot(context, lotId, "QUARANTINED", "warehouse.lot.quarantined", reason, expected, key, correlation);
     }
 
-    @Transactional
     public WarehouseOperationsService.LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) {
         return transitionLot(context, lotId, "AVAILABLE", "warehouse.lot.restored", reason, expected, key, correlation);
     }
@@ -190,11 +196,16 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         UUID id = uuid(lotId);
         WarehouseOperationsService.LotSummary lot = loadLot(context, id, true);
         if (lot.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
-        if (nextStatus.equals("AVAILABLE")) {
-            if (lot.expirationDate().isBefore(LocalDate.now()) || !lot.expirationDate().isAfter(LocalDate.now())
-                    || lot.onHand().signum() <= 0 || lot.status().equals("EXPIRED") || lot.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
-            if (!lot.status().equals("BLOCKED") && !lot.status().equals("QUARANTINED")) throw error("INVENTORY_RESERVATION_TRANSITION_INVALID", false);
-        } else if (lot.status().equals("EXPIRED") || lot.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
+        InventoryLot lotAggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
+                InventoryLotStatus.valueOf(lot.status()));
+        try {
+            if (nextStatus.equals("BLOCKED")) lotAggregate.markBlocked();
+            else if (nextStatus.equals("QUARANTINED")) lotAggregate.markQuarantined();
+            else if (nextStatus.equals("AVAILABLE")) lotAggregate.restoreAvailability();
+            else throw error("INVENTORY_RESERVATION_TRANSITION_INVALID", false);
+        } catch (IllegalStateException exception) {
+            throw error("INVENTORY_RESERVATION_TRANSITION_INVALID", false);
+        }
         checkUpdated(jdbc.update("update warehouse.inventory_lot set status=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
                 nextStatus, tenant(context), workspace(context), id, expected), "lot status update", "CONCURRENCY_CONFLICT");
         appendEvent(context, id, eventType, "lot");

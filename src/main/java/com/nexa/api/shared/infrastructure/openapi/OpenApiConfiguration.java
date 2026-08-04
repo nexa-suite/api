@@ -14,7 +14,7 @@ public class OpenApiConfiguration {
 	@Bean
 	OpenAPI nexaOpenAPI() {
 		return new OpenAPI()
-				.info(new Info().title("Nexa API").version("0.8.1").description(
+				.info(new Info().title("Nexa API").version("0.9.0").description(
 						"Local API contract for secured identity, tenant/workspace administration, Catalog reads and "
 								+ "Sales Client Accounts and Purchase Requests. Bearer authentication revalidates the "
 								+ "persistent session; refresh and sign-out require the surface refresh cookie and Origin policy. "

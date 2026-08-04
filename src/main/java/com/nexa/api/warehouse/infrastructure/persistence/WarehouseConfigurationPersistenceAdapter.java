@@ -62,7 +62,6 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
                 .stream().findFirst().orElseThrow(() -> error("WAREHOUSE_NOT_FOUND", true));
     }
 
-    @Transactional
     public WarehouseOperationsService.WarehouseSummary createWarehouse(
             CurrentAccessContext context, String code, String name, String address) {
         requireWrite(context);
@@ -78,7 +77,6 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
         return warehouse(context, id.toString());
     }
 
-    @Transactional
     public WarehouseOperationsService.WarehouseSummary updateWarehouse(
             CurrentAccessContext context, String id, String name, String address, String status, long expected) {
         requireWrite(context);
@@ -100,7 +98,6 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
         return operationalProfile(summary, settings(context), coordinates(context, uuid(id)));
     }
 
-    @Transactional
     public WarehouseOperationsService.OperationalProfile updateOperationalProfile(
             CurrentAccessContext context, String id, WarehouseOperationsService.OperationalPatch patch, long expected) {
         requireWrite(context);
@@ -175,7 +172,6 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
                 tenant(context), workspace(context), warehouseIdValue));
     }
 
-    @Transactional
     public WarehouseOperationsService.ZoneSummary createZone(CurrentAccessContext context, String warehouseId, String code,
                                                               String name, String type, BigDecimal min, BigDecimal max) {
         requireWrite(context);
@@ -193,7 +189,6 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
         return zone(context, warehouse, id);
     }
 
-    @Transactional
     public WarehouseOperationsService.ZoneSummary updateZone(CurrentAccessContext context, String warehouseId, String zoneId,
                                                               String name, BigDecimal min, BigDecimal max, String status, long expected) {
         requireWrite(context);

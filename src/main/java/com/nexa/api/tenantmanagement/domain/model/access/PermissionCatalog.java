@@ -75,7 +75,7 @@ public final class PermissionCatalog {
 					PermissionKey.DOCUMENT_GENERATE, PermissionKey.DOCUMENT_REGENERATE,
 					PermissionKey.DOCUMENT_UPLOAD, PermissionKey.DOCUMENT_DOWNLOAD,
 					PermissionKey.PAYMENT_READ, PermissionKey.PAYMENT_CREATE,
-					PermissionKey.PAYMENT_REFUND, PermissionKey.PAYMENT_RECONCILE,
+					PermissionKey.PAYMENT_RECONCILE,
 					PermissionKey.WAREHOUSE_READ, PermissionKey.WAREHOUSE_LOCATION_MANAGE,
 					PermissionKey.INVENTORY_READ, PermissionKey.INVENTORY_RECEIVE,
 					PermissionKey.INVENTORY_ADJUST, PermissionKey.INVENTORY_RESERVE,

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+           xmlns="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+           elementFormDefault="qualified">
+    <xs:complexType name="AmountType">
+        <xs:simpleContent>
+            <xs:extension base="xs:decimal"><xs:attribute name="currencyID" type="xs:string" use="required"/></xs:extension>
+        </xs:simpleContent>
+    </xs:complexType>
+    <xs:complexType name="QuantityType">
+        <xs:simpleContent>
+            <xs:extension base="xs:decimal"><xs:attribute name="unitCode" type="xs:string" use="required"/></xs:extension>
+        </xs:simpleContent>
+    </xs:complexType>
+    <xs:element name="ID" type="xs:string"/>
+    <xs:element name="IssueDate" type="xs:date"/>
+    <xs:element name="DocumentCurrencyCode" type="xs:string"/>
+    <xs:element name="Name" type="xs:string"/>
+    <xs:element name="Note" type="xs:string"/>
+    <xs:element name="Information" type="xs:string"/>
+    <xs:element name="InvoicedQuantity" type="QuantityType"/>
+    <xs:element name="DeliveredQuantity" type="QuantityType"/>
+    <xs:element name="LineExtensionAmount" type="AmountType"/>
+    <xs:element name="PriceAmount" type="AmountType"/>
+    <xs:element name="TaxAmount" type="AmountType"/>
+    <xs:element name="PayableAmount" type="AmountType"/>
+</xs:schema>

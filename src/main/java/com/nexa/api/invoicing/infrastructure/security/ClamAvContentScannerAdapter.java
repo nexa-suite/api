@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -25,7 +26,12 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
         this.port = Integer.parseInt(environment.getProperty("nexa.clamav.port", "3310"));
     }
 
-    @Override public ScanResult scan(byte[] content) {
+    @Override public ScanResult scan(InputStream input) {
+        byte[] content = readBounded(input, 10485760);
+        return scanBytes(content);
+    }
+
+    private ScanResult scanBytes(byte[] content) {
         if (content == null || content.length == 0) return new ScanResult(false, null, "EMPTY_FILE");
         if (!host.isBlank()) {
             String verdict = clamScan(content);
@@ -34,6 +40,24 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
         } else if (contains(content, EICAR)) return new ScanResult(false, null, "MALWARE_SIGNATURE");
         String type = detect(content);
         return type == null ? new ScanResult(false, null, "UNKNOWN_CONTENT_TYPE") : new ScanResult(true, type, "CLEAN");
+    }
+
+    private static byte[] readBounded(InputStream input, int maximum) {
+        if (input == null) return new byte[0];
+        try (InputStream source = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            int read;
+            while ((read = source.read(buffer)) >= 0) {
+                if (read == 0) continue;
+                total += read;
+                if (total > maximum) throw new IllegalArgumentException("Evidence size is invalid");
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Content scanner input failed", exception);
+        }
     }
     private String clamScan(byte[] content) {
         try (Socket socket = new Socket()) {

@@ -16,6 +16,8 @@ import com.nexa.api.sales.application.reference.port.PeruGeographyPersistencePor
 import com.nexa.api.sales.application.reference.port.PeruGeographyUseCase;
 import com.nexa.api.sales.application.reference.service.PeruGeographyService;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderPersistencePort;
+import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderDraftPersistencePort;
+import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderDraftUseCase;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderUseCase;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderAggregatePersistencePort;
@@ -23,6 +25,7 @@ import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersis
 import com.nexa.api.sales.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.sales.application.salesorder.service.SalesOrderService;
 import com.nexa.api.sales.application.salesorder.service.ManualSalesOrderService;
+import com.nexa.api.sales.application.salesorder.service.ManualSalesOrderDraftService;
 import com.nexa.api.sales.application.workflow.SalesSnapshotAssembler;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import org.springframework.context.annotation.Bean;
@@ -46,6 +49,10 @@ public class SalesRuntimeConfiguration {
 	}
 	@Bean ManualSalesOrderUseCase manualSalesOrderUseCase(SalesSnapshotAssembler snapshots,
 			ManualSalesOrderPersistencePort persistence) { return new ManualSalesOrderService(snapshots, persistence); }
+	@Bean ManualSalesOrderDraftUseCase manualSalesOrderDraftUseCase(ManualSalesOrderDraftPersistencePort drafts,
+			ManualSalesOrderUseCase manualOrders, ManualSalesOrderPersistencePort orders) {
+		return new ManualSalesOrderDraftService(drafts, manualOrders, orders);
+	}
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts,
 			ChangeEventPersistencePort changeFeed) {

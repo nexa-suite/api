@@ -9,7 +9,19 @@ public record CatalogItemSummaryResponse(String catalogItemId, String productId,
 		CatalogMediaResponse image, String status, String availabilityStatus, boolean nearExpiry,
 			String promotionLabel, MoneyResponse basePrice, MoneyResponse effectivePrice,
 			MoneyResponse discountAmount, String currency, List<CatalogAppliedPromotionResponse> appliedPromotions,
+			Instant pricingAsOf, String productFamilyId, String productFamilyCode, String productFamilyName,
+			String sellableSkuId, String skuCode, String unitOfMeasure, String packagingType,
+			java.math.BigDecimal netWeight, java.math.BigDecimal grossWeight, Instant availabilityAsOf) {
+	public CatalogItemSummaryResponse(String catalogItemId, String productId, String itemName, String brandName,
+			String categoryName, String presentation, MoneyResponse unitPrice, String coldChainRequirement,
+			CatalogMediaResponse image, String status, String availabilityStatus, boolean nearExpiry,
+			String promotionLabel, MoneyResponse basePrice, MoneyResponse effectivePrice,
+			MoneyResponse discountAmount, String currency, List<CatalogAppliedPromotionResponse> appliedPromotions,
 			Instant pricingAsOf) {
+		this(catalogItemId, productId, itemName, brandName, categoryName, presentation, unitPrice, coldChainRequirement,
+				image, status, availabilityStatus, nearExpiry, promotionLabel, basePrice, effectivePrice, discountAmount,
+				currency, appliedPromotions, pricingAsOf, null, null, null, null, null, null, null, null, null, Instant.EPOCH);
+	}
 	public CatalogItemSummaryResponse(String catalogItemId, String productId, String itemName, String brandName,
 			String categoryName, String presentation, MoneyResponse unitPrice, String coldChainRequirement,
 			CatalogMediaResponse image) {
