@@ -2,6 +2,7 @@ package com.nexa.api.warehouse.presentation;
 
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -39,6 +40,7 @@ public final class WarehouseController {
     }
 
     @GetMapping({"/warehouses/{id}/location", "/warehouses/{id}/locations"})
+    @Operation(operationId = "getWarehouseLocation")
     public ResponseEntity<LocationResponse> location(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
         OperationalProfileResponse value = operational(service.operationalProfile(c, id));
         return ResponseEntity.ok().eTag(etag(value.version()))
@@ -46,6 +48,7 @@ public final class WarehouseController {
     }
 
     @GetMapping({"/warehouses/{id}/profile", "/warehouses/{id}/operational-profile"})
+    @Operation(operationId = "getWarehouseOperationalProfile")
     public ResponseEntity<OperationalProfileResponse> operationalProfile(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
         OperationalProfileResponse value = operational(service.operationalProfile(c, id));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
@@ -70,6 +73,7 @@ public final class WarehouseController {
     }
 
     @PatchMapping({"/warehouses/{id}/profile", "/warehouses/{id}/operational-profile"})
+    @Operation(operationId = "updateWarehouseOperationalProfile")
     public ResponseEntity<OperationalProfileResponse> updateOperationalProfile(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                                  @PathVariable String id,
                                                                                  @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -130,6 +134,7 @@ public final class WarehouseController {
     }
 
     @PatchMapping({"/warehouses/{id}/location", "/warehouses/{id}/locations"})
+    @Operation(operationId = "updateWarehouseLocation")
     public ResponseEntity<LocationResponse> updateLocation(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                             @PathVariable String id,
                                                             @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -159,6 +164,7 @@ public final class WarehouseController {
     }
 
     @GetMapping({"/inventory", "/inventory/lots"})
+    @Operation(operationId = "listInventoryLots")
     public PageResponse<LotResponse> inventory(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) String warehouseId, @RequestParam(required = false) String zoneId, @RequestParam(required = false) String status, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "expirationDate,asc") String sort) {
         return page(service.lots(c, catalogItemId, warehouseId, zoneId, status, page, size, sort), this::lot);
     }
@@ -173,7 +179,7 @@ public final class WarehouseController {
 
     @PostMapping("/inventory/inbound-receipts")
     public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
-        var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes()), key, String.valueOf(correlation)));
+        var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId()), key, String.valueOf(correlation)));
         return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
     }
 
@@ -210,6 +216,7 @@ public final class WarehouseController {
     }
 
     @GetMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservation-preview")
+    @Operation(operationId = "previewFulfillmentCandidateInventoryReservation")
     public ReservationPreviewResponse preview(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId) { return preview(service.preview(c, salesOrderId)); }
 
     @PostMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservations")
@@ -251,11 +258,11 @@ public final class WarehouseController {
                 x.latitude(), x.longitude());
     }
     private ZoneResponse zone(WarehouseOperationsService.ZoneSummary x) { return new ZoneResponse(x.id(), x.warehouseId(), x.code(), x.name(), x.type(), x.temperatureMin(), x.temperatureMax(), x.status(), x.version()); }
-    private LotResponse lot(WarehouseOperationsService.LotSummary x) { return new LotResponse(x.id(), x.warehouseId(), x.zoneId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.receivedAt(), x.onHand(), x.reserved(), x.available(), x.unit(), x.status(), x.version()); }
-    private MovementResponse movement(WarehouseOperationsService.MovementSummary x) { return new MovementResponse(x.id(), x.lotId(), x.catalogItemId(), x.type(), x.quantity(), x.unit(), x.quantityBefore(), x.quantityAfter(), x.reservedBefore(), x.reservedAfter(), x.reason(), x.occurredAt()); }
+    private LotResponse lot(WarehouseOperationsService.LotSummary x) { return new LotResponse(x.id(), x.warehouseId(), x.zoneId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.receivedAt(), x.onHand(), x.reserved(), x.available(), x.unit(), x.status(), x.version(), x.skuId()); }
+    private MovementResponse movement(WarehouseOperationsService.MovementSummary x) { return new MovementResponse(x.id(), x.lotId(), x.catalogItemId(), x.type(), x.quantity(), x.unit(), x.quantityBefore(), x.quantityAfter(), x.reservedBefore(), x.reservedAfter(), x.reason(), x.occurredAt(), x.skuId()); }
     private AvailabilityResponse availability(WarehouseOperationsService.Availability x) { return new AvailabilityResponse(x.catalogItemId(), x.status(), x.asOf()); }
     private ReservationPreviewResponse preview(WarehouseOperationsService.ReservationPreview x) { return new ReservationPreviewResponse(x.salesOrderId(), x.orderNumber(), x.lines().stream().map(this::proposal).toList(), x.complete(), x.generatedAt(), x.notice()); }
-    private ProposalLineResponse proposal(WarehouseOperationsService.ProposalLine x) { return new ProposalLineResponse(x.catalogItemId(), x.requested(), x.unit(), x.allocations().stream().map(this::allocation).toList(), x.shortage(), x.complete()); }
+    private ProposalLineResponse proposal(WarehouseOperationsService.ProposalLine x) { return new ProposalLineResponse(x.catalogItemId(), x.requested(), x.unit(), x.allocations().stream().map(this::allocation).toList(), x.shortage(), x.complete(), x.skuId()); }
     private ReservationDetailResponse reservation(WarehouseOperationsService.ReservationDetail x) { return new ReservationDetailResponse(x.id(), x.salesOrderId(), x.orderNumber(), x.status(), x.createdAt(), x.reservedAt(), x.expiresAt(), x.version(), x.clientAccountId(), x.allocations().stream().map(this::allocation).toList()); }
     private ReservationSummaryResponse reservationSummary(WarehouseOperationsService.ReservationSummary x) { return new ReservationSummaryResponse(x.id(), x.salesOrderId(), x.orderNumber(), x.status(), x.createdAt(), x.reservedAt(), x.expiresAt(), x.version()); }
     private AllocationResponse allocation(WarehouseOperationsService.AllocationView x) { return new AllocationResponse(x.lotId(), x.quantity(), x.unit(), x.expirationDate()); }
@@ -273,11 +280,11 @@ public final class WarehouseController {
                                          LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                          boolean serviceable) { }
     public record ZoneResponse(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
-    public record LotResponse(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version) { }
-    public record MovementResponse(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt) { }
+    public record LotResponse(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId) { }
+    public record MovementResponse(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt, String skuId) { }
     public record AvailabilityResponse(String catalogItemId, String status, Instant asOf) { }
     public record ReservationPreviewResponse(String salesOrderId, String orderNumber, List<ProposalLineResponse> lines, boolean complete, Instant generatedAt, String notice) { }
-    public record ProposalLineResponse(String catalogItemId, BigDecimal requested, String unit, List<AllocationResponse> allocations, BigDecimal shortage, boolean complete) { }
+    public record ProposalLineResponse(String catalogItemId, BigDecimal requested, String unit, List<AllocationResponse> allocations, BigDecimal shortage, boolean complete, String skuId) { }
     public record AllocationResponse(String lotId, BigDecimal quantity, String unit, LocalDate expirationDate) { }
     public record ReservationSummaryResponse(String id, String salesOrderId, String orderNumber, String status, Instant createdAt, Instant reservedAt, Instant expiresAt, long version) { }
     public record ReservationDetailResponse(String id, String salesOrderId, String orderNumber, String status, Instant createdAt, Instant reservedAt, Instant expiresAt, long version, String clientAccountId, List<AllocationResponse> allocations) { }
@@ -304,7 +311,7 @@ public final class WarehouseController {
     public record SelectionPolicyPatchRequest(String selectionPolicy) { }
     public record ZoneRequest(String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax) { }
     public record ZonePatch(String name, BigDecimal temperatureMin, BigDecimal temperatureMax, String status) { }
-    public record ReceiptRequest(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes) { }
+    public record ReceiptRequest(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) { }
     public record QuantityRequest(String lotId, BigDecimal quantity, String direction, String reason) { }
     public record ReasonRequest(String reason) { }
 }
