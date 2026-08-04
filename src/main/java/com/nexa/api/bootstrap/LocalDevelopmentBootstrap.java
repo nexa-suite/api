@@ -108,7 +108,7 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	private void seedInventory(UUID tenantId, UUID workspaceId, UUID warehouseId, UUID zoneId, Instant now) {
-		List<SkuSeed> skus = jdbc.query("select id,legacy_catalog_item_id,unit_of_measure from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and status='ACTIVE' and visible order by sku_code",
+		List<SkuSeed> skus = jdbc.query("select id,legacy_catalog_item_id,unit_of_measure from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and status='ACTIVE' and visible and legacy_catalog_item_id is not null and btrim(legacy_catalog_item_id) <> '' order by sku_code",
 				(rs, row) -> new SkuSeed(rs.getObject("id", UUID.class), rs.getString("legacy_catalog_item_id"), rs.getString("unit_of_measure")), tenantId, workspaceId);
 		for (SkuSeed sku : skus) {
 			String batch = "LOCAL-FOUNDATION-" + sku.legacyCatalogItemId();
