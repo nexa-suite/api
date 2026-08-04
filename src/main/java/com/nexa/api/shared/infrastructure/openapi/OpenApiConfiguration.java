@@ -19,8 +19,8 @@ public class OpenApiConfiguration {
 								+ "Sales Client Accounts and Purchase Requests. Bearer authentication revalidates the "
 								+ "persistent session; refresh and sign-out require the surface refresh cookie and Origin policy. "
 								+ "Sales Order conversion and lifecycle endpoints plus the tenant-scoped persisted change feed are included. "
-								+ "Warehouse and Logistics HTTP workflows are included; Proof of Delivery remains metadata-only. "
-								+ "Business Documents, file storage, invoices and payments are not implemented."))
+						+ "Warehouse and Logistics HTTP workflows are included with FEFO, dispatch lifecycle and Proof of Delivery evidence. "
+						+ "Business Documents, private object storage, invoice drafts, receivables and Stripe-compatible payment intents are included."))
 				.components(new Components()
 						.addSecuritySchemes("bearerAuth", new SecurityScheme().type(SecurityScheme.Type.HTTP)
 								.scheme("bearer").bearerFormat("JWT").description("RS256 access token"))
