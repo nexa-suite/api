@@ -20,4 +20,6 @@ jobs:
           java-version: "25"
           cache: maven
       - name: Verify API with real PostgreSQL integrations
+        env:
+          NEXA_DATABASE_POOL_MAX: "32"
         run: ./mvnw clean verify -Dnexa.integration.enabled=true

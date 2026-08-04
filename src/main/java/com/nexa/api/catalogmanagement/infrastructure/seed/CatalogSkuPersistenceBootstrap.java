@@ -28,7 +28,7 @@ public class CatalogSkuPersistenceBootstrap {
     }
 
     @EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
-    @Order(Ordered.LOWEST_PRECEDENCE)
+    @Order(Ordered.LOWEST_PRECEDENCE - 10)
     @Transactional
     public void reconcile() {
         Instant now = Instant.now();
