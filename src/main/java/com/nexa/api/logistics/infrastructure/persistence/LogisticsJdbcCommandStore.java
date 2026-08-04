@@ -2,7 +2,6 @@ package com.nexa.api.logistics.infrastructure.persistence;
 
 import com.nexa.api.logistics.application.LogisticsOperationsService;
 import com.nexa.api.logistics.application.LogisticsOperationsService.LogisticsException;
-import com.nexa.api.logistics.application.port.LogisticsPersistencePort;
 import com.nexa.api.logistics.application.port.DispatchRouteStartPort;
 import com.nexa.api.logistics.application.port.OperationalHandoffNotificationPort;
 import com.nexa.api.logistics.application.port.OperationalHandoffPort;
@@ -25,6 +24,7 @@ import com.nexa.api.logistics.domain.temperaturereading.TemperatureReading;
 import com.nexa.api.logistics.domain.temperaturereading.TemperatureReadingStatus;
 import com.nexa.api.logistics.domain.temperaturereading.TemperatureScale;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
+import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
 import com.nexa.api.warehouse.application.port.WarehouseLogisticsFulfillmentPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,11 +45,11 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
-@Repository
-@Profile("!test")
-public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort, DispatchRouteStartPort, OperationalHandoffPort {
+/** Shared tenant-scoped JDBC primitives used by the focused Logistics adapters. */
+abstract class LogisticsJdbcSupport {
     private static final int MAX_PAGE_SIZE = 100;
     private final JdbcTemplate jdbc;
     private final ChangeEventPersistencePort changeFeed;
@@ -57,19 +57,18 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
     private final OperationalHandoffNotificationPort handoffNotifications;
 
     @Autowired
-    public JdbcLogisticsPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+    protected LogisticsJdbcSupport(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                            WarehouseLogisticsFulfillmentPort warehouseFulfillment,
                                            OperationalHandoffNotificationPort handoffNotifications) {
         this.jdbc = jdbc; this.changeFeed = changeFeed; this.warehouseFulfillment = warehouseFulfillment;
         this.handoffNotifications = handoffNotifications;
     }
 
-    public JdbcLogisticsPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+    protected LogisticsJdbcSupport(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                            WarehouseLogisticsFulfillmentPort warehouseFulfillment) {
         this(jdbc, changeFeed, warehouseFulfillment, notification -> { });
     }
 
-    @Override
     @Transactional(readOnly = true)
     public LogisticsOperationsService.Page<LogisticsOperationsService.DispatchView> list(String tenantId, String workspaceId, String clientAccountId, String status, int page, int size, String sort) {
         pageCheck(page, size); UUID tenant = uuid(tenantId), workspace = uuid(workspaceId); List<Object> args = new ArrayList<>(List.of(tenant, workspace));
@@ -83,7 +82,6 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return new LogisticsOperationsService.Page<>(items, page, size, total);
     }
 
-    @Override
     @Transactional(readOnly = true)
     public LogisticsOperationsService.DispatchView detail(String tenantId, String workspaceId, String clientAccountId, String dispatchId) {
         DispatchRow row = load(uuid(tenantId), uuid(workspaceId), uuid(dispatchId), clientAccountId == null ? null : uuid(clientAccountId), false);
@@ -91,7 +89,6 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return view(row, clientAccountId != null);
     }
 
-    @Override
     @Transactional(readOnly = true)
     public List<LogisticsOperationsService.DispatchEventView> events(String tenantId, String workspaceId, String clientAccountId, String dispatchId) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), dispatch = uuid(dispatchId);
@@ -101,7 +98,6 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
                 (rs, row) -> event(rs, clientAccountId != null), tenant, workspace, dispatch);
     }
 
-    @Override
     @Transactional(readOnly = true)
     public List<LogisticsOperationsService.HandoffNoteView> notes(String tenantId, String workspaceId,
                                                                    String clientAccountId, String dispatchId) {
@@ -124,7 +120,6 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
                         rs.getLong("version")), args.toArray());
     }
 
-    @Override
     @Transactional
     public LogisticsOperationsService.HandoffNoteView append(String tenantId, String workspaceId,
                                                               String dispatchId, long expectedVersion,
@@ -155,13 +150,17 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return valueView(value);
     }
 
-    @Override
     @Transactional
     public LogisticsOperationsService.DispatchView create(String tenantId, String workspaceId, String reservationId, long reservationVersion, String actorMembershipId, String key, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), reservation = uuid(reservationId), actor = uuid(actorMembershipId); String hash = hash("dispatch-create", reservationId, reservationVersion);
         LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-create", key, hash); if (replay != null) return replay;
         var source = warehouseFulfillment.loadReservedReservation(tenantId, workspaceId, reservationId, reservationVersion, Instant.ofEpochMilli(now));
-        if (exists("select 1 from logistics.dispatch_order where tenant_id=? and workspace_id=? and inventory_reservation_id=?", tenant, workspace, reservation)) throw error("DISPATCH_ALREADY_EXISTS", false);
+        UUID existing = jdbc.query("select id from logistics.dispatch_order where tenant_id=? and workspace_id=? and inventory_reservation_id=? for update",
+                rs -> rs.next() ? rs.getObject("id", UUID.class) : null, tenant, workspace, reservation);
+        // FULFILLMENT_READY is consumed asynchronously. A caller may race the
+        // outbox consumer; the reservation lock serializes both paths and the
+        // already-created dispatch is the idempotent result, not a duplicate.
+        if (existing != null) return detail(tenantId, workspaceId, null, existing.toString());
         UUID id = UUID.randomUUID(); int year = Instant.ofEpochMilli(now).atZone(ZoneOffset.UTC).getYear(); long sequence = nextDispatchNumber(tenant, workspace, year); DispatchNumber number = new DispatchNumber(String.format("DO-%04d-%06d", year, sequence));
         jdbc.update("insert into logistics.dispatch_order(id,tenant_id,workspace_id,dispatch_number,inventory_reservation_id,sales_order_id,client_account_id,status,destination_snapshot,temperature_min,temperature_max,temperature_unit,temperature_status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
                 id, tenant, workspace, number.value(), reservation, source.salesOrderId(), source.clientAccountId(), "READY_FOR_OPERATIONS", source.destinationSnapshot(), source.temperatureMin(), source.temperatureMax(), source.temperatureUnit(), source.temperatureStatus(), timestamp(now), timestamp(now));
@@ -170,31 +169,30 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return detail(tenantId, workspaceId, null, id.toString());
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView prepare(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, long now) {
         return statusCommand(tenantId, workspaceId, dispatchId, version, actorMembershipId, key, "dispatch-preparation", "logistics.dispatch.preparation-started", now, "PREPARE", null);
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView assign(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, String responsibleMembershipId, String vehicleReference, String routeName, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId), membership = uuid(responsibleMembershipId); String hash = hash("dispatch-assignment", dispatchId, version, responsibleMembershipId, vehicleReference, routeName);
         LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-assignment", key, hash); if (replay != null) return replay;
-        DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); String display = jdbc.query("select u.display_name from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join iam.user_account u on u.id=m.user_id join tenant_management.membership_role_assignment r on r.membership_id=m.id where m.id=? and w.tenant_id=? and w.id=? and r.role='LOGISTICS' and m.status='ACTIVE'", rs -> rs.next() ? rs.getString(1) : null, membership, tenant, workspace); if (display == null) throw error("RESPONSIBLE_MEMBERSHIP_INVALID", false);
+		DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); String display = jdbc.query("select u.display_name from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join iam.user_account u on u.id=m.user_id join tenant_management.membership_role_definition a on a.membership_id=m.id join tenant_management.role_definition r on r.id=a.role_id where m.id=? and w.tenant_id=? and w.id=? and r.code='logistics' and r.status='ACTIVE' and m.status='ACTIVE'", rs -> rs.next() ? rs.getString(1) : null, membership, tenant, workspace); if (display == null) throw error("RESPONSIBLE_MEMBERSHIP_INVALID", false);
         DispatchOrder aggregate = aggregate(row); aggregate.assign(new TransportAssignment(membership, display, vehicleReference, routeName)); updateAssignment(tenant, workspace, row, aggregate, membership, display, vehicleReference, routeName, now, actor, "logistics.dispatch.assigned", false, null); saveIdempotency(tenant, workspace, "dispatch-assignment", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView schedule(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, Instant startsAt, Instant endsAt, Instant eta, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-schedule", dispatchId, version, startsAt, endsAt, eta); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-schedule", key, hash); if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); DispatchOrder aggregate = aggregate(row); aggregate.schedule(new DeliveryWindow(startsAt, endsAt), eta); updateSchedule(tenant, workspace, row, aggregate, startsAt, endsAt, eta, now, actor, "logistics.dispatch.scheduled", true, null); saveIdempotency(tenant, workspace, "dispatch-schedule", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView ready(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, long now) {
         return statusCommand(tenantId, workspaceId, dispatchId, version, actorMembershipId, key, "dispatch-ready", "logistics.dispatch.ready", now, "READY", null);
     }
 
-    @Override
     public java.util.Optional<LogisticsOperationsService.DispatchView> replayRouteStart(
             String tenantId, String workspaceId, String idempotencyKey, String requestHash) {
         LogisticsOperationsService.DispatchView value = replay(
@@ -202,14 +200,12 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return java.util.Optional.ofNullable(value);
     }
 
-    @Override
     public java.util.Optional<DispatchOrder> findDispatchForRouteStart(
             String tenantId, String workspaceId, String dispatchId) {
         DispatchRow row = locked(uuid(tenantId), uuid(workspaceId), uuid(dispatchId), null);
         return row == null ? java.util.Optional.empty() : java.util.Optional.of(aggregate(row));
     }
 
-    @Override
     public LogisticsOperationsService.DispatchView commitRouteStart(
             String tenantId, String workspaceId, DispatchOrder aggregate,
             DispatchStatus expectedStatus, long expectedVersion,
@@ -231,7 +227,7 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return detail(tenant.toString(), workspace.toString(), null, dispatchId.toString());
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView temperature(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, BigDecimal value, String unit, Instant recordedAt, String source, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-temperature", dispatchId, version, value, unit, recordedAt, source); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-temperature", key, hash); if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); if (!(row.status().equals("READY_FOR_ROUTE") || row.status().equals("IN_ROUTE") || row.status().equals("INCIDENT"))) throw error("INVALID_TRANSITION", false);
@@ -248,34 +244,41 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         appendEvent(tenant, workspace, id, "logistics.dispatch.temperature-recorded", row.status(), excursion ? "INCIDENT" : row.status(), actor, false, null, now, row.clientAccountId()); saveIdempotency(tenant, workspace, "dispatch-temperature", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView incident(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, String type, String severity, boolean buyerVisible, String description, Instant occurredAt, String resolution, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-incident", dispatchId, version, type, severity, buyerVisible, description, occurredAt, resolution); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-incident", key, hash); if (replay != null) return replay;
         IncidentType incidentType = IncidentType.valueOf(enumValue(type, "incidentType", IncidentType.values())); IncidentSeverity incidentSeverity = IncidentSeverity.valueOf(enumValue(severity, "severity", IncidentSeverity.values())); DeliveryIncident incident = new DeliveryIncident(incidentType, incidentSeverity, buyerVisible, description, occurredAt, resolution); DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); DispatchOrder aggregate = aggregate(row); String toStatus = row.status(); if (!row.status().equals("INCIDENT")) { aggregate.recordIncident(); toStatus = "INCIDENT"; updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.incident-recorded", buyerVisible, description); } else { touch(tenant, workspace, row, now); appendEvent(tenant, workspace, id, "logistics.dispatch.incident-recorded", row.status(), row.status(), actor, buyerVisible, description, now, row.clientAccountId()); }
         jdbc.update("insert into logistics.delivery_incident(id,tenant_id,workspace_id,dispatch_order_id,incident_type,severity,buyer_visible,description,occurred_at,resolution,created_at) values (?,?,?,?,?,?,?,?,?,?,?)", UUID.randomUUID(), tenant, workspace, id, incident.type().name(), incident.severity().name(), incident.buyerVisible(), incident.description(), timestamp(incident.occurredAt().toEpochMilli()), incident.resolution(), timestamp(now)); saveIdempotency(tenant, workspace, "dispatch-incident", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView reprogram(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, Instant startsAt, Instant endsAt, Instant eta, String reason, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-reprogram", dispatchId, version, startsAt, endsAt, eta, reason); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-reprogram", key, hash); if (replay != null) return replay; DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); DispatchOrder aggregate = aggregate(row); aggregate.reprogram(new DeliveryWindow(startsAt, endsAt), eta); updateSchedule(tenant, workspace, row, aggregate, startsAt, endsAt, eta, now, actor, "logistics.dispatch.reprogrammed", true, reason); saveIdempotency(tenant, workspace, "dispatch-reprogram", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView cancel(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, String reason, long now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-cancel", dispatchId, version, reason); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-cancel", key, hash); if (replay != null) return replay; DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); DispatchOrder aggregate = aggregate(row); aggregate.cancel(); warehouseFulfillment.releaseReservation(tenantId, workspaceId, row.reservationId().toString(), actorMembershipId, id.toString(), reason, Instant.ofEpochMilli(now)); updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.cancelled", true, reason); saveIdempotency(tenant, workspace, "dispatch-cancel", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
-    @Override @Transactional
+    @Transactional
     public LogisticsOperationsService.DispatchView complete(String tenantId, String workspaceId, String dispatchId, long version, String actorMembershipId, String key, String receiverName, Instant completedAt, String notes, boolean photoDeclared, boolean signatureDeclared, long now) {
-        UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-delivery", dispatchId, version, receiverName, completedAt, notes, photoDeclared, signatureDeclared); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-delivery", key, hash); if (replay != null) return replay; DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); DispatchOrder aggregate = aggregate(row); aggregate.deliver(); ProofOfDeliveryRecord pod = new ProofOfDeliveryRecord(receiverName, completedAt, notes, photoDeclared, signatureDeclared, ProofOfDeliveryStatus.COMPLETED); jdbc.update("insert into logistics.proof_of_delivery(id,tenant_id,workspace_id,dispatch_order_id,receiver_name,completed_at,notes,photo_evidence_declared,signature_evidence_declared,status,created_at) values (?,?,?,?,?,?,?,?,?,?,?)", UUID.randomUUID(), tenant, workspace, id, pod.receiverName(), timestamp(pod.completedAt().toEpochMilli()), pod.notes(), pod.photoEvidenceDeclared(), pod.signatureEvidenceDeclared(), pod.status().name(), timestamp(now)); updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.delivered", true, null); appendEvent(tenant, workspace, id, "logistics.pod.completed", row.status(), "DELIVERED", actor, true, null, now, row.clientAccountId()); saveIdempotency(tenant, workspace, "dispatch-delivery", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
+        UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), id = uuid(dispatchId), actor = uuid(actorMembershipId); String hash = hash("dispatch-delivery", dispatchId, version, receiverName, completedAt, notes, photoDeclared, signatureDeclared); LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-delivery", key, hash); if (replay != null) return replay; DispatchRow row = locked(tenant, workspace, id, null); if (row == null) throw error("RESOURCE_NOT_FOUND", true); if (row.version() != version) throw error("CONCURRENCY_CONFLICT", false); DispatchOrder aggregate = aggregate(row); aggregate.deliver(); ProofOfDeliveryRecord pod = new ProofOfDeliveryRecord(receiverName, completedAt, notes, photoDeclared, signatureDeclared, ProofOfDeliveryStatus.COMPLETED); UUID podId = UUID.randomUUID(); jdbc.update("insert into logistics.proof_of_delivery(id,tenant_id,workspace_id,dispatch_order_id,receiver_name,completed_at,notes,photo_evidence_declared,signature_evidence_declared,status,created_at) values (?,?,?,?,?,?,?,?,?,?,?)", podId, tenant, workspace, id, pod.receiverName(), timestamp(pod.completedAt().toEpochMilli()), pod.notes(), pod.photoEvidenceDeclared(), pod.signatureEvidenceDeclared(), pod.status().name(), timestamp(now)); updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.delivered", true, null); appendEvent(tenant, workspace, id, "logistics.pod.completed", row.status(), "DELIVERED", actor, true, null, now, row.clientAccountId());
+        CanonicalOutbox.append(jdbc, "DISPATCH_DELIVERED", "DispatchOrder", id, tenant, workspace, Instant.ofEpochMilli(now),
+                "dispatch-" + id, null, "1.0", Map.of("dispatchOrderId", id, "salesOrderId", row.salesOrderId(), "podId", podId, "podStatus", "COMPLETED"));
+        CanonicalOutbox.append(jdbc, "DELIVERY_COMPLETED", "DispatchOrder", id, tenant, workspace, Instant.ofEpochMilli(now),
+                "dispatch-" + id, null, "1.0", Map.of("dispatchOrderId", id, "salesOrderId", row.salesOrderId(), "podId", podId, "status", "DELIVERED"));
+        CanonicalOutbox.append(jdbc, "POD_COMPLETED", "ProofOfDelivery", podId, tenant, workspace, Instant.ofEpochMilli(now),
+                "dispatch-" + id, null, "1.0", Map.of("dispatchOrderId", id, "salesOrderId", row.salesOrderId(), "podId", podId, "status", "COMPLETED"));
+        saveIdempotency(tenant, workspace, "dispatch-delivery", key, hash, id, now); return detail(tenantId, workspaceId, null, dispatchId);
     }
 
-    @Override @Transactional(readOnly = true)
+    @Transactional(readOnly = true)
     public LogisticsOperationsService.DashboardView dashboard(String tenantId, String workspaceId) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId); Long[] values = jdbc.queryForObject("select count(*) filter (where status='READY_FOR_OPERATIONS'),count(*) filter (where status='PREPARING'),count(*) filter (where status='ASSIGNED'),count(*) filter (where status='SCHEDULED'),count(*) filter (where status='READY_FOR_ROUTE'),count(*) filter (where status='IN_ROUTE'),count(*) filter (where status='INCIDENT'),count(*) filter (where status='DELIVERED' and updated_at>=current_date),count(*) filter (where temperature_status='OUT_OF_RANGE'),count(*) filter (where status='IN_ROUTE' and not exists(select 1 from logistics.proof_of_delivery p where p.dispatch_order_id=d.id)),0::bigint from logistics.dispatch_order d where tenant_id=? and workspace_id=?", (rs, row) -> { Long[] v = new Long[11]; for (int i=0;i<11;i++) v[i]=rs.getLong(i+1); return v; }, tenant, workspace); long reservations = warehouseFulfillment.countReadyReservations(tenantId, workspaceId, Instant.now()); return new LogisticsOperationsService.DashboardView(values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], reservations);
     }
 
-    @Override @Transactional(readOnly = true)
+    @Transactional(readOnly = true)
     public LogisticsOperationsService.AnalyticsView analytics(String tenantId, String workspaceId, Instant from, Instant to) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId);
         String sql = "select count(*), "
@@ -300,7 +303,7 @@ public class JdbcLogisticsPersistenceAdapter implements LogisticsPersistencePort
         return new LogisticsOperationsService.AnalyticsView(from, to, values[0], values[1], values[2], values[3], values[4], onTime, preparation, route);
     }
 
-    @Override @Transactional(readOnly = true)
+    @Transactional(readOnly = true)
     public LogisticsOperationsService.Page<LogisticsOperationsService.ProofOfDeliveryView> proofOfDelivery(String tenantId, String workspaceId, String status, int page, int size) {
         pageCheck(page, size);
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId);
