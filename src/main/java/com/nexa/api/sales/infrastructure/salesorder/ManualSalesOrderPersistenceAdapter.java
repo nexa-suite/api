@@ -79,9 +79,9 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
                 timestamp(nowEpochMillis), timestamp(nowEpochMillis), json(order.snapshot().delivery().address()),
                 json(order.snapshot().delivery().route()), json(order.snapshot().delivery().warehouse()), json(order.snapshot().commercial()));
         for (var line : order.lines()) {
-            jdbc.update("insert into sales.sales_order_line (id,sales_order_id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,"
-                            + "unit_price_amount,unit_price_currency,line_subtotal,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
-                    UUID.randomUUID(), id, line.catalogItemId(), line.itemNameSnapshot(), line.presentationSnapshot(), line.quantity(),
+            jdbc.update("insert into sales.sales_order_line (id,sales_order_id,catalog_item_id,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,"
+                            + "unit_price_amount,unit_price_currency,line_subtotal,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), id, line.catalogItemId(), line.sellableSkuId(), line.productFamilyId(), line.skuCodeSnapshot(), line.productFamilyCodeSnapshot(), line.itemNameSnapshot(), line.presentationSnapshot(), line.quantity(),
                     line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), timestamp(nowEpochMillis));
         }
         jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,to_status,occurred_at) "
@@ -106,10 +106,11 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
     private ManualSalesOrderView view(ResultSet rs) throws java.sql.SQLException {
         String id = rs.getObject(1).toString();
         var snapshot = read(rs.getString(8), com.nexa.api.sales.domain.model.salesorder.ManualSalesOrderSnapshot.class);
-        List<SalesOrderLineView> lines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal "
+        List<SalesOrderLineView> lines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot "
                         + "from sales.sales_order_line where sales_order_id=? order by created_at,id",
                 (line, row) -> new SalesOrderLineView(line.getString(1), line.getString(2), line.getString(3), line.getBigDecimal(4),
-                        line.getString(5), line.getBigDecimal(6), line.getString(7), line.getBigDecimal(8)), uuid(id));
+                        line.getString(5), line.getBigDecimal(6), line.getString(7), line.getBigDecimal(8), stringUuid(line.getObject(9)),
+                        stringUuid(line.getObject(10)), line.getString(11), line.getString(12)), uuid(id));
         return new ManualSalesOrderView(id, rs.getString(2), rs.getObject(3).toString(), rs.getObject(4).toString(),
                 rs.getObject(5).toString(), rs.getObject(6).toString(), PurchaseRequestPriority.from(rs.getString(7)),
                 snapshot.delivery().requestedDate(), snapshot, rs.getString(9), rs.getBigDecimal(10), rs.getString(11),
@@ -127,5 +128,6 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
     }
 
     private static UUID uuid(String value) { return UUID.fromString(value); }
+    private static String stringUuid(Object value) { return value == null ? null : value.toString(); }
     private static Timestamp timestamp(long epochMillis) { return Timestamp.from(Instant.ofEpochMilli(epochMillis)); }
 }

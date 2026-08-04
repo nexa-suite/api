@@ -84,6 +84,7 @@ public class ManualSalesOrderService implements ManualSalesOrderUseCase {
         append(canonical, command.currency());
         append(canonical, command.notes());
         for (var line : command.lines()) {
+            append(canonical, line.skuId());
             append(canonical, line.catalogItemId());
             append(canonical, line.quantity());
             append(canonical, line.unit());

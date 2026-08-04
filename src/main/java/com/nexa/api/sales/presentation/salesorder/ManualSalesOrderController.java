@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/sales-orders/manual")
@@ -51,11 +52,11 @@ public final class ManualSalesOrderController {
             return new CreateManualSalesOrderCommand(clientAccountId, addressId, manualAddress == null ? null : manualAddress.toDomain(),
                     requestedDeliveryDate, deliveryNotes, warehouseId, routeProvider, PaymentOption.from(paymentOption),
                     priority == null ? null : PurchaseRequestPriority.from(priority), currency, notes,
-                    lines.stream().map(line -> new CreateManualSalesOrderCommand.Line(line.catalogItemId(), line.quantity(), line.unit(), line.notes())).toList());
+                    lines.stream().map(line -> new CreateManualSalesOrderCommand.Line(line.skuId(), line.catalogItemId(), line.quantity(), line.unit(), line.notes())).toList());
         }
     }
 
-    public record LineRequest(@NotBlank @Size(max = 64) String catalogItemId,
+    public record LineRequest(UUID skuId, @Size(max = 64) String catalogItemId,
                               @jakarta.validation.constraints.NotNull java.math.BigDecimal quantity,
                               @Size(max = 32) String unit, @Size(max = 2000) String notes) { }
 }

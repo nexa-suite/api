@@ -12,6 +12,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
@@ -32,12 +33,14 @@ public final class ClientAccountAddressController {
     public ClientAccountAddressController(ClientAccountAddressUseCase addresses) { this.addresses = addresses; }
 
     @GetMapping
+    @Operation(operationId = "listClientAccountAddresses")
     public List<AddressResponse> list(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
                                       @PathVariable String clientAccountId) {
         return addresses.list(context, clientAccountId).stream().map(AddressResponse::from).toList();
     }
 
     @PostMapping
+    @Operation(operationId = "createClientAccountAddress")
     public ResponseEntity<AddressResponse> create(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
                                                   @PathVariable String clientAccountId,
                                                   @Valid @RequestBody CreateAddressRequest request) {
@@ -47,6 +50,7 @@ public final class ClientAccountAddressController {
     }
 
     @PatchMapping("/{addressId}")
+    @Operation(operationId = "updateClientAccountAddress")
     public ResponseEntity<AddressResponse> update(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
                                                   @PathVariable String clientAccountId, @PathVariable String addressId,
                                                   @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -58,6 +62,7 @@ public final class ClientAccountAddressController {
     }
 
     @PutMapping("/{addressId}/default")
+    @Operation(operationId = "setDefaultClientAccountAddress")
     public ResponseEntity<AddressResponse> setDefault(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
                                                       @PathVariable String clientAccountId, @PathVariable String addressId,
                                                       @RequestHeader(name = "If-Match", required = false) String ifMatch) {
@@ -66,6 +71,7 @@ public final class ClientAccountAddressController {
     }
 
     @DeleteMapping("/{addressId}")
+    @Operation(operationId = "deactivateClientAccountAddress")
     public ResponseEntity<AddressResponse> deactivate(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
                                                       @PathVariable String clientAccountId, @PathVariable String addressId,
                                                       @RequestHeader(name = "If-Match", required = false) String ifMatch) {
