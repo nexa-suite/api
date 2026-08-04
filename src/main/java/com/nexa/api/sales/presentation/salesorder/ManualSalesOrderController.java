@@ -12,6 +12,7 @@ import jakarta.validation.constraints.FutureOrPresent;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
@@ -34,6 +35,7 @@ public final class ManualSalesOrderController {
     public ManualSalesOrderController(ManualSalesOrderUseCase orders) { this.orders = orders; }
 
     @PostMapping
+    @Operation(operationId = "createManualSalesOrder", summary = "Create a manual sales order")
     public ResponseEntity<ManualSalesOrderView> create(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
                                                        @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
                                                        @Valid @RequestBody CreateRequest request) {
