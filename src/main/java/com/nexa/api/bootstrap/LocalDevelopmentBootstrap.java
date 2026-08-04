@@ -59,10 +59,9 @@ public class LocalDevelopmentBootstrap {
 					+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
 					LocalIdentityIds.forMembership(workspaceId, userId), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
 			UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
-			jdbc.update("delete from tenant_management.membership_role_assignment where membership_id=?", membershipId);
-			if (!user.roles().contains("BUYER")) {
-				for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_assignment (membership_id,tenant_id,workspace_id,role,assigned_at) values (?,?,?,?,?) on conflict do nothing", membershipId, tenantId, workspaceId, role, timestamp(now));
-			}
+			jdbc.update("delete from tenant_management.membership_role_definition a using tenant_management.role_definition r where a.role_id=r.id and a.membership_id=? and r.tenant_id is null", membershipId);
+			for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) select ?,?,?,r.id,? from tenant_management.role_definition r where r.tenant_id is null and r.code=lower(?) on conflict do nothing", membershipId, tenantId, workspaceId, timestamp(now), role);
+			jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?,?,?,?,?) on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=excluded.updated_at", membershipId, tenantId, workspaceId, 0, timestamp(now));
 		}
 		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
 		seedWarehouse(tenantId, workspaceId, now);
@@ -82,6 +81,27 @@ public class LocalDevelopmentBootstrap {
 				+ "values (?,?,?,?,?,?,?,?,?) on conflict (warehouse_id) do nothing",
 				persistedWarehouseId, tenantId, workspaceId, "OPERATIONAL", 100, true,
 				new BigDecimal("-12.0464"), new BigDecimal("-77.0428"), timestamp(now));
+		UUID zoneId = LocalIdentityIds.forWarehouseZone(persistedWarehouseId, "CHILLED-A");
+		jdbc.update("insert into warehouse.storage_zone (id,tenant_id,workspace_id,warehouse_id,code,name,zone_type,temperature_min,temperature_max,status,created_at,updated_at,version) "
+				+ "values (?,?,?,?,?,?, 'CHILLED',?,?, 'ACTIVE',?,?,0) on conflict (tenant_id,workspace_id,warehouse_id,code) do nothing",
+				zoneId, tenantId, workspaceId, persistedWarehouseId, "CHILLED-A", "Cámara refrigerada A",
+				new BigDecimal("0"), new BigDecimal("8"), timestamp(now), timestamp(now));
+		UUID persistedZoneId = jdbc.queryForObject("select id from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? and code=?",
+				UUID.class, tenantId, workspaceId, persistedWarehouseId, "CHILLED-A");
+		seedInventory(tenantId, workspaceId, persistedWarehouseId, persistedZoneId, now);
+	}
+
+	private void seedInventory(UUID tenantId, UUID workspaceId, UUID warehouseId, UUID zoneId, Instant now) {
+		List<SkuSeed> skus = jdbc.query("select id,legacy_catalog_item_id,unit_of_measure from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and status='ACTIVE' and visible order by sku_code",
+				(rs, row) -> new SkuSeed(rs.getObject("id", UUID.class), rs.getString("legacy_catalog_item_id"), rs.getString("unit_of_measure")), tenantId, workspaceId);
+		for (SkuSeed sku : skus) {
+			String batch = "LOCAL-FOUNDATION-" + sku.legacyCatalogItemId();
+			UUID lotId = LocalIdentityIds.forInventoryLot(warehouseId, sku.id(), batch);
+			jdbc.update("insert into warehouse.inventory_lot (id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,version) "
+					+ "values (?,?,?,?,?,?,?,?,current_date + 365,current_timestamp - interval '1 day',1000,0,?,'AVAILABLE','0-8 C',0) on conflict do nothing",
+					lotId, tenantId, workspaceId, warehouseId, zoneId, sku.legacyCatalogItemId(), sku.id(), batch,
+					sku.unitOfMeasure() == null || sku.unitOfMeasure().isBlank() ? "UNIT" : sku.unitOfMeasure());
+		}
 	}
 
 	private void seedClientAccounts(UUID tenantId, UUID workspaceId, UUID buyerUserId, Instant now) {
@@ -99,8 +119,8 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	private UUID tenant(Instant now) {
-		String slug = required("NEXA_DEV_TENANT_SLUG").toLowerCase(java.util.Locale.ROOT);
-		String name = required("NEXA_DEV_TENANT_NAME");
+		String slug = defaulted("NEXA_DEV_TENANT_SLUG", "icisa").toLowerCase(java.util.Locale.ROOT);
+		String name = defaulted("NEXA_DEV_TENANT_NAME", "ICISA");
 		List<UUID> existing = jdbc.query("select id from tenant_management.tenant where slug = ?", (rs, row) -> rs.getObject(1, UUID.class), slug);
 		if (!existing.isEmpty()) return existing.get(0);
 		UUID id = LocalIdentityIds.forTenant(slug);
@@ -109,8 +129,8 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	private UUID workspace(UUID tenantId, Instant now) {
-		String slug = required("NEXA_DEV_WORKSPACE_SLUG").toLowerCase(java.util.Locale.ROOT);
-		String name = required("NEXA_DEV_WORKSPACE_NAME");
+		String slug = defaulted("NEXA_DEV_WORKSPACE_SLUG", "icisa").toLowerCase(java.util.Locale.ROOT);
+		String name = defaulted("NEXA_DEV_WORKSPACE_NAME", "ICISA Workspace");
 		List<UUID> existing = jdbc.query("select id from tenant_management.workspace where tenant_id = ? and slug = ?",
 				(rs, row) -> rs.getObject(1, UUID.class), tenantId, slug);
 		if (!existing.isEmpty()) return existing.get(0);
@@ -121,7 +141,7 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	private UUID user(UserSeed seed, Instant now) {
-		String email = required(seed.emailKey()).toLowerCase(java.util.Locale.ROOT);
+		String email = defaulted(seed.emailKey(), defaultEmail(seed.emailKey())).toLowerCase(java.util.Locale.ROOT);
 		String password = password(seed.passwordKey());
 		List<UUID> existing = jdbc.query("select id from iam.user_account where normalized_email = ?", (rs, row) -> rs.getObject(1, UUID.class), email);
 		UUID id = existing.isEmpty() ? LocalIdentityIds.forUser(email) : existing.get(0);
@@ -141,11 +161,28 @@ public class LocalDevelopmentBootstrap {
 		return value.trim();
 	}
 
+	private String defaulted(String key, String fallback) {
+		String value = environment.getProperty(key);
+		return value == null || value.isBlank() ? fallback : value.trim();
+	}
+
 	private String password(String key) {
 		String configured = environment.getProperty(key);
 		if (configured == null || configured.isBlank()) configured = environment.getProperty("NEXA_DEV_DEMO_PASSWORD");
-		if (configured == null || configured.isBlank()) throw new IllegalStateException("Missing local bootstrap variable " + key);
-		return configured.trim();
+		return configured == null || configured.isBlank() ? "NexaLocal!2026#" : configured.trim();
+	}
+
+	private static String defaultEmail(String key) {
+		return switch (key) {
+			case "NEXA_DEV_TENANT_ADMIN_EMAIL" -> "tenant.admin@icisa.test";
+			case "NEXA_DEV_COMPANY_OWNER_EMAIL" -> "company.owner@icisa.test";
+			case "NEXA_DEV_OWNER_EMAIL" -> "owner@icisa.test";
+			case "NEXA_DEV_SALES_EMAIL" -> "sales@icisa.test";
+			case "NEXA_DEV_WAREHOUSE_EMAIL" -> "warehouse@icisa.test";
+			case "NEXA_DEV_LOGISTICS_EMAIL" -> "logistics@icisa.test";
+			case "NEXA_DEV_BUYER_EMAIL" -> "buyer@icisa.test";
+			default -> throw new IllegalArgumentException("No deterministic local email for " + key);
+		};
 	}
 
 	private void addOptionalUser(List<UserSeed> users, String emailKey, String passwordKey, Set<String> roles) {
@@ -171,4 +208,5 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	private record UserSeed(String emailKey, String passwordKey, Set<String> roles) {}
+	private record SkuSeed(UUID id, String legacyCatalogItemId, String unitOfMeasure) {}
 }

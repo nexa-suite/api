@@ -37,6 +37,15 @@ public final class LocalIdentityIds {
 		return stable("warehouse", Objects.requireNonNull(tenantId, "Tenant id is required") + ":" + normalize(code));
 	}
 
+	public static UUID forWarehouseZone(UUID warehouseId, String code) {
+		return stable("warehouse-zone", Objects.requireNonNull(warehouseId, "Warehouse id is required") + ":" + normalize(code));
+	}
+
+	public static UUID forInventoryLot(UUID warehouseId, UUID skuId, String batch) {
+		return stable("inventory-lot", Objects.requireNonNull(warehouseId, "Warehouse id is required") + ":"
+				+ Objects.requireNonNull(skuId, "SKU id is required") + ":" + normalize(batch));
+	}
+
 	private static UUID stable(String type, String key) {
 		return UUID.nameUUIDFromBytes((type + ":" + normalize(key)).getBytes(StandardCharsets.UTF_8));
 	}
