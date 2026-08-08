@@ -23,3 +23,9 @@ Sesión Playwright `nexa-stripe`, workspace `icisa`, usuario buyer autenticado:
 5. `/portal/documents` mostró el `PAYMENT_RECEIPT` generado; `Descargar` produjo un PDF válido (`PDF 1.6`, `Content-Type: application/pdf`).
 
 No se exponen client secrets, tokens, cookies ni credenciales en este registro. La cuenta Stripe externa y sus credenciales son explícitamente out-of-scope; WireMock se usa como proveedor Stripe-compatible permitido por la especificación, no como un provider determinista alternativo.
+
+## Gates remotos del commit
+
+- `d6fa950`: API CI `31255791257` — `success`.
+- API Security and Load `31255791245` — `success`; DAST autenticado y baseline con `FAIL-NEW: 0`, k6 service `720/720` y negocio `3567/3567`, ambos con `http_req_failed=0`.
+- API Supply Chain `31255791246` — `success`; Trivy filesystem limpio y SBOM generado.
