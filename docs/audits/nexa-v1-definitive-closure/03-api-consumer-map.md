@@ -31,6 +31,6 @@
 3. El UI de promociones recibe IDs internos como texto; no hay selector por recursos.
 4. Fulfillment readiness pide `salesOrderId` y version manuales; viola el contrato “ningún UUID interno escrito por usuario”.
 5. Business Documents dispone de ports de generación/evidencia, pero el componente Platform solo lista/descarga.
-6. Payment Methods es honesto y enlaza receivables; el provider activo baseline es `deterministic`, no Stripe.
+6. Payment Methods enlaza receivables; el runtime de aceptación activa el adapter oficial `stripe` contra WireMock, mientras `deterministic` sigue disponible como fallback local reproducible.
 
 Gate final: cada endpoint consumido debe existir en OpenAPI runtime/estático, toda ruta visible debe disparar una acción real y ninguna UI debe solicitar UUID interno.

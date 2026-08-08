@@ -38,6 +38,7 @@ nexa:
     secret-key: ${STRIPE_SECRET_KEY:}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:whsec_local_service_foundation}
     publishable-key: ${STRIPE_PUBLISHABLE_KEY:pk_test_local_foundation}
+    api-base-url: ${NEXA_STRIPE_API_BASE_URL:}
     webhook-worker-delay-ms: ${NEXA_PAYMENT_WEBHOOK_WORKER_DELAY_MS:1000}
   documents:
     worker-delay-ms: ${NEXA_DOCUMENT_WORKER_DELAY_MS:3000}

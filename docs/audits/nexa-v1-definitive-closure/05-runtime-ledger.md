@@ -7,13 +7,13 @@ Project: `nexa-modern`. Stack dejado corriendo.
 | Service | Image | Puerto host | Health | Perfil/adaptador observado |
 |---|---|---|---|---|
 | PostgreSQL | `postgres:18.4-alpine` | interno | healthy | DB runtime `nexa_runtime`, Flyway migrator separado |
-| API | `nexa/modern-api:local` | `127.0.0.1:8080` | healthy | profiles `local,minio`; payment `deterministic` |
+| API | `nexa/modern-api:local` | `127.0.0.1:8080` | healthy | profiles `local,minio,observability`; payment `stripe` contra WireMock local |
 | Platform | `nexa/modern-platform:local` | `127.0.0.1:4200` | healthy | Nginx estático + proxy `/api` no usado por bundle |
 | Portal | `nexa/modern-portal:local` | `127.0.0.1:4300` | healthy | Nginx estático + proxy `/api` no usado por bundle |
 | Mailpit | `axllent/mailpit:v1.26.0` | `127.0.0.1:8025` | healthy | SMTP local requerido |
 | MinIO | `minio/minio:RELEASE.2024-10-13T13-34-11Z` | `9000/9001` | healthy | profile MinIO activo; volumen persistente |
-| ClamAV | `clamav/clamav-debian:1.4.3` | interno | healthy | host/port configurados |
-| Stripe mock | `wiremock/wiremock:3.13.1` | `127.0.0.1:12111` | healthy | no es Stripe SDK activo; payment deterministic |
+| ClamAV | `clamav/clamav-debian:1.4.3` | `127.0.0.1:3310` | healthy | adapter TCP real ejercitado con contenido limpio y EICAR |
+| Stripe mock | `wiremock/wiremock:3.13.1` | `127.0.0.1:12111` | healthy | endpoint compatible; adapter oficial Stripe Java activo; IDs/client secrets con forma Stripe válida |
 | Jaeger | `jaegertracing/all-in-one:1.76.0` | `16686/4318` | running | profile observability |
 | OTEL collector | `otel/opentelemetry-collector-contrib:0.132.0` | interno | running | export configurado; metrics API baseline false |
 
@@ -21,7 +21,7 @@ No se registran valores secretos. Solo nombres de variables, adapters y selecci�
 
 ## Evidencia final 2026-08-08
 
-- `modern-up.sh` reconstruyó y recreó API, Platform y Portal con `NEXA_MODERN_SPRING_PROFILE=local,minio`.
+- `modern-up.sh` reconstruyó y recreó API, Platform y Portal con `NEXA_MODERN_SPRING_PROFILE=local,minio,observability`.
 - Readiness/health: API `/actuator/health/readiness`, Platform `/health` y Portal `/health` respondieron `UP/ok`; ambos `/api-health` respondieron `UP`.
 - Flyway runtime: versión `68`.
 - CORS: `localhost:4200`, `localhost:4300`, `127.0.0.1:4200` y `127.0.0.1:4300` → 200; `https://evil.example` → 403.
@@ -29,6 +29,9 @@ No se registran valores secretos. Solo nombres de variables, adapters y selecci�
 - Runtime catalog: 66 variants, 132 sellable SKUs con `variant_id`, 0 permisos operativos asignados a Company Owner.
 - Forced RLS observada en `sales.client_account`, `sales.client_account_address`, `business_documents.*` y `payments.*` protegidos.
 - OpenAPI exportado desde runtime: 223 paths; comparación con el baseline de 213 añadió 10 rutas y no removió ninguna.
+- Stripe runtime: `POST /receivables/{id}/payment-intents` pasó por el SDK oficial contra WireMock; webhook `payment_intent.succeeded` firmado fue aceptado y el worker produjo settlement/receipt.
+- Documentos XML: los dos objetos XML generados en MinIO se descargaron con `mc cat` y pasaron `xmllint --noout -` (raíces UBL `Invoice`).
+- Observabilidad: con perfil `observability`, Jaeger reportó servicio `nexa-api` y 20 trazas consultables en `/api/traces` después de una llamada autenticada.
 
 ## Reproducción Portal
 

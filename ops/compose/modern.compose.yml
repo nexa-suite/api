@@ -82,6 +82,7 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_service_foundation}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_local_foundation}
+      NEXA_STRIPE_API_BASE_URL: ${NEXA_STRIPE_API_BASE_URL:-}
       NEXA_OBJECT_STORAGE_ROOT: /app/.local-object-storage
       NEXA_OBJECT_STORAGE_ENDPOINT: http://modern-minio:9000
       NEXA_OBJECT_STORAGE_BUCKET: ${NEXA_OBJECT_STORAGE_BUCKET:-nexa-private}
@@ -157,6 +158,8 @@ services:
   modern-clamav:
     image: clamav/clamav-debian:1.4.3
     container_name: nexa-modern-clamav
+    ports:
+      - "127.0.0.1:3310:3310"
     networks:
       - modern-data
     healthcheck:
@@ -170,6 +173,8 @@ services:
     image: wiremock/wiremock:3.13.1
     container_name: nexa-modern-stripe-mock
     command: ["--global-response-templating"]
+    volumes:
+      - ./stripe-mock/mappings:/home/wiremock/mappings:ro
     ports:
       - "127.0.0.1:12111:8080"
     networks:

@@ -7,7 +7,7 @@
 - Total: 68 migraciones append-only e inmutables.
 - Migración fresca obligatoria: 68 validadas/aplicadas sobre PostgreSQL 18.4.
 - Suite de migración verificó grants de `nexa_runtime`, permisos operativos de Company Owner y las tablas/columnas canónicas de V65.
-- Upgrade desde snapshot V63: no se ejecutó como gate independiente en esta corrida; queda reportado como pendiente, no como aprobado.
+- Upgrade desde snapshot V63: PASS en `ModernPostgresUpgradeMigrationTests`; PostgreSQL 18.4 arranca en V63, conserva una fila histórica de catálogo y aplica V64–V68 hasta la versión 68.
 
 ## Bloques de autoridad
 
@@ -48,6 +48,6 @@ El flujo FEFO también normaliza la unidad comercial (`upper(line.unit)`) antes 
 - `Flyway validate` y migración fresca completa: PASS (68/68).
 - Grants de runtime y funciones: PASS (`nexa_runtime` login, no superuser/bypass RLS/create DB/create role).
 - RLS por tenant/workspace y forced policies: PASS en suite y runtime para tablas sensibles.
-- Concurrencia FEFO, conversión, webhooks y seguridad: PASS en integración obligatoria (329/329, 0 skips).
-- Upgrade migration desde V63 con datos preservados: PENDIENTE de gate independiente.
+- Concurrencia FEFO, conversión, webhooks y seguridad: PASS en integración obligatoria (332/332, 0 skips).
+- Upgrade migration desde V63 con datos preservados: PASS (1/1, 0 fallos, 0 skips).
 - Índices/query budgets: no se ejecutó una medición final p50/p95/p99; no se marca como PASS.

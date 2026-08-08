@@ -12,3 +12,9 @@ Este índice registra solo nombres, correlación, comandos y checksums necesario
 - `audit-current/02-platform-forbidden.png`
 - `audit-current/03-legacy-platform-contact-sheet.png`
 - `audit-current/04-legacy-portal-contact-sheet.png`
+- Captura visual del Payment Element montado en el browser final: evidencia emitida en la sesión de auditoría; no se versionan capturas efímeras del proveedor externo.
+
+## Documentos y adapters
+
+- XML UBL validado desde MinIO con `mc cat ... | xmllint --noout -`; la evidencia de checksum/objeto se conserva en el runtime ledger.
+- Stripe SDK oficial ejercitado contra WireMock local; ClamAV TCP real validó archivo limpio y rechazó EICAR.

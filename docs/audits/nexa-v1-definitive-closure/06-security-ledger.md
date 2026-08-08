@@ -15,8 +15,8 @@ Target: ASVS 5 Level 2 según matriz activa. Baseline, no certificación.
 | RLS | forced policies en tablas principales | PASS en integración y runtime |
 | CSP | frontend + API headers | PASS en builds/headers; no se ejecutó DAST final |
 | Rate limiting | auth/preview/system operator tables | PASS en suite e integración |
-| File security | MIME, checksum, ClamAV, private storage | checksum/MinIO PASS; ClamAV provider E2E pendiente |
-| Stripe | signature/dedup/service amount | deterministic provider PASS; Stripe SDK/provider E2E pendiente |
+| File security | MIME, checksum, ClamAV, private storage | checksum/MinIO PASS; ClamAV TCP real PASS con limpio/EICAR; HTTP cross-tenant final pendiente |
+| Stripe | signature/dedup/service amount | SDK oficial + WireMock PASS; firma/dedup/importe/settlement/receipt PASS |
 | Secret handling | ignored `.env.local`; no valores registrados | pass source hygiene; scans pendientes |
 
 ## Riesgos P0/P1 baseline
@@ -24,5 +24,5 @@ Target: ASVS 5 Level 2 según matriz activa. Baseline, no certificación.
 1. El host mismatch histórico quedó corregido usando el host canónico local y la allowlist exacta; no se habilitó wildcard ni Origin bypass.
 2. La integración final no marcó skips; los warnings de Spring/Mockito son no bloqueantes.
 3. El grant de V64 y la normalización FEFO quedaron cubiertos por migración/test.
-4. MinIO fue ejercitado con documentos generados y checksums coincidentes; ClamAV y Stripe siguen siendo gates de proveedor externos pendientes.
-5. DAST y secret scan final no fueron ejecutados; no se declara certificación ASVS.
+4. MinIO fue ejercitado con documentos generados y checksums coincidentes; ClamAV real rechazó EICAR y el adapter Stripe oficial fue ejercitado contra WireMock.
+5. Los binarios externos `trivy`, `gitleaks`, `semgrep` y `zap-baseline.py` no están instalados en el entorno; se ejecutaron probes HTTP/CORS/headers y búsquedas de secretos versionados, pero no se declara DAST ni certificación ASVS.

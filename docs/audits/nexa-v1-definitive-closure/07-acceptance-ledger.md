@@ -15,25 +15,25 @@ Actualizado tras cada subtask. `OPEN` no significa ausencia de código; signific
 | 8 | Warehouse/FEFO | CLOSED | reservation, allocation FEFO y shortage 0 en browser |
 | 9 | Logistics/POD | CLOSED | dispatch lifecycle, temperature, incident, reprogram y POD |
 | 10 | Event backbone/process manager | CLOSED | outbox publicado para confirmación, fulfillment, delivery y POD |
-| 11 | Documents/storage/security | PARTIAL | PDF/CSV/MinIO/checksum/download PASS; ClamAV/XML y cross-tenant provider matrix pendientes |
-| 12 | Receivables/payments/Stripe | PARTIAL | opción CARD_STRIPE y contratos base; Stripe SDK/provider/Portal Payment Element pendiente |
-| 13 | PostgreSQL/Flyway/RLS | PARTIAL | V64–V68, fresh/validate/RLS PASS; upgrade V63 independiente pendiente |
+| 11 | Documents/storage/security | PARTIAL | PDF/CSV/XML/MinIO/checksum/download PASS; ClamAV real PASS; falta repetir la matriz HTTP de descarga cross-tenant |
+| 12 | Receivables/payments/Stripe | PARTIAL | Stripe SDK oficial + WireMock, PaymentIntent, webhook firmado, settlement y recibo PASS; Payment Element monta en Portal; falta confirmación browser contra Stripe test real |
+| 13 | PostgreSQL/Flyway/RLS | CLOSED | V64–V68, fresh, `validate`, upgrade V63→V68 con fila histórica preservada y RLS PASS |
 | 14 | REST/OpenAPI | CLOSED | runtime export 223 paths, +10 sin removals, contratos frontend alineados |
 | 15 | Security hardening | PARTIAL | integración security/RLS/CORS PASS; DAST y secret scan final no ejecutados |
-| 16 | Performance/observability | PARTIAL | perfiles/health/Jaeger/OTEL activos; p50/p95/p99 final pendiente |
-| 17 | Automated/browser acceptance | CLOSED | buyer→sales→warehouse→logistics→POD→tracking y documentos correlacionados |
+| 16 | Performance/observability | PARTIAL | reads HTTP medidos bajo objetivos y traza `nexa-api` en Jaeger; falta matriz completa k6/Gatling de comandos y query budgets 1/10/50 |
+| 17 | Automated/browser acceptance | PARTIAL | buyer→sales→warehouse→logistics→POD→tracking/documentos PASS; Payment Element monta, pero no se simula confirmación Stripe real sin credencial externa |
 | 18 | Conditional presentation advance | BLOCKED BY POLICY | no se habilita polish hasta cerrar PARTIAL provider/upgrade/performance/security gates |
 
 ## Baseline test ledger
 
 | Area | Tests | Passed | Failed | Skipped | Interpretación |
 |---|---:|---:|---:|---:|---|
-| API integración obligatoria | 329 | 329 | 0 | 0 | `-Dnexa.integration.enabled=true`, Testcontainers/PostgreSQL 18.4 |
-| API default | 329 | 329 | 0 | 80 | suite completa; skips son clases condicionadas no obligatorias |
+| API integración obligatoria | 332 | 332 | 0 | 0 | `-Dnexa.integration.enabled=true`, Testcontainers/PostgreSQL 18.4 + Stripe mock + ClamAV |
+| API default | 332 | 332 | 0 | 85 | suite completa; skips son clases condicionadas no obligatorias |
 | Platform unit | 98 | 98 | 0 | 0 | 52 archivos |
 | Portal unit | 74 | 74 | 0 | 0 | 38 archivos |
 | Docker/browser | — | PASS | 0 | — | flujo autenticado y capturas actuales |
 
 ## Definition of Done guard
 
-La foundation funcional queda cerrada para los gates marcados `CLOSED`. No se declara cierre/publicación total porque siguen `PARTIAL`: Stripe real/Payment Element, ClamAV/XML/cross-tenant provider matrix, upgrade V63, DAST/secret scan y performance p50/p95/p99; además no se ejecutaron push, CI remoto, tag ni Release.
+La foundation funcional queda cerrada solo para los gates marcados `CLOSED`. No se declara cierre/publicación total porque siguen `PARTIAL`: confirmación browser contra Stripe test real, matriz HTTP cross-tenant de descargas, DAST/secret scanner externo y carga completa de comandos; tampoco se ejecutaron push, CI remoto, tag ni Release.
