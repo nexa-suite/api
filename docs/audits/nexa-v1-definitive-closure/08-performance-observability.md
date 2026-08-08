@@ -17,7 +17,7 @@ Error rate observado en ambas muestras: 0% (200/200 por endpoint). Query budgets
 
 ## k6 service smoke remoto
 
-El workflow `API Security and Load` ejecutó el mismo script con 4 VUs/20 s: 126 iteraciones, 630 requests, checks 100% (`630/630`), `http_req_failed` `0.00%`, p95 `482.71 ms` y p99 `521.77 ms`. El artefacto `k6-summary.json` queda persistido por el workflow tras ejecutar el contenedor con el UID del runner. El smoke cubre preview de workspace, login, catálogo, permisos y notificaciones; no sustituye la matriz concurrente de submit, pricing preview, Warehouse/FEFO, dispatch ni documentos.
+El workflow `API Security and Load` ejecutó el mismo script con 4 VUs/20 s: 143 iteraciones, 715 requests, checks 100% (`715/715`), `http_req_failed` `0.00%`, p95 `421.19 ms` y p99 `473.83 ms`. El artefacto `k6-summary.json` quedó persistido y descargable desde el run final. El smoke cubre preview de workspace, login, catálogo, permisos y notificaciones; no sustituye la matriz concurrente de submit, pricing preview, Warehouse/FEFO, dispatch ni documentos.
 
 ## Trace proof
 
