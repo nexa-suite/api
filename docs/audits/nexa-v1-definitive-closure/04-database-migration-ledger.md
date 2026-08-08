@@ -50,4 +50,4 @@ El flujo FEFO también normaliza la unidad comercial (`upper(line.unit)`) antes 
 - RLS por tenant/workspace y forced policies: PASS en suite y runtime para tablas sensibles.
 - Concurrencia FEFO, conversión, webhooks y seguridad: PASS en integración obligatoria (333/333, 0 skips).
 - Upgrade migration desde V63 con datos preservados: PASS (1/1, 0 fallos, 0 skips).
-- Índices/query budgets: no se ejecutó una medición final p50/p95/p99; no se marca como PASS.
+- Query budgets de snapshots: PASS (`SalesSnapshotQueryBudgetIT`; catálogo constante `<=4` queries y SKU `1` query para 1/10/50 líneas).

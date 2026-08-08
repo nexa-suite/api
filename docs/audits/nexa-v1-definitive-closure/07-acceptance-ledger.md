@@ -20,7 +20,7 @@ Actualizado tras cada subtask. `OPEN` no significa ausencia de código; signific
 | 13 | PostgreSQL/Flyway/RLS | CLOSED | V64–V68, fresh, `validate`, upgrade V63→V68 con fila histórica preservada y RLS PASS |
 | 14 | REST/OpenAPI | CLOSED | runtime export 223 paths, +10 sin removals, contratos frontend alineados |
 | 15 | Security hardening | PARTIAL | integración security/RLS/CORS PASS; DAST y secret scan final no ejecutados |
-| 16 | Performance/observability | PARTIAL | reads HTTP medidos bajo objetivos y traza `nexa-api` en Jaeger; falta matriz completa k6/Gatling de comandos y query budgets 1/10/50 |
+| 16 | Performance/observability | PARTIAL | reads HTTP medidos bajo objetivos, query budgets 1/10/50 PASS y traza `nexa-api` en Jaeger; falta matriz completa k6/Gatling de comandos |
 | 17 | Automated/browser acceptance | PARTIAL | buyer→sales→warehouse→logistics→POD→tracking/documentos PASS; Payment Element monta, pero no se simula confirmación Stripe real sin credencial externa |
 | 18 | Conditional presentation advance | BLOCKED BY POLICY | no se habilita polish hasta cerrar PARTIAL provider/upgrade/performance/security gates |
 
