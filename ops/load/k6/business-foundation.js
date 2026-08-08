@@ -136,9 +136,37 @@ function createState(index) {
     200,
     `buyer-${index} address book`,
   );
-  const address = addresses.find((candidate) => candidate.active) || addresses[0];
+  let address = addresses.find((candidate) => candidate.active);
   if (!address) {
-    throw new Error(`buyer-${index} has no active address`);
+    const createdAddress = http.post(
+      url(`/api/v1/client-accounts/${account.id}/addresses`),
+      JSON.stringify({
+        label: `K6 business address ${index}`,
+        defaultAddress: true,
+        address: {
+          addressType: 'STREET',
+          line: 'Av. Lima 123',
+          reference: 'K6 business matrix',
+          countryCode: 'PE',
+          departmentCode: '15',
+          provinceCode: '1501',
+          districtCode: '150101',
+          recipientName: 'ICISA Buyer',
+          recipientPhone: '+51999999999',
+          roadType: 'STREET',
+          streetName: 'Av. Lima',
+          streetNumber: '123',
+          postalCode: '15074',
+          receivingInstructions: 'K6 business matrix',
+          receivingHours: '08:00-16:00',
+          latitude: -12.0464,
+          longitude: -77.0428,
+          source: 'K6_BUSINESS',
+        },
+      }),
+      requestParams(buyer, true),
+    );
+    address = expectStatus(createdAddress, 201, `buyer-${index} address create`);
   }
 
   const catalog = expectStatus(
