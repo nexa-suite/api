@@ -19,6 +19,17 @@ Project: `nexa-modern`. Stack dejado corriendo.
 
 No se registran valores secretos. Solo nombres de variables, adapters y selección de profile.
 
+## Evidencia final 2026-08-08
+
+- `modern-up.sh` reconstruyó y recreó API, Platform y Portal con `NEXA_MODERN_SPRING_PROFILE=local,minio`.
+- Readiness/health: API `/actuator/health/readiness`, Platform `/health` y Portal `/health` respondieron `UP/ok`; ambos `/api-health` respondieron `UP`.
+- Flyway runtime: versión `68`.
+- CORS: `localhost:4200`, `localhost:4300`, `127.0.0.1:4200` y `127.0.0.1:4300` → 200; `https://evil.example` → 403.
+- PostgreSQL: `nexa_runtime` puede iniciar sesión, no es superusuario, no puede omitir RLS, crear bases ni crear roles.
+- Runtime catalog: 66 variants, 132 sellable SKUs con `variant_id`, 0 permisos operativos asignados a Company Owner.
+- Forced RLS observada en `sales.client_account`, `sales.client_account_address`, `business_documents.*` y `payments.*` protegidos.
+- OpenAPI exportado desde runtime: 223 paths; comparación con el baseline de 213 añadió 10 rutas y no removió ninguna.
+
 ## Reproducción Portal
 
 - Browser URL: `http://127.0.0.1:4300/sign-in`.

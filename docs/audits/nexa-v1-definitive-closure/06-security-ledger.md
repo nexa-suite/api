@@ -4,26 +4,25 @@ Target: ASVS 5 Level 2 según matriz activa. Baseline, no certificación.
 
 | Control | Evidencia source/runtime | Estado baseline |
 |---|---|---|
-| Access JWT corto + refresh opaco | IAM domain/application + cookie controller | source exists; Docker host roto |
-| Refresh rotation/reuse rejection | session service/tests | integration/browser pendiente |
-| Cookie HttpOnly/SameSite/path | AuthenticationController | header matrix pendiente |
-| CORS narrow | allowlist exacta `localhost` | secure intent, incompatible con `127.0.0.1` |
-| Origin guard | `CookieOriginGuardFilter` | activo; no se debilitará |
-| CSRF posture | Bearer + guarded cookie mutations | matriz pendiente |
-| BOLA/BFLA | access context, permissions, scoped queries | integration/RLS pendiente |
-| Authorization version | membership state + JWT/session checks | integration/browser pendiente |
-| RLS | forced policies en principales tablas | cross-tenant proof pendiente |
-| CSP | frontend + API headers | duplicate CSP through proxy; normalización pendiente |
-| Rate limiting | auth/preview/system operator tables | negative matrix pendiente |
-| File security | MIME, checksum, ClamAV, private storage | provider E2E pendiente |
-| Stripe | signature/dedup/service amount | deterministic provider activo; Stripe profile pendiente |
+| Access JWT corto + refresh opaco | IAM domain/application + cookie controller | PASS en suite e integración |
+| Refresh rotation/reuse rejection | session service/tests | PASS en integración obligatoria |
+| Cookie HttpOnly/SameSite/path | AuthenticationController | PASS en tests; browser autenticado ejecutado |
+| CORS narrow | allowlist exacta de cuatro orígenes locales | PASS; origen externo 403 |
+| Origin guard | `CookieOriginGuardFilter` | PASS en integración; no se debilitó |
+| CSRF posture | Bearer + guarded cookie mutations | PASS en suite de seguridad |
+| BOLA/BFLA | access context, permissions, scoped queries | PASS en integración/RLS |
+| Authorization version | membership state + JWT/session checks | PASS en integración y flujo browser |
+| RLS | forced policies en tablas principales | PASS en integración y runtime |
+| CSP | frontend + API headers | PASS en builds/headers; no se ejecutó DAST final |
+| Rate limiting | auth/preview/system operator tables | PASS en suite e integración |
+| File security | MIME, checksum, ClamAV, private storage | checksum/MinIO PASS; ClamAV provider E2E pendiente |
+| Stripe | signature/dedup/service amount | deterministic provider PASS; Stripe SDK/provider E2E pendiente |
 | Secret handling | ignored `.env.local`; no valores registrados | pass source hygiene; scans pendientes |
 
 ## Riesgos P0/P1 baseline
 
-1. Host mismatch rompe autenticación, pero la solución no será wildcard CORS ni Origin bypass.
-2. Helpers E2E permiten Forbidden como falso éxito.
-3. Function grant faltante provoca fallo periódico del change-feed retention.
-4. Schedulers siguen activos en ciertos tests y generan errores después de destruir Testcontainers; puede ocultar ruido real.
-5. UI expone campos UUID en promociones/readiness; riesgo de errores/BOLA aunque backend autorice.
-6. Providers “healthy” no equivalen a MinIO/ClamAV/Stripe ejercitados.
+1. El host mismatch histórico quedó corregido usando el host canónico local y la allowlist exacta; no se habilitó wildcard ni Origin bypass.
+2. La integración final no marcó skips; los warnings de Spring/Mockito son no bloqueantes.
+3. El grant de V64 y la normalización FEFO quedaron cubiertos por migración/test.
+4. MinIO fue ejercitado con documentos generados y checksums coincidentes; ClamAV y Stripe siguen siendo gates de proveedor externos pendientes.
+5. DAST y secret scan final no fueron ejecutados; no se declara certificación ASVS.

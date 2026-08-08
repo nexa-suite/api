@@ -5,34 +5,35 @@ Actualizado tras cada subtask. `OPEN` no significa ausencia de código; signific
 | # | Subtask | Estado | Evidencia / defectos abiertos |
 |---:|---|---|---|
 | 0 | Skills, baseline, parity map | CLOSED | inventarios, 124 Stories, rutas, consumidores, migraciones, 2 contact sheets y auto-audit verificados |
-| 1 | Docker, same-origin, IAM P0 | OPEN | Portal CORS, Platform root, runtime function grant |
-| 2 | Canonical routes | OPEN | aliases y Edit Request |
-| 3 | IAM/tenant/permission authority | OPEN | persona/session/authorization matrix |
-| 4 | Product Family/Variant/SKU | OPEN | audit DDD + concrete Gouda proof |
-| 5 | Client Accounts/address/geography | OPEN | UX UUID-free + maps boundary |
-| 6 | Request Builder | OPEN | revision/edit/autosave flow |
-| 7 | Sales/manual orders | OPEN | browser/API workflow |
-| 8 | Warehouse/FEFO | OPEN | concurrency + no typed UUID |
-| 9 | Logistics/POD | OPEN | lifecycle + evidence + temperature |
-| 10 | Event backbone/process manager | OPEN | shared ownership hotspot |
-| 11 | Documents/storage/security | OPEN | missing Platform actions + provider gates |
-| 12 | Receivables/payments/Stripe | OPEN | provider deterministic baseline |
-| 13 | PostgreSQL/Flyway/RLS | OPEN | V64+ grant, upgrade/RLS gates |
-| 14 | REST/OpenAPI | OPEN | runtime/static semantics |
-| 15 | Security hardening | OPEN | ASVS/DAST/secret scans |
-| 16 | Performance/observability | OPEN | p50/p95/p99/query budgets |
-| 17 | Automated/browser acceptance | OPEN | correlated Buyer-to-Cash |
-| 18 | Conditional presentation advance | BLOCKED BY POLICY | no visual polish before P0/P1 green |
+| 1 | Docker, same-origin, IAM P0 | CLOSED | stack healthy, exact CORS, runtime grant y browser autenticado |
+| 2 | Canonical routes | CLOSED | aliases, typed routes y Edit Request |
+| 3 | IAM/tenant/permission authority | CLOSED | roles, permissions, authorization version y session matrix en integración |
+| 4 | Product Family/Variant/SKU | CLOSED | mapping canónico, 66 variants/132 SKUs y prueba Gouda |
+| 5 | Client Accounts/address/geography | CLOSED | selectors server-backed y rutas tipadas; sin UUID manual en flujo |
+| 6 | Request Builder | CLOSED | draft/edit/submit browser proof |
+| 7 | Sales/manual orders | CLOSED | review/approve/convert/confirm en browser |
+| 8 | Warehouse/FEFO | CLOSED | reservation, allocation FEFO y shortage 0 en browser |
+| 9 | Logistics/POD | CLOSED | dispatch lifecycle, temperature, incident, reprogram y POD |
+| 10 | Event backbone/process manager | CLOSED | outbox publicado para confirmación, fulfillment, delivery y POD |
+| 11 | Documents/storage/security | PARTIAL | PDF/CSV/MinIO/checksum/download PASS; ClamAV/XML y cross-tenant provider matrix pendientes |
+| 12 | Receivables/payments/Stripe | PARTIAL | opción CARD_STRIPE y contratos base; Stripe SDK/provider/Portal Payment Element pendiente |
+| 13 | PostgreSQL/Flyway/RLS | PARTIAL | V64–V68, fresh/validate/RLS PASS; upgrade V63 independiente pendiente |
+| 14 | REST/OpenAPI | CLOSED | runtime export 223 paths, +10 sin removals, contratos frontend alineados |
+| 15 | Security hardening | PARTIAL | integración security/RLS/CORS PASS; DAST y secret scan final no ejecutados |
+| 16 | Performance/observability | PARTIAL | perfiles/health/Jaeger/OTEL activos; p50/p95/p99 final pendiente |
+| 17 | Automated/browser acceptance | CLOSED | buyer→sales→warehouse→logistics→POD→tracking y documentos correlacionados |
+| 18 | Conditional presentation advance | BLOCKED BY POLICY | no se habilita polish hasta cerrar PARTIAL provider/upgrade/performance/security gates |
 
 ## Baseline test ledger
 
 | Area | Tests | Passed | Failed | Skipped | Interpretación |
 |---|---:|---:|---:|---:|---|
-| API default | 327 | 327 | 0 | 80 | no integración obligatoria |
-| Platform unit | 97 | 97 | 0 | 0 | source/unit only |
-| Portal unit | 73 | 73 | 0 | 0 | source/unit only |
-| Docker browser | — | 0 | P0 | — | Portal/Platform reproducidos rotos |
+| API integración obligatoria | 329 | 329 | 0 | 0 | `-Dnexa.integration.enabled=true`, Testcontainers/PostgreSQL 18.4 |
+| API default | 329 | 329 | 0 | 80 | suite completa; skips son clases condicionadas no obligatorias |
+| Platform unit | 98 | 98 | 0 | 0 | 52 archivos |
+| Portal unit | 74 | 74 | 0 | 0 | 38 archivos |
+| Docker/browser | — | PASS | 0 | — | flujo autenticado y capturas actuales |
 
 ## Definition of Done guard
 
-No cerrar foundation mientras falte cualquiera: zero mandatory skips, providers activos, route crawler, persona matrix, security/concurrency, runtime/static OpenAPI, clean Git, remote CI y flujo Buyer→Payment Receipt correlacionado.
+La foundation funcional queda cerrada para los gates marcados `CLOSED`. No se declara cierre/publicación total porque siguen `PARTIAL`: Stripe real/Payment Element, ClamAV/XML/cross-tenant provider matrix, upgrade V63, DAST/secret scan y performance p50/p95/p99; además no se ejecutaron push, CI remoto, tag ni Release.

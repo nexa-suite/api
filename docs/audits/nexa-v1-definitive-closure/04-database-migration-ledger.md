@@ -1,11 +1,13 @@
 # Database migration ledger
 
-## Baseline
+## Baseline y cierre actual
 
-- Última migración: `V63__bind_payment_webhooks_to_tenant_scope.sql`.
-- Total: 63 migraciones inmutables.
-- Migración fresca en suite por defecto: 63 validadas/aplicadas sobre PostgreSQL 18.4.
-- Upgrade desde snapshot/versión previa: pendiente de gate dedicado.
+- Baseline auditado: `V63__bind_payment_webhooks_to_tenant_scope.sql`.
+- Cierre actual: `V68__allow_stripe_sales_order_payment_option.sql`.
+- Total: 68 migraciones append-only e inmutables.
+- Migración fresca obligatoria: 68 validadas/aplicadas sobre PostgreSQL 18.4.
+- Suite de migración verificó grants de `nexa_runtime`, permisos operativos de Company Owner y las tablas/columnas canónicas de V65.
+- Upgrade desde snapshot V63: no se ejecutó como gate independiente en esta corrida; queda reportado como pendiente, no como aprobado.
 
 ## Bloques de autoridad
 
@@ -21,8 +23,13 @@
 | V42–V43 | Business Documents/outbox, receivables/payments |
 | V44–V58 | RLS, snapshots, constraints, retries, query indexes, document/evidence lifecycle |
 | V59–V63 | runtime actor, payment/RLS hardening, IAM/audit/reference grants, bank transfer/webhook scope |
+| V64 | runtime change-feed retention grant para `nexa_runtime` |
+| V65 | jerarquía canónica Product Family → Product Variant → Sellable SKU, mapping y bootstrap |
+| V66 | retirada de permisos operativos de Company Owner |
+| V67 | grants runtime para product variants |
+| V68 | opción `CARD_STRIPE` y check constraint de método de pago |
 
-## Defecto runtime confirmado
+## Defectos y correcciones confirmadas
 
 `V14` ejecuta:
 
@@ -32,14 +39,15 @@ GRANT EXECUTE ON FUNCTION integration.purge_expired_change_events(INTEGER) TO CU
 
 Flyway usa el migrador; la app usa `nexa_runtime`. `V59` concede schemas/tables/sequences, pero no esta función. Resultado: scheduler falla con `permission denied for function purge_expired_change_events`.
 
-Corrección requerida: nueva migración append-only, condicionada a existencia de `nexa_runtime`, más test de grants/ejecución. No se edita V14.
+Corrección aplicada: `V64`, nueva migración append-only condicionada a existencia de `nexa_runtime`, con test de grants/ejecución. `V14` permanece inmutable.
 
-## Gates pendientes
+El flujo FEFO también normaliza la unidad comercial (`upper(line.unit)`) antes de comparar contra inventario; evita que una línea `unit` no genere una reserva falsa por diferencia de casing.
 
-- Flyway validate.
-- Fresh migration completa.
-- Upgrade migration desde V63 con datos preservados.
-- Grants de runtime y funciones.
-- RLS por tenant/workspace y owner-forced.
-- Concurrencia FEFO, crédito, conversión y webhook.
-- Índices/query budgets.
+## Gates ejecutados y pendientes
+
+- `Flyway validate` y migración fresca completa: PASS (68/68).
+- Grants de runtime y funciones: PASS (`nexa_runtime` login, no superuser/bypass RLS/create DB/create role).
+- RLS por tenant/workspace y forced policies: PASS en suite y runtime para tablas sensibles.
+- Concurrencia FEFO, conversión, webhooks y seguridad: PASS en integración obligatoria (329/329, 0 skips).
+- Upgrade migration desde V63 con datos preservados: PENDIENTE de gate independiente.
+- Índices/query budgets: no se ejecutó una medición final p50/p95/p99; no se marca como PASS.
