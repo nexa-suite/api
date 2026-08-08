@@ -17,11 +17,11 @@ Error rate observado en ambas muestras: 0% (200/200 por endpoint). Query budgets
 
 ## k6 service smoke remoto
 
-El workflow `API Security and Load` ejecutó el mismo script con 4 VUs/20 s: 143 iteraciones, 715 requests, checks 100% (`715/715`), `http_req_failed` `0.00%`, p95 `421.19 ms` y p99 `473.83 ms`. El artefacto `k6-summary.json` quedó persistido y descargable desde el run final. El smoke cubre preview de workspace, login, catálogo, permisos y notificaciones; no sustituye la matriz concurrente de submit, pricing preview, Warehouse/FEFO, dispatch ni documentos.
+El workflow `API Security and Load` final `31254245975` ejecutó el mismo script con 4 VUs/20 s: 130 iteraciones, 650 requests, checks 100% (`650/650`), `http_req_failed` `0.00%`, p95 `477.59 ms` y p99 `501.22 ms`. El artefacto `k6-summary.json` quedó persistido y descargable desde el run final. El smoke cubre preview de workspace, login, catálogo, permisos y notificaciones; no sustituye la matriz concurrente de submit, pricing preview, Warehouse/FEFO, dispatch ni documentos.
 
 ## k6 business command matrix local
 
-`grafana/k6:0.56.0`, 4 VUs durante 20 s contra el Docker runtime. Cada VU autenticó Buyer, Sales, Warehouse, Logistics y Tenant Owner, ejecutó un Buyer-to-Cash completo y repitió lecturas y comandos de catálogo, pricing preview, draft/review, Purchase Request, Sales Order manual, inventario/FEFO, reserva idempotente, dispatch, route start, temperatura, documentos, receivable, PaymentIntent y notificaciones. Resultado: 400 iteraciones, `7328/7328` checks, `http_req_failed` `0/7328` (0%), p95 `9.56 ms`, p99 `14.85 ms`. El script queda integrado en `API Security and Load` para repetir esta matriz en CI.
+`grafana/k6:0.56.0`, 4 VUs durante 20 s contra el Docker runtime. Cada VU autenticó Buyer, Sales, Warehouse, Logistics y Tenant Owner, ejecutó un Buyer-to-Cash completo y repitió lecturas y comandos de catálogo, pricing preview, draft/review, Purchase Request, Sales Order manual, inventario/FEFO, reserva idempotente, dispatch, route start, temperatura, documentos, receivable, PaymentIntent y notificaciones. Resultado local final: 408 iteraciones, `7472/7472` checks, `http_req_failed` `0/7472` (0%), p95 `8.36 ms`, p99 `11.62 ms`. El mismo script integrado en `API Security and Load` remoto `31254245975` alcanzó 147 iteraciones, `2775/2775` checks, `http_req_failed` `0/2775` (0%), p95 `97.91 ms` y p99 `148.13 ms`.
 
 ## Trace proof
 
