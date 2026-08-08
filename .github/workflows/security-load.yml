@@ -109,7 +109,7 @@ jobs:
         run: ./scripts/verify-local-security.sh
       - name: Run k6 service load smoke
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
             -e BASE_URL=http://127.0.0.1:8080 \
             -e NEXA_LOAD_WORKSPACE=icisa \
             -e NEXA_LOAD_EMAIL=owner@icisa.test \
