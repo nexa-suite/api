@@ -18,6 +18,15 @@ class FefoAllocationPolicyTests {
     }
     @Test void reportsShortageWithoutPartialCommitDecision() { var result=FefoAllocationPolicy.allocate(List.of(new FefoAllocationPolicy.LotSnapshot("A",new BigDecimal("2"),"UNIT",LocalDate.of(2026,12,1),Instant.now())),new BigDecimal("3"),"UNIT"); assertThat(result.complete()).isFalse(); assertThat(result.shortage()).isEqualByComparingTo("1"); }
 
+    @Test void matchesCommercialUnitCaseToCanonicalInventoryUnit() {
+        var result = FefoAllocationPolicy.allocate(List.of(new FefoAllocationPolicy.LotSnapshot(
+                "A", BigDecimal.ONE, "UNIT", LocalDate.of(2027, 1, 1), Instant.now())),
+                BigDecimal.ONE, "unit");
+
+        assertThat(result.complete()).isTrue();
+        assertThat(result.allocations().getFirst().unit()).isEqualTo("UNIT");
+    }
+
     @Test void excludesExpiredBlockedQuarantinedDepletedAndWrongScopeLots() {
         var eligible = new FefoAllocationPolicy.LotSnapshot("eligible", new BigDecimal("4"), "UNIT",
                 LocalDate.of(2027, 1, 1), Instant.parse("2026-01-01T00:00:00Z"),

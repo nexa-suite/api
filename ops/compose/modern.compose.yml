@@ -42,7 +42,7 @@ services:
       NEXA_ACCESS_TOKEN_TTL: ${NEXA_ACCESS_TOKEN_TTL:-PT15M}
       NEXA_REFRESH_TOKEN_TTL: ${NEXA_REFRESH_TOKEN_TTL:-P30D}
       NEXA_BCRYPT_STRENGTH: ${NEXA_BCRYPT_STRENGTH:-12}
-      NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300}
+      NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300,http://127.0.0.1:4200,http://127.0.0.1:4300}
       NEXA_SECURITY_RSA_PUBLIC_KEY: /run/secrets/nexa_access_token_public
       NEXA_SECURITY_RSA_PRIVATE_KEY: /run/secrets/nexa_access_token_private
       NEXA_SMTP_HOST: ${NEXA_SMTP_HOST:-modern-mailpit}
@@ -82,6 +82,7 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_service_foundation}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_local_foundation}
+      NEXA_STRIPE_API_BASE_URL: ${NEXA_STRIPE_API_BASE_URL:-}
       NEXA_OBJECT_STORAGE_ROOT: /app/.local-object-storage
       NEXA_OBJECT_STORAGE_ENDPOINT: http://modern-minio:9000
       NEXA_OBJECT_STORAGE_BUCKET: ${NEXA_OBJECT_STORAGE_BUCKET:-nexa-private}
@@ -157,6 +158,8 @@ services:
   modern-clamav:
     image: clamav/clamav-debian:1.4.3
     container_name: nexa-modern-clamav
+    ports:
+      - "127.0.0.1:3310:3310"
     networks:
       - modern-data
     healthcheck:
@@ -170,6 +173,8 @@ services:
     image: wiremock/wiremock:3.13.1
     container_name: nexa-modern-stripe-mock
     command: ["--global-response-templating"]
+    volumes:
+      - ./stripe-mock/mappings:/home/wiremock/mappings:ro
     ports:
       - "127.0.0.1:12111:8080"
     networks:

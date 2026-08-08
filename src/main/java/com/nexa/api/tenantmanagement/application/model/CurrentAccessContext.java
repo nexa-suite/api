@@ -186,6 +186,17 @@ public final class CurrentAccessContext implements AccessContext {
 		 * typed PermissionKey checks and must not inherit broad legacy aliases such
 		 * as tenant:manage from a narrower tenant.role.assign permission. */
 		if (!roles().isEmpty()) result.addAll(PermissionPolicy.permissionsFor(roles()));
+		/* Company Owner is a business-governance role, not an operational role.
+		 * Keep the legacy compatibility projection aligned with the canonical
+		 * PermissionCatalog: explicit custom/operational assignments still arrive
+		 * through authorization.allows(...), while the reserved owner alone cannot
+		 * read or mutate Warehouse, Fulfillment or Logistics resources. */
+		if (roles().contains(MembershipRole.COMPANY_OWNER)
+				&& roles().stream().noneMatch(role -> role == MembershipRole.SALES
+						|| role == MembershipRole.WAREHOUSE || role == MembershipRole.LOGISTICS)) {
+			result.removeAll(java.util.EnumSet.of(Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
+					Permission.FULFILLMENT_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE));
+		}
 		return Set.copyOf(new LinkedHashSet<>(result));
 	}
 }

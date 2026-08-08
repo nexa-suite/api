@@ -76,16 +76,6 @@ public final class PermissionCatalog {
 					PermissionKey.DOCUMENT_UPLOAD, PermissionKey.DOCUMENT_DOWNLOAD,
 					PermissionKey.PAYMENT_READ, PermissionKey.PAYMENT_CREATE,
 					PermissionKey.PAYMENT_RECONCILE,
-					PermissionKey.WAREHOUSE_READ, PermissionKey.WAREHOUSE_LOCATION_MANAGE,
-					PermissionKey.INVENTORY_READ, PermissionKey.INVENTORY_RECEIVE,
-					PermissionKey.INVENTORY_ADJUST, PermissionKey.INVENTORY_RESERVE,
-					PermissionKey.INVENTORY_RELEASE, PermissionKey.INVENTORY_WASTE,
-					PermissionKey.FULFILLMENT_READ, PermissionKey.FULFILLMENT_MANAGE,
-					PermissionKey.LOGISTICS_READ, PermissionKey.DISPATCH_READ,
-					PermissionKey.DISPATCH_ASSIGN, PermissionKey.DISPATCH_SCHEDULE,
-					PermissionKey.DISPATCH_START_ROUTE, PermissionKey.DISPATCH_TEMPERATURE,
-					PermissionKey.DISPATCH_INCIDENT, PermissionKey.DISPATCH_REPROGRAM,
-					PermissionKey.DISPATCH_COMPLETE, PermissionKey.LOGISTICS_ANALYTICS_READ,
 					PermissionKey.ANALYTICS_EXECUTIVE_READ, PermissionKey.ORDER_EXPORT_READ,
 					PermissionKey.NOTIFICATION_READ, PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
 			case SALES -> Set.of(

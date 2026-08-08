@@ -28,7 +28,7 @@ public final class CatalogItemProjectionMapper {
 				com.nexa.api.catalogmanagement.application.model.CatalogPricingView.base(item.unitPrice().amount(),
 						item.unitPrice().currency().getCurrencyCode(), Instant.EPOCH), null,
 				mapping == null ? null : mapping.familyCode(), mapping == null ? null : mapping.familyName(), item.productId().value(),
-				mapping == null ? item.productId().value() : mapping.skuCode(), "UNIT", null, null, null, Instant.EPOCH);
+				mapping == null ? item.productId().value() : mapping.skuCode(), "UNIT", null, null, null, Instant.EPOCH, null, null);
 	}
 
 	public CatalogItemDetail toDetail(CatalogItem item) {
@@ -40,6 +40,6 @@ public final class CatalogItemProjectionMapper {
 				com.nexa.api.catalogmanagement.application.model.CatalogPricingView.base(item.unitPrice().amount(),
 						item.unitPrice().currency().getCurrencyCode(), Instant.EPOCH), null,
 				mapping == null ? null : mapping.familyCode(), mapping == null ? null : mapping.familyName(), item.productId().value(),
-				mapping == null ? item.productId().value() : mapping.skuCode(), "UNIT", null, null, null, Instant.EPOCH);
+				mapping == null ? item.productId().value() : mapping.skuCode(), "UNIT", null, null, null, Instant.EPOCH, null, null);
 	}
 }

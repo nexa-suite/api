@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/v1/payment_intents/[^/]+"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "{{request.pathSegments.[2]}}",
+      "object": "payment_intent",
+      "amount": 1250,
+      "amount_received": 0,
+      "currency": "pen",
+      "status": "requires_action",
+      "client_secret": "{{request.pathSegments.[2]}}_secret",
+      "livemode": false,
+      "metadata": {}
+    }
+  }
+}

@@ -25,6 +25,7 @@ public final class LogisticsController {
     public LogisticsController(LogisticsOperationsService service) { this.service = service; }
 
     @GetMapping("/dispatch-orders") public PageResponse<DispatchResponse> dispatches(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required=false) String status, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="25") int size, @RequestParam(defaultValue="updatedAt,desc") String sort) { return page(service.list(c,status,page,size,sort)); }
+    @GetMapping("/dispatch-assignees") @Operation(operationId = "listDispatchAssignees") public List<LogisticsOperationsService.AssigneeView> assignees(@RequestAttribute(ACCESS) CurrentAccessContext c) { return service.assignees(c); }
     @GetMapping("/dispatch-orders/{id}") public ResponseEntity<DispatchResponse> dispatch(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){LogisticsOperationsService.DispatchView value=service.detail(c,id);return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));}
     @GetMapping("/dispatch-orders/{id}/events") public List<DispatchEventResponse> events(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return service.events(c,id).stream().map(this::event).toList();}
     @GetMapping("/dispatch-orders/{id}/handoff-notes") public List<HandoffNoteResponse> handoffNotes(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return service.handoffNotes(c,id).stream().map(this::handoffNote).toList();}

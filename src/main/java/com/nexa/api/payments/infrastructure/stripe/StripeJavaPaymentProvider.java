@@ -10,6 +10,7 @@ import com.stripe.param.PaymentIntentCreateParams;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
@@ -23,14 +24,23 @@ import java.util.Optional;
 public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     private final String secretKey;
     private final String webhookSecret;
+    private final String apiBaseUrl;
 
+    @Autowired
     public StripeJavaPaymentProvider(
             @Value("${nexa.payments.secret-key:}") String secretKey,
-            @Value("${nexa.payments.webhook-secret:}") String webhookSecret) {
+            @Value("${nexa.payments.webhook-secret:}") String webhookSecret,
+            @Value("${nexa.payments.api-base-url:}") String apiBaseUrl) {
         if (secretKey == null || secretKey.isBlank() || webhookSecret == null || webhookSecret.isBlank()) {
             throw new IllegalStateException("Stripe secret and webhook secret are required for the stripe provider");
         }
-        this.secretKey = secretKey.trim(); this.webhookSecret = webhookSecret.trim();
+        this.secretKey = secretKey.trim();
+        this.webhookSecret = webhookSecret.trim();
+        this.apiBaseUrl = apiBaseUrl == null ? "" : apiBaseUrl.trim();
+    }
+
+    public StripeJavaPaymentProvider(String secretKey, String webhookSecret) {
+        this(secretKey, webhookSecret, "");
     }
 
     @Override
@@ -42,7 +52,9 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
                     .setAutomaticPaymentMethods(PaymentIntentCreateParams.AutomaticPaymentMethods.builder().setEnabled(true).build())
                     .putAllMetadata(request.metadata())
                     .build();
-            RequestOptions options = RequestOptions.builder().setApiKey(secretKey).setIdempotencyKey(request.idempotencyKey()).build();
+            var optionsBuilder = RequestOptions.builder().setApiKey(secretKey).setIdempotencyKey(request.idempotencyKey());
+            if (!apiBaseUrl.isBlank()) optionsBuilder.setBaseUrl(apiBaseUrl);
+            RequestOptions options = optionsBuilder.build();
             com.stripe.model.PaymentIntent intent = com.stripe.model.PaymentIntent.create(params, options);
             return new StripePaymentProvider.PaymentIntent(intent.getId(), intent.getClientSecret(), intent.getStatus());
         } catch (Exception exception) {
@@ -54,7 +66,9 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     public Optional<StripePaymentProvider.PaymentIntent> retrievePaymentIntent(String providerId) {
         if (providerId == null || providerId.isBlank()) return Optional.empty();
         try {
-            RequestOptions options = RequestOptions.builder().setApiKey(secretKey).build();
+            var optionsBuilder = RequestOptions.builder().setApiKey(secretKey);
+            if (!apiBaseUrl.isBlank()) optionsBuilder.setBaseUrl(apiBaseUrl);
+            RequestOptions options = optionsBuilder.build();
             com.stripe.model.PaymentIntent intent = com.stripe.model.PaymentIntent.retrieve(providerId, options);
             return Optional.of(new StripePaymentProvider.PaymentIntent(intent.getId(), intent.getClientSecret(), intent.getStatus()));
         } catch (Exception exception) {

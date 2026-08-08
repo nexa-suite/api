@@ -3,7 +3,7 @@ package com.nexa.api.shared.infrastructure.changefeed;
 import com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase;
 import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
 import com.nexa.api.shared.application.changefeed.ChangeFeedQueryPort;
-import com.nexa.api.shared.application.changefeed.ChangeFeedStreamService;
+import com.nexa.api.shared.presentation.changefeed.ChangeFeedStreamService;
 import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

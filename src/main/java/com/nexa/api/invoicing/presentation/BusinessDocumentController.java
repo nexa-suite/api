@@ -22,6 +22,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -40,6 +41,9 @@ public final class BusinessDocumentController {
     @GetMapping("/business-documents/{documentId}")
     @Operation(operationId = "getBusinessDocument")
     public BusinessDocumentModels.DocumentView get(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId) { return service.get(context, documentId); }
+    @GetMapping("/business-documents/{documentId}/events")
+    @Operation(operationId = "listBusinessDocumentEvents")
+    public List<BusinessDocumentModels.DocumentEventView> events(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId) { return service.events(context, documentId); }
     @PostMapping("/business-document-generation-requests")
     @Operation(operationId = "requestBusinessDocumentGeneration")
     public ResponseEntity<BusinessDocumentModels.GenerationRequestView> request(@RequestAttribute(ACCESS) CurrentAccessContext context, @RequestHeader("Idempotency-Key") String key, @Valid @RequestBody GenerationRequest request) { var value = service.request(context, request.subjectType(), request.subjectId(), request.documentType(), request.format(), key); return ResponseEntity.accepted().location(URI.create("/api/v1/business-documents/" + value.documentId())).body(value); }

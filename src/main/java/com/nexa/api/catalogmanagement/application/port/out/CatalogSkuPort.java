@@ -16,6 +16,7 @@ public interface CatalogSkuPort {
     CatalogSkuModels.FamilyView insertFamily(CatalogScope scope, ProductFamily family);
     CatalogSkuModels.FamilyView changeFamilyStatus(CatalogScope scope, UUID id, String status, long expectedVersion);
     CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(CatalogScope scope, int page, int size, String search, UUID familyId);
+    CatalogSkuModels.Page<CatalogSkuModels.SkuView> skusByVariant(CatalogScope scope, int page, int size, String search, UUID variantId);
     CatalogSkuModels.SkuView sku(CatalogScope scope, UUID id);
     CatalogSkuModels.SkuView insertSku(CatalogScope scope, SellableSku sku);
     CatalogSkuModels.SkuView changeSkuStatus(CatalogScope scope, UUID id, String status, long expectedVersion);
