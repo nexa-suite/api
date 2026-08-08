@@ -282,6 +282,9 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(InvalidDataAccessApiUsageException.class)
 	public ResponseEntity<ProblemDetail> handleInvalidDataAccessUsage(InvalidDataAccessApiUsageException exception, HttpServletRequest request) {
 		String message = exception.getMessage() == null ? "" : exception.getMessage().toLowerCase(java.util.Locale.ROOT);
+		if (hasCauseMessage(exception, "Business document not found")) {
+			return response(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found", request);
+		}
 		if (message.contains("evidence rejected") || message.contains("mime type mismatch") || message.contains("empty_file")
 				|| message.contains("malware") || message.contains("unknown_content_type")) {
 			return response(HttpStatus.BAD_REQUEST, ApiErrorCode.INVALID_REQUEST, "Evidence is invalid", request);
@@ -403,5 +406,12 @@ public final class GlobalExceptionHandler {
 
 	private static ResponseEntity<ProblemDetail> response(HttpStatus status, ApiErrorCode code, String detail, HttpServletRequest request) {
 		return ResponseEntity.status(status).body(problem(status, code, detail, request));
+	}
+
+	private static boolean hasCauseMessage(Throwable exception, String expected) {
+		for (Throwable current = exception; current != null; current = current.getCause()) {
+			if (expected.equals(current.getMessage())) return true;
+		}
+		return false;
 	}
 }

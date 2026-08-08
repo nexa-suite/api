@@ -15,7 +15,7 @@ Actualizado tras cada subtask. `OPEN` no significa ausencia de código; signific
 | 8 | Warehouse/FEFO | CLOSED | reservation, allocation FEFO y shortage 0 en browser |
 | 9 | Logistics/POD | CLOSED | dispatch lifecycle, temperature, incident, reprogram y POD |
 | 10 | Event backbone/process manager | CLOSED | outbox publicado para confirmación, fulfillment, delivery y POD |
-| 11 | Documents/storage/security | PARTIAL | PDF/CSV/XML/MinIO/checksum/download PASS; ClamAV real PASS; falta repetir la matriz HTTP de descarga cross-tenant |
+| 11 | Documents/storage/security | CLOSED | PDF/CSV/XML/MinIO/checksum/download PASS; ClamAV real PASS; lectura/descarga HTTP cross-tenant retorna 404 sin exposición |
 | 12 | Receivables/payments/Stripe | PARTIAL | Stripe SDK oficial + WireMock, PaymentIntent, webhook firmado, settlement y recibo PASS; Payment Element monta en Portal; falta confirmación browser contra Stripe test real |
 | 13 | PostgreSQL/Flyway/RLS | CLOSED | V64–V68, fresh, `validate`, upgrade V63→V68 con fila histórica preservada y RLS PASS |
 | 14 | REST/OpenAPI | CLOSED | runtime export 223 paths, +10 sin removals, contratos frontend alineados |
@@ -28,12 +28,12 @@ Actualizado tras cada subtask. `OPEN` no significa ausencia de código; signific
 
 | Area | Tests | Passed | Failed | Skipped | Interpretación |
 |---|---:|---:|---:|---:|---|
-| API integración obligatoria | 332 | 332 | 0 | 0 | `-Dnexa.integration.enabled=true`, Testcontainers/PostgreSQL 18.4 + Stripe mock + ClamAV |
-| API default | 332 | 332 | 0 | 85 | suite completa; skips son clases condicionadas no obligatorias |
+| API integración obligatoria | 333 | 333 | 0 | 0 | `-Dnexa.integration.enabled=true`, Testcontainers/PostgreSQL 18.4 + Stripe mock + ClamAV |
+| API default | 333 | 333 | 0 | 86 | suite completa; skips son clases condicionadas no obligatorias |
 | Platform unit | 98 | 98 | 0 | 0 | 52 archivos |
-| Portal unit | 74 | 74 | 0 | 0 | 38 archivos |
+| Portal unit | 76 | 76 | 0 | 0 | 39 archivos |
 | Docker/browser | — | PASS | 0 | — | flujo autenticado y capturas actuales |
 
 ## Definition of Done guard
 
-La foundation funcional queda cerrada solo para los gates marcados `CLOSED`. No se declara cierre/publicación total porque siguen `PARTIAL`: confirmación browser contra Stripe test real, matriz HTTP cross-tenant de descargas, DAST/secret scanner externo y carga completa de comandos; tampoco se ejecutaron push, CI remoto, tag ni Release.
+La foundation funcional queda cerrada solo para los gates marcados `CLOSED`. No se declara cierre/publicación total porque siguen `PARTIAL`: confirmación browser contra Stripe test real, DAST/secret scanner externo y carga completa de comandos; tampoco se ejecutaron push, CI remoto, tag ni Release.

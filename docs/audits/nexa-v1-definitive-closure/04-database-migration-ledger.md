@@ -48,6 +48,6 @@ El flujo FEFO también normaliza la unidad comercial (`upper(line.unit)`) antes 
 - `Flyway validate` y migración fresca completa: PASS (68/68).
 - Grants de runtime y funciones: PASS (`nexa_runtime` login, no superuser/bypass RLS/create DB/create role).
 - RLS por tenant/workspace y forced policies: PASS en suite y runtime para tablas sensibles.
-- Concurrencia FEFO, conversión, webhooks y seguridad: PASS en integración obligatoria (332/332, 0 skips).
+- Concurrencia FEFO, conversión, webhooks y seguridad: PASS en integración obligatoria (333/333, 0 skips).
 - Upgrade migration desde V63 con datos preservados: PASS (1/1, 0 fallos, 0 skips).
 - Índices/query budgets: no se ejecutó una medición final p50/p95/p99; no se marca como PASS.

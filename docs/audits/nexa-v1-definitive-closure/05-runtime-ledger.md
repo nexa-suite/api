@@ -30,6 +30,7 @@ No se registran valores secretos. Solo nombres de variables, adapters y selecci�
 - Forced RLS observada en `sales.client_account`, `sales.client_account_address`, `business_documents.*` y `payments.*` protegidos.
 - OpenAPI exportado desde runtime: 223 paths; comparación con el baseline de 213 añadió 10 rutas y no removió ninguna.
 - Stripe runtime: `POST /receivables/{id}/payment-intents` pasó por el SDK oficial contra WireMock; webhook `payment_intent.succeeded` firmado fue aceptado y el worker produjo settlement/receipt.
+- Cross-tenant documents: lectura y descarga de un documento de otro tenant por usuario autenticado respondieron `404 Resource not found`; no se expuso metadata ni contenido.
 - Documentos XML: los dos objetos XML generados en MinIO se descargaron con `mc cat` y pasaron `xmllint --noout -` (raíces UBL `Invoice`).
 - Observabilidad: con perfil `observability`, Jaeger reportó servicio `nexa-api` y 20 trazas consultables en `/api/traces` después de una llamada autenticada.
 

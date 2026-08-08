@@ -15,7 +15,7 @@ Target: ASVS 5 Level 2 según matriz activa. Baseline, no certificación.
 | RLS | forced policies en tablas principales | PASS en integración y runtime |
 | CSP | frontend + API headers | PASS en builds/headers; no se ejecutó DAST final |
 | Rate limiting | auth/preview/system operator tables | PASS en suite e integración |
-| File security | MIME, checksum, ClamAV, private storage | checksum/MinIO PASS; ClamAV TCP real PASS con limpio/EICAR; HTTP cross-tenant final pendiente |
+| File security | MIME, checksum, ClamAV, private storage | checksum/MinIO PASS; ClamAV TCP real PASS con limpio/EICAR; HTTP cross-tenant read/download PASS (404, sin exposición) |
 | Stripe | signature/dedup/service amount | SDK oficial + WireMock PASS; firma/dedup/importe/settlement/receipt PASS |
 | Secret handling | ignored `.env.local`; no valores registrados | pass source hygiene; scans pendientes |
 
