@@ -9,6 +9,7 @@ import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistenc
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,25 +70,32 @@ public class LogisticsOperationsService {
     public DashboardView dashboard(CurrentAccessContext c) { logisticsRead(c); return queries.dashboard(tenant(c), workspace(c)); }
     public AnalyticsView analytics(CurrentAccessContext c, Instant from, Instant to) { logisticsRead(c); Instant end = to == null ? Instant.now() : to; Instant start = from == null ? end.minus(30, ChronoUnit.DAYS) : from; if (!start.isBefore(end) || start.plus(366, ChronoUnit.DAYS).isBefore(end)) throw error("INVALID_REQUEST", false); return queries.analytics(tenant(c), workspace(c), start, end); }
     public Page<ProofOfDeliveryView> proofOfDelivery(CurrentAccessContext c, String status, int page, int size) { logisticsRead(c); return queries.proofOfDelivery(tenant(c), workspace(c), status, page, size); }
+    public List<AssigneeView> assignees(CurrentAccessContext c) { logisticsRead(c); return queries.assignees(tenant(c), workspace(c)); }
 
     private String readScope(CurrentAccessContext c) {
         if (c.hasRole(MembershipRole.BUYER)) { c.requirePermission(Permission.TRACKING_BUYER_READ); return accounts.findForBuyer(tenant(c), workspace(c), actor(c)).map(ClientAccountView::id).orElseThrow(() -> error("RESOURCE_NOT_FOUND", true)); }
-        if (c.hasRole(MembershipRole.SALES)) c.requirePermission(Permission.SALES_READ);
-        else if (c.hasRole(MembershipRole.WAREHOUSE)) c.requirePermission(Permission.FULFILLMENT_READ);
-        else if (c.hasRole(MembershipRole.LOGISTICS)) c.requirePermission(Permission.LOGISTICS_READ);
-        else throw new AccessPolicyViolation("Logistics access is not available");
-        return null;
+        /* Company Owner is a governance/commercial role. A legacy sales-read
+         * capability must not widen into the operational dispatch board; only
+         * an explicit logistics/fulfillment grant (fixed or custom) can do so. */
+        boolean operationalRead = c.allows(PermissionKey.LOGISTICS_READ)
+                || c.allows(PermissionKey.DISPATCH_READ)
+                || c.allows(PermissionKey.FULFILLMENT_READ);
+        if (c.hasRole(MembershipRole.COMPANY_OWNER) && !operationalRead) {
+            throw new AccessPolicyViolation("Company Owner does not have operational logistics access");
+        }
+        if (c.allows(Permission.SALES_READ) || c.allows(Permission.FULFILLMENT_READ) || c.allows(Permission.LOGISTICS_READ)) return null;
+        throw new AccessPolicyViolation("Logistics access is not available");
     }
-    private static void logisticsRead(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS) && !c.hasRoleCode("system_workflow")) throw new AccessPolicyViolation("Logistics access is required"); c.requirePermission(Permission.LOGISTICS_READ); }
-    private static void write(CurrentAccessContext c) { if (!c.hasRole(MembershipRole.LOGISTICS) && !c.hasRoleCode("system_workflow")) throw new AccessPolicyViolation("Logistics write access is required"); c.requirePermission(Permission.LOGISTICS_WRITE); }
+    private static void logisticsRead(CurrentAccessContext c) { c.requirePermission(Permission.LOGISTICS_READ); }
+    private static void write(CurrentAccessContext c) { c.requirePermission(Permission.LOGISTICS_WRITE); }
     private static void handoffRead(CurrentAccessContext c) {
-        if (c.hasRole(MembershipRole.WAREHOUSE)) c.requirePermission(Permission.FULFILLMENT_READ);
-        else if (c.hasRole(MembershipRole.LOGISTICS)) c.requirePermission(Permission.LOGISTICS_READ);
+        if (c.allows(Permission.FULFILLMENT_READ)) c.requirePermission(Permission.FULFILLMENT_READ);
+        else if (c.allows(Permission.LOGISTICS_READ)) c.requirePermission(Permission.LOGISTICS_READ);
         else throw new AccessPolicyViolation("Operational handoff access is not available");
     }
     private static void handoffWrite(CurrentAccessContext c) {
-        if (c.hasRole(MembershipRole.WAREHOUSE)) c.requirePermission(Permission.WAREHOUSE_WRITE);
-        else if (c.hasRole(MembershipRole.LOGISTICS)) c.requirePermission(Permission.LOGISTICS_WRITE);
+        if (c.allows(Permission.WAREHOUSE_WRITE)) c.requirePermission(Permission.WAREHOUSE_WRITE);
+        else if (c.allows(Permission.LOGISTICS_WRITE)) c.requirePermission(Permission.LOGISTICS_WRITE);
         else throw new AccessPolicyViolation("Operational handoff write access is not available");
     }
     private OperationalHandoffPort requireHandoff() {
@@ -116,6 +124,7 @@ public class LogisticsOperationsService {
         private static List<String> buyerAlerts(List<String> values) { return values.stream().filter(value -> value.equals("DELIVERY_REVIEW") || value.equals("TEMPERATURE_ALERT")).map(value -> value.equals("TEMPERATURE_ALERT") ? "DELIVERY_REVIEW" : value).distinct().toList(); }
     }
     public record AssignmentView(String responsibleMembershipId, String responsibleDisplayName, String vehicleReference, String routeName) { }
+    public record AssigneeView(String id, String email, String displayName) { }
     public record DispatchEventView(String id, String type, String fromStatus, String toStatus, String occurredAt, boolean buyerVisible, String summary) { }
     public record HandoffNoteView(String id, String dispatchOrderId, String note, String authorMembershipId,
                                   Instant occurredAt, long dispatchVersion) { }
@@ -125,12 +134,12 @@ public class LogisticsOperationsService {
     public record ProofOfDeliveryView(String podId, String dispatchOrderId, String dispatchNumber, String status, String receiverName, Instant completedAt, String notes, boolean photoEvidenceDeclared, boolean signatureEvidenceDeclared, Instant updatedAt) { }
     private static DispatchView safe(CurrentAccessContext context, DispatchView value) {
         if (context.hasRole(MembershipRole.BUYER)) return value.buyerSafe();
-        if (context.hasRole(MembershipRole.SALES)) return value.salesSafe();
-        if (context.hasRole(MembershipRole.WAREHOUSE) && !context.hasRole(MembershipRole.LOGISTICS)) return value.warehouseSafe();
+        if (context.hasRole(MembershipRole.SALES) || (context.allows(Permission.SALES_READ) && !context.allows(Permission.LOGISTICS_READ) && !context.allows(Permission.FULFILLMENT_READ))) return value.salesSafe();
+        if ((context.hasRole(MembershipRole.WAREHOUSE) || context.allows(Permission.FULFILLMENT_READ)) && !context.allows(Permission.LOGISTICS_READ)) return value.warehouseSafe();
         return value;
     }
     private static DispatchEventView safeEvent(CurrentAccessContext context, DispatchEventView value) {
-        if (context.hasRole(MembershipRole.BUYER) || context.hasRole(MembershipRole.SALES)) {
+        if (context.hasRole(MembershipRole.BUYER) || context.hasRole(MembershipRole.SALES) || (context.allows(Permission.SALES_READ) && !context.allows(Permission.LOGISTICS_READ) && !context.allows(Permission.FULFILLMENT_READ))) {
             String publicType = switch (value.type()) {
                 case "logistics.dispatch.scheduled", "logistics.dispatch.reprogrammed", "DELIVERY_SCHEDULED" -> "DELIVERY_SCHEDULED";
                 case "logistics.dispatch.route-started", "IN_TRANSIT" -> "IN_TRANSIT";

@@ -12,12 +12,15 @@ import com.nexa.api.catalogmanagement.application.port.in.CatalogPricingPreviewU
 import com.nexa.api.catalogmanagement.application.port.in.CatalogProductUseCase;
 import com.nexa.api.catalogmanagement.application.port.in.CatalogPromotionUseCase;
 import com.nexa.api.catalogmanagement.application.port.in.CatalogTaxonomyUseCase;
+import com.nexa.api.catalogmanagement.application.port.in.CatalogVariantUseCase;
 import com.nexa.api.catalogmanagement.application.service.CatalogQueryService;
 import com.nexa.api.catalogmanagement.application.service.CatalogPricingService;
 import com.nexa.api.catalogmanagement.application.service.CatalogPricingPreviewService;
 import com.nexa.api.catalogmanagement.application.service.CatalogProductService;
 import com.nexa.api.catalogmanagement.application.service.CatalogPromotionService;
 import com.nexa.api.catalogmanagement.application.service.CatalogTaxonomyService;
+import com.nexa.api.catalogmanagement.application.service.CatalogVariantService;
+import com.nexa.api.catalogmanagement.application.port.out.CatalogVariantPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -64,6 +67,13 @@ public class CatalogQueryConfiguration {
 	CatalogPromotionUseCase catalogPromotionService(CatalogPromotionPort port, CatalogAuthorizationPort authorization,
 			PlatformTransactionManager transactionManager) {
 		return CatalogTransactionalProxy.required(new CatalogPromotionService(port, authorization), CatalogPromotionUseCase.class, transactionManager);
+	}
+
+	@Bean
+	@Profile("!test")
+	CatalogVariantUseCase catalogVariantService(CatalogVariantPort port, CatalogAuthorizationPort authorization,
+			PlatformTransactionManager transactionManager) {
+		return CatalogTransactionalProxy.required(new CatalogVariantService(port, authorization), CatalogVariantUseCase.class, transactionManager);
 	}
 
 }

@@ -183,6 +183,21 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
         return new LogisticsOperationsService.Page<>(items, page, size, total);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<LogisticsOperationsService.AssigneeView> assignees(String tenantId, String workspaceId) {
+        return jdbc.query("select m.id,u.email,u.display_name from tenant_management.workspace_membership m "
+                        + "join tenant_management.workspace w on w.id=m.workspace_id "
+                        + "join iam.user_account u on u.id=m.user_id "
+                        + "where w.tenant_id=? and m.workspace_id=? and m.membership_type='INTERNAL' and m.status='ACTIVE' "
+                        + "and exists (select 1 from tenant_management.membership_role_definition a "
+                        + "join tenant_management.role_definition r on r.id=a.role_id "
+                        + "where a.membership_id=m.id and r.code='logistics' and r.status='ACTIVE') "
+                        + "order by u.display_name,u.email,m.id",
+                (rs, row) -> new LogisticsOperationsService.AssigneeView(rs.getObject(1).toString(), rs.getString(2), rs.getString(3)),
+                uuid(tenantId), uuid(workspaceId));
+    }
+
     private double averageMinutes(UUID tenant, UUID workspace, String startEvent, String endEvent,
                                   Instant from, Instant to) {
         String sql = "select coalesce(avg(extract(epoch from (finish.occurred_at-start.occurred_at))/60.0),0) " +

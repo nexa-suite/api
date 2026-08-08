@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1.0",
+  "source": "catalog-family-sku-mapping.v1.json",
+  "mappingPolicy": "explicit-curated",
+  "items": [
+    {"legacyCatalogItemId":"CAT-0014","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-CABRA","variantName":"Cabra"},
+    {"legacyCatalogItemId":"CAT-0015","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-CABRA","variantName":"Cabra"},
+    {"legacyCatalogItemId":"CAT-0016","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-CHILI","variantName":"Chili"},
+    {"legacyCatalogItemId":"CAT-0017","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-CHILI","variantName":"Chili"},
+    {"legacyCatalogItemId":"CAT-0018","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-COMINO","variantName":"Comino"},
+    {"legacyCatalogItemId":"CAT-0019","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-COMINO","variantName":"Comino"},
+    {"legacyCatalogItemId":"CAT-0020","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-FINAS-HIERBAS","variantName":"Finas Hierbas"},
+    {"legacyCatalogItemId":"CAT-0021","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-FINAS-HIERBAS","variantName":"Finas Hierbas"},
+    {"legacyCatalogItemId":"CAT-0022","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-NATURAL","variantName":"Natural"},
+    {"legacyCatalogItemId":"CAT-0023","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-NATURAL","variantName":"Natural"},
+    {"legacyCatalogItemId":"CAT-0024","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-PIMIENTA","variantName":"Pimienta"},
+    {"legacyCatalogItemId":"CAT-0025","familyCode":"FAM-GOUDA","familyName":"QUESO GOUDA","variantCode":"VAR-GOUDA-PIMIENTA","variantName":"Pimienta"}
+  ]
+}

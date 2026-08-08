@@ -105,6 +105,13 @@ public class BusinessDocumentService implements BusinessDocumentPort {
         return jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().filter(value -> authorizedDocument(context, value.clientAccountId())).findFirst().orElseThrow(() -> new IllegalArgumentException("Business document not found"));
     }
 
+    @Transactional(readOnly = true)
+    public List<BusinessDocumentModels.DocumentEventView> events(CurrentAccessContext context, UUID documentId) {
+        get(context, documentId);
+        return jdbc.query("select event_id,event_type,status,occurred_at,processed_at,attempt_count from integration.outbox_event where tenant_id=? and workspace_id=? and aggregate_type='BusinessDocument' and aggregate_id=? order by occurred_at asc,event_id asc",
+                (rs, n) -> new BusinessDocumentModels.DocumentEventView(rs.getObject("event_id", UUID.class).toString(), rs.getString("event_type"), rs.getString("status"), rs.getTimestamp("occurred_at").toInstant(), rs.getTimestamp("processed_at") == null ? null : rs.getTimestamp("processed_at").toInstant(), rs.getInt("attempt_count")), tenant(context), workspace(context), documentId);
+    }
+
     @Transactional
     public BusinessDocumentModels.GenerationRequestView regenerate(CurrentAccessContext context, UUID documentId, String idempotencyKey) {
         requireGeneration(context); requireKey(idempotencyKey);

@@ -22,13 +22,13 @@ public final class PermissionPolicy {
 					Permission.CATALOG_READ, Permission.CATALOG_MANAGE, Permission.CATALOG_PRICE_MANAGE,
 					Permission.PROMOTION_READ, Permission.PROMOTION_MANAGE),
 			MembershipRole.SALES, Set.of(
-					Permission.CATALOG_READ, Permission.CATALOG_MANAGE, Permission.CATALOG_PRICE_MANAGE,
+					Permission.CATALOG_READ,
 					Permission.PROMOTION_READ, Permission.SALES_READ, Permission.SALES_WRITE),
 			MembershipRole.WAREHOUSE, Set.of(
 					Permission.CATALOG_READ, Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
 					Permission.FULFILLMENT_READ),
 			MembershipRole.LOGISTICS, Set.of(
-					Permission.CATALOG_READ, Permission.PROMOTION_READ, Permission.PROMOTION_MANAGE,
+					Permission.CATALOG_READ, Permission.PROMOTION_READ,
 					Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE,
 					Permission.FULFILLMENT_READ),
 			MembershipRole.BUYER, Set.of(

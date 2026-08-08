@@ -21,10 +21,23 @@ class ModernPostgresMigrationTests {
 
 	@Test
 	void flywayCreatesOnlyTheModernIdentityAndTenantSchemasWithRequiredTables() throws SQLException {
+		try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement()) {
+			statement.execute("create role nexa_runtime");
+		}
 		Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
 				.locations("classpath:db/migration").cleanDisabled(false).load().migrate();
 
 		try (var connection = POSTGRES.createConnection("")) {
+			try (var statement = connection.createStatement(); var result = statement.executeQuery(
+					"select has_function_privilege('nexa_runtime', 'integration.purge_expired_change_events(integer)', 'EXECUTE')")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getBoolean(1)).as("nexa_runtime must run scheduled change-feed retention").isTrue();
+			}
+			try (var statement = connection.createStatement(); var result = statement.executeQuery(
+					"select count(*) from tenant_management.role_permission rp join tenant_management.role_definition r on r.id=rp.role_id where r.code='company_owner' and rp.permission_key in ('warehouse.read','warehouse.location.manage','inventory.read','inventory.receive','inventory.adjust','inventory.reserve','inventory.release','inventory.waste','fulfillment.read','fulfillment.manage','logistics.read','dispatch.read','dispatch.assign','dispatch.schedule','dispatch.start_route','dispatch.temperature','dispatch.incident','dispatch.reprogram','dispatch.complete','logistics.analytics.read')")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).as("Company Owner must not receive operational permissions by default").isZero();
+			}
 			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management", "sales", "integration", "warehouse", "logistics", "catalog_management", "reference_data", "notifications", "audit", "business_documents", "payments");
 			assertThat(tables(connection, "iam")).containsExactlyInAnyOrder("user_account", "password_credential", "refresh_session", "authentication_failure", "password_reset_request", "security_audit_event", "password_reset_throttle_bucket", "security_notification_outbox", "system_operator_throttle_bucket", "workspace_preview_throttle_bucket");
 			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership", "membership_admin_event", "membership_role_assignment", "organization_registration", "organization_settings", "workspace_settings", "regional_settings", "unit_preferences", "operational_settings", "notification_preference", "tenant_security_settings", "custom_field_definition", "reference_plan_assignment", "organization_invitation", "organization_invitation_role", "organization_invitation_idempotency", "workspace_creation_idempotency", "permission_definition", "role_definition", "role_permission", "membership_role_definition", "membership_authorization_state");
@@ -32,7 +45,11 @@ class ModernPostgresMigrationTests {
 			assertThat(tables(connection, "integration")).containsExactlyInAnyOrder("change_event", "outbox_event", "inbox_event");
 			assertThat(tables(connection, "warehouse")).containsExactlyInAnyOrder("warehouse", "storage_zone", "inventory_lot", "stock_movement", "inventory_event", "inventory_reservation", "inventory_reservation_line", "inventory_reservation_allocation", "reservation_shortage", "command_idempotency", "warehouse_service_configuration", "selection_snapshot");
 			assertThat(tables(connection, "logistics")).containsExactlyInAnyOrder("dispatch_number_counter", "dispatch_order", "dispatch_event", "command_idempotency", "proof_of_delivery", "temperature_reading", "delivery_incident", "buyer_delivery_tracking", "operational_handoff_note");
-			assertThat(tables(connection, "catalog_management")).containsExactlyInAnyOrder("category", "brand", "product", "product_presentation", "product_asset_reference", "product_visibility", "product_price", "promotion", "promotion_product", "promotion_category", "promotion_client_account", "promotion_rule", "command_idempotency", "seed_import_history", "product_family", "sellable_sku", "sku_price", "promotion_sku");
+			assertThat(tables(connection, "catalog_management")).containsExactlyInAnyOrder("category", "brand", "product", "product_presentation", "product_asset_reference", "product_visibility", "product_price", "promotion", "promotion_product", "promotion_category", "promotion_client_account", "promotion_rule", "command_idempotency", "seed_import_history", "product_family", "product_variant", "sellable_sku", "sku_price", "promotion_sku");
+			assertThat(columns(connection, "catalog_management", "product_variant")).containsExactlyInAnyOrder(
+				"id", "tenant_id", "workspace_id", "family_id", "variant_code", "name", "description", "status",
+				"version", "created_at", "updated_at");
+			assertThat(columns(connection, "catalog_management", "sellable_sku")).contains("variant_id");
 			assertThat(tables(connection, "business_documents")).containsExactlyInAnyOrder("object_storage_object", "business_document", "document_generation_request", "evidence_object");
 			assertThat(tables(connection, "payments")).containsExactlyInAnyOrder("credit_account", "receivable", "payment", "payment_attempt", "receivable_allocation", "credit_reservation", "stripe_event_inbox", "payment_event");
 			assertThat(tables(connection, "reference_data")).containsExactlyInAnyOrder("department", "province", "district", "road_type");

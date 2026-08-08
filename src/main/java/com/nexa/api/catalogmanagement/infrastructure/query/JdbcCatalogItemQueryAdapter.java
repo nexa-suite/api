@@ -121,7 +121,8 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 row.categoryName(), row.presentation(), value.effectivePrice(), value.currency(), row.temperature(),
                 row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(), label, value,
                 string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
-                row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf());
+                row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
+                row.variantCode(), row.variantName());
     }
 
     private CatalogItemDetail detail(Row row, Enrichment enrichment) {
@@ -133,7 +134,8 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 row.categoryName(), row.description(), row.presentation(), value.effectivePrice(), value.currency(),
                 row.temperature(), row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(),
                 label, value, string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
-                row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf());
+                row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
+                row.variantCode(), row.variantName());
     }
 
     private String promotionLabel(String catalogItemId, Enrichment enrichment) {
@@ -213,7 +215,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
     private String selectSql() {
         return "select s.id sellable_sku_id,coalesce(s.legacy_product_id,s.id) product_id,s.legacy_catalog_item_id catalog_item_id,s.sku_code product_code," +
-                "coalesce(f.name,p.name) item_name,f.id family_id,f.family_code family_code,f.name family_name,c.id category_id,c.name category_name," +
+                "coalesce(f.name,p.name) item_name,f.id family_id,f.family_code family_code,f.name family_name,v.variant_code variant_code,v.name variant_name,c.id category_id,c.name category_name," +
                 "b.name brand_name,s.presentation presentation,coalesce(p.description,f.description) description,f.storage_family temperature,s.status status," +
                 "coalesce(current_price.amount,0) amount,coalesce(current_price.currency,'PEN') currency,s.unit_of_measure unit_of_measure,s.packaging_type packaging_type," +
                 "s.net_weight net_weight,s.gross_weight gross_weight,asset.asset_path image_path,asset.file_name image_file_name ";
@@ -222,6 +224,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
     private String fromClause() {
         return "from catalog_management.sellable_sku s " +
                 "join catalog_management.product_family f on f.tenant_id=s.tenant_id and f.workspace_id=s.workspace_id and f.id=s.family_id " +
+                "left join catalog_management.product_variant v on v.tenant_id=s.tenant_id and v.workspace_id=s.workspace_id and v.id=s.variant_id " +
                 "left join catalog_management.brand b on b.tenant_id=f.tenant_id and b.workspace_id=f.workspace_id and b.id=f.brand_id " +
                 "left join catalog_management.category c on c.tenant_id=f.tenant_id and c.workspace_id=f.workspace_id and c.id=f.category_id " +
                 "left join catalog_management.product p on p.tenant_id=s.tenant_id and p.workspace_id=s.workspace_id and p.id=s.legacy_product_id " +
@@ -233,7 +236,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
     private String predicate(CatalogScope scope, CatalogSearchCriteria criteria) {
         StringBuilder sql = new StringBuilder(" where s.tenant_id=? and s.workspace_id=? and s.status='ACTIVE' and s.visible=true");
         if (scope.buyerView()) sql.append(" and pv.buyer_visible=true");
-        if (criteria.query() != null && !criteria.query().isBlank()) sql.append(" and (lower(f.name) like lower(?) or lower(coalesce(p.name,'')) like lower(?) or lower(coalesce(p.description,'')) like lower(?) or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or lower(coalesce(s.legacy_catalog_item_id,'')) like lower(?))");
+        if (criteria.query() != null && !criteria.query().isBlank()) sql.append(" and (lower(f.name) like lower(?) or lower(coalesce(v.name,'')) like lower(?) or lower(coalesce(p.name,'')) like lower(?) or lower(coalesce(p.description,'')) like lower(?) or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or lower(coalesce(s.legacy_catalog_item_id,'')) like lower(?))");
         if (criteria.brand() != null) sql.append(" and lower(b.name) like lower(?)");
         if (criteria.category() != null) sql.append(" and lower(c.name) like lower(?)");
         if (criteria.coldChainRequirement() != null) sql.append(" and f.storage_family=?");
@@ -244,7 +247,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         List<Object> args = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
         if (criteria.query() != null && !criteria.query().isBlank()) {
             String value = "%" + criteria.query() + "%";
-            args.add(value); args.add(value); args.add(value); args.add(value); args.add(value); args.add(value);
+            args.add(value); args.add(value); args.add(value); args.add(value); args.add(value); args.add(value); args.add(value);
         }
         if (criteria.brand() != null) args.add("%" + criteria.brand() + "%");
         if (criteria.category() != null) args.add("%" + criteria.category() + "%");
@@ -256,6 +259,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         return new Row(rs.getObject("sellable_sku_id", UUID.class), rs.getObject("product_id", UUID.class),
                 rs.getString("catalog_item_id"), rs.getString("product_code"), rs.getString("item_name"),
                 rs.getObject("family_id", UUID.class), rs.getString("family_code"), rs.getString("family_name"),
+                rs.getString("variant_code"), rs.getString("variant_name"),
                 rs.getObject("category_id", UUID.class), rs.getString("category_name"), rs.getString("brand_name"),
                 rs.getString("presentation"), rs.getString("description"), rs.getString("temperature"), rs.getString("status"),
                 rs.getBigDecimal("amount"), rs.getString("currency"), rs.getString("unit_of_measure"), rs.getString("packaging_type"),
@@ -267,7 +271,8 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
     private static Instant instant(java.sql.Timestamp value) { return value == null ? null : value.toInstant(); }
 
     private record Row(UUID sellableSkuId, UUID productId, String catalogItemId, String skuCode, String itemName,
-                       UUID familyId, String familyCode, String familyName, UUID categoryId, String categoryName,
+                       UUID familyId, String familyCode, String familyName, String variantCode, String variantName,
+                       UUID categoryId, String categoryName,
                        String brandName, String presentation, String description, String temperature, String status,
                        BigDecimal amount, String currency, String unitOfMeasure, String packagingType,
                        BigDecimal netWeight, BigDecimal grossWeight, String imagePath, String imageFileName) { }

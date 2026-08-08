@@ -42,7 +42,7 @@ services:
       NEXA_ACCESS_TOKEN_TTL: ${NEXA_ACCESS_TOKEN_TTL:-PT15M}
       NEXA_REFRESH_TOKEN_TTL: ${NEXA_REFRESH_TOKEN_TTL:-P30D}
       NEXA_BCRYPT_STRENGTH: ${NEXA_BCRYPT_STRENGTH:-12}
-      NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300}
+      NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300,http://127.0.0.1:4200,http://127.0.0.1:4300}
       NEXA_SECURITY_RSA_PUBLIC_KEY: /run/secrets/nexa_access_token_public
       NEXA_SECURITY_RSA_PRIVATE_KEY: /run/secrets/nexa_access_token_private
       NEXA_SMTP_HOST: ${NEXA_SMTP_HOST:-modern-mailpit}

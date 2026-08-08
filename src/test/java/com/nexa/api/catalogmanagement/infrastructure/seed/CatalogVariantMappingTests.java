@@ -14,6 +14,9 @@ class CatalogVariantMappingTests {
     @Autowired
     private CatalogFamilySkuMappingLoader loader;
 
+    @Autowired
+    private CatalogVariantMappingLoader variantLoader;
+
     @Test
     void mapsAllFiftySeedSkusToAnExplicitCuratedFamily() {
         Map<String, CatalogFamilySkuMappingLoader.MappingItem> mapping = loader.byLegacyCatalogItemId();
@@ -47,6 +50,21 @@ class CatalogVariantMappingTests {
         assertThat(mapping.get("CAT-0033").familyCode()).isNotEqualTo(mapping.get("CAT-0034").familyCode());
         assertThat(mapping.get("CAT-0044").familyCode()).isNotEqualTo(mapping.get("CAT-0045").familyCode());
         assertThat(mapping.get("CAT-0045").familyCode()).isNotEqualTo(mapping.get("CAT-0047").familyCode());
+    }
+
+    @Test
+    void exposesOnlyTheReviewedExplicitGoudaVariantMapping() {
+        Map<String, CatalogVariantMappingLoader.MappingItem> mapping = variantLoader.byLegacyCatalogItemId();
+
+        assertThat(mapping).hasSize(12);
+        assertThat(mapping.values().stream().map(CatalogVariantMappingLoader.MappingItem::variantCode).distinct())
+                .containsExactlyInAnyOrder("VAR-GOUDA-CABRA", "VAR-GOUDA-CHILI", "VAR-GOUDA-COMINO",
+                        "VAR-GOUDA-FINAS-HIERBAS", "VAR-GOUDA-NATURAL", "VAR-GOUDA-PIMIENTA");
+        assertThat(mapping.values()).allSatisfy(item -> {
+            assertThat(item.familyCode()).isEqualTo("FAM-GOUDA");
+            assertThat(item.familyName()).isEqualTo("QUESO GOUDA");
+            assertThat(item.variantName()).isNotBlank();
+        });
     }
 
     private static void assertSameFamily(Map<String, CatalogFamilySkuMappingLoader.MappingItem> mapping,

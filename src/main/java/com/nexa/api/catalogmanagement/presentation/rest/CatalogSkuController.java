@@ -1,7 +1,9 @@
 package com.nexa.api.catalogmanagement.presentation.rest;
 
 import com.nexa.api.catalogmanagement.application.model.CatalogSkuModels;
+import com.nexa.api.catalogmanagement.application.model.CatalogVariantModels;
 import com.nexa.api.catalogmanagement.application.port.in.CatalogSkuUseCase;
+import com.nexa.api.catalogmanagement.application.port.in.CatalogVariantUseCase;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -25,7 +27,8 @@ import java.util.UUID;
 public final class CatalogSkuController {
     private static final String ACCESS = CatalogHttpSupport.ACCESS_CONTEXT;
     private final CatalogSkuUseCase service;
-    public CatalogSkuController(CatalogSkuUseCase service) { this.service = service; }
+    private final CatalogVariantUseCase variants;
+    public CatalogSkuController(CatalogSkuUseCase service, CatalogVariantUseCase variants) { this.service = service; this.variants = variants; }
 
     @GetMapping("/product-families")
     @Operation(operationId = "listProductFamilies")
@@ -52,6 +55,34 @@ public final class CatalogSkuController {
     @GetMapping("/product-families/{familyId}/skus")
     @Operation(operationId = "listFamilySkus")
     public CatalogSkuModels.Page<CatalogSkuModels.SkuView> familySkus(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search) { return service.skus(CatalogHttpSupport.scope(context), page, size, search, familyId); }
+    @GetMapping("/product-families/{familyId}/variants")
+    @Operation(operationId = "listProductFamilyVariants")
+    public CatalogVariantModels.Page<CatalogVariantModels.VariantView> familyVariants(@RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID familyId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String search) {
+        return variants.variants(CatalogHttpSupport.scope(context), familyId, page, size, search);
+    }
+    @PostMapping("/product-families/{familyId}/variants")
+    @Operation(operationId = "createProductVariant")
+    public ResponseEntity<CatalogVariantModels.VariantView> createVariant(@RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID familyId, @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody VariantRequest request) {
+        CatalogHttpSupport.requireIdempotency(idempotencyKey);
+        CatalogVariantModels.VariantView value = variants.create(CatalogHttpSupport.scope(context), familyId, request.code(), request.name(), request.description());
+        return ResponseEntity.created(URI.create("/api/v1/product-variants/" + value.id())).body(value);
+    }
+    @GetMapping("/product-variants/{variantId}")
+    @Operation(operationId = "getProductVariant")
+    public CatalogVariantModels.VariantView variant(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID variantId) {
+        return variants.variant(CatalogHttpSupport.scope(context), variantId);
+    }
+    @GetMapping("/product-variants/{variantId}/skus")
+    @Operation(operationId = "listProductVariantSkus")
+    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> variantSkus(@RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID variantId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String search) {
+        return variants.skus(CatalogHttpSupport.scope(context), variantId, page, size, search);
+    }
     @GetMapping("/skus")
     @Operation(operationId = "listSellableSkus")
     public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(@RequestAttribute(ACCESS) CurrentAccessContext context, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search, @RequestParam(required = false) UUID familyId) { return service.skus(CatalogHttpSupport.scope(context), page, size, search, familyId); }
@@ -97,5 +128,6 @@ public final class CatalogSkuController {
 
     public record FamilyRequest(String code, String name, String description, UUID categoryId, UUID brandId, String countryOfOrigin, String manufacturerReference, String supplierReference, String storageFamily) { }
     public record SkuRequest(String skuCode, String gtin, String presentation, String packagingType, String unitOfMeasure, BigDecimal netWeight, BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax, int shelfLifeDays, int minimumRemainingShelfLifeDays, boolean lotTrackingRequired, boolean expiryTrackingRequired, String taxCategory) { }
+    public record VariantRequest(String code, String name, String description) { }
     public record PriceRequest(BigDecimal amount, String currency, Instant validFrom, Instant validUntil, String sourceCode, String sourceDescription) { }
 }

@@ -194,7 +194,7 @@ abstract class WarehouseJdbcSupport {
     }
 
     protected List<LineData> lines(CurrentAccessContext context, UUID orderId) {
-        return jdbc.query("select line.sku_id,line.catalog_item_id,line.quantity,line.unit from sales.sales_order_line line "
+        return jdbc.query("select line.sku_id,line.catalog_item_id,line.quantity,upper(line.unit) as unit from sales.sales_order_line line "
                         + "join sales.sales_order order_header on order_header.id=line.sales_order_id "
                         + "where order_header.tenant_id=? and order_header.workspace_id=? and line.sales_order_id=? "
                         + "order by coalesce(line.sku_id::text,line.catalog_item_id),line.id",

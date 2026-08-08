@@ -36,4 +36,30 @@ public final class ReferenceDataController {
         PeruGeographyLevel level = PeruGeographyLevel.fromResource(resource);
         return geography.list(context, level, parentCode);
     }
+
+    @GetMapping("/departments")
+    @Operation(operationId = "listReferenceDepartments")
+    public List<ReferenceOptionView> departments(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context) {
+        return geography.list(context, PeruGeographyLevel.DEPARTMENT, null);
+    }
+
+    @GetMapping("/departments/{departmentCode}/provinces")
+    @Operation(operationId = "listReferenceProvinces")
+    public List<ReferenceOptionView> provinces(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+                                               @PathVariable String departmentCode) {
+        return geography.list(context, PeruGeographyLevel.PROVINCE, departmentCode);
+    }
+
+    @GetMapping("/provinces/{provinceCode}/districts")
+    @Operation(operationId = "listReferenceDistricts")
+    public List<ReferenceOptionView> districts(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+                                               @PathVariable String provinceCode) {
+        return geography.list(context, PeruGeographyLevel.DISTRICT, provinceCode);
+    }
+
+    @GetMapping("/road-types")
+    @Operation(operationId = "listReferenceRoadTypes")
+    public List<ReferenceOptionView> roadTypes(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context) {
+        return geography.list(context, PeruGeographyLevel.ROAD_TYPE, null);
+    }
 }

@@ -22,7 +22,8 @@ public final class CatalogResponseMapper {
 						.map(promotion -> new com.nexa.api.catalogmanagement.presentation.rest.response.CatalogAppliedPromotionResponse(
 								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf(),
 				item.productFamilyId(), item.productFamilyCode(), item.productFamilyName(), item.sellableSkuId(), item.skuCode(),
-				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf());
+				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf(),
+				item.productVariantCode(), item.productVariantName());
 	}
 
 	public CatalogItemDetailResponse toDetail(CatalogItemDetail item) {
@@ -35,7 +36,8 @@ public final class CatalogResponseMapper {
 						.map(promotion -> new com.nexa.api.catalogmanagement.presentation.rest.response.CatalogAppliedPromotionResponse(
 								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf(),
 				item.productFamilyId(), item.productFamilyCode(), item.productFamilyName(), item.sellableSkuId(), item.skuCode(),
-				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf());
+				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf(),
+				item.productVariantCode(), item.productVariantName());
 	}
 
 	public CatalogPageResponse toPage(CatalogPage<CatalogItemSummary> page) {

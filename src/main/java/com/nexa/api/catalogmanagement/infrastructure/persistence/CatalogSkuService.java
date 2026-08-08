@@ -83,12 +83,23 @@ public class CatalogSkuService implements CatalogSkuPort {
     @Override
     @Transactional(readOnly = true)
     public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(CatalogScope scope, int page, int size, String search, UUID familyId) {
+        return skus(scope, page, size, search, familyId, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skusByVariant(CatalogScope scope, int page, int size, String search, UUID variantId) {
+        return skus(scope, page, size, search, null, variantId);
+    }
+
+    private CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(CatalogScope scope, int page, int size, String search, UUID familyId, UUID variantId) {
         int safePage = boundedPage(page);
         int safeSize = boundedSize(size);
         String term = like(search);
         String familyFilter = familyId == null ? null : familyId.toString();
+        String variantFilter = variantId == null ? null : variantId.toString();
         String where = skuWhere();
-        Object[] arguments = skuArguments(scope, familyFilter, term);
+        Object[] arguments = skuArguments(scope, familyFilter, variantFilter, term);
         long total = jdbc.queryForObject("select count(*) from catalog_management.sellable_sku s" + skuJoins() + " where " + where,
                 Long.class, arguments);
         List<CatalogSkuModels.SkuView> rows = jdbc.query(skuSql(where) + " order by f.name,s.presentation,s.id limit ? offset ?",
@@ -189,7 +200,8 @@ public class CatalogSkuService implements CatalogSkuPort {
                 rs.getBoolean("expiry_tracking_required"), rs.getString("tax_category"), rs.getString("status"),
                 rs.getBoolean("visible"), rs.getLong("version"), rs.getString("legacy_catalog_item_id"),
                 rs.getString("image_path"), rs.getString("image_file_name"), "UNKNOWN", false, Instant.EPOCH,
-                currentPrice, instant(rs.getTimestamp("created_at")), instant(rs.getTimestamp("updated_at")));
+                currentPrice, instant(rs.getTimestamp("created_at")), instant(rs.getTimestamp("updated_at")),
+                uuid(rs, "variant_id"), rs.getString("variant_code"), rs.getString("variant_name"));
     }
 
     private List<CatalogSkuModels.SkuView> enrichAvailability(CatalogScope scope, List<CatalogSkuModels.SkuView> rows) {
@@ -227,18 +239,21 @@ public class CatalogSkuService implements CatalogSkuPort {
     private static String skuJoins() {
         return " join catalog_management.product_family f on f.tenant_id=s.tenant_id and f.workspace_id=s.workspace_id and f.id=s.family_id " +
                 "left join catalog_management.brand b on b.tenant_id=f.tenant_id and b.workspace_id=f.workspace_id and b.id=f.brand_id " +
-                "left join catalog_management.category c on c.tenant_id=f.tenant_id and c.workspace_id=f.workspace_id and c.id=f.category_id";
+                "left join catalog_management.category c on c.tenant_id=f.tenant_id and c.workspace_id=f.workspace_id and c.id=f.category_id " +
+                "left join catalog_management.product_variant v on v.tenant_id=s.tenant_id and v.workspace_id=s.workspace_id and v.id=s.variant_id";
     }
 
     private static String skuWhere() {
         return "s.tenant_id=? and s.workspace_id=? and (? is null or s.family_id=cast(? as uuid)) and " +
+                "(? is null or s.variant_id=cast(? as uuid)) and " +
                 "(? is null or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or " +
                 "lower(coalesce(s.gtin,'')) like lower(?) or lower(f.name) like lower(?) or " +
-                "lower(coalesce(b.name,'')) like lower(?) or lower(coalesce(c.name,'')) like lower(?))";
+                "lower(coalesce(b.name,'')) like lower(?) or lower(coalesce(c.name,'')) like lower(?) or " +
+                "lower(coalesce(v.name,'')) like lower(?) or lower(coalesce(v.variant_code,'')) like lower(?))";
     }
 
     private static String skuSql(String where) {
-        return "select s.id,s.family_id,f.family_code,f.name family_name,c.name category_name,b.name brand_name," +
+        return "select s.id,s.family_id,v.id variant_id,v.variant_code,v.name variant_name,f.family_code,f.name family_name,c.name category_name,b.name brand_name," +
                 "s.sku_code,s.gtin,s.presentation,s.packaging_type,s.unit_of_measure,s.net_weight,s.gross_weight,s.pack_quantity," +
                 "s.temperature_min,s.temperature_max,s.shelf_life_days,s.minimum_remaining_shelf_life_days,s.lot_tracking_required," +
                 "s.expiry_tracking_required,s.tax_category,s.status,s.visible,s.version,s.legacy_catalog_item_id," +
@@ -253,8 +268,9 @@ public class CatalogSkuService implements CatalogSkuPort {
                 "and (p0.valid_until is null or p0.valid_until > current_timestamp) order by p0.valid_from desc,p0.id limit 1) p on true where " + where;
     }
 
-    private static Object[] skuArguments(CatalogScope scope, String familyFilter, String term) {
-        return new Object[] { scope.tenantId(), scope.workspaceId(), familyFilter, familyFilter, term, term, term, term, term, term, term };
+    private static Object[] skuArguments(CatalogScope scope, String familyFilter, String variantFilter, String term) {
+        return new Object[] { scope.tenantId(), scope.workspaceId(), familyFilter, familyFilter,
+                variantFilter, variantFilter, term, term, term, term, term, term, term, term, term };
     }
 
     private static Object[] concat(Object[] values, Object... tail) {

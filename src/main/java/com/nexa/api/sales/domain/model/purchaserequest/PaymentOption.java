@@ -8,6 +8,7 @@ import java.util.Locale;
 public enum PaymentOption {
 	CREDIT_LINE,
 	BANK_TRANSFER,
+	CARD_STRIPE,
 	CASH,
 	CASH_ON_DELIVERY;
 

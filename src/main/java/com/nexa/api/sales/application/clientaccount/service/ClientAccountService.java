@@ -1,6 +1,7 @@
 package com.nexa.api.sales.application.clientaccount.service;
 
 import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
+import com.nexa.api.sales.application.clientaccount.model.BuyerMembershipCandidate;
 import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
 import com.nexa.api.sales.application.clientaccount.port.ClientAccountUseCase;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
@@ -12,6 +13,7 @@ import com.nexa.api.tenantmanagement.domain.model.access.Permission;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
+import java.util.List;
 
 public class ClientAccountService implements ClientAccountUseCase {
 	private final ClientAccountPersistencePort persistence;
@@ -27,6 +29,10 @@ public class ClientAccountService implements ClientAccountUseCase {
 		context.requirePermission(Permission.SALES_BUYER_READ);
 		return persistence.findForBuyer(scope(context), workspace(context), context.membershipId().toString())
 				.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
+	}
+	@Override public List<BuyerMembershipCandidate> buyerMembershipCandidates(CurrentAccessContext context) {
+		internal(context, Permission.SALES_READ);
+		return persistence.buyerMembershipCandidates(scope(context), workspace(context));
 	}
 	@Override @Transactional public ClientAccountView create(CurrentAccessContext context, ClientAccountView command) {
 		internal(context, Permission.SALES_WRITE); validateDomain(command);

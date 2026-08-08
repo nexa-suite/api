@@ -67,7 +67,7 @@ class AccessPolicyTests {
 						Permission.IAM_USER_READ, Permission.IAM_USER_MANAGE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.SALES))
 				.containsExactlyInAnyOrder(
-						Permission.CATALOG_READ, Permission.CATALOG_MANAGE, Permission.CATALOG_PRICE_MANAGE,
+						Permission.CATALOG_READ,
 						Permission.PROMOTION_READ, Permission.SALES_READ, Permission.SALES_WRITE);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.WAREHOUSE))
 				.containsExactlyInAnyOrder(
@@ -75,7 +75,7 @@ class AccessPolicyTests {
 						Permission.FULFILLMENT_READ);
 		assertThat(PermissionPolicy.permissionsFor(MembershipRole.LOGISTICS))
 				.containsExactlyInAnyOrder(
-						Permission.CATALOG_READ, Permission.PROMOTION_READ, Permission.PROMOTION_MANAGE,
+						Permission.CATALOG_READ, Permission.PROMOTION_READ,
 						Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE,
 						Permission.FULFILLMENT_READ);
 				assertThat(PermissionPolicy.permissionsFor(MembershipRole.BUYER))

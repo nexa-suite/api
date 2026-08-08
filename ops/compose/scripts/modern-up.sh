@@ -29,17 +29,17 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 docker compose --env-file "$env_file" -f "$compose_file" exec -T \
-	-e NEXA_RUNTIME_DATABASE_PASSWORD="$NEXA_MODERN_POSTGRES_PASSWORD" \
-	modern-postgres sh -eu -c 'psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v runtime_password="$NEXA_RUNTIME_DATABASE_PASSWORD" <<'"'"'SQL'"'"'
+	modern-postgres psql -q -v ON_ERROR_STOP=1 -U "$NEXA_MODERN_POSTGRES_USER" -d "$NEXA_MODERN_POSTGRES_DB" -v runtime_password="$NEXA_MODERN_POSTGRES_PASSWORD" <<'SQL'
+SELECT set_config('nexa.runtime_database_password', :'runtime_password', false) AS _runtime_password \gset
 DO $do$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '"'"'nexa_runtime'"'"') THEN
-        EXECUTE format('"'"'CREATE ROLE nexa_runtime LOGIN PASSWORD %L'"'"', :'"'"'runtime_password'"'"');
-    ELSE
-        EXECUTE format('"'"'ALTER ROLE nexa_runtime LOGIN PASSWORD %L'"'"', :'"'"'runtime_password'"'"');
-    END IF;
+	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_runtime') THEN
+	    EXECUTE format('CREATE ROLE nexa_runtime LOGIN PASSWORD %L', current_setting('nexa.runtime_database_password'));
+	ELSE
+	    EXECUTE format('ALTER ROLE nexa_runtime LOGIN PASSWORD %L', current_setting('nexa.runtime_database_password'));
+	    END IF;
 END
 $do$;
-SQL'
+SQL
 
 exec docker compose --env-file "$env_file" -f "$compose_file" up --build -d

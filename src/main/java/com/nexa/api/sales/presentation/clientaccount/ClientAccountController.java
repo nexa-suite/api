@@ -1,6 +1,7 @@
 package com.nexa.api.sales.presentation.clientaccount;
 
 import com.nexa.api.sales.application.clientaccount.port.ClientAccountUseCase;
+import com.nexa.api.sales.application.clientaccount.model.BuyerMembershipCandidate;
 import com.nexa.api.sales.presentation.SalesHttpHeaders;
 import com.nexa.api.sales.presentation.clientaccount.mapper.ClientAccountHttpMapper;
 import com.nexa.api.sales.presentation.clientaccount.request.AssociateBuyerMembershipRequest;
@@ -23,6 +24,8 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/client-accounts")
@@ -56,6 +59,12 @@ public class ClientAccountController {
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Buyer client account returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Buyer client account not found")})
 	public ResponseEntity<ClientAccountDetailResponse> buyerDetail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context) {
 		var value = sales.buyerDetail(context); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	}
+
+	@GetMapping("/buyer-membership-candidates")
+	@Operation(operationId = "listBuyerMembershipCandidates")
+	public List<BuyerMembershipCandidate> buyerMembershipCandidates(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context) {
+		return sales.buyerMembershipCandidates(context);
 	}
 
 	@PostMapping
