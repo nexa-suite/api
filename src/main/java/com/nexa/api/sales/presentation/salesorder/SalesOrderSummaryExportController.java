@@ -27,25 +27,46 @@ public final class SalesOrderSummaryExportController {
 
 	public SalesOrderSummaryExportController(SalesOrderSummaryExportUseCase exports) { this.exports = exports; }
 
-	@GetMapping({"/api/v1/sales-orders/{id}/summary", "/api/v1/my-orders/{id}/summary"})
+	@GetMapping("/api/v1/sales-orders/{id}/summary")
 	@Operation(operationId = "exportSalesOrderSummary")
 	public ResponseEntity<byte[]> export(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable String id, @RequestParam(defaultValue = "PDF") String format) {
 		return response(exports.export(context, id, SalesOrderSummaryExportFormat.from(format)));
 	}
 
-	@GetMapping({"/api/v1/sales-orders/{id}/exports/summary.pdf", "/api/v1/buyer/orders/{id}/exports/summary.pdf"})
+	@GetMapping("/api/v1/my-orders/{id}/summary")
+	@Operation(operationId = "exportMySalesOrderSummary")
+	public ResponseEntity<byte[]> exportMyOrderSummary(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+			@PathVariable String id, @RequestParam(defaultValue = "PDF") String format) {
+		return export(context, id, format);
+	}
+
+	@GetMapping("/api/v1/sales-orders/{id}/exports/summary.pdf")
 	@Operation(operationId = "exportSalesOrderSummaryPdf")
 	public ResponseEntity<byte[]> exportPdf(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable String id) {
 		return response(exports.export(context, id, SalesOrderSummaryExportFormat.PDF));
 	}
 
-	@GetMapping({"/api/v1/sales-orders/{id}/exports/summary.csv", "/api/v1/buyer/orders/{id}/exports/summary.csv"})
+	@GetMapping("/api/v1/buyer/orders/{id}/exports/summary.pdf")
+	@Operation(operationId = "exportBuyerSalesOrderSummaryPdf")
+	public ResponseEntity<byte[]> exportBuyerPdf(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+			@PathVariable String id) {
+		return exportPdf(context, id);
+	}
+
+	@GetMapping("/api/v1/sales-orders/{id}/exports/summary.csv")
 	@Operation(operationId = "exportSalesOrderSummaryCsv")
 	public ResponseEntity<byte[]> exportCsv(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable String id) {
 		return response(exports.export(context, id, SalesOrderSummaryExportFormat.CSV));
+	}
+
+	@GetMapping("/api/v1/buyer/orders/{id}/exports/summary.csv")
+	@Operation(operationId = "exportBuyerSalesOrderSummaryCsv")
+	public ResponseEntity<byte[]> exportBuyerCsv(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+			@PathVariable String id) {
+		return exportCsv(context, id);
 	}
 
 	private ResponseEntity<byte[]> response(SalesOrderSummaryExportResult result) {
