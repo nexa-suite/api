@@ -19,10 +19,10 @@ Actualizado tras cada subtask. `OPEN` no significa ausencia de código; signific
 | 12 | Receivables/payments/Stripe | PARTIAL | Stripe SDK oficial + WireMock, PaymentIntent, webhook firmado, settlement y recibo PASS; Payment Element monta en Portal; falta confirmación browser contra Stripe test real |
 | 13 | PostgreSQL/Flyway/RLS | CLOSED | V64–V68, fresh, `validate`, upgrade V63→V68 con fila histórica preservada y RLS PASS |
 | 14 | REST/OpenAPI | CLOSED | runtime export 223 paths, +10 sin removals, contratos frontend alineados |
-| 15 | Security hardening | PARTIAL | integración security/RLS/CORS PASS; ZAP API baseline remoto `0` fallos/`7` warnings y Trivy/SBOM `0` findings; falta DAST autenticado por rol y certificación externa |
-| 16 | Performance/observability | PARTIAL | reads HTTP medidos bajo objetivos, query budgets 1/10/50 PASS, traza `nexa-api` en Jaeger y k6 remoto `715/715` checks con `0%` errores; falta matriz completa de comandos de negocio |
+| 15 | Security hardening | CLOSED | integración security/RLS/CORS PASS; DAST ZAP autenticado local por seis roles `6/6` con `FAIL-NEW:0` (`WARN-NEW:6–7`, `PASS:110–111`); baseline remoto y Trivy/SBOM `0` findings; no se declara certificación ASVS |
+| 16 | Performance/observability | CLOSED | reads HTTP bajo objetivos, query budgets 1/10/50 PASS, traza `nexa-api` en Jaeger, k6 service remoto `715/715` y matriz k6 de comandos local `7328/7328`, 0% errores, p95 `9.56 ms`, p99 `14.85 ms`; la misma matriz queda en CI |
 | 17 | Automated/browser acceptance | PARTIAL | flujo autenticado completo y E2E remoto Platform `52/52` + Portal `16/16`; Payment Element monta, pero falta confirmación browser contra Stripe test real sin credencial externa |
-| 18 | Conditional presentation advance | BLOCKED BY POLICY | no se habilita polish hasta cerrar PARTIAL provider/upgrade/performance/security gates |
+| 18 | Conditional presentation advance | BLOCKED BY POLICY | no se habilita polish mientras permanezca PARTIAL el provider Stripe real |
 
 ## Baseline test ledger
 
@@ -38,4 +38,4 @@ Actualizado tras cada subtask. `OPEN` no significa ausencia de código; signific
 
 ## Definition of Done guard
 
-La foundation funcional queda cerrada solo para los gates marcados `CLOSED`. Los tres repositorios feature están publicados y los workflows remotos de API (CI, Security and Load, Supply Chain), Platform y Portal están verdes en los SHAs finales verificados. No se declara cierre/publicación total porque siguen `PARTIAL`: confirmación browser contra Stripe test real, DAST autenticado por rol y carga completa de comandos; no se crea tag ni Release por la política del prompt.
+La foundation funcional queda cerrada solo para los gates marcados `CLOSED`. Los tres repositorios feature están publicados y los workflows remotos de API (CI, Security and Load, Supply Chain), Platform y Portal están verdes en los SHAs finales verificados. No se declara cierre/publicación total porque sigue `PARTIAL` la confirmación browser contra Stripe test real: el runtime local usa `deterministic`/WireMock y no hay credenciales Stripe test reales disponibles en `.env.local` ni en secretos del repositorio. No se crea tag ni Release por la política del prompt.
