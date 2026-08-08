@@ -32,12 +32,20 @@ public final class NotificationController {
 
 	public NotificationController(NotificationUseCase notifications) { this.notifications = notifications; }
 
-	@GetMapping({"/api/v1/notifications", "/api/v1/notifications/unread"})
+	@GetMapping("/api/v1/notifications")
 	@Operation(operationId = "listNotifications")
 	public NotificationPage inbox(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@RequestParam(defaultValue = "false") boolean unread,
 			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int limit) {
 		return notifications.inbox(context, unread, limit);
+	}
+
+	@GetMapping("/api/v1/notifications/unread")
+	@Operation(operationId = "listUnreadNotifications")
+	public NotificationPage unreadInbox(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
+			@RequestParam(defaultValue = "false") boolean unread,
+			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int limit) {
+		return notifications.inbox(context, true, limit);
 	}
 
 	@GetMapping("/api/v1/notifications/unread-count")

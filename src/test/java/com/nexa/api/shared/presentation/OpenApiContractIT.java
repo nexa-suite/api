@@ -4,6 +4,8 @@ import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
+import java.util.HashSet;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -24,5 +26,18 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/route-starts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/handoff-notes")).isTrue();
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
+
+        var operationIds = new HashSet<String>();
+        document.get("paths").properties().forEach(path -> path.getValue().properties().forEach(operation -> {
+            var operationId = operation.getValue().get("operationId");
+            if (operationId != null && operationId.isTextual()) {
+                assertThat(operationIds.add(operationId.asText()))
+                        .as("operationId must be unique: %s", operationId.asText())
+                        .isTrue();
+                assertThat(operationId.asText())
+                        .as("operationId must be explicit instead of a generated suffix: %s", operationId.asText())
+                        .doesNotMatch(".*_\\d+$");
+            }
+        }));
     }
 }

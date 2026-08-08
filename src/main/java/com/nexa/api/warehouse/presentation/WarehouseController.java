@@ -39,7 +39,7 @@ public final class WarehouseController {
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
-    @GetMapping({"/warehouses/{id}/location", "/warehouses/{id}/locations"})
+    @GetMapping("/warehouses/{id}/location")
     @Operation(operationId = "getWarehouseLocation")
     public ResponseEntity<LocationResponse> location(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
         OperationalProfileResponse value = operational(service.operationalProfile(c, id));
@@ -47,11 +47,23 @@ public final class WarehouseController {
                 .body(new LocationResponse(value.id(), value.address(), value.latitude(), value.longitude(), value.version()));
     }
 
-    @GetMapping({"/warehouses/{id}/profile", "/warehouses/{id}/operational-profile"})
+    @GetMapping("/warehouses/{id}/locations")
+    @Operation(operationId = "getWarehouseLocationLegacyAlias")
+    public ResponseEntity<LocationResponse> locationsAlias(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
+        return location(c, id);
+    }
+
+    @GetMapping("/warehouses/{id}/profile")
     @Operation(operationId = "getWarehouseOperationalProfile")
     public ResponseEntity<OperationalProfileResponse> operationalProfile(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
         OperationalProfileResponse value = operational(service.operationalProfile(c, id));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @GetMapping("/warehouses/{id}/operational-profile")
+    @Operation(operationId = "getWarehouseOperationalProfileLegacyAlias")
+    public ResponseEntity<OperationalProfileResponse> operationalProfileAlias(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
+        return operationalProfile(c, id);
     }
 
     @GetMapping("/warehouses/{id}/hours")
@@ -72,7 +84,7 @@ public final class WarehouseController {
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
-    @PatchMapping({"/warehouses/{id}/profile", "/warehouses/{id}/operational-profile"})
+    @PatchMapping("/warehouses/{id}/profile")
     @Operation(operationId = "updateWarehouseOperationalProfile")
     public ResponseEntity<OperationalProfileResponse> updateOperationalProfile(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                                  @PathVariable String id,
@@ -80,6 +92,15 @@ public final class WarehouseController {
                                                                                  @RequestBody OperationalPatchRequest request) {
         OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, request.toPatch(), version(ifMatch)));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @PatchMapping("/warehouses/{id}/operational-profile")
+    @Operation(operationId = "updateWarehouseOperationalProfileLegacyAlias")
+    public ResponseEntity<OperationalProfileResponse> updateOperationalProfileAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                                                      @PathVariable String id,
+                                                                                      @RequestHeader(name = "If-Match", required = false) String ifMatch,
+                                                                                      @RequestBody OperationalPatchRequest request) {
+        return updateOperationalProfile(c, id, ifMatch, request);
     }
 
     @PatchMapping("/warehouses/{id}/hours")
@@ -133,7 +154,7 @@ public final class WarehouseController {
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
-    @PatchMapping({"/warehouses/{id}/location", "/warehouses/{id}/locations"})
+    @PatchMapping("/warehouses/{id}/location")
     @Operation(operationId = "updateWarehouseLocation")
     public ResponseEntity<LocationResponse> updateLocation(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                             @PathVariable String id,
@@ -144,6 +165,15 @@ public final class WarehouseController {
         OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch)));
         return ResponseEntity.ok().eTag(etag(value.version()))
                 .body(new LocationResponse(value.id(), value.address(), value.latitude(), value.longitude(), value.version()));
+    }
+
+    @PatchMapping("/warehouses/{id}/locations")
+    @Operation(operationId = "updateWarehouseLocationLegacyAlias")
+    public ResponseEntity<LocationResponse> updateLocationsAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                                   @PathVariable String id,
+                                                                   @RequestHeader(name = "If-Match", required = false) String ifMatch,
+                                                                   @RequestBody LocationPatchRequest request) {
+        return updateLocation(c, id, ifMatch, request);
     }
 
     @GetMapping("/warehouses/{warehouseId}/zones")
@@ -163,10 +193,16 @@ public final class WarehouseController {
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
-    @GetMapping({"/inventory", "/inventory/lots"})
-    @Operation(operationId = "listInventoryLots")
+    @GetMapping("/inventory")
+    @Operation(operationId = "listInventory")
     public PageResponse<LotResponse> inventory(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) String warehouseId, @RequestParam(required = false) String zoneId, @RequestParam(required = false) String status, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "expirationDate,asc") String sort) {
         return page(service.lots(c, catalogItemId, warehouseId, zoneId, status, page, size, sort), this::lot);
+    }
+
+    @GetMapping("/inventory/lots")
+    @Operation(operationId = "listInventoryLots")
+    public PageResponse<LotResponse> inventoryLots(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) String warehouseId, @RequestParam(required = false) String zoneId, @RequestParam(required = false) String status, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "expirationDate,asc") String sort) {
+        return inventory(c, catalogItemId, warehouseId, zoneId, status, page, size, sort);
     }
 
     @GetMapping("/inventory/lots/{lotId}")
