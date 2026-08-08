@@ -45,6 +45,11 @@ public class PaymentApplicationService implements PaymentPort {
     }
 
     @Override
+    public PaymentModels.PaymentView confirmTestCardPayment(CurrentAccessContext context, UUID receivableId, String clientSecret) {
+        return persistence.confirmTestCardPayment(context, receivableId, clientSecret);
+    }
+
+    @Override
     public PaymentModels.PaymentView createCreditLinePayment(CurrentAccessContext context, UUID receivableId, String idempotencyKey) {
         return persistence.createCreditLinePayment(context, receivableId, idempotencyKey);
     }

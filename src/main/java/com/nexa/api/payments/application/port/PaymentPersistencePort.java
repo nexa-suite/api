@@ -13,6 +13,7 @@ public interface PaymentPersistencePort {
     PaymentModels.PaymentView getPayment(CurrentAccessContext context, UUID paymentId);
     PaymentModels.ReceivableView createReceivable(CurrentAccessContext context, ReceivableCommand request);
     PaymentModels.PaymentIntentView createCardPaymentIntent(CurrentAccessContext context, UUID receivableId, String idempotencyKey);
+    PaymentModels.PaymentView confirmTestCardPayment(CurrentAccessContext context, UUID receivableId, String clientSecret);
     PaymentModels.PaymentView createCreditLinePayment(CurrentAccessContext context, UUID receivableId, String idempotencyKey);
     PaymentModels.PaymentView createBankTransfer(CurrentAccessContext context, UUID receivableId, String idempotencyKey,
                                                  String transferReference, UUID proofEvidenceId);

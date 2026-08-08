@@ -20,6 +20,7 @@ public class PaymentServiceFacade {
     public PaymentModels.PaymentView getPayment(CurrentAccessContext c, UUID id) { return port.getPayment(c, id); }
     public PaymentModels.ReceivableView createReceivable(CurrentAccessContext c, ReceivableRequest r) { return port.createReceivable(c, new PaymentPort.ReceivableCommand(r.subjectType(), r.subjectId(), r.dueAt(), r.idempotencyKey())); }
     public PaymentModels.PaymentIntentView createCardPaymentIntent(CurrentAccessContext c, UUID id, String key) { return port.createCardPaymentIntent(c, id, key); }
+    public PaymentModels.PaymentView confirmTestCardPayment(CurrentAccessContext c, UUID receivableId, String clientSecret) { return port.confirmTestCardPayment(c, receivableId, clientSecret); }
     public PaymentModels.PaymentView createCreditLinePayment(CurrentAccessContext c, UUID id, String key) { return port.createCreditLinePayment(c, id, key); }
     public PaymentModels.PaymentView createBankTransfer(CurrentAccessContext c, UUID id, String key, String reference, UUID proofEvidenceId) { return port.createBankTransfer(c, id, key, reference, proofEvidenceId); }
     public PaymentModels.PaymentView reviewBankTransfer(CurrentAccessContext c, UUID id, String action, String reason, String key) { return port.reviewBankTransfer(c, id, action, reason, key); }

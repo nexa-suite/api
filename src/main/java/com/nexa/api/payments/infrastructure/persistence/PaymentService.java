@@ -40,6 +40,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 /** Persistence adapter for payment use cases. Amounts, scope and final status stay server/webhook authoritative. */
 @Profile("!test")
 @Component
@@ -47,13 +50,16 @@ public class PaymentService implements PaymentPersistencePort {
     private final JdbcTemplate jdbc;
     private final StripePaymentProvider stripe;
     private final String publishableKey;
+    private final String webhookSecret;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PaymentService(JdbcTemplate jdbc, StripePaymentProvider stripe,
                           @Value("${nexa.payments.publishable-key:}") String publishableKey,
+                          @Value("${nexa.payments.webhook-secret:}") String webhookSecret,
                           PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc; this.stripe = stripe; this.publishableKey = publishableKey == null ? "" : publishableKey;
+        this.webhookSecret = webhookSecret == null ? "" : webhookSecret;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -148,6 +154,38 @@ public class PaymentService implements PaymentPersistencePort {
         jdbc.update("insert into payments.payment_attempt (id,tenant_id,workspace_id,payment_id,attempt_number,status,provider_reference,created_at) values (?,?,?,?,1,?,?,?)", UUID.randomUUID(), tenant(context), workspace(context), paymentId, status.name(), intent.providerId(), Timestamp.from(now));
         PaymentRow payment = new PaymentRow(paymentId, receivable.id(), aggregate.status().name(), aggregate.amount(), receivable.currency(), intent.clientSecret(), intent.providerId(), now, null, receivable.clientAccountId(), tenant(context), workspace(context));
         return paymentIntentView(payment, intent.clientSecret());
+    }
+
+    /**
+     * Local-only browser acceptance seam. It exercises the official Stripe
+     * adapter against the configured Stripe-compatible provider, then sends a
+     * signed event through the same webhook inbox/worker used in production.
+     * There is no route for this outside the local profile.
+     */
+    @Transactional
+    public PaymentModels.PaymentView confirmTestCardPayment(CurrentAccessContext context, UUID receivableId, String clientSecret) {
+        context.requirePermission(PermissionKey.PAYMENT_CREATE);
+        if (clientSecret == null || clientSecret.isBlank() || clientSecret.length() > 512) throw new IllegalArgumentException("Stripe client secret is required");
+        ReceivableRow receivable = lockedReceivable(context, receivableId);
+        ensureBuyerScope(context, receivable.clientAccountId());
+        PaymentRow payment = latestStripePayment(context, receivableId);
+        if (payment == null) throw new IllegalArgumentException("Stripe payment intent was not created");
+        if (PaymentStatus.SUCCEEDED.name().equals(payment.status())) return paymentView(payment, PaymentMethod.CARD_STRIPE.name());
+        if (!PaymentStatus.REQUIRES_ACTION.name().equals(payment.status()) && !PaymentStatus.PROCESSING.name().equals(payment.status())) {
+            throw new IllegalArgumentException("Stripe payment is not confirmable");
+        }
+        StripePaymentProvider.PaymentIntent current = stripe.retrievePaymentIntent(payment.providerId()).orElseThrow(() -> new IllegalArgumentException("Stripe PaymentIntent was not found"));
+        if (current.clientSecret() == null || !MessageDigest.isEqual(current.clientSecret().getBytes(StandardCharsets.UTF_8), clientSecret.getBytes(StandardCharsets.UTF_8))) {
+            throw new IllegalArgumentException("Stripe client secret does not match the payment intent");
+        }
+        StripePaymentProvider.PaymentIntent confirmed = stripe.confirmPaymentIntent(payment.providerId());
+        if (confirmed == null || !"succeeded".equalsIgnoreCase(confirmed.status())) {
+            throw new IllegalArgumentException("Stripe test payment did not succeed");
+        }
+        String payload = testSucceededPayload(confirmed, payment, receivable, context);
+        receiveStripeWebhook(payload, signWebhook(payload));
+        processStripeWebhookInbox();
+        return getPayment(context, payment.id());
     }
 
     @Transactional
@@ -409,6 +447,48 @@ public class PaymentService implements PaymentPersistencePort {
     private String providerSecret(PaymentRow row) {
         if (row.providerId() == null) return null;
         return stripe.retrievePaymentIntent(row.providerId()).map(StripePaymentProvider.PaymentIntent::clientSecret).orElse(null);
+    }
+    private PaymentRow latestStripePayment(CurrentAccessContext context, UUID receivableId) {
+        return jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.receivable_id=? and p.method='CARD_STRIPE' order by p.created_at desc limit 1", (rs, n) -> paymentRow(rs), tenant(context), workspace(context), receivableId).stream().findFirst().orElse(null);
+    }
+    private String testSucceededPayload(StripePaymentProvider.PaymentIntent intent, PaymentRow payment, ReceivableRow receivable, CurrentAccessContext context) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("nexa_receivable_id", receivable.id().toString());
+        metadata.put("nexa_tenant_id", tenant(context).toString());
+        metadata.put("nexa_workspace_id", workspace(context).toString());
+        Map<String, Object> paymentIntent = new LinkedHashMap<>();
+        paymentIntent.put("id", intent.providerId());
+        paymentIntent.put("object", "payment_intent");
+        paymentIntent.put("amount", minor(payment.amount(), payment.currency()));
+        paymentIntent.put("amount_received", minor(payment.amount(), payment.currency()));
+        paymentIntent.put("currency", payment.currency().toLowerCase(Locale.ROOT));
+        paymentIntent.put("livemode", false);
+        paymentIntent.put("metadata", metadata);
+        paymentIntent.put("status", "succeeded");
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("object", paymentIntent);
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("id", "evt_nexa_local_" + UUID.randomUUID().toString().replace("-", ""));
+        event.put("object", "event");
+        event.put("api_version", "2024-06-20");
+        event.put("created", Instant.now().getEpochSecond());
+        event.put("data", data);
+        event.put("livemode", false);
+        event.put("pending_webhooks", 1);
+        event.put("type", "payment_intent.succeeded");
+        return json(event);
+    }
+    private String signWebhook(String payload) {
+        if (webhookSecret.isBlank()) throw new IllegalStateException("Stripe webhook secret is not configured");
+        long timestamp = Instant.now().getEpochSecond();
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String digest = java.util.HexFormat.of().formatHex(mac.doFinal((timestamp + "." + payload).getBytes(StandardCharsets.UTF_8)));
+            return "t=" + timestamp + ",v1=" + digest;
+        } catch (Exception exception) {
+            throw new IllegalStateException("Stripe webhook signature could not be generated", exception);
+        }
     }
     private List<ReceivableRow> receivableQuery(CurrentAccessContext c, UUID id) { return jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=?", (rs, n) -> receivableRow(rs), tenant(c), workspace(c), id); }
     private List<ReceivableRow> receivableQuery(CurrentAccessContext c, UUID subjectId, String subjectType) { return jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and subject_id=? and subject_type=?", (rs, n) -> receivableRow(rs), tenant(c), workspace(c), subjectId, subjectType); }

@@ -30,6 +30,10 @@ class StripeJavaPaymentProviderIntegrationTests {
         assertThat(intent.clientSecret()).startsWith("pi_mocknexa");
         assertThat(intent.status()).isEqualTo("requires_action");
 
+        var confirmed = provider.confirmPaymentIntent(intent.providerId());
+        assertThat(confirmed.providerId()).isEqualTo(intent.providerId());
+        assertThat(confirmed.status()).isEqualTo("succeeded");
+
         var retrieved = provider.retrievePaymentIntent("pi_mock_nexa_retrieval");
         assertThat(retrieved).isPresent();
         assertThat(retrieved.orElseThrow().providerId()).isEqualTo("pi_mock_nexa_retrieval");

@@ -6,6 +6,14 @@ import java.util.Optional;
 public interface StripePaymentProvider {
     PaymentIntent createPaymentIntent(PaymentIntentRequest request);
     default Optional<PaymentIntent> retrievePaymentIntent(String providerId) { return Optional.empty(); }
+    /**
+     * Confirms an intent through the configured Stripe-compatible provider.
+     * The local browser acceptance harness uses this only with the explicit
+     * stripe provider profile; production callers use Stripe.js directly.
+     */
+    default PaymentIntent confirmPaymentIntent(String providerId) {
+        throw new UnsupportedOperationException("Payment provider does not support confirmation");
+    }
     StripeWebhookEvent verifyWebhook(String payload, String signature);
 
     record PaymentIntentRequest(long amountMinor, String currency, String idempotencyKey, Map<String, String> metadata) { }

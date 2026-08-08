@@ -77,6 +77,21 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     }
 
     @Override
+    public StripePaymentProvider.PaymentIntent confirmPaymentIntent(String providerId) {
+        if (providerId == null || providerId.isBlank()) throw new IllegalArgumentException("Stripe PaymentIntent id is required");
+        try {
+            var optionsBuilder = RequestOptions.builder().setApiKey(secretKey);
+            if (!apiBaseUrl.isBlank()) optionsBuilder.setBaseUrl(apiBaseUrl);
+            RequestOptions options = optionsBuilder.build();
+            com.stripe.model.PaymentIntent intent = com.stripe.model.PaymentIntent.retrieve(providerId, options);
+            com.stripe.model.PaymentIntent confirmed = intent.confirm(options);
+            return new StripePaymentProvider.PaymentIntent(confirmed.getId(), confirmed.getClientSecret(), confirmed.getStatus());
+        } catch (Exception exception) {
+            throw new IllegalStateException("Stripe PaymentIntent confirmation failed", exception);
+        }
+    }
+
+    @Override
     public StripeWebhookEvent verifyWebhook(String payload, String signature) {
         try {
             Event event = Webhook.constructEvent(payload, signature, webhookSecret);
