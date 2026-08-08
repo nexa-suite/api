@@ -161,7 +161,7 @@ function createState(index) {
           receivingHours: '08:00-16:00',
           latitude: -12.0464,
           longitude: -77.0428,
-          source: 'K6_BUSINESS',
+          source: 'MANUAL',
         },
       }),
       requestParams(buyer, true),
