@@ -123,6 +123,24 @@ jobs:
           exit 1
       - name: Run local security and abuse matrix
         run: ./scripts/verify-local-security.sh
+      - name: Run authenticated OWASP ZAP role matrix
+        env:
+          BASE_URL: http://127.0.0.1:8080
+          NEXA_DEV_WORKSPACE: icisa
+          NEXA_DEV_OWNER_EMAIL: owner@icisa.test
+          NEXA_DEV_OWNER_PASSWORD: CI-Owner-Password-2026!
+          NEXA_DEV_COMPANY_OWNER_EMAIL: company-owner@icisa.test
+          NEXA_DEV_COMPANY_OWNER_PASSWORD: CI-Company-Owner-Password-2026!
+          NEXA_DEV_SALES_EMAIL: sales@icisa.test
+          NEXA_DEV_SALES_PASSWORD: CI-Sales-Password-2026!
+          NEXA_DEV_WAREHOUSE_EMAIL: warehouse@icisa.test
+          NEXA_DEV_WAREHOUSE_PASSWORD: CI-Warehouse-Password-2026!
+          NEXA_DEV_LOGISTICS_EMAIL: logistics@icisa.test
+          NEXA_DEV_LOGISTICS_PASSWORD: CI-Logistics-Password-2026!
+          NEXA_DEV_BUYER_EMAIL: buyer@icisa.test
+          NEXA_DEV_BUYER_PASSWORD: CI-Buyer-Password-2026!
+          ZAP_REPORT_DIR: zap-authenticated
+        run: ./ops/security/zap-authenticated.sh
       - name: Run k6 service load smoke
         run: |
           docker run --rm --network host --user "$(id -u):$(id -g)" \
@@ -133,6 +151,39 @@ jobs:
             -e K6_VUS=4 -e K6_DURATION=20s \
             -v "$GITHUB_WORKSPACE:/work" \
             grafana/k6:0.56.0 run --summary-export=/work/k6-summary.json /work/ops/load/k6/service-foundation.js
+      - name: Run k6 business command matrix
+        env:
+          K6_BUSINESS_VUS: "4"
+          K6_BUSINESS_DURATION: 20s
+          NEXA_LOAD_WORKSPACE: icisa
+          NEXA_LOAD_OWNER_EMAIL: owner@icisa.test
+          NEXA_LOAD_OWNER_PASSWORD: CI-Owner-Password-2026!
+          NEXA_LOAD_BUYER_EMAIL: buyer@icisa.test
+          NEXA_LOAD_BUYER_PASSWORD: CI-Buyer-Password-2026!
+          NEXA_LOAD_SALES_EMAIL: sales@icisa.test
+          NEXA_LOAD_SALES_PASSWORD: CI-Sales-Password-2026!
+          NEXA_LOAD_WAREHOUSE_EMAIL: warehouse@icisa.test
+          NEXA_LOAD_WAREHOUSE_PASSWORD: CI-Warehouse-Password-2026!
+          NEXA_LOAD_LOGISTICS_EMAIL: logistics@icisa.test
+          NEXA_LOAD_LOGISTICS_PASSWORD: CI-Logistics-Password-2026!
+        run: |
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            -e BASE_URL=http://127.0.0.1:8080 \
+            -e NEXA_LOAD_WORKSPACE="$NEXA_LOAD_WORKSPACE" \
+            -e NEXA_LOAD_OWNER_EMAIL="$NEXA_LOAD_OWNER_EMAIL" \
+            -e NEXA_LOAD_OWNER_PASSWORD="$NEXA_LOAD_OWNER_PASSWORD" \
+            -e NEXA_LOAD_BUYER_EMAIL="$NEXA_LOAD_BUYER_EMAIL" \
+            -e NEXA_LOAD_BUYER_PASSWORD="$NEXA_LOAD_BUYER_PASSWORD" \
+            -e NEXA_LOAD_SALES_EMAIL="$NEXA_LOAD_SALES_EMAIL" \
+            -e NEXA_LOAD_SALES_PASSWORD="$NEXA_LOAD_SALES_PASSWORD" \
+            -e NEXA_LOAD_WAREHOUSE_EMAIL="$NEXA_LOAD_WAREHOUSE_EMAIL" \
+            -e NEXA_LOAD_WAREHOUSE_PASSWORD="$NEXA_LOAD_WAREHOUSE_PASSWORD" \
+            -e NEXA_LOAD_LOGISTICS_EMAIL="$NEXA_LOAD_LOGISTICS_EMAIL" \
+            -e NEXA_LOAD_LOGISTICS_PASSWORD="$NEXA_LOAD_LOGISTICS_PASSWORD" \
+            -e K6_BUSINESS_VUS="$K6_BUSINESS_VUS" \
+            -e K6_BUSINESS_DURATION="$K6_BUSINESS_DURATION" \
+            -v "$GITHUB_WORKSPACE:/work" \
+            grafana/k6:0.56.0 run --summary-export=/work/k6-business-summary.json /work/ops/load/k6/business-foundation.js
       - name: Run OWASP ZAP API baseline
         run: |
           docker run --rm --network host --user 0 \
@@ -147,5 +198,7 @@ jobs:
           path: |
             api-runtime.log
             zap-report.html
+            zap-authenticated/**/*
             k6-summary.json
+            k6-business-summary.json
           if-no-files-found: ignore
