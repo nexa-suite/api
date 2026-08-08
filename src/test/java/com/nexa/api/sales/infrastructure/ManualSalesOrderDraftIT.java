@@ -98,6 +98,12 @@ class ManualSalesOrderDraftIT extends PostgresIntegrationSupport {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.id").isNotEmpty())
                 .andReturn();
         String orderId = json(submitted).get("id").asText();
+        String orderNumber = json(submitted).get("number").asText();
+
+        mockMvc.perform(get("/api/v1/sales-orders?search=" + orderNumber)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(orderId));
 
         mockMvc.perform(post("/api/v1/sales-orders/manual-drafts/" + draftId + "/submissions")
                         .header("Authorization", "Bearer " + token)

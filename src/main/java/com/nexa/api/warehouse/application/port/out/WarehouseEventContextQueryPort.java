@@ -8,6 +8,9 @@ public interface WarehouseEventContextQueryPort {
     Optional<ReservationSnapshot> findActiveReservationForSalesOrder(UUID tenantId, UUID workspaceId,
                                                                        UUID salesOrderId);
 
+    Optional<ReservationSnapshot> findReservationForSalesOrder(UUID tenantId, UUID workspaceId,
+                                                                UUID salesOrderId);
+
     Optional<ReservationSnapshot> findReservation(UUID tenantId, UUID workspaceId, UUID reservationId);
 
     record ReservationSnapshot(UUID id, UUID salesOrderId, String status, long version) {

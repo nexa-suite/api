@@ -33,6 +33,18 @@ public class JdbcWarehouseEventContextQueryAdapter implements WarehouseEventCont
     }
 
     @Override
+    public Optional<ReservationSnapshot> findReservationForSalesOrder(UUID tenantId, UUID workspaceId,
+                                                                        UUID salesOrderId) {
+        return jdbc.query("select id,sales_order_id,status,version "
+                        + "from warehouse.inventory_reservation where tenant_id=? and workspace_id=? "
+                        + "and sales_order_id=? order by created_at desc,id desc limit 1",
+                rs -> rs.next()
+                        ? Optional.of(reservation(rs.getObject("id", UUID.class), rs.getObject("sales_order_id", UUID.class),
+                        rs.getString("status"), rs.getLong("version")))
+                        : Optional.empty(), tenantId, workspaceId, salesOrderId);
+    }
+
+    @Override
     public Optional<ReservationSnapshot> findReservation(UUID tenantId, UUID workspaceId, UUID reservationId) {
         return jdbc.query("select id,sales_order_id,status,version from warehouse.inventory_reservation "
                         + "where tenant_id=? and workspace_id=? and id=?",
