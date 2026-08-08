@@ -11,9 +11,13 @@ Se ejecutaron 100 lecturas autenticadas secuenciales por endpoint desde el host,
 
 Error rate observado en ambas muestras: 0% (200/200 por endpoint). Query budgets 1/10/50 líneas pasan en `SalesSnapshotQueryBudgetIT` (catálogo `<=4` queries constantes; SKU `1` query). Quedan pendientes las mediciones concurrentes de submit, pricing preview, Warehouse/FEFO, dispatch y generación documental.
 
-## k6 service smoke
+## k6 service smoke local
 
 `grafana/k6:0.56.0`, 4 VUs durante 20 s contra el Docker runtime: 208 iteraciones, 1.040 requests, checks 100% (`1040/1040`), error rate 0%, p95 `256.04 ms`, p99 `266.33 ms`. Este smoke cubre preview de workspace, login, catálogo, permisos y notificaciones; no sustituye la matriz concurrente de comandos de negocio.
+
+## k6 service smoke remoto
+
+El workflow `API Security and Load` ejecutó el mismo script con 4 VUs/20 s: 126 iteraciones, 630 requests, checks 100% (`630/630`), `http_req_failed` `0.00%`, p95 `482.71 ms` y p99 `521.77 ms`. El artefacto `k6-summary.json` queda persistido por el workflow tras ejecutar el contenedor con el UID del runner. El smoke cubre preview de workspace, login, catálogo, permisos y notificaciones; no sustituye la matriz concurrente de submit, pricing preview, Warehouse/FEFO, dispatch ni documentos.
 
 ## Trace proof
 

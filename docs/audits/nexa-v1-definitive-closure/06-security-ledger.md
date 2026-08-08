@@ -13,11 +13,11 @@ Target: ASVS 5 Level 2 según matriz activa. Baseline, no certificación.
 | BOLA/BFLA | access context, permissions, scoped queries | PASS en integración/RLS |
 | Authorization version | membership state + JWT/session checks | PASS en integración y flujo browser |
 | RLS | forced policies en tablas principales | PASS en integración y runtime |
-| CSP | frontend + API headers | PASS en builds/headers; no se ejecutó DAST final |
+| CSP | frontend + API headers | PASS en builds/headers; ZAP baseline remoto sin fallos |
 | Rate limiting | auth/preview/system operator tables | PASS en suite e integración |
 | File security | MIME, checksum, ClamAV, private storage | checksum/MinIO PASS; ClamAV TCP real PASS con limpio/EICAR; HTTP cross-tenant read/download PASS (404, sin exposición) |
 | Stripe | signature/dedup/service amount | SDK oficial + WireMock PASS; firma/dedup/importe/settlement/receipt PASS |
-| Secret handling | ignored `.env.local`; no valores registrados | pass source hygiene; scans pendientes |
+| Secret handling | ignored `.env.local`; no valores registrados | Trivy/SBOM remoto PASS (0 vulnerabilidades, 0 secretos y 0 misconfiguraciones); no se declara certificación |
 
 ## Riesgos P0/P1 baseline
 
@@ -25,4 +25,4 @@ Target: ASVS 5 Level 2 según matriz activa. Baseline, no certificación.
 2. La integración final no marcó skips; los warnings de Spring/Mockito son no bloqueantes.
 3. El grant de V64 y la normalización FEFO quedaron cubiertos por migración/test.
 4. MinIO fue ejercitado con documentos generados y checksums coincidentes; ClamAV real rechazó EICAR y el adapter Stripe oficial fue ejercitado contra WireMock.
-5. Los binarios externos `trivy`, `gitleaks`, `semgrep` y `zap-baseline.py` no están instalados en el entorno; se ejecutaron probes HTTP/CORS/headers y búsquedas de secretos versionados, pero no se declara DAST ni certificación ASVS.
+5. La matriz local autenticada y la ejecución remota de OWASP ZAP API baseline pasaron; ZAP reportó `FAIL-NEW: 0`, `FAIL-INPROG: 0`, `WARN-NEW: 7`, `PASS: 60` sobre 13 URLs. Trivy/SBOM remoto no detectó vulnerabilidades, secretos ni misconfiguraciones. Esto es evidencia baseline, no certificación ASVS ni DAST autenticado por rol.
