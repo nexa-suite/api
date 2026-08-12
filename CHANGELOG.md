@@ -3,7 +3,9 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
-## [0.8.1] - 2026-08-01
+## Unreleased
+
+Current `develop` artifact: `0.9.0`. The following candidate content is an **UNRELEASED DRAFT**; no release number, tag or GitHub Release is established.
 
 Operations release stabilization for the consolidated commercial, Warehouse and Logistics baseline.
 
@@ -21,7 +23,7 @@ Operations release stabilization for the consolidated commercial, Warehouse and 
 
 - Internal TASK-011 document-subject vocabulary and lookup contract only.
 
-Business Documents, storage, files, invoices and payments are not implemented.
+This candidate did not claim Business Documents, storage, files, invoices or payments. Current `develop` contains separate development contracts; no provider, fiscal or end-to-end completion is claimed.
 
 ## [0.8.0] - 2026-07-31
 
@@ -43,7 +45,9 @@ This release consolidates the previously unpublished TASK-NEXA-008, TASK-NEXA-00
 
 - Authentication throttling, session revalidation, tenant/client isolation and role-specific Warehouse/Logistics authorization are covered by the release gate.
 
-## [0.7.0] - 2026-07-30
+## Previously unreleased candidate: 0.7.0
+
+This candidate content was later consolidated into published `v0.8.0`; `v0.7.0` has no published tag or GitHub Release.
 
 ### Added
 
@@ -144,7 +148,6 @@ This release consolidates previously unreleased Identity, tenant, security and c
 
 [Unreleased]: https://github.com/nexa-suite/api/compare/v0.8.0...HEAD
 [0.8.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.8.0
-[0.7.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0
