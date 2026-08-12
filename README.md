@@ -79,7 +79,7 @@ Java 25, Spring Boot 4.1.0, Spring MVC, Spring Security resource server, JPA inf
 
 ## Runtime
 
-The canonical dual runtime is [ops/compose/compose.yml](./ops/compose/compose.yml). Modern API, Platform and Portal run without PostgreSQL. Legacy services remain isolated under the `legacy` profile and require local secrets.
+The canonical dual runtime is [ops/compose/compose.yml](./ops/compose/compose.yml). The Modern API, Platform and Portal run with the `modern-postgres` service; `modern-api` connects to PostgreSQL and runs Flyway migrations against it. Legacy services remain isolated under the `legacy` profile and require local secrets.
 
 ## Getting started
 
