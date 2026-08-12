@@ -6,11 +6,11 @@
 
 Business and integration API foundation for Nexa Suite, implemented as a Spring Boot modular monolith.
 
-[![Java 26](https://img.shields.io/badge/Java-26-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/26/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.8.1](https://img.shields.io/badge/release-v0.8.1-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.8.1)
+[![Java 25](https://img.shields.io/badge/Java-25-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://jdk.java.net/25/) [![Spring Boot 4.1.0](https://img.shields.io/badge/Spring%20Boot-4.1.0-6DB33F?style=flat-square&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot) [![Maven](https://img.shields.io/badge/build-Maven-C71A36?style=flat-square&logo=apachemaven&logoColor=white)](https://maven.apache.org/) [![Release v0.8.0](https://img.shields.io/badge/release-v0.8.0-2563EB?style=flat-square)](https://github.com/nexa-suite/api/releases/tag/v0.8.0)
 
 [Changelog](./CHANGELOG.md) · [Release notes](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
 
-**Current repository:** API · **Current release:** `v0.8.1`
+**Current repository:** API · **Latest published release:** `v0.8.0` · **Development version:** `0.9.0`
 
 [Website](https://github.com/nexa-suite/website) · [Platform](https://github.com/nexa-suite/platform) · [Portal](https://github.com/nexa-suite/portal) · [API](https://github.com/nexa-suite/api) · [Mobile](https://github.com/nexa-suite/mobile)
 
@@ -20,9 +20,11 @@ Business and integration API foundation for Nexa Suite, implemented as a Spring 
 
 ## What is implemented
 
-`v0.6.0` consolidates RS256 identity sessions, refresh-token rotation, tenant/workspace membership verification, Organization Administration, Client Accounts, Purchase Requests and secured Catalog Management reads over the existing checksum-validated 50-item seed. It includes Flyway-managed PostgreSQL schemas, idempotency, optimistic concurrency, Problem Details and local OpenAPI.
+`v0.8.0` consolidates RS256 identity sessions, refresh-token rotation, tenant/workspace membership verification, Organization Administration, Client Accounts, Purchase Requests, Sales Orders, Warehouse, Logistics, dispatch and buyer delivery tracking over the existing checksum-validated catalog seed. It includes Flyway-managed PostgreSQL schemas, idempotency, optimistic concurrency, Problem Details and local OpenAPI.
 
-The API is the business authority for identity, workspace, Catalog, commercial, Warehouse and Logistics workflows. Proof of Delivery is metadata-only; Business Documents, file storage, invoices, payments, cache and external integrations are not implemented.
+Current `develop` artifact `0.9.0` also contains development contracts for Business Documents and evidence, invoice drafts, receivables and Stripe-compatible payment intents. Provider, fiscal and end-to-end publication gates remain separate; these development contracts do not establish a published release.
+
+The API is the business authority for identity, workspace, Catalog, commercial, Warehouse and Logistics workflows. Published `v0.8.0` exposes Proof of Delivery metadata; current `develop` adds document, invoicing and payment contracts without claiming provider, fiscal or end-to-end completion.
 
 Catalog routes require a valid RS256 access token, active membership and `catalog:read`. Health/info are public; local OpenAPI is enabled only with the `local` profile.
 
@@ -31,9 +33,9 @@ Catalog routes require a valid RS256 access token, active membership and `catalo
 ```mermaid
 flowchart LR
     Website["Website<br/>Static public site<br/>v1.0.0"]
-    Platform["Platform<br/>Angular secured surface<br/>v0.5.0"]
-    Portal["Buyer Portal<br/>Angular secured surface<br/>v0.5.0"]
-    API["API<br/>IAM, tenant scope and commercial requests<br/>v0.6.0"]
+    Platform["Platform<br/>Angular secured surface<br/>v0.7.0"]
+    Portal["Buyer Portal<br/>Angular secured surface<br/>v0.7.0"]
+    API["API<br/>IAM, tenant scope and commercial workflows<br/>v0.8.0"]
 
     Website -. "product navigation" .-> Platform
     Website -. "product navigation" .-> Portal
@@ -47,25 +49,25 @@ The diagram shows the approved secured vertical slice; it is not a public deploy
 
 ## Repository map
 
-| Repository | Current release | Responsibility | Evidence status |
+| Repository | Latest published release | Responsibility | Evidence status |
 |---|---:|---|---|
 | [Website](https://github.com/nexa-suite/website) | `v1.0.0` | Static public product discovery | Released static site |
-| [Platform](https://github.com/nexa-suite/platform) | `v0.5.0` | Internal operations shell | Secured Angular commercial surface |
-| [Portal](https://github.com/nexa-suite/portal) | `v0.5.0` | Buyer self-service shell | Secured Angular commercial surface |
-| **API** | **`v0.6.0`** | Business and integration authority | IAM, tenant scope, Catalog and Sales requests |
+| [Platform](https://github.com/nexa-suite/platform) | `v0.7.0` | Internal operations shell | Secured Angular commercial, Warehouse and Logistics surface |
+| [Portal](https://github.com/nexa-suite/portal) | `v0.7.0` | Buyer self-service shell | Secured Angular commercial and delivery surface |
+| **API** | **`v0.8.0`** | Business and integration authority | IAM, tenant scope, commercial, Warehouse and Logistics workflows |
 | [Mobile](https://github.com/nexa-suite/mobile) | `v0.1.1` | Future native clients | Documentation-only |
 
 ## Bounded contexts
 
 | Area | Current maturity |
 |---|---|
-| Catalog Management | Secured read contract in `v0.6.0` |
+| Catalog Management | Secured read and pricing contract in `v0.8.0` |
 | IAM | RS256 sessions and refresh rotation |
 | Tenant Management | Workspace membership and surface policy |
-| Sales | Client Accounts and Purchase Requests; Sales Order readiness only |
-| Warehouse | Planned |
-| Logistics | Planned |
-| Invoicing | Planned |
+| Sales | Client Accounts, Purchase Requests and Sales Orders in `v0.8.0` |
+| Warehouse | Inventory, FEFO reservations and readiness in `v0.8.0` |
+| Logistics | Dispatch, incidents, Proof of Delivery metadata and buyer tracking in `v0.8.0` |
+| Documents, invoicing and payments | Development contracts in `0.9.0`; provider and fiscal completion not claimed |
 
 ## Architecture
 
@@ -73,7 +75,7 @@ Each future bounded context keeps Presentation, Application, Domain and Infrastr
 
 ## Tech stack
 
-Java 26, Spring Boot 4.1.0, Spring MVC, Spring Security resource server, JPA infrastructure, Flyway, PostgreSQL 18.4, Bean Validation, Actuator, Maven Wrapper and jar packaging.
+Java 25, Spring Boot 4.1.0, Spring MVC, Spring Security resource server, JPA infrastructure, Flyway, PostgreSQL 18.4, Bean Validation, Actuator, Maven Wrapper and jar packaging.
 
 ## Runtime
 
