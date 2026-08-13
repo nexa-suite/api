@@ -68,6 +68,8 @@ class ModernPostgresMigrationTests {
 				"inventory_visibility_policy", "buyer_availability_policy", "operating_hours_start",
 				"operating_hours_end", "order_cutoff_minutes", "thermal_log_required", "version", "updated_at");
 			assertThat(columns(connection, "catalog_management", "promotion")).contains("priority");
+			assertThat(indexColumns(connection, "sales", "uq_client_account_one_buyer"))
+			.containsExactly("tenant_id", "workspace_id", "client_account_id");
 			assertTenantWorkspaceRls(connection);
 		}
 	}
@@ -104,6 +106,7 @@ class ModernPostgresMigrationTests {
 		}
 	}
 
+
 	private static void assertTenantWorkspaceRls(java.sql.Connection connection) throws SQLException {
 		Set<String> expectedTables = Set.of(
 				"business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
@@ -124,5 +127,17 @@ class ModernPostgresMigrationTests {
 		assertThat(actualTables).as("all forced RLS tables must be explicitly inventoried").containsExactlyInAnyOrderElementsOf(expectedTables);
 		assertThat(policyTables).as("all forced RLS tables must have an explicit tenant/workspace policy")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
+	}
+
+	private static Set<String> indexColumns(java.sql.Connection connection, String schema, String index) throws SQLException {
+		try (var statement = connection.prepareStatement("select a.attname from pg_index i join pg_class c on c.oid=i.indexrelid join pg_attribute a on a.attrelid=i.indrelid and a.attnum=any(i.indkey) join pg_namespace n on n.oid=c.relnamespace where n.nspname=? and c.relname=? order by array_position(i.indkey,a.attnum)")) {
+			statement.setString(1, schema);
+			statement.setString(2, index);
+			try (var result = statement.executeQuery()) {
+				var values = new java.util.LinkedHashSet<String>();
+				while (result.next()) values.add(result.getString(1));
+				return values;
+			}
+		}
 	}
 }

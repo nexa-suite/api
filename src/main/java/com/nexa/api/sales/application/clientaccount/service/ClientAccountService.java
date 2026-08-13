@@ -53,6 +53,7 @@ public class ClientAccountService implements ClientAccountUseCase {
 		internal(context, Permission.SALES_WRITE);
 		ClientAccountView account = detail(context, id);
 		if (account.version() != version) throw new SalesConcurrencyConflictException();
+		if (account.buyerMembershipId() != null) throw new SalesConcurrencyConflictException();
 		if (!persistence.isAvailableBuyerMembership(scope(context), workspace(context), membershipId)) throw new SalesResourceNotFoundException("buyer-membership");
 		if (persistence.associateBuyer(scope(context), workspace(context), account.id(), membershipId, UUID.randomUUID(), now(), version) == 0) throw new SalesConcurrencyConflictException();
 		return detail(context, id);
