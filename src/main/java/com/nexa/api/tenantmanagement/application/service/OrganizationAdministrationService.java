@@ -11,6 +11,7 @@ import com.nexa.api.tenantmanagement.domain.model.access.RoleCatalog;
 import com.nexa.api.tenantmanagement.domain.model.access.RoleDefinition;
 import com.nexa.api.tenantmanagement.domain.model.access.RoleDefinitionType;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.identity.RoleDefinitionId;
 import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
@@ -76,7 +77,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 
 	@Override
 	public OrganizationAdministrationResult<WorkspaceSummary> createWorkspace(CurrentAccessContext context, String name, String slug, String idempotencyKey, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		if (idempotencyKey == null || idempotencyKey.isBlank()) throw new IdempotencyKeyRequiredException();
 		String safeName = name == null ? "" : name.strip();
 		String safeSlug = new WorkspaceSlug(slug).value();
@@ -105,7 +106,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 	@Override
 	public OrganizationAdministrationResult<WorkspaceSummary> updateWorkspace(CurrentAccessContext context, String workspaceId,
 			String name, String slug, WorkspaceStatus status, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		var current = findWorkspace(context, workspaceId);
 		if (name == null || name.isBlank()) name = current.name();
 		if (slug == null || slug.isBlank()) slug = current.slug(); else slug = new WorkspaceSlug(slug).value();
@@ -119,7 +120,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 
 	@Override
 	public OrganizationAdministrationResult<WorkspaceSummary> suspendWorkspace(CurrentAccessContext context, String workspaceId, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		WorkspaceSummary current = findWorkspace(context, workspaceId);
 		port.lockTenant(context.tenantId().toString());
 		if ("ACTIVE".equals(current.status()) && port.activeAdministrativeWorkspaceCount(context.tenantId().toString()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one usable administrative workspace must remain");
@@ -131,7 +132,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 
 	@Override
 	public OrganizationAdministrationResult<WorkspaceSummary> reactivateWorkspace(CurrentAccessContext context, String workspaceId, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		WorkspaceSummary current = findWorkspace(context, workspaceId);
 		if (port.updateWorkspaceStatus(context.tenantId().toString(), current.id(), WorkspaceStatus.ACTIVE.name(), expectedVersion) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "WORKSPACE_REACTIVATED", correlationId, java.util.Map.of("workspaceId", current.id()));
@@ -218,7 +219,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 	@Override
 	public OrganizationAdministrationResult<WorkspaceMembershipSummary> suspendMembership(CurrentAccessContext context, String membershipId,
 			long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_MEMBER_MANAGE);
 		var current = findMembership(context, membershipId);
 		if ("DISABLED".equals(current.status())) {
 			if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
@@ -235,7 +236,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 	@Override
 	public OrganizationAdministrationResult<WorkspaceMembershipSummary> reactivateMembership(CurrentAccessContext context, String membershipId,
 			long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_MEMBER_MANAGE);
 		var current = findMembership(context, membershipId);
 		if ("ACTIVE".equals(current.status())) {
 			if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
@@ -289,10 +290,8 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 				|| membership.roles().stream().anyMatch(value -> value.equalsIgnoreCase(role.name()));
 	}
 	private static void read(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_READ); }
-	private static void manage(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_MANAGE); }
 	private static void manageRoleAssignments(CurrentAccessContext context) {
-		if (!context.allows(Permission.TENANT_MANAGE)
-				&& !context.allows(com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.TENANT_ROLE_ASSIGN)) {
+		if (!context.allows(PermissionKey.TENANT_ROLE_ASSIGN)) {
 			throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Membership role assignment is not allowed");
 		}
 	}

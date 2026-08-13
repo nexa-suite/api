@@ -10,6 +10,7 @@ import com.nexa.api.tenantmanagement.application.port.out.TenantConfigurationPor
 import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
 import com.nexa.api.tenantmanagement.domain.model.TenantManagementInvariantViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
 import com.nexa.api.tenantmanagement.domain.model.configuration.NotificationPreference;
 import com.nexa.api.tenantmanagement.domain.model.configuration.OperationalSettings;
@@ -49,7 +50,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.OrganizationProfileView updateOrganizationProfile(CurrentAccessContext context,
 			TenantConfigurationModels.OrganizationProfileView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_ORGANIZATION_MANAGE);
 		OrganizationProfile current = port.findOrganizationProfile(context.tenantId().toString())
 				.orElseThrow(() -> new ApiResourceNotFoundException("organization settings"));
 		OrganizationProfile profile = new OrganizationProfile(request.legalName(), request.displayName(), request.businessIdentifier(), request.operationCategory(), expectedVersion);
@@ -67,7 +68,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.WorkspaceSettingsView updateWorkspaceSettings(CurrentAccessContext context, String workspaceId,
 			TenantConfigurationModels.WorkspaceSettingsView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		String scopedWorkspace = requireWorkspace(context, workspaceId);
 		if (port.updateWorkspaceSettings(scopedWorkspace, request.defaultWorkspaceBehavior(), request.warehousePreferenceStrategy(), expectedVersion) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "OPERATIONAL_SETTINGS_CHANGED", correlationId, Map.of("section", "workspace-defaults"));
@@ -83,7 +84,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.RegionalSettingsView updateRegionalSettings(CurrentAccessContext context,
 			TenantConfigurationModels.RegionalSettingsView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_ORGANIZATION_MANAGE);
 		RegionalSettings settings = new RegionalSettings(request.timezone(), request.language(), request.currency(), request.countryRegion(), request.dateTimePolicy(), request.locale(), expectedVersion);
 		if (port.updateRegionalSettings(context.tenantId().toString(), settings) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "REGIONAL_SETTINGS_CHANGED", correlationId, Map.of("section", "regional"));
@@ -99,7 +100,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.UnitPreferencesView updateUnitPreferences(CurrentAccessContext context,
 			TenantConfigurationModels.UnitPreferencesView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_ORGANIZATION_MANAGE);
 		UnitPreferences preferences = new UnitPreferences(request.massUnit(), request.temperatureUnit(), request.distanceUnit(), request.volumeUnit(), expectedVersion);
 		if (port.updateUnitPreferences(context.tenantId().toString(), preferences) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "UNIT_PREFERENCES_CHANGED", correlationId, Map.of("section", "units"));
@@ -116,7 +117,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.OperationalSettingsView updateOperationalSettings(CurrentAccessContext context, String workspaceId,
 			TenantConfigurationModels.OperationalSettingsView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		String scopedWorkspace = requireWorkspace(context, workspaceId);
 		OperationalSettings settings = new OperationalSettings(request.defaultWarehouseSelectionPolicy(), request.orderCutoffPolicy(), request.fulfillmentDefaults(), request.inventoryVisibilityPolicy(), request.buyerAvailabilityPolicy(), request.operatingHoursStart(), request.operatingHoursEnd(), request.orderCutoffMinutes(), request.thermalLogRequired(), expectedVersion);
 		if (port.updateOperationalSettings(scopedWorkspace, settings) == 0) throw new ConcurrencyConflictException();
@@ -136,7 +137,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.NotificationSettingsView updateNotificationSettings(CurrentAccessContext context, String workspaceId,
 			TenantConfigurationModels.NotificationSettingsView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
 		String scopedWorkspace = requireWorkspace(context, workspaceId);
 		if (port.notificationVersion(scopedWorkspace) != expectedVersion) throw new ConcurrencyConflictException();
 		for (TenantConfigurationModels.NotificationPreferenceView value : request.preferences()) {
@@ -160,7 +161,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.TenantSecuritySettingsView updateTenantSecuritySettings(CurrentAccessContext context,
 			TenantConfigurationModels.TenantSecuritySettingsView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_SECURITY_MANAGE);
 		TenantSecuritySettings settings = new TenantSecuritySettings(request.passwordMinLength(), request.sessionDurationMinutes(), request.invitationExpirationHours(), request.requiredEmailDomain(), expectedVersion);
 		if (port.updateTenantSecuritySettings(context.tenantId().toString(), settings) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "TENANT_SECURITY_SETTINGS_CHANGED", correlationId, Map.of("section", "security"));
@@ -176,7 +177,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.CustomFieldView createCustomField(CurrentAccessContext context,
 			TenantConfigurationModels.CustomFieldView request, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		UUID id = request.id() == null ? UUID.randomUUID() : request.id();
 		CustomFieldDefinition definition = definition(id, request, 0);
 		if (port.createCustomField(context.tenantId().toString(), context.workspaceId().toString(), definition) == 0) throw new CustomFieldConflictException();
@@ -187,7 +188,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.CustomFieldView updateCustomField(CurrentAccessContext context, UUID id,
 			TenantConfigurationModels.CustomFieldView request, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		CustomFieldDefinition definition = definition(id, request, expectedVersion);
 		if (port.updateCustomField(context.tenantId().toString(), context.workspaceId().toString(), id, definition, expectedVersion) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "CUSTOM_FIELD_DEFINITION_UPDATED", correlationId, Map.of("fieldKey", definition.fieldKey(), "scope", definition.scope()));
@@ -197,7 +198,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.CustomFieldView setCustomFieldActive(CurrentAccessContext context, UUID id,
 			boolean active, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		if (port.updateCustomFieldActive(context.tenantId().toString(), context.workspaceId().toString(), id, active, expectedVersion) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, active ? "CUSTOM_FIELD_DEFINITION_UPDATED" : "CUSTOM_FIELD_DEFINITION_DISABLED", correlationId, Map.of("active", active));
 		return port.findCustomField(context.tenantId().toString(), context.workspaceId().toString(), id).orElseThrow(() -> new ApiResourceNotFoundException("custom field"));
@@ -246,7 +247,6 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	}
 
 	private static void read(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_READ); }
-	private static void manage(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_MANAGE); }
 	private void appendAudit(CurrentAccessContext context, String type, String correlationId, Map<String, Object> metadata) {
 		audit.append(new SecurityAuditPort.Event(type, context.userId().value(), null, context.tenantId().value(), context.workspaceId().value(), context.surface().name(), valueOrUnknown(correlationId), "unknown", clock.instant(), metadata));
 	}
