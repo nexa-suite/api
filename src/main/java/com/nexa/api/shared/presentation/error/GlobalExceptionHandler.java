@@ -36,6 +36,7 @@ import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.sales.application.exception.PurchaseRequestAlreadyConvertedException;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
+import com.nexa.api.sales.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
@@ -298,6 +299,8 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request); }
 	@ExceptionHandler(PurchaseRequestDraftConcurrencyException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.CONCURRENCY_CONFLICT, "Purchase request draft version is stale", request); }
+	@ExceptionHandler(PurchaseRequestDraftInvariantException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftInvariant(PurchaseRequestDraftInvariantException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Purchase request draft is not ready to submit", request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
 	@ExceptionHandler(PurchaseRequestAlreadyConvertedException.class)
