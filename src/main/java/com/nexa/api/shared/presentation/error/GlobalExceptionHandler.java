@@ -83,6 +83,7 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleIamSecurity(IamSecurityException exception, HttpServletRequest request) {
 		ApiErrorCode code = switch (exception.code()) {
 			case "RESET_RATE_LIMITED" -> ApiErrorCode.RESET_RATE_LIMITED;
+			case "PUBLIC_CONTACT_RATE_LIMITED" -> ApiErrorCode.PUBLIC_CONTACT_RATE_LIMITED;
 			case "PROFILE_VERSION_CONFLICT" -> ApiErrorCode.PROFILE_VERSION_CONFLICT;
 			case "PROFILE_PRECONDITION_REQUIRED" -> ApiErrorCode.PRECONDITION_REQUIRED;
 			case "PASSWORD_POLICY_INVALID" -> ApiErrorCode.PASSWORD_POLICY_INVALID;
@@ -98,13 +99,14 @@ public final class GlobalExceptionHandler {
 			default -> ApiErrorCode.REGISTRATION_INVALID;
 		};
 		HttpStatus status = switch (code) {
-			case RESET_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
+			case RESET_RATE_LIMITED, PUBLIC_CONTACT_RATE_LIMITED -> HttpStatus.TOO_MANY_REQUESTS;
 			case PROFILE_VERSION_CONFLICT, REGISTRATION_SLUG_CONFLICT, FOUNDER_EMAIL_INCOMPATIBLE, REGISTRATION_NOT_PENDING -> HttpStatus.CONFLICT;
 			case PRECONDITION_REQUIRED -> HttpStatus.PRECONDITION_REQUIRED;
 			case SYSTEM_OPERATOR_REQUIRED -> HttpStatus.FORBIDDEN;
 			default -> HttpStatus.BAD_REQUEST;
 		};
 		String detail = code == ApiErrorCode.RESET_RATE_LIMITED ? "Password reset requests are temporarily limited"
+				: code == ApiErrorCode.PUBLIC_CONTACT_RATE_LIMITED ? "Contact requests are temporarily limited"
 				: code == ApiErrorCode.RESET_INVALID ? "The reset request is invalid or expired" : "The requested security operation could not be completed";
 		return response(status, code, detail, request);
 	}
