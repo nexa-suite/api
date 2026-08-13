@@ -22,6 +22,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @SpringBootTest
 @TestPropertySource(properties = "nexa.security.notification-outbox.poll-delay=PT1H")
@@ -48,6 +49,8 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"legalName\":\"ICISA Test\",\"displayName\":\"ICISA Administration\",\"businessIdentifier\":\"IT-ADMIN\",\"operationCategory\":\"B2B_COLD_CHAIN_DISTRIBUTOR\"}"))
                 .andExpect(status().isOk()).andReturn();
         assertThat(updated.getResponse().getHeader("ETag")).isEqualTo("\"1\"");
+        String organizationAudit = jdbc.queryForObject("select metadata_json::text from iam.security_audit_event where event_type='ORGANIZATION_UPDATED' order by occurred_at desc limit 1", String.class);
+        assertThat(organizationAudit).contains("oldValues", "newValues", "ICISA Test", "ICISA Administration", "IT-ADMIN");
         mockMvc.perform(patch("/api/v1/organization").header("Authorization", "Bearer " + owner).header("If-Match", etag)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"legalName\":\"ICISA Test\",\"displayName\":\"Stale\",\"businessIdentifier\":\"IT-ADMIN\",\"operationCategory\":\"B2B_COLD_CHAIN_DISTRIBUTOR\"}"))
                 .andExpect(status().isConflict());
@@ -65,6 +68,48 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         mockMvc.perform(get("/api/v1/organization").header("Authorization", "Bearer " + buyer)).andExpect(status().isForbidden());
         String pureOwner = createPureOwner();
         String securityEtag = mockMvc.perform(get("/api/v1/settings/security").header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn().getResponse().getHeader("ETag");
+        mockMvc.perform(patch("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner).header("If-Match", securityEtag)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"passwordMinLength\":12,\"sessionDurationMinutes\":480,\"invitationExpirationHours\":72,\"requiredEmailDomain\":null}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void pureCompanyOwnerCanManageOrganizationAndWorkforceButNotTechnicalSettings() throws Exception {
+        String pureOwner = createPureOwner();
+        MvcResult profile = mockMvc.perform(get("/api/v1/organization").header("Authorization", "Bearer " + pureOwner))
+                .andExpect(status().isOk()).andReturn();
+        String profileEtag = profile.getResponse().getHeader("ETag");
+        mockMvc.perform(patch("/api/v1/organization").header("Authorization", "Bearer " + pureOwner).header("If-Match", profileEtag)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"legalName\":\"Pure Owner Legal\",\"displayName\":\"Pure Owner Trade\",\"businessIdentifier\":\"PO-001\",\"operationCategory\":\"B2B_COLD_CHAIN_DISTRIBUTOR\"}"))
+                .andExpect(status().isOk());
+
+        String revokedEmail = "pure-owner-revoked-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult invitation = createInvitation(pureOwner, revokedEmail, "Revoked operator", "pure-owner-invite-" + uuid());
+        mockMvc.perform(post("/api/v1/organization-invitations/" + json(invitation).get("id").asText() + "/revocations")
+                        .header("Authorization", "Bearer " + pureOwner)
+                        .header("If-Match", invitation.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REVOKED"));
+
+        String workforceEmail = "pure-owner-workforce-" + uuid().substring(0, 8) + "@example.test";
+        createInvitation(pureOwner, workforceEmail, "Workforce operator", "pure-owner-workforce-invite-" + uuid());
+        assertThat(acceptInvitationStatus(invitationToken(workforceEmail), "Workforce operator")).isEqualTo(201);
+        String workforceMembership = membershipId(workforceEmail);
+        String workforceEtag = "\"" + jdbc.queryForObject("select version from tenant_management.workspace_membership where id=?", Long.class, UUID.fromString(workforceMembership)) + "\"";
+
+        MvcResult reassigned = mockMvc.perform(patch("/api/v1/workspace-memberships/" + workforceMembership + "/roles")
+                        .header("Authorization", "Bearer " + pureOwner).header("If-Match", workforceEtag)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"roles\":[\"WAREHOUSE\"]}"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult suspended = mockMvc.perform(post("/api/v1/workspace-memberships/" + workforceMembership + "/suspensions")
+                        .header("Authorization", "Bearer " + pureOwner).header("If-Match", reassigned.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DISABLED")).andReturn();
+        mockMvc.perform(post("/api/v1/workspace-memberships/" + workforceMembership + "/reactivations")
+                        .header("Authorization", "Bearer " + pureOwner).header("If-Match", suspended.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        String securityEtag = mockMvc.perform(get("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner))
+                .andExpect(status().isOk()).andReturn().getResponse().getHeader("ETag");
         mockMvc.perform(patch("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner).header("If-Match", securityEtag)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"passwordMinLength\":12,\"sessionDurationMinutes\":480,\"invitationExpirationHours\":72,\"requiredEmailDomain\":null}"))
                 .andExpect(status().isForbidden());

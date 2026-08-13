@@ -73,7 +73,10 @@ public class ApiSecurityConfiguration {
 						.authenticationEntryPoint(authenticationEntryPoint))
 				.authorizeHttpRequests(authorize -> {
 				authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
-					if (observabilityProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
+					if (observabilityProfile) {
+						if (localProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
+						else authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").authenticated();
+					}
 					if (localProfile) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
 						authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
 						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",

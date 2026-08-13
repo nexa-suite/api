@@ -2,6 +2,7 @@ package com.nexa.api.sales.infrastructure.purchaserequestdraft;
 
 import com.nexa.api.sales.application.port.PurchaseRequestDraftPort;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
+import com.nexa.api.sales.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.sales.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
 import com.nexa.api.sales.domain.model.purchaserequestdraft.PurchaseRequestDraft;
 import com.nexa.api.sales.domain.model.purchaserequestdraft.PurchaseRequestDraftStatus;
@@ -85,6 +86,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
                 (rs, n) -> new PriceRow(rs.getObject("id", UUID.class), rs.getObject("family_id", UUID.class), rs.getString("family_code"), rs.getString("sku_code"), rs.getString("presentation"), rs.getBigDecimal(6), rs.getString(7)), priceArguments.toArray()).forEach(row -> prices.put(row.skuId(), row));
         if (prices.size() != skuIds.size()) throw new IllegalArgumentException("SKU is not active or has no serviceable price");
         jdbc.update("delete from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?", tenant(context), workspace(context), draftId);
+        clearRouteSnapshots(context, draftId);
         Instant now = Instant.now();
         String insertLineSql = "insert into sales.purchase_request_draft_line (id,tenant_id,workspace_id,draft_id,sku_id,sku_code_snapshot,presentation_snapshot,quantity,unit,base_unit_price,effective_unit_price,discount_amount,currency,promotion_references,notes,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,'[]'::jsonb,?,?,?)";
         jdbc.batchUpdate(insertLineSql, commands, commands.size(), (ps, command) -> {
@@ -93,7 +95,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
             ps.setObject(5, command.skuId()); ps.setString(6, price.skuCode()); ps.setString(7, price.presentation()); ps.setBigDecimal(8, command.quantity());
             ps.setString(9, command.unit() == null || command.unit().isBlank() ? "UNIT" : command.unit()); ps.setBigDecimal(10, price.amount()); ps.setBigDecimal(11, price.amount()); ps.setBigDecimal(12, BigDecimal.ZERO); ps.setString(13, price.currency()); ps.setString(14, command.notes()); ps.setTimestamp(15, Timestamp.from(now)); ps.setTimestamp(16, Timestamp.from(now));
         });
-        updateStatus(context, draftId, draft.version, true, hasDestination(draftId, context), hasRoute(draftId, context), hasCommercial(draft));
+        updateStatus(context, draftId, draft.version, true, hasDestination(draftId, context), false, hasCommercial(draft));
         return get(context, draftId);
     }
 
@@ -111,6 +113,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         String snapshot = json(addressMap);
         Instant now = Instant.now();
         jdbc.update("insert into sales.purchase_request_draft_destination (draft_id,tenant_id,workspace_id,address_id,address_snapshot,snapshot_schema_version,updated_at) values (?,?,?,?,?::jsonb,?,?) on conflict (draft_id) do update set address_id=excluded.address_id,address_snapshot=excluded.address_snapshot,snapshot_schema_version=excluded.snapshot_schema_version,updated_at=excluded.updated_at", draftId, tenant(context), workspace(context), addressId, snapshot, SCHEMA, Timestamp.from(now));
+        clearRouteSnapshots(context, draftId);
         updateStatus(context, draftId, draft.version, hasLines(draftId, context), true, false, false);
         return get(context, draftId);
     }
@@ -168,7 +171,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         }
         DraftRow draft = mutable(context, draftId, expectedVersion);
         PurchaseRequestDraftModels.ReviewView review = review(context, draftId);
-        if (!review.readyToSubmit()) throw new IllegalStateException("Purchase request draft is not ready to submit");
+        if (!review.readyToSubmit()) throw new PurchaseRequestDraftInvariantException("Purchase request draft is not ready to submit");
         int idempotencyClaimed = jdbc.update("insert into sales.purchase_request_draft_idempotency (tenant_id,workspace_id,buyer_membership_id,idempotency_key,request_hash,draft_id,created_at) values (?,?,?,?,?,?,current_timestamp) on conflict do nothing", tenant(context), workspace(context), context.membershipId().value(), idempotencyKey, requestHash, draftId);
         if (idempotencyClaimed == 0) {
             var claim = jdbc.query("select request_hash,draft_id from sales.purchase_request_draft_idempotency where tenant_id=? and workspace_id=? and buyer_membership_id=? and idempotency_key=?", (rs, n) -> new IdempotencyClaim(rs.getString(1), rs.getObject(2, UUID.class)), tenant(context), workspace(context), context.membershipId().value(), idempotencyKey).stream().findFirst().orElseThrow();
@@ -199,6 +202,10 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private boolean hasLines(UUID id, CurrentAccessContext c) { return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?)", Boolean.class, tenant(c), workspace(c), id)); }
     private boolean hasDestination(UUID id, CurrentAccessContext c) { return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.purchase_request_draft_destination where tenant_id=? and workspace_id=? and draft_id=?)", Boolean.class, tenant(c), workspace(c), id)); }
     private boolean hasRoute(UUID id, CurrentAccessContext c) { return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.purchase_request_draft_route where tenant_id=? and workspace_id=? and draft_id=?)", Boolean.class, tenant(c), workspace(c), id)); }
+    private void clearRouteSnapshots(CurrentAccessContext c, UUID id) {
+        jdbc.update("delete from sales.purchase_request_draft_route where tenant_id=? and workspace_id=? and draft_id=?", tenant(c), workspace(c), id);
+        jdbc.update("delete from sales.purchase_request_draft_warehouse_selection where tenant_id=? and workspace_id=? and draft_id=?", tenant(c), workspace(c), id);
+    }
     private boolean hasCommercial(DraftRow d) { return d.paymentPreference != null && d.requestedDeliveryDate != null; }
     private String creditResult(CurrentAccessContext context, UUID clientId, String payment) {
         if (!"CREDIT_LINE".equalsIgnoreCase(payment)) return "NOT_APPLICABLE";

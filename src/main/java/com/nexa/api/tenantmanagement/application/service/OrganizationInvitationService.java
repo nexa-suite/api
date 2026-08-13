@@ -110,7 +110,7 @@ public class OrganizationInvitationService implements InvitationUseCase {
 
 	@Override
 	public InvitationModels.InvitationView revoke(CurrentAccessContext context, UUID invitationId, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_MEMBER_MANAGE);
 		var snapshot = find(context, invitationId);
 		OrganizationInvitation invitation = snapshot.invitation();
 		try {
@@ -125,7 +125,7 @@ public class OrganizationInvitationService implements InvitationUseCase {
 
 	@Override
 	public InvitationModels.InvitationView resend(CurrentAccessContext context, UUID invitationId, long expectedVersion, String correlationId) {
-		manage(context);
+		context.requirePermission(PermissionKey.TENANT_MEMBER_MANAGE);
 		var snapshot = find(context, invitationId);
 		OrganizationInvitation invitation = snapshot.invitation();
 		invitation.expire(clock);
@@ -190,7 +190,6 @@ public class OrganizationInvitationService implements InvitationUseCase {
 	private static String required(String value, String label) { if (value == null || value.isBlank()) throw new TenantManagementInvariantViolation(label + " is required"); return value.strip(); }
 	private static Set<MembershipRole> roles(Set<String> values) { if (values == null || values.isEmpty()) throw new TenantManagementInvariantViolation("At least one invitation role is required"); Set<MembershipRole> result = values.stream().map(MembershipRole::from).collect(Collectors.toUnmodifiableSet()); if (result.contains(MembershipRole.BUYER)) throw new TenantManagementInvariantViolation("Buyer cannot be invited as internal member"); return result; }
 	private static void read(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_READ); }
-	private static void manage(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_MANAGE); }
 	private void appendAudit(CurrentAccessContext context, String type, String correlationId, Map<String, Object> metadata) { audit.append(new SecurityAuditPort.Event(type, context.userId().value(), null, context.tenantId().value(), context.workspaceId().value(), context.surface().name(), valueOrUnknown(correlationId), "unknown", clock.instant(), metadata)); }
 	private static String valueOrUnknown(String value) { return value == null || value.isBlank() ? "unknown" : value; }
 

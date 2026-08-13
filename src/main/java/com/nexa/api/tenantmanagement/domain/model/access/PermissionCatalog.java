@@ -63,8 +63,10 @@ public final class PermissionCatalog {
 					PermissionKey.TENANT_AUDIT_READ, PermissionKey.NOTIFICATION_READ,
 					PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
 			case COMPANY_OWNER -> Set.of(
-					PermissionKey.TENANT_ORGANIZATION_READ, PermissionKey.TENANT_WORKSPACE_READ,
-					PermissionKey.TENANT_MEMBER_READ, PermissionKey.TENANT_ROLE_READ,
+					PermissionKey.TENANT_ORGANIZATION_READ, PermissionKey.TENANT_ORGANIZATION_MANAGE,
+					PermissionKey.TENANT_WORKSPACE_READ, PermissionKey.TENANT_MEMBER_READ,
+					PermissionKey.TENANT_MEMBER_INVITE, PermissionKey.TENANT_MEMBER_MANAGE,
+					PermissionKey.TENANT_ROLE_READ, PermissionKey.TENANT_ROLE_ASSIGN,
 					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PRODUCT_MANAGE,
 					PermissionKey.CATALOG_TAXONOMY_MANAGE, PermissionKey.CATALOG_PRICE_MANAGE,
 					PermissionKey.CATALOG_PROMOTION_READ, PermissionKey.CATALOG_PROMOTION_MANAGE,
