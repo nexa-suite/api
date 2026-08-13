@@ -155,15 +155,13 @@ class RlsRuntimeDatabaseIsolationIT {
 
         List<String> forceRlsTables = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement("""
-                select c.relname
+                select n.nspname || '.' || c.relname
                   from pg_class c
                   join pg_namespace n on n.oid = c.relnamespace
-                 where n.nspname = 'sales'
-                   and c.relname in ('client_account', 'client_account_address', 'client_account_membership',
-                       'manual_sales_order_draft', 'manual_sales_order_draft_line', 'manual_sales_order_draft_idempotency')
+                 where c.relkind = 'r'
                    and c.relrowsecurity
                    and c.relforcerowsecurity
-                 order by c.relname
+                 order by n.nspname, c.relname
                 """)) {
             try (ResultSet result = statement.executeQuery()) {
                 while (result.next()) forceRlsTables.add(result.getString(1));
@@ -171,8 +169,10 @@ class RlsRuntimeDatabaseIsolationIT {
         }
         assertThat(forceRlsTables)
                 .as("RLS must be enabled and forced for every table used by this isolation proof")
-                .containsExactly("client_account", "client_account_address", "client_account_membership",
-                        "manual_sales_order_draft", "manual_sales_order_draft_idempotency", "manual_sales_order_draft_line");
+                .containsExactlyInAnyOrder("business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
+                        "notifications.inbox_item",
+                        "payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.receivable", "payments.receivable_allocation",
+                        "sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order");
     }
 
     private static void assertVisibleRows(Connection connection, ScopedRow expected, List<ScopedRow> allRows) throws SQLException {
