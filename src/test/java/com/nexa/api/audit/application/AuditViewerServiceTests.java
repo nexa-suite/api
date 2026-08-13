@@ -6,6 +6,7 @@ import com.nexa.api.audit.application.service.AuditViewerService;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.audit.application.service.SafeAuditMetadata;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -36,6 +37,20 @@ class AuditViewerServiceTests {
 
 		assertThat(event.metadata()).containsEntry("status", "ACTIVE").containsEntry("beforeRoles", List.of("SALES"));
 		assertThat(event.metadata()).doesNotContainKeys("sessionId", "token");
+	}
+
+	@Test
+	void tenantAdminReceivesAllowlistedOrganizationChangeValues() {
+		Map<String, Object> oldValues = Map.of("legalName", "Old Legal", "displayName", "Old Display",
+				"businessIdentifier", "OLD-1", "operationCategory", "B2B_COLD_CHAIN_DISTRIBUTOR", "token", "secret");
+		Map<String, Object> newValues = Map.of("legalName", "New Legal", "displayName", "New Display",
+				"businessIdentifier", "NEW-1", "operationCategory", "B2B_COLD_CHAIN_DISTRIBUTOR");
+		Map<String, Object> raw = Map.of("section", "organization", "oldValues", oldValues, "newValues", newValues, "token", "secret");
+
+		assertThat(SafeAuditMetadata.sanitize(raw)).containsEntry("oldValues", Map.of("legalName", "Old Legal", "displayName", "Old Display",
+				"businessIdentifier", "OLD-1", "operationCategory", "B2B_COLD_CHAIN_DISTRIBUTOR"))
+				.containsEntry("newValues", newValues)
+				.doesNotContainKey("token");
 	}
 
 	@Test
