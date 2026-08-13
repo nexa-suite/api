@@ -51,7 +51,10 @@ public final class RefreshSessionService implements RefreshSessionUseCase {
 		}
 		if (!current.session().isActive(now)) throw new InvalidRefreshTokenException();
 		if (command.surface() != null && command.surface() != current.subject().surface()) throw new InvalidRefreshTokenException();
-		AccessPolicy policy = accessPolicies.findFor(current.subject().userAccountId(), current.subject().policy().workspaceSlug(), current.subject().surface())
+		String membershipId = current.subject().policy().membershipId();
+		AccessPolicy policy = (membershipId == null || membershipId.isBlank()
+				? accessPolicies.findFor(current.subject().userAccountId(), current.subject().policy().workspaceSlug(), current.subject().surface())
+				: accessPolicies.findForMembership(current.subject().userAccountId(), membershipId, current.subject().surface()))
 				.orElseThrow(InvalidRefreshTokenException::new);
 		AuthenticationSubject subject = new AuthenticationSubject(current.subject().userAccountId(), current.subject().email(),
 				current.subject().surface(), policy);
