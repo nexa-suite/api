@@ -24,6 +24,8 @@ Business and integration API foundation for Nexa Suite, implemented as a Spring 
 
 Current `develop` artifact `0.9.0` also contains development contracts for Business Documents and evidence, invoice drafts, receivables and Stripe-compatible payment intents. Provider, fiscal and end-to-end publication gates remain separate; these development contracts do not establish a published release.
 
+The current `develop` work also includes public contact/demo intake at `POST /api/v1/public/contact-requests`. It validates and durably throttles anonymous requests, persists them in the IAM schema and never provisions a Tenant or Nexa identity. This endpoint is an unreleased development contract until its external notification and production publication gates are approved.
+
 The API is the business authority for identity, workspace, Catalog, commercial, Warehouse and Logistics workflows. Published `v0.8.0` exposes Proof of Delivery metadata; current `develop` adds document, invoicing and payment contracts without claiming provider, fiscal or end-to-end completion.
 
 Catalog routes require a valid RS256 access token, active membership and `catalog:read`. Health/info are public; local OpenAPI is enabled only with the `local` profile.
@@ -113,6 +115,7 @@ docs/releases/                                           # Versioned release not
 - [Local OpenAPI instructions](./docs/openapi/README.md)
 - [Authentication contract](./docs/security/authentication.md)
 - [Authorization contract](./docs/security/authorization.md)
+- Public contact/demo intake: `POST /api/v1/public/contact-requests` (unreleased `develop` contract)
 - [Release notes index](./docs/releases/)
 - [Release policy](./.github/RELEASE_POLICY.md)
 

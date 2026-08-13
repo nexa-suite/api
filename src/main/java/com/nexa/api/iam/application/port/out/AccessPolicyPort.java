@@ -12,4 +12,9 @@ public interface AccessPolicyPort {
 	default Optional<AccessPolicy> findFor(UserAccountId userAccountId, String workspaceSlug, ClientSurface surface) {
 		return findFor(userAccountId, surface);
 	}
+
+	/** Resolves a persisted session by its exact membership instead of a user-supplied slug. */
+	default Optional<AccessPolicy> findForMembership(UserAccountId userAccountId, String membershipId, ClientSurface surface) {
+		return Optional.empty();
+	}
 }

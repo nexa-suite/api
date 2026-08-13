@@ -18,9 +18,9 @@ public class JdbcWorkspacePreviewQueryAdapter implements WorkspacePreviewQueryPo
 
 	@Override
 	public Optional<PreviewRecord> findActiveBySlug(String slug) {
-		return jdbc.query("select slug, name, status from tenant_management.workspace where lower(slug) = ? limit 1",
+		var matches = jdbc.query("select slug, name, status from tenant_management.workspace where lower(slug) = ?",
 				(rs, row) -> new PreviewRecord(rs.getString("slug"), rs.getString("name"), rs.getString("status")),
-				slug.toLowerCase(java.util.Locale.ROOT)).stream().findFirst()
-				.filter(value -> "ACTIVE".equals(value.status()));
+				slug.toLowerCase(java.util.Locale.ROOT));
+		return matches.size() == 1 ? Optional.of(matches.get(0)).filter(value -> "ACTIVE".equals(value.status())) : Optional.empty();
 	}
 }

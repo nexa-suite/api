@@ -147,11 +147,7 @@ public class JpaSessionAdapter implements SessionPort {
 		try {
 			UserAccountId userId = new UserAccountId(entity.getUserId().toString());
 			ClientSurface surface = ClientSurface.valueOf(entity.getSurface());
-			String workspaceSlug = jdbc.query("select w.slug from tenant_management.workspace_membership m "
-					+ "join tenant_management.workspace w on w.id = m.workspace_id where m.id = ?",
-				(rs, row) -> rs.getString("slug"), entity.getMembershipId()).stream().findFirst().orElse(null);
-			if (workspaceSlug == null) return Optional.empty();
-			AccessPolicy policy = accessPolicies.findFor(userId, workspaceSlug, surface).orElse(null);
+			AccessPolicy policy = accessPolicies.findForMembership(userId, entity.getMembershipId().toString(), surface).orElse(null);
 			if (policy == null) return Optional.empty();
 			var user = users.findById(entity.getUserId()).orElse(null);
 			if (user == null) return Optional.empty();

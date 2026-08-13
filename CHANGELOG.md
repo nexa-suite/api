@@ -14,6 +14,7 @@ Operations release stabilization for the consolidated commercial, Warehouse and 
 - Sales Order creator identity, aggregate-owned lifecycle and concurrent conversion replay.
 - Warehouse FEFO/expiration forward migration and route-start application ownership.
 - Dispatch number initialization and OpenAPI release metadata.
+- Refresh and workspace-preview context resolution now fail closed on ambiguous tenant/workspace slugs and use the exact persisted membership when available.
 
 ### Changed
 
@@ -22,6 +23,8 @@ Operations release stabilization for the consolidated commercial, Warehouse and 
 ### Added
 
 - Internal TASK-011 document-subject vocabulary and lookup contract only.
+- Public contact/demo request intake with validation, durable email/IP throttling, audit evidence and no automatic Tenant or identity provisioning.
+- Forward-only Flyway hardening for direct tenant-scoped membership and manual sales-draft tables.
 
 This candidate did not claim Business Documents, storage, files, invoices or payments. Current `develop` contains separate development contracts; no provider, fiscal or end-to-end completion is claimed.
 

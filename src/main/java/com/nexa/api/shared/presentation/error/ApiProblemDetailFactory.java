@@ -123,6 +123,7 @@ public final class ApiProblemDetailFactory {
 				case PASSWORD_REUSE_NOT_ALLOWED -> "Password reuse not allowed";
 				case RESET_INVALID -> "Password reset invalid";
 				case RESET_RATE_LIMITED -> "Password reset rate limited";
+				case PUBLIC_CONTACT_RATE_LIMITED -> "Public contact request rate limited";
 				case REGISTRATION_INVALID -> "Organization registration invalid";
 				case REGISTRATION_SLUG_CONFLICT -> "Organization workspace slug conflict";
 				case FOUNDER_EMAIL_INCOMPATIBLE -> "Founder email is already used by an incompatible membership";

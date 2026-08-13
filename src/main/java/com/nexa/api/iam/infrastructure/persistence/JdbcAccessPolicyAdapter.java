@@ -64,33 +64,67 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 				+ "join tenant_management.workspace w on w.id = m.workspace_id "
 				+ "join tenant_management.tenant t on t.id = w.tenant_id "
 				+ "join iam.user_account u on u.id = m.user_id "
-				+ "where m.user_id = ? and lower(w.slug) = ? limit 1";
-		return jdbc.query(sql, rs -> {
-			if (!rs.next() || !"ACTIVE".equals(rs.getString("membership_status"))) return Optional.empty();
-			Set<MembershipRole> roles = roles(rs.getObject("membership_id", UUID.class), rs.getString("membership_type"));
-			if (!"ACTIVE".equals(rs.getString("workspace_status"))
-					|| !"ACTIVE".equals(rs.getString("tenant_status"))) return Optional.empty();
-			Surface requestedSurface = Surface.valueOf(surface.name());
-			MembershipId membershipId = new MembershipId(rs.getObject("membership_id", UUID.class).toString());
-			UserId memberUserId = new UserId(userId);
-			TenantId memberTenantId = new TenantId(rs.getObject("tenant_id", UUID.class).toString());
-			WorkspaceId memberWorkspaceId = new WorkspaceId(rs.getObject("workspace_id", UUID.class).toString());
-			EffectiveAuthorization effective;
-			try {
-				effective = authorization.resolve(new AuthorizationResolutionRequest(membershipId, memberUserId,
-						memberTenantId, memberWorkspaceId, rs.getString("membership_type"), roles, rs.getLong("authorization_version")));
-			} catch (RuntimeException exception) {
-				return Optional.empty();
-			}
-			if (!effective.allowsSurface(requestedSurface)) return Optional.empty();
-			Set<String> permissions = effective.permissionCodes();
-			Set<String> roleValues = effective.roleCodes();
-			return Optional.of(new AccessPolicy(surface, roleValues, permissions,
-					rs.getObject("tenant_id", UUID.class).toString(), rs.getString("tenant_slug"),
-					rs.getObject("workspace_id", UUID.class).toString(), rs.getString("workspace_slug"),
-					 rs.getObject("membership_id", UUID.class).toString(), rs.getString("display_name"),
-					 rs.getString("preferred_language"), effective.authorizationVersion(), effective.roleDefinitionIds()));
-		}, userId, workspaceSlug.toLowerCase(Locale.ROOT));
+				+ "where m.user_id = ? and lower(w.slug) = ?";
+		return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<Optional<AccessPolicy>>) rs -> resolveExactlyOne(rs, userId, surface), userId, workspaceSlug.toLowerCase(Locale.ROOT));
+	}
+
+	@Override
+	public Optional<AccessPolicy> findForMembership(UserAccountId userAccountId, String membershipId, ClientSurface surface) {
+		if (membershipId == null || membershipId.isBlank()) return Optional.empty();
+		final UUID userId;
+		final UUID membership;
+		try {
+			userId = UUID.fromString(userAccountId.value());
+			membership = UUID.fromString(membershipId);
+		} catch (IllegalArgumentException exception) {
+			return Optional.empty();
+		}
+		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
+				+ "w.id workspace_id, w.slug workspace_slug, w.status workspace_status, "
+				+ "t.id tenant_id, t.slug tenant_slug, t.status tenant_status, "
+				+ "u.display_name, u.preferred_language "
+				+ "from tenant_management.workspace_membership m "
+				+ "join tenant_management.workspace w on w.id = m.workspace_id "
+				+ "join tenant_management.tenant t on t.id = w.tenant_id "
+				+ "join iam.user_account u on u.id = m.user_id "
+				+ "where m.user_id = ? and m.id = ?";
+		return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<Optional<AccessPolicy>>) rs -> resolveExactlyOne(rs, userId, surface), userId, membership);
+	}
+
+	private Optional<AccessPolicy> resolveExactlyOne(java.sql.ResultSet rs, UUID userId, ClientSurface surface) throws java.sql.SQLException {
+		AccessPolicy resolved = null;
+		while (rs.next()) {
+			if (!"ACTIVE".equals(rs.getString("membership_status"))
+					|| !"ACTIVE".equals(rs.getString("workspace_status"))
+					|| !"ACTIVE".equals(rs.getString("tenant_status"))) continue;
+			AccessPolicy candidate = resolve(rs, userId, surface);
+			if (candidate == null) continue;
+			if (resolved != null) return Optional.empty();
+			resolved = candidate;
+		}
+		return Optional.ofNullable(resolved);
+	}
+
+	private AccessPolicy resolve(java.sql.ResultSet rs, UUID userId, ClientSurface surface) throws java.sql.SQLException {
+		Set<MembershipRole> roles = roles(rs.getObject("membership_id", UUID.class), rs.getString("membership_type"));
+		Surface requestedSurface = Surface.valueOf(surface.name());
+		MembershipId membershipId = new MembershipId(rs.getObject("membership_id", UUID.class).toString());
+		UserId memberUserId = new UserId(userId);
+		TenantId memberTenantId = new TenantId(rs.getObject("tenant_id", UUID.class).toString());
+		WorkspaceId memberWorkspaceId = new WorkspaceId(rs.getObject("workspace_id", UUID.class).toString());
+		EffectiveAuthorization effective;
+		try {
+			effective = authorization.resolve(new AuthorizationResolutionRequest(membershipId, memberUserId,
+					memberTenantId, memberWorkspaceId, rs.getString("membership_type"), roles, rs.getLong("authorization_version")));
+		} catch (RuntimeException exception) {
+			return null;
+		}
+		if (!effective.allowsSurface(requestedSurface)) return null;
+		return new AccessPolicy(surface, effective.roleCodes(), effective.permissionCodes(),
+				rs.getObject("tenant_id", UUID.class).toString(), rs.getString("tenant_slug"),
+				rs.getObject("workspace_id", UUID.class).toString(), rs.getString("workspace_slug"),
+				rs.getObject("membership_id", UUID.class).toString(), rs.getString("display_name"),
+				rs.getString("preferred_language"), effective.authorizationVersion(), effective.roleDefinitionIds());
 	}
 
 	private Set<MembershipRole> roles(UUID membershipId, String membershipType) {

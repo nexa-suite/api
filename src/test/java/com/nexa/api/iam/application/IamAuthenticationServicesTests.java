@@ -98,6 +98,18 @@ class IamAuthenticationServicesTests {
 	}
 
 	@Test
+	void refreshResolvesTheExactPersistedMembership() {
+		Fixture fixture = new Fixture();
+		fixture.policies.membershipId = "membership-1";
+		var first = fixture.signInService().signIn(new SignInCommand("carlos", "correct", ClientSurface.PORTAL));
+
+		new RefreshSessionService(fixture.sessions, fixture.policies, fixture.tokens, CLOCK)
+				.refresh(new RefreshSessionCommand(first.refreshToken()));
+
+		assertThat(fixture.policies.exactMembershipLookups).isEqualTo(1);
+	}
+
+	@Test
 	void signOutIsIdempotentAndCurrentSessionRequiresAnActiveToken() {
 		Fixture fixture = new Fixture();
 		var first = fixture.signInService().signIn(new SignInCommand("carlos", "correct", ClientSurface.PLATFORM));
@@ -140,9 +152,23 @@ class IamAuthenticationServicesTests {
 	}
 
 	private static final class FakePolicies implements AccessPolicyPort {
+		private String membershipId;
+		private int exactMembershipLookups;
+
 		@Override
 		public Optional<AccessPolicy> findFor(UserAccountId id, ClientSurface surface) {
-			return Optional.of(new AccessPolicy(surface, Set.of("commercial"), Set.of("catalog:read", "sales:read"), null, null, null, null, null, null, null));
+			return Optional.of(policy(surface));
+		}
+
+		@Override
+		public Optional<AccessPolicy> findForMembership(UserAccountId id, String membershipId, ClientSurface surface) {
+			exactMembershipLookups++;
+			return membershipId.equals(this.membershipId) ? Optional.of(policy(surface)) : Optional.empty();
+		}
+
+		private AccessPolicy policy(ClientSurface surface) {
+			return new AccessPolicy(surface, Set.of("commercial"), Set.of("catalog:read", "sales:read"),
+					null, null, null, null, membershipId, null, null);
 		}
 	}
 
