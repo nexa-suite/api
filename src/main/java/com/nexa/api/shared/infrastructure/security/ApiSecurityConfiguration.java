@@ -80,6 +80,7 @@ public class ApiSecurityConfiguration {
 						"/api/v1/integrations/stripe/webhooks",
 						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
 						"/api/v1/organization-invitation-acceptances",
+						"/api/v1/public/contact-requests",
 						"/api/v1/tenant-management/organization-registrations",
 						"/api/v1/tenant-management/organization-registrations/**").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();
@@ -104,7 +105,7 @@ public class ApiSecurityConfiguration {
 	}
 
 	private static Set<String> allowedOrigins(Environment environment) {
-		return Arrays.stream(environment.getProperty("nexa.security.allowed-origins", "http://localhost:4200,http://localhost:4300").split(","))
+		return Arrays.stream(environment.getProperty("nexa.security.allowed-origins", "http://localhost:4200,http://localhost:4300,http://localhost:8000,http://127.0.0.1:4200,http://127.0.0.1:4300,http://127.0.0.1:8000").split(","))
 				.map(String::trim).filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet());
 	}
 

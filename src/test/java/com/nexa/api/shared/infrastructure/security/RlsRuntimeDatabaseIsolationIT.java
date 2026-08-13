@@ -159,7 +159,8 @@ class RlsRuntimeDatabaseIsolationIT {
                   from pg_class c
                   join pg_namespace n on n.oid = c.relnamespace
                  where n.nspname = 'sales'
-                   and c.relname in ('client_account', 'client_account_address')
+                   and c.relname in ('client_account', 'client_account_address', 'client_account_membership',
+                       'manual_sales_order_draft', 'manual_sales_order_draft_line', 'manual_sales_order_draft_idempotency')
                    and c.relrowsecurity
                    and c.relforcerowsecurity
                  order by c.relname
@@ -170,7 +171,8 @@ class RlsRuntimeDatabaseIsolationIT {
         }
         assertThat(forceRlsTables)
                 .as("RLS must be enabled and forced for every table used by this isolation proof")
-                .containsExactly("client_account", "client_account_address");
+                .containsExactly("client_account", "client_account_address", "client_account_membership",
+                        "manual_sales_order_draft", "manual_sales_order_draft_idempotency", "manual_sales_order_draft_line");
     }
 
     private static void assertVisibleRows(Connection connection, ScopedRow expected, List<ScopedRow> allRows) throws SQLException {
