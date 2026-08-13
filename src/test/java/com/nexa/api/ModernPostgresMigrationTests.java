@@ -70,6 +70,7 @@ class ModernPostgresMigrationTests {
 			assertThat(columns(connection, "catalog_management", "promotion")).contains("priority");
 			assertThat(indexColumns(connection, "sales", "uq_client_account_one_buyer"))
 			.containsExactly("tenant_id", "workspace_id", "client_account_id");
+			assertTenantWorkspaceRls(connection);
 		}
 	}
 
@@ -103,6 +104,29 @@ class ModernPostgresMigrationTests {
 				return values;
 			}
 		}
+	}
+
+
+	private static void assertTenantWorkspaceRls(java.sql.Connection connection) throws SQLException {
+		Set<String> expectedTables = Set.of(
+				"business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
+				"notifications.inbox_item",
+				"payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.receivable", "payments.receivable_allocation",
+				"sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order");
+		Set<String> actualTables = new java.util.HashSet<>();
+		Set<String> policyTables = new java.util.HashSet<>();
+		try (var statement = connection.createStatement(); var result = statement.executeQuery("select n.nspname || '.' || c.relname, p.policyname, p.qual, p.with_check from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_policies p on p.schemaname=n.nspname and p.tablename=c.relname where c.relkind='r' and c.relrowsecurity and c.relforcerowsecurity order by 1")) {
+			while (result.next()) {
+				String table = result.getString(1);
+				actualTables.add(table);
+				policyTables.add(table);
+				assertThat(result.getString(3)).as("USING policy for " + table).contains("current_setting('app.current_tenant_id'").contains("current_setting('app.current_workspace_id'");
+				assertThat(result.getString(4)).as("WITH CHECK policy for " + table).contains("current_setting('app.current_tenant_id'").contains("current_setting('app.current_workspace_id'");
+			}
+		}
+		assertThat(actualTables).as("all forced RLS tables must be explicitly inventoried").containsExactlyInAnyOrderElementsOf(expectedTables);
+		assertThat(policyTables).as("all forced RLS tables must have an explicit tenant/workspace policy")
+				.containsExactlyInAnyOrderElementsOf(expectedTables);
 	}
 
 	private static Set<String> indexColumns(java.sql.Connection connection, String schema, String index) throws SQLException {
