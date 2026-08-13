@@ -100,7 +100,9 @@ public class OrganizationRegistrationService implements SubmitOrganizationRegist
         try { aggregate.activate(); } catch (IllegalStateException exception) { throw new IamSecurityException("REGISTRATION_NOT_PENDING"); }
 
         String initialPassword = tokens.generate();
-        var activated = activations.createActivatedOrganization(aggregate, snapshot.displayName(), snapshot.workspaceName(), hasher.encode(initialPassword), now);
+        var organization = new OrganizationActivationPersistencePort.OrganizationSeed(snapshot.legalName(), snapshot.displayName(),
+                snapshot.businessIdentifier(), snapshot.operationCategory());
+        var activated = activations.createActivatedOrganization(aggregate, organization, snapshot.workspaceName(), hasher.encode(initialPassword), now);
         roles.assignFounderRoles(activated.membershipId(), activated.tenantId(), activated.workspaceId(), FOUNDER_ROLES);
 
         String resetToken = tokens.generate();

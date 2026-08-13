@@ -20,6 +20,7 @@ import com.nexa.api.tenantmanagement.domain.model.configuration.UnitPreferences;
 
 import java.time.Clock;
 import java.time.LocalTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -49,9 +50,11 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	public TenantConfigurationModels.OrganizationProfileView updateOrganizationProfile(CurrentAccessContext context,
 			TenantConfigurationModels.OrganizationProfileView request, long expectedVersion, String correlationId) {
 		manage(context);
+		OrganizationProfile current = port.findOrganizationProfile(context.tenantId().toString())
+				.orElseThrow(() -> new ApiResourceNotFoundException("organization settings"));
 		OrganizationProfile profile = new OrganizationProfile(request.legalName(), request.displayName(), request.businessIdentifier(), request.operationCategory(), expectedVersion);
 		if (port.updateOrganizationProfile(context.tenantId().toString(), profile) == 0) throw new ConcurrencyConflictException();
-		appendAudit(context, "ORGANIZATION_UPDATED", correlationId, Map.of("section", "organization"));
+		appendAudit(context, "ORGANIZATION_UPDATED", correlationId, organizationChangeMetadata(current, profile));
 		return view(new OrganizationProfile(profile.legalName(), profile.displayName(), profile.businessIdentifier(), profile.operationCategory(), expectedVersion + 1));
 	}
 
@@ -224,6 +227,23 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	private static TenantConfigurationModels.UnitPreferencesView view(UnitPreferences value) { return new TenantConfigurationModels.UnitPreferencesView(value.massUnit(), value.temperatureUnit(), value.distanceUnit(), value.volumeUnit(), value.version()); }
 	private static TenantConfigurationModels.OperationalSettingsView view(String workspaceId, OperationalSettings value) { return new TenantConfigurationModels.OperationalSettingsView(workspaceId, value.defaultWarehouseSelectionPolicy(), value.orderCutoffPolicy(), value.fulfillmentDefaults(), value.inventoryVisibilityPolicy(), value.buyerAvailabilityPolicy(), value.operatingHoursStart(), value.operatingHoursEnd(), value.orderCutoffMinutes(), value.thermalLogRequired(), value.version()); }
 	private static TenantConfigurationModels.TenantSecuritySettingsView view(TenantSecuritySettings value) { return new TenantConfigurationModels.TenantSecuritySettingsView(value.passwordMinLength(), value.sessionDurationMinutes(), value.invitationExpirationHours(), value.requiredEmailDomain(), value.version()); }
+	private static Map<String, Object> organizationChangeMetadata(OrganizationProfile before, OrganizationProfile after) {
+		Map<String, Object> oldValues = new LinkedHashMap<>();
+		oldValues.put("legalName", before.legalName());
+		oldValues.put("displayName", before.displayName());
+		oldValues.put("businessIdentifier", before.businessIdentifier());
+		oldValues.put("operationCategory", before.operationCategory());
+		Map<String, Object> newValues = new LinkedHashMap<>();
+		newValues.put("legalName", after.legalName());
+		newValues.put("displayName", after.displayName());
+		newValues.put("businessIdentifier", after.businessIdentifier());
+		newValues.put("operationCategory", after.operationCategory());
+		Map<String, Object> metadata = new LinkedHashMap<>();
+		metadata.put("section", "organization");
+		metadata.put("oldValues", oldValues);
+		metadata.put("newValues", newValues);
+		return metadata;
+	}
 
 	private static void read(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_READ); }
 	private static void manage(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_MANAGE); }

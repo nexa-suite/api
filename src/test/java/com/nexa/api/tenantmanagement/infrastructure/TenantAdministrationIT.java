@@ -48,6 +48,8 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"legalName\":\"ICISA Test\",\"displayName\":\"ICISA Administration\",\"businessIdentifier\":\"IT-ADMIN\",\"operationCategory\":\"B2B_COLD_CHAIN_DISTRIBUTOR\"}"))
                 .andExpect(status().isOk()).andReturn();
         assertThat(updated.getResponse().getHeader("ETag")).isEqualTo("\"1\"");
+        String organizationAudit = jdbc.queryForObject("select metadata_json::text from iam.security_audit_event where event_type='ORGANIZATION_UPDATED' order by occurred_at desc limit 1", String.class);
+        assertThat(organizationAudit).contains("oldValues", "newValues", "ICISA Test", "ICISA Administration", "IT-ADMIN");
         mockMvc.perform(patch("/api/v1/organization").header("Authorization", "Bearer " + owner).header("If-Match", etag)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"legalName\":\"ICISA Test\",\"displayName\":\"Stale\",\"businessIdentifier\":\"IT-ADMIN\",\"operationCategory\":\"B2B_COLD_CHAIN_DISTRIBUTOR\"}"))
                 .andExpect(status().isConflict());

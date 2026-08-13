@@ -11,13 +11,15 @@ import java.util.UUID;
 /** Locked organization-registration transition intent. */
 public interface OrganizationActivationPersistencePort {
     Optional<RegistrationSnapshot> findForUpdate(UUID registrationId);
-    ActivatedOrganization createActivatedOrganization(OrganizationRegistration registration, String organizationName,
+    ActivatedOrganization createActivatedOrganization(OrganizationRegistration registration, OrganizationSeed organization,
             String workspaceName, String initialPasswordHash, Instant now);
     void markActivated(UUID registrationId, UUID tenantId, UUID workspaceId, Instant now);
     void markRejected(UUID registrationId, String reason, Instant now);
 
-    record RegistrationSnapshot(UUID id, String displayName, String workspaceName, String workspaceSlug,
+    record RegistrationSnapshot(UUID id, String legalName, String displayName, String businessIdentifier,
+            String operationCategory, String workspaceName, String workspaceSlug,
             String founderEmail, String founderDisplayName, String termsVersion, String statusTokenHash,
             String referencePlan, String status, Instant submittedAt) { }
+    record OrganizationSeed(String legalName, String displayName, String businessIdentifier, String operationCategory) { }
     record ActivatedOrganization(UUID tenantId, UUID workspaceId, UUID founderUserId, UUID membershipId, String founderEmail) { }
 }

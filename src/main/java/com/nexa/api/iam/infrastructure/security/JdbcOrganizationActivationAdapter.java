@@ -24,16 +24,17 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
 
     @Override
     public Optional<RegistrationSnapshot> findForUpdate(UUID registrationId) {
-        return jdbc.query("select id,display_name,workspace_name,workspace_slug,founder_email,founder_display_name,terms_version,status_token_hash,reference_plan,status,created_at from tenant_management.organization_registration where id=? for update",
-                (rs, row) -> new RegistrationSnapshot(rs.getObject("id", UUID.class), rs.getString("display_name"),
-                        rs.getString("workspace_name"), rs.getString("workspace_slug"), rs.getString("founder_email"),
-                        rs.getString("founder_display_name"), rs.getString("terms_version"), rs.getString("status_token_hash"),
+        return jdbc.query("select id,legal_name,display_name,business_identifier,operation_category,workspace_name,workspace_slug,founder_email,founder_display_name,terms_version,status_token_hash,reference_plan,status,created_at from tenant_management.organization_registration where id=? for update",
+                (rs, row) -> new RegistrationSnapshot(rs.getObject("id", UUID.class), rs.getString("legal_name"), rs.getString("display_name"),
+                        rs.getString("business_identifier"), rs.getString("operation_category"), rs.getString("workspace_name"),
+                        rs.getString("workspace_slug"), rs.getString("founder_email"), rs.getString("founder_display_name"),
+                        rs.getString("terms_version"), rs.getString("status_token_hash"),
                         rs.getString("reference_plan"), rs.getString("status"), rs.getTimestamp("created_at").toInstant()), registrationId)
                 .stream().findFirst();
     }
 
     @Override
-    public ActivatedOrganization createActivatedOrganization(OrganizationRegistration registration, String organizationName,
+    public ActivatedOrganization createActivatedOrganization(OrganizationRegistration registration, OrganizationSeed organization,
             String workspaceName, String initialPasswordHash, Instant now) {
         String founderEmail = registration.founder().email();
         UUID existingUser = jdbc.query("select id from iam.user_account where normalized_email=? for update",
@@ -47,9 +48,11 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
         UUID tenantId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
         jdbc.update("insert into tenant_management.tenant (id,name,slug,status,created_at,updated_at,version) values (?,?,?,'ACTIVE',?,?,0)",
-                tenantId, organizationName, registration.workspaceSlug().value(), timestamp(now), timestamp(now));
+                tenantId, organization.displayName(), registration.workspaceSlug().value(), timestamp(now), timestamp(now));
         jdbc.update("insert into tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at,version) values (?,?,?,?,'ACTIVE',?,?,0)",
                 workspaceId, tenantId, workspaceName, registration.workspaceSlug().value(), timestamp(now), timestamp(now));
+        jdbc.update("insert into tenant_management.organization_settings (tenant_id,legal_name,display_name,business_identifier,operation_category,version,updated_at) values (?,?,?,?,?,0,?)",
+                tenantId, organization.legalName(), organization.displayName(), nullable(organization.businessIdentifier()), organization.operationCategory(), timestamp(now));
 
         UUID userId = existingUser;
         if (userId == null) {
@@ -82,5 +85,9 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
 
     private static Timestamp timestamp(Instant instant) {
         return Timestamp.from(instant);
+    }
+
+    private static String nullable(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }
