@@ -5,7 +5,9 @@ The project uses Semantic Versioning.
 
 ## Unreleased
 
-Current `develop` artifact: `0.9.0`. The following candidate content is an **UNRELEASED DRAFT**; no release number, tag or GitHub Release is established.
+No unreleased changes are included in this baseline.
+
+## [0.9.0] - 2026-08-18
 
 Operations release stabilization for the consolidated commercial, Warehouse and Logistics baseline.
 
@@ -26,7 +28,7 @@ Operations release stabilization for the consolidated commercial, Warehouse and 
 - Public contact/demo request intake with validation, durable email/IP throttling, audit evidence and no automatic Tenant or identity provisioning.
 - Forward-only Flyway hardening for direct tenant-scoped membership and manual sales-draft tables.
 
-This candidate did not claim Business Documents, storage, files, invoices or payments. Current `develop` contains separate development contracts; no provider, fiscal or end-to-end completion is claimed.
+This release does not claim Business Documents, storage, files, invoices or payments. Current development contracts remain outside this baseline; no provider, fiscal or end-to-end completion is claimed.
 
 ## [0.8.0] - 2026-07-31
 
