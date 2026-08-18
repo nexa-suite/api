@@ -29,7 +29,7 @@
 	<properties>
 		<java.version>25</java.version>
 		<spring-modulith.version>2.1.0</spring-modulith.version>
-		<archunit.version>1.4.2</archunit.version>
+		<archunit.version>1.5.0</archunit.version>
 		<testcontainers.version>2.0.4</testcontainers.version>
 		<stripe-java.version>31.4.0</stripe-java.version>
 	</properties>
