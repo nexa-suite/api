@@ -18,7 +18,7 @@
 
 ## Overview
 
-Spring Boot modular monolith. API owns identity, tenant/workspace access, Catalog, commercial, Warehouse and Logistics contracts. Current development contracts for documents, invoicing, payments and public contact intake remain unreleased until their provider, fiscal and end-to-end gates pass.
+Spring Boot modular monolith. API owns identity, tenant/workspace access, Catalog, commercial, Warehouse and Logistics contracts. Business Documents, storage/evidence and Payments/Stripe technical foundations are present in this runtime and database baseline; that presence does not claim accepted Product capability, provider/fiscal completion or complete end-to-end business semantics.
 
 ## Related repositories
 
@@ -36,6 +36,7 @@ The organization profile owns the full public ecosystem map. This repository lin
 - Client Accounts, Purchase Requests and Sales Orders.
 - Inventory, FEFO reservations, dispatch and delivery tracking.
 - Problem Details, idempotency, optimistic concurrency and Flyway-managed PostgreSQL schemas.
+- Business Document rendering/storage/evidence and Payments/Stripe technical foundations, with Product acceptance boundaries kept explicit.
 - Local OpenAPI for contract inspection.
 
 Development evidence is not published product evidence. API remains business authority; clients do not duplicate domain rules.

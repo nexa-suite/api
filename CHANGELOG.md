@@ -28,7 +28,7 @@ Operations release stabilization for the consolidated commercial, Warehouse and 
 - Public contact/demo request intake with validation, durable email/IP throttling, audit evidence and no automatic Tenant or identity provisioning.
 - Forward-only Flyway hardening for direct tenant-scoped membership and manual sales-draft tables.
 
-This release does not claim Business Documents, storage, files, invoices or payments. Current development contracts remain outside this baseline; no provider, fiscal or end-to-end completion is claimed.
+Business Documents, storage/evidence and Payments/Stripe technical foundations are present in the API runtime and database baseline. Their presence does not claim completion or acceptance of the corresponding Product capabilities, provider/fiscal workflows or end-to-end business semantics.
 
 ## [0.8.0] - 2026-07-31
 
