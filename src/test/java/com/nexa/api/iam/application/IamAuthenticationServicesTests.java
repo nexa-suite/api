@@ -58,7 +58,7 @@ class IamAuthenticationServicesTests {
 		var result = service.signIn(new SignInCommand("CARLOS@ICISA.PE", "correct", ClientSurface.PLATFORM));
 
 		assertThat(result.surface()).isEqualTo(ClientSurface.PLATFORM);
-		assertThat(result.role()).isEqualTo("commercial");
+		assertThat(result.roles()).containsExactly("commercial");
 		assertThat(result.permissions()).containsExactlyInAnyOrder("catalog:read", "sales:read");
 		assertThat(result.accessToken()).isEqualTo("access-1");
 		assertThat(fixture.passwords.checked).isTrue();
@@ -95,6 +95,18 @@ class IamAuthenticationServicesTests {
 		assertThat(fixture.sessions.revokedFamilies).containsExactly(firstFamily(fixture));
 		assertThatThrownBy(() -> refresh.refresh(new RefreshSessionCommand(rotated.refreshToken())))
 				.isInstanceOf(RefreshTokenReuseDetectedException.class);
+	}
+
+	@Test
+	void refreshResolvesTheExactPersistedMembership() {
+		Fixture fixture = new Fixture();
+		fixture.policies.membershipId = "membership-1";
+		var first = fixture.signInService().signIn(new SignInCommand("carlos", "correct", ClientSurface.PORTAL));
+
+		new RefreshSessionService(fixture.sessions, fixture.policies, fixture.tokens, CLOCK)
+				.refresh(new RefreshSessionCommand(first.refreshToken()));
+
+		assertThat(fixture.policies.exactMembershipLookups).isEqualTo(1);
 	}
 
 	@Test
@@ -140,9 +152,23 @@ class IamAuthenticationServicesTests {
 	}
 
 	private static final class FakePolicies implements AccessPolicyPort {
+		private String membershipId;
+		private int exactMembershipLookups;
+
 		@Override
 		public Optional<AccessPolicy> findFor(UserAccountId id, ClientSurface surface) {
-			return Optional.of(new AccessPolicy(surface, "commercial", Set.of("catalog:read", "sales:read")));
+			return Optional.of(policy(surface));
+		}
+
+		@Override
+		public Optional<AccessPolicy> findForMembership(UserAccountId id, String membershipId, ClientSurface surface) {
+			exactMembershipLookups++;
+			return membershipId.equals(this.membershipId) ? Optional.of(policy(surface)) : Optional.empty();
+		}
+
+		private AccessPolicy policy(ClientSurface surface) {
+			return new AccessPolicy(surface, Set.of("commercial"), Set.of("catalog:read", "sales:read"),
+					null, null, null, null, membershipId, null, null);
 		}
 	}
 

@@ -2,7 +2,7 @@ name: API CI
 
 on:
   push:
-    branches: [main, develop, "feature/**", "release/**"]
+    branches: [main, develop, "feature/**", "release/**", "integration/**"]
   pull_request:
     branches: [main, develop]
 
@@ -13,11 +13,33 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
-          java-version: "26.0.1"
+          java-version: "25"
           cache: maven
-      - name: Verify API
-        run: ./mvnw clean verify
+      - name: Start external integration adapters
+        run: |
+          docker run -d --name nexa-ci-clamav -p 3310:3310 clamav/clamav-debian:1.4.3
+          docker run -d --name nexa-ci-stripe-mock -p 12111:8080 \
+            -v "$GITHUB_WORKSPACE/ops/compose/stripe-mock/mappings:/home/wiremock/mappings:ro" \
+            wiremock/wiremock:3.13.1 --global-response-templating
+          for _ in $(seq 1 60); do
+            stripe_ready=0
+            clamav_ready=0
+            curl --fail --silent http://127.0.0.1:12111/__admin/health >/dev/null && stripe_ready=1 || true
+            docker exec nexa-ci-clamav clamdscan --ping 1 >/dev/null 2>&1 && clamav_ready=1 || true
+            if [ "$stripe_ready" -eq 1 ] && [ "$clamav_ready" -eq 1 ]; then exit 0; fi
+            sleep 2
+          done
+          docker logs nexa-ci-clamav
+          docker logs nexa-ci-stripe-mock
+          exit 1
+      - name: Verify API with real PostgreSQL integrations
+        env:
+          NEXA_DATABASE_POOL_MAX: "32"
+        run: ./mvnw clean verify -Dnexa.integration.enabled=true -Dspring.datasource.hikari.maximum-pool-size=32
+      - name: Stop external integration adapters
+        if: ${{ always() }}
+        run: docker rm -f nexa-ci-clamav nexa-ci-stripe-mock || true

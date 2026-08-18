@@ -13,6 +13,7 @@ import com.nexa.api.iam.application.port.in.RefreshSessionUseCase;
 import com.nexa.api.iam.application.port.out.AccessPolicyPort;
 import com.nexa.api.iam.application.port.out.AuthenticationTokenPort;
 import com.nexa.api.iam.application.port.out.SessionPort;
+import com.nexa.api.shared.application.port.out.SecurityAuditPort;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -23,12 +24,19 @@ public final class RefreshSessionService implements RefreshSessionUseCase {
 	private final AccessPolicyPort accessPolicies;
 	private final AuthenticationTokenPort tokenIssuer;
 	private final Clock clock;
+	private final SecurityAuditPort audit;
 
 	public RefreshSessionService(SessionPort sessions, AccessPolicyPort accessPolicies,
 			AuthenticationTokenPort tokenIssuer, Clock clock) {
+		this(sessions, accessPolicies, tokenIssuer, event -> { }, clock);
+	}
+
+	public RefreshSessionService(SessionPort sessions, AccessPolicyPort accessPolicies,
+			AuthenticationTokenPort tokenIssuer, SecurityAuditPort audit, Clock clock) {
 		this.sessions = Objects.requireNonNull(sessions, "Session port is required");
 		this.accessPolicies = Objects.requireNonNull(accessPolicies, "Access policy port is required");
 		this.tokenIssuer = Objects.requireNonNull(tokenIssuer, "Authentication token port is required");
+		this.audit = Objects.requireNonNull(audit, "Security audit port is required");
 		this.clock = Objects.requireNonNull(clock, "Clock is required");
 	}
 
@@ -43,7 +51,10 @@ public final class RefreshSessionService implements RefreshSessionUseCase {
 		}
 		if (!current.session().isActive(now)) throw new InvalidRefreshTokenException();
 		if (command.surface() != null && command.surface() != current.subject().surface()) throw new InvalidRefreshTokenException();
-		AccessPolicy policy = accessPolicies.findFor(current.subject().userAccountId(), current.subject().policy().workspaceSlug(), current.subject().surface())
+		String membershipId = current.subject().policy().membershipId();
+		AccessPolicy policy = (membershipId == null || membershipId.isBlank()
+				? accessPolicies.findFor(current.subject().userAccountId(), current.subject().policy().workspaceSlug(), current.subject().surface())
+				: accessPolicies.findForMembership(current.subject().userAccountId(), membershipId, current.subject().surface()))
 				.orElseThrow(InvalidRefreshTokenException::new);
 		AuthenticationSubject subject = new AuthenticationSubject(current.subject().userAccountId(), current.subject().email(),
 				current.subject().surface(), policy);
@@ -59,6 +70,12 @@ public final class RefreshSessionService implements RefreshSessionUseCase {
 			throw new RefreshTokenReuseDetectedException();
 		}
 		if (rotation.status() != RefreshRotation.Status.ROTATED) throw new InvalidRefreshTokenException();
+		audit.append(new SecurityAuditPort.Event("LOGIN_SUCCEEDED", uuid(replacement.subject().userAccountId().value()), null, null, null,
+				replacement.subject().surface().name(), "unknown", "unknown", now, java.util.Map.of("flow", "refresh")));
 		return AuthenticationResult.from(rotation.session());
+	}
+
+	private static java.util.UUID uuid(String value) {
+		try { return value == null ? null : java.util.UUID.fromString(value); } catch (IllegalArgumentException ignored) { return null; }
 	}
 }

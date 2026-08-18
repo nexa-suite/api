@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+           xmlns="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+           xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+           elementFormDefault="qualified">
+    <xs:import namespace="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" schemaLocation="business-document-common-basic-v1.xsd"/>
+    <xs:complexType name="PartyNameType"><xs:sequence><xs:element ref="cbc:Name"/></xs:sequence></xs:complexType>
+    <xs:complexType name="PartyType"><xs:sequence><xs:element name="Party" type="PartyBodyType"/></xs:sequence></xs:complexType>
+    <xs:complexType name="PartyBodyType"><xs:sequence><xs:element name="PartyName" type="PartyNameType"/></xs:sequence></xs:complexType>
+    <xs:complexType name="ItemType"><xs:sequence><xs:element ref="cbc:Name"/></xs:sequence></xs:complexType>
+    <xs:complexType name="PriceType"><xs:sequence><xs:element ref="cbc:PriceAmount"/></xs:sequence></xs:complexType>
+    <xs:complexType name="InvoiceLineType"><xs:sequence><xs:element ref="cbc:ID"/><xs:element ref="cbc:InvoicedQuantity"/><xs:element ref="cbc:LineExtensionAmount"/><xs:element name="Item" type="ItemType"/><xs:element name="Price" type="PriceType"/></xs:sequence></xs:complexType>
+    <xs:complexType name="TaxTotalType"><xs:sequence><xs:element ref="cbc:TaxAmount"/></xs:sequence></xs:complexType>
+    <xs:complexType name="LegalMonetaryTotalType"><xs:sequence><xs:element ref="cbc:PayableAmount"/></xs:sequence></xs:complexType>
+    <xs:complexType name="ShipmentType"><xs:sequence><xs:element ref="cbc:ID"/><xs:element ref="cbc:Information"/></xs:sequence></xs:complexType>
+    <xs:complexType name="DespatchLineType"><xs:sequence><xs:element ref="cbc:ID"/><xs:element ref="cbc:DeliveredQuantity"/><xs:element name="Item" type="ItemType"/></xs:sequence></xs:complexType>
+    <xs:element name="AccountingSupplierParty" type="PartyType"/>
+    <xs:element name="AccountingCustomerParty" type="PartyType"/>
+    <xs:element name="DespatchSupplierParty" type="PartyType"/>
+    <xs:element name="DeliveryCustomerParty" type="PartyType"/>
+    <xs:element name="InvoiceLine" type="InvoiceLineType"/>
+    <xs:element name="TaxTotal" type="TaxTotalType"/>
+    <xs:element name="LegalMonetaryTotal" type="LegalMonetaryTotalType"/>
+    <xs:element name="Shipment" type="ShipmentType"/>
+    <xs:element name="DespatchLine" type="DespatchLineType"/>
+</xs:schema>

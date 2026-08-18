@@ -2,6 +2,7 @@ package com.nexa.api.tenantmanagement.application.model;
 
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.access.PermissionPolicy;
 import com.nexa.api.tenantmanagement.domain.model.access.RoleSurfacePolicy;
 import com.nexa.api.tenantmanagement.domain.model.access.Surface;
@@ -17,6 +18,7 @@ import com.nexa.api.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 
 import java.util.Objects;
 import java.util.Set;
+import java.util.LinkedHashSet;
 
 /**
  * Application-facing access snapshot created only from a verified membership.
@@ -26,6 +28,7 @@ public final class CurrentAccessContext implements AccessContext {
 	private final VerifiedMembership verifiedMembership;
 	private final Surface surface;
 	private final Set<Permission> permissions;
+	private final Set<String> permissionCodes;
 
 	private CurrentAccessContext(VerifiedMembership verifiedMembership, Surface surface) {
 		this.verifiedMembership = Objects.requireNonNull(verifiedMembership, "Verified membership is required");
@@ -33,8 +36,9 @@ public final class CurrentAccessContext implements AccessContext {
 		if (!verifiedMembership.isAccessible()) {
 			throw new AccessPolicyViolation("Tenant workspace membership is not active");
 		}
-		RoleSurfacePolicy.requireAllowed(role(), surface);
-		this.permissions = PermissionPolicy.permissionsFor(role());
+		if (!verifiedMembership.authorization().allowsSurface(surface)) throw new AccessPolicyViolation("Membership roles are not allowed on requested surface");
+		this.permissionCodes = verifiedMembership.authorization().permissionCodes();
+		this.permissions = legacyPermissions();
 	}
 
 	public static CurrentAccessContext from(VerifiedMembership verifiedMembership, Surface surface) {
@@ -66,9 +70,22 @@ public final class CurrentAccessContext implements AccessContext {
 	}
 
 	@Override
-	public MembershipRole role() {
-		return verifiedMembership.membership().role();
+	public long authorizationVersion() {
+		return verifiedMembership.authorization().authorizationVersion();
 	}
+
+	public Set<MembershipRole> roles() { return verifiedMembership.membership().roles(); }
+
+	@Override
+	public Set<String> roleCodes() { return verifiedMembership.authorization().roleCodes(); }
+
+	@Override
+	public Set<String> roleDefinitionIds() { return verifiedMembership.authorization().roleDefinitionIds(); }
+
+	@Override
+	public Set<String> permissionCodes() { return permissionCodes; }
+
+	public boolean hasRole(MembershipRole role) { return roles().contains(Objects.requireNonNull(role)); }
 
 	@Override
 	public Surface surface() {
@@ -82,7 +99,12 @@ public final class CurrentAccessContext implements AccessContext {
 
 	@Override
 	public boolean allows(Permission permission) {
-		return permissions.contains(Objects.requireNonNull(permission, "Permission is required"));
+		return permission != null && (permissions.contains(permission) || verifiedMembership.authorization().allowsLegacy(permission));
+	}
+
+	@Override
+	public boolean allows(PermissionKey permission) {
+		return verifiedMembership.authorization().allows(permission);
 	}
 
 	public boolean hasPermission(Permission permission) {
@@ -141,6 +163,14 @@ public final class CurrentAccessContext implements AccessContext {
 		}
 	}
 
+	public void requirePermission(PermissionKey permission) {
+		if (!allows(permission)) throw new AccessPolicyViolation("Membership role does not have the requested permission");
+	}
+
+	public boolean hasRoleCode(String roleCode) {
+		return roleCode != null && roleCodes().stream().anyMatch(roleCode::equalsIgnoreCase);
+	}
+
 	@Override
 	public void requireAccess(TenantId requestedTenantId, WorkspaceId requestedWorkspaceId,
 			Surface requestedSurface, Permission permission) {
@@ -148,5 +178,25 @@ public final class CurrentAccessContext implements AccessContext {
 		requireWorkspace(requestedWorkspaceId);
 		requireSurface(requestedSurface);
 		requirePermission(permission);
+	}
+
+	private Set<Permission> legacyPermissions() {
+		java.util.EnumSet<Permission> result = java.util.EnumSet.noneOf(Permission.class);
+		/* Fixed roles own the legacy compatibility surface. Dynamic roles use the
+		 * typed PermissionKey checks and must not inherit broad legacy aliases such
+		 * as tenant:manage from a narrower tenant.role.assign permission. */
+		if (!roles().isEmpty()) result.addAll(PermissionPolicy.permissionsFor(roles()));
+		/* Company Owner is a business-governance role, not an operational role.
+		 * Keep the legacy compatibility projection aligned with the canonical
+		 * PermissionCatalog: explicit custom/operational assignments still arrive
+		 * through authorization.allows(...), while the reserved owner alone cannot
+		 * read or mutate Warehouse, Fulfillment or Logistics resources. */
+		if (roles().contains(MembershipRole.COMPANY_OWNER)
+				&& roles().stream().noneMatch(role -> role == MembershipRole.SALES
+						|| role == MembershipRole.WAREHOUSE || role == MembershipRole.LOGISTICS)) {
+			result.removeAll(java.util.EnumSet.of(Permission.WAREHOUSE_READ, Permission.WAREHOUSE_WRITE,
+					Permission.FULFILLMENT_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE));
+		}
+		return Set.copyOf(new LinkedHashSet<>(result));
 	}
 }

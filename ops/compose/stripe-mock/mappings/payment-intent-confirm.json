@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "/v1/payment_intents/[^/]+/confirm"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "{{request.pathSegments.[2]}}",
+      "object": "payment_intent",
+      "amount": 1250,
+      "amount_received": 1250,
+      "currency": "pen",
+      "status": "succeeded",
+      "client_secret": "{{request.pathSegments.[2]}}_secret_mock",
+      "livemode": false,
+      "metadata": {}
+    }
+  }
+}

@@ -3,6 +3,33 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## Unreleased
+
+No unreleased changes are included in this baseline.
+
+## [0.9.0] - 2026-08-18
+
+Operations release stabilization for the consolidated commercial, Warehouse and Logistics baseline.
+
+### Fixed
+
+- Sales Order creator identity, aggregate-owned lifecycle and concurrent conversion replay.
+- Warehouse FEFO/expiration forward migration and route-start application ownership.
+- Dispatch number initialization and OpenAPI release metadata.
+- Refresh and workspace-preview context resolution now fail closed on ambiguous tenant/workspace slugs and use the exact persisted membership when available.
+
+### Changed
+
+- Warehouse and Logistics application boundaries and dedicated operational evidence were strengthened.
+
+### Added
+
+- Internal TASK-011 document-subject vocabulary and lookup contract only.
+- Public contact/demo request intake with validation, durable email/IP throttling, audit evidence and no automatic Tenant or identity provisioning.
+- Forward-only Flyway hardening for direct tenant-scoped membership and manual sales-draft tables.
+
+Business Documents, storage/evidence and Payments/Stripe technical foundations are present in the API runtime and database baseline. Their presence does not claim completion or acceptance of the corresponding Product capabilities, provider/fiscal workflows or end-to-end business semantics.
+
 ## [0.8.0] - 2026-07-31
 
 This release consolidates the previously unpublished TASK-NEXA-008, TASK-NEXA-008.6, TASK-NEXA-009, TASK-NEXA-010 and TASK-NEXA-010.5 work.
@@ -23,7 +50,9 @@ This release consolidates the previously unpublished TASK-NEXA-008, TASK-NEXA-00
 
 - Authentication throttling, session revalidation, tenant/client isolation and role-specific Warehouse/Logistics authorization are covered by the release gate.
 
-## [0.7.0] - 2026-07-30
+## Previously unreleased candidate: 0.7.0
+
+This candidate content was later consolidated into published `v0.8.0`; `v0.7.0` has no published tag or GitHub Release.
 
 ### Added
 
@@ -122,9 +151,8 @@ This release consolidates previously unreleased Identity, tenant, security and c
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.9.0...HEAD
 [0.8.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.8.0
-[0.7.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nexa-suite/api/compare/v0.2.0...v0.3.0

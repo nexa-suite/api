@@ -16,6 +16,10 @@ class ChangeEventAudiencePolicyTests {
 		assertThat(ChangeEventAudiences.forEvent("sales.purchase-request.created", true))
 				.containsExactlyInAnyOrder(ChangeEventAudience.SALES, ChangeEventAudience.BUYER);
 	}
+	@Test void operationalHandoffIsVisibleOnlyToWarehouseAndLogistics() {
+		assertThat(ChangeEventAudiences.forEvent("warehouse.logistics.handoff-note", false))
+				.containsExactlyInAnyOrder(ChangeEventAudience.WAREHOUSE, ChangeEventAudience.LOGISTICS);
+	}
 	@Test void unknownEventsFailClosed() {
 		assertThatThrownBy(() -> ChangeEventAudiences.forEvent("future.unknown.event", false))
 				.isInstanceOf(IllegalStateException.class);

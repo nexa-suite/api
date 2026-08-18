@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 public class SalesOrderService implements SalesOrderUseCase {
 	private final SalesOrderPersistencePort persistence;
@@ -43,10 +44,10 @@ public class SalesOrderService implements SalesOrderUseCase {
 
 	public SalesOrderService(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts,
 			SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence) {
-		this.persistence = persistence;
-		this.accounts = accounts;
-		this.aggregatePersistence = aggregatePersistence;
-		this.conversionPersistence = conversionPersistence;
+		this.persistence = Objects.requireNonNull(persistence, "Sales Order persistence is required");
+		this.accounts = Objects.requireNonNull(accounts, "Client Account persistence is required");
+		this.aggregatePersistence = Objects.requireNonNull(aggregatePersistence, "Sales Order aggregate persistence is required");
+		this.conversionPersistence = Objects.requireNonNull(conversionPersistence, "Sales Order conversion persistence is required");
 		this.conversionService = new ConvertApprovedPurchaseRequestToSalesOrderService(conversionPersistence);
 	}
 
@@ -75,19 +76,16 @@ public class SalesOrderService implements SalesOrderUseCase {
 		String normalized = action == null ? "" : action.trim().toLowerCase(java.util.Locale.ROOT);
 		if (!(normalized.equals("confirm") || normalized.equals("reject") || normalized.equals("cancel"))) throw new SalesOrderTransitionException();
 		if (normalized.equals("reject") && (reason == null || reason.isBlank())) throw new SalesOrderRejectionReasonRequiredException();
-		if (aggregatePersistence != null) {
-			SalesOrder aggregate = aggregatePersistence.findForUpdate(scope(context), workspace(context), id)
-					.orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("sales-order"));
-			if (aggregate.version() != expectedVersion) throw new com.nexa.api.sales.application.exception.SalesConcurrencyConflictException();
-			Instant at = java.time.Instant.ofEpochMilli(now());
-			switch (normalized) {
-				case "confirm" -> aggregate.confirm(at);
-				case "reject" -> aggregate.reject(reason, at);
-				case "cancel" -> aggregate.cancel(at);
-			}
-			return aggregatePersistence.saveTransition(aggregate, normalized, reason, context.membershipId().toString(), expectedVersion, at.toEpochMilli());
+		SalesOrder aggregate = aggregatePersistence.findForUpdate(scope(context), workspace(context), id)
+				.orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("sales-order"));
+		if (aggregate.version() != expectedVersion) throw new com.nexa.api.sales.application.exception.SalesConcurrencyConflictException();
+		Instant at = java.time.Instant.ofEpochMilli(now());
+		switch (normalized) {
+			case "confirm" -> aggregate.confirm(at);
+			case "reject" -> aggregate.reject(reason, at);
+			case "cancel" -> aggregate.cancel(at);
 		}
-		return persistence.transition(scope(context), workspace(context), id, normalized, reason, context.membershipId().toString(), expectedVersion, now());
+		return aggregatePersistence.saveTransition(aggregate, normalized, reason, context.membershipId().toString(), expectedVersion, at.toEpochMilli());
 	}
 
 	@Override
@@ -97,13 +95,12 @@ public class SalesOrderService implements SalesOrderUseCase {
 
 	@Override
 	public SalesPage<FulfillmentCandidateView> fulfillmentCandidates(CurrentAccessContext context, SalesOrderFilter filter) {
-		if (context.role() != MembershipRole.WAREHOUSE && context.role() != MembershipRole.LOGISTICS) throw new AccessPolicyViolation("Only warehouse or logistics can read fulfillment candidates");
-		context.requirePermission(Permission.FULFILLMENT_READ);
+		if (!context.allows(Permission.FULFILLMENT_READ) && !context.allows(Permission.LOGISTICS_READ)) throw new AccessPolicyViolation("Only warehouse or logistics can read fulfillment candidates");
 		return persistence.fulfillmentCandidates(scope(context), workspace(context), filter);
 	}
 
 	private String buyerAccount(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.BUYER) {
+		if (!context.hasRole(MembershipRole.BUYER)) {
 			context.requirePermission(Permission.SALES_READ);
 			return null;
 		}
@@ -112,7 +109,6 @@ public class SalesOrderService implements SalesOrderUseCase {
 	}
 
 	private static void commercialWrite(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.SALES && context.role() != MembershipRole.COMPANY_OWNER) throw new AccessPolicyViolation("Commercial sales access is required");
 		context.requirePermission(Permission.SALES_WRITE);
 	}
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }

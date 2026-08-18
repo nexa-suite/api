@@ -50,6 +50,13 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
+		if (isSignOutRequest(request)) {
+			/* Logout must remain callable with a still-valid JWT after the active
+			 * membership was suspended or its authorization snapshot changed. */
+			filterChain.doFilter(request, response);
+			return;
+		}
+
 		Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 		if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)) {
 			filterChain.doFilter(request, response);
@@ -62,16 +69,22 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		TenantId tenantId;
 		WorkspaceId workspaceId;
 		String membershipIdClaim;
-		String roleClaim;
+		String rolesClaim;
+		java.util.List<String> roleDefinitionIdsClaim;
 		String sessionIdClaim;
+		long authorizationVersionClaim;
 		try {
 			surface = Surface.valueOf(requiredClaim(jwt, "surface").toUpperCase(java.util.Locale.ROOT));
 			userId = new UserId(jwt.getSubject());
 			tenantId = new TenantId(requiredClaim(jwt, "tenant_id"));
 			workspaceId = new WorkspaceId(requiredClaim(jwt, "workspace_id"));
 			membershipIdClaim = requiredClaim(jwt, "membership_id");
-			roleClaim = requiredClaim(jwt, "role");
+			var canonicalRoles = jwt.getClaimAsStringList("roles");
+			if (canonicalRoles == null || canonicalRoles.isEmpty()) throw new IllegalArgumentException("Missing JWT claim roles");
+			rolesClaim = String.join(",", canonicalRoles);
+			roleDefinitionIdsClaim = jwt.getClaimAsStringList("role_definition_ids");
 			sessionIdClaim = requiredClaim(jwt, "sid");
+			authorizationVersionClaim = requiredLongClaim(jwt, "authorization_version");
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			authenticationEntryPoint.commence(request, response,
@@ -81,7 +94,7 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 
 		try {
 			accessSession.validate(new SessionId(sessionIdClaim), new com.nexa.api.iam.domain.model.useraccount.UserAccountId(jwt.getSubject()),
-					com.nexa.api.iam.domain.model.access.ClientSurface.valueOf(surface.name()));
+					com.nexa.api.iam.domain.model.access.ClientSurface.valueOf(surface.name()), authorizationVersionClaim);
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			accessTokenInvalidEntryPoint.commence(request, response,
@@ -93,8 +106,15 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		try {
 			resolved = accessContext.resolve(new CurrentAccessRequest(userId, tenantId, workspaceId, surface));
 			if (!resolved.membershipId().toString().equals(membershipIdClaim)
-					|| !resolved.role().name().equals(roleClaim)) {
+					|| !sameValues(resolved.roleCodes(), java.util.Arrays.asList(rolesClaim.split(",")))) {
 				throw new IllegalStateException("JWT access claims do not match the active workspace membership");
+			}
+			if (roleDefinitionIdsClaim != null && !roleDefinitionIdsClaim.isEmpty()
+					&& !sameValues(resolved.roleDefinitionIds(), roleDefinitionIdsClaim)) {
+				throw new IllegalStateException("JWT role definition claims do not match the active workspace membership");
+			}
+			if (resolved.authorizationVersion() != authorizationVersionClaim) {
+				throw new IllegalStateException("JWT authorization version does not match the active workspace membership");
 			}
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
@@ -103,19 +123,50 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 			return;
 		}
 
-		var authorities = resolved.permissions().stream()
-					.map(permission -> new SimpleGrantedAuthority(permission.code()))
-					.toList();
+		/* The persisted authorization snapshot is the only HTTP authority.  The
+		 * legacy Permission enum remains available to application compatibility
+		 * code, but must never widen a canonical role into an old broad grant. */
+		var authorities = resolved.permissionCodes().stream()
+				.distinct().map(SimpleGrantedAuthority::new).toList();
 		var verifiedAuthentication = new JwtAuthenticationToken(jwt, authorities, jwtAuthentication.getName());
 		verifiedAuthentication.setDetails(jwtAuthentication.getDetails());
 		SecurityContextHolder.getContext().setAuthentication(verifiedAuthentication);
 		request.setAttribute(ACCESS_CONTEXT_ATTRIBUTE, resolved);
-		filterChain.doFilter(request, response);
+		RlsRequestScope.set(resolved.tenantId().value(), resolved.workspaceId().value());
+		try {
+			filterChain.doFilter(request, response);
+		} finally {
+			RlsRequestScope.clear();
+		}
+	}
+
+	private static boolean isSignOutRequest(HttpServletRequest request) {
+		return "/api/v1/authentication/sign-out".equals(request.getRequestURI());
 	}
 
 	private static String requiredClaim(Jwt jwt, String name) {
 		String value = jwt.getClaimAsString(name);
 		if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing JWT claim " + name);
 		return value;
+	}
+
+	private static long requiredLongClaim(Jwt jwt, String name) {
+		Object raw = jwt.getClaims().get(name);
+		if (raw instanceof Number number && number.longValue() >= 0) return number.longValue();
+		try {
+			long value = Long.parseLong(String.valueOf(raw));
+			if (value < 0) throw new NumberFormatException();
+			return value;
+		} catch (RuntimeException exception) {
+			throw new IllegalArgumentException("Missing or invalid JWT claim " + name, exception);
+		}
+	}
+
+	private static boolean sameValues(java.util.Collection<String> expected, java.util.Collection<String> actual) {
+		java.util.Set<String> left = expected.stream().map(value -> value.trim().toLowerCase(java.util.Locale.ROOT))
+				.collect(java.util.stream.Collectors.toUnmodifiableSet());
+		java.util.Set<String> right = actual.stream().map(value -> value.trim().toLowerCase(java.util.Locale.ROOT))
+				.collect(java.util.stream.Collectors.toUnmodifiableSet());
+		return left.equals(right);
 	}
 }

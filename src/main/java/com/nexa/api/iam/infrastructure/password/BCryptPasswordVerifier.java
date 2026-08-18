@@ -1,6 +1,7 @@
 package com.nexa.api.iam.infrastructure.password;
 
 import com.nexa.api.iam.application.port.out.PasswordVerificationPort;
+import com.nexa.api.iam.application.port.out.PasswordHashPort;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,7 +10,8 @@ import org.springframework.beans.factory.annotation.Value;
 import java.util.Objects;
 
 @Component
-public final class BCryptPasswordVerifier implements PasswordVerificationPort {
+public final class BCryptPasswordVerifier implements PasswordVerificationPort, PasswordHashPort,
+		com.nexa.api.shared.application.port.out.PasswordVerificationPort {
 	private final BCryptPasswordEncoder encoder;
 
 	public BCryptPasswordVerifier() {
@@ -33,5 +35,11 @@ public final class BCryptPasswordVerifier implements PasswordVerificationPort {
 		} catch (IllegalArgumentException exception) {
 			return false;
 		}
+	}
+
+	@Override
+	public String encode(String rawPassword) {
+		if (rawPassword == null || rawPassword.isBlank()) throw new IllegalArgumentException("Password is required");
+		return encoder.encode(rawPassword);
 	}
 }

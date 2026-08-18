@@ -11,6 +11,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.core.annotation.Order;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -27,11 +28,30 @@ import java.util.Set;
 @EnableMethodSecurity
 public class ApiSecurityConfiguration {
 	@Bean
+	@Order(-100)
+	SecurityFilterChain systemOperatorSecurityFilterChain(HttpSecurity http, SystemOperatorAuthenticationFilter operatorFilter,
+			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) throws Exception {
+		http.securityMatcher("/api/v1/internal/organization-registrations/*/activation",
+				"/api/v1/internal/organization-registrations/*/rejection")
+				.csrf(AbstractHttpConfigurer::disable)
+				.cors(AbstractHttpConfigurer::disable)
+				.formLogin(AbstractHttpConfigurer::disable)
+				.httpBasic(AbstractHttpConfigurer::disable)
+				.logout(AbstractHttpConfigurer::disable)
+				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+				.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint).accessDeniedHandler(accessDeniedHandler))
+				.addFilterBefore(operatorFilter, BearerTokenAuthenticationFilter.class)
+				.authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated());
+		return http.build();
+	}
+
+	@Bean
 	SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, Environment environment,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
 			ObjectMapper objectMapper, JwtAuthenticationConverter jwtAuthenticationConverter,
 			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter) throws Exception {
-		boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
+				boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
+				boolean observabilityProfile = environment.acceptsProfiles(Profiles.of("observability"));
 		Set<String> allowedOrigins = allowedOrigins(environment);
 			http.csrf(AbstractHttpConfigurer::disable)
 				.headers(headers -> {
@@ -52,10 +72,20 @@ public class ApiSecurityConfiguration {
 				.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
 						.authenticationEntryPoint(authenticationEntryPoint))
 				.authorizeHttpRequests(authorize -> {
-					authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
+				authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
+					if (observabilityProfile) {
+						if (localProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
+						else authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").authenticated();
+					}
 					if (localProfile) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
-					authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
-						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews").permitAll();
+						authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/refresh",
+						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",
+						"/api/v1/integrations/stripe/webhooks",
+						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
+						"/api/v1/organization-invitation-acceptances",
+						"/api/v1/public/contact-requests",
+						"/api/v1/tenant-management/organization-registrations",
+						"/api/v1/tenant-management/organization-registrations/**").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();
 					authorize.anyRequest().denyAll();
 					});
@@ -69,8 +99,8 @@ public class ApiSecurityConfiguration {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Nexa-Surface"));
-		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-Id"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface"));
+		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-ID", "X-Trace-ID"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/**", configuration);
@@ -78,7 +108,7 @@ public class ApiSecurityConfiguration {
 	}
 
 	private static Set<String> allowedOrigins(Environment environment) {
-		return Arrays.stream(environment.getProperty("nexa.security.allowed-origins", "http://localhost:4200,http://localhost:4300").split(","))
+		return Arrays.stream(environment.getProperty("nexa.security.allowed-origins", "http://localhost:4200,http://localhost:4300,http://localhost:8000,http://127.0.0.1:4200,http://127.0.0.1:4300,http://127.0.0.1:8000").split(","))
 				.map(String::trim).filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.toUnmodifiableSet());
 	}
 
@@ -88,8 +118,10 @@ public class ApiSecurityConfiguration {
 	}
 
 	@Bean
-	ProblemDetailAccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper) {
-		return new ProblemDetailAccessDeniedHandler(objectMapper);
+	ProblemDetailAccessDeniedHandler accessDeniedHandler(ObjectMapper objectMapper,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.application.port.out.SecurityAuditPort> audit,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.infrastructure.observability.SecurityMetrics> metrics) {
+		return new ProblemDetailAccessDeniedHandler(objectMapper, audit, metrics);
 	}
 
 	@Bean
@@ -104,8 +136,10 @@ public class ApiSecurityConfiguration {
 	}
 
 	@Bean
-	AccessContextInvalidHandler accessContextInvalidHandler(ObjectMapper objectMapper) {
-		return new AccessContextInvalidHandler(objectMapper);
+	AccessContextInvalidHandler accessContextInvalidHandler(ObjectMapper objectMapper,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.application.port.out.SecurityAuditPort> audit,
+			org.springframework.beans.factory.ObjectProvider<com.nexa.api.shared.infrastructure.observability.SecurityMetrics> metrics) {
+		return new AccessContextInvalidHandler(objectMapper, audit, metrics);
 	}
 
 	@Bean

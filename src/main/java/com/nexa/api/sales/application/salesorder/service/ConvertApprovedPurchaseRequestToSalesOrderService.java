@@ -5,12 +5,10 @@ import com.nexa.api.sales.application.exception.PurchaseRequestAlreadyConvertedE
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.sales.application.salesorder.model.SalesOrderView;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersistencePort;
-import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.sales.domain.model.salesorder.SalesOrder;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
+import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -66,16 +64,13 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
 
         var identity = persistence.nextIdentity(tenant, workspace);
         SalesOrder aggregate = SalesOrder.fromApprovedSnapshot(snapshot.get(), identity.id(), identity.number(),
-                new BuyerMembershipId(context.membershipId().value()),
+                new MembershipId(context.membershipId().value()),
                 java.time.Instant.ofEpochMilli(System.currentTimeMillis()));
         return persistence.persistConversion(aggregate, purchaseRequestVersion, actor, idempotencyKey, note,
                 System.currentTimeMillis(), requestHash);
     }
 
     private static void requireCommercialWrite(CurrentAccessContext context) {
-        if (context.role() != MembershipRole.SALES && context.role() != MembershipRole.COMPANY_OWNER) {
-            throw new AccessPolicyViolation("Commercial sales access is required");
-        }
         context.requirePermission(Permission.SALES_WRITE);
     }
 

@@ -10,7 +10,10 @@ import com.nexa.api.catalogmanagement.application.port.out.CatalogItemQueryPort;
 import com.nexa.api.catalogmanagement.domain.model.catalogitem.CatalogItem;
 import com.nexa.api.catalogmanagement.domain.model.catalogitem.CatalogItemId;
 import com.nexa.api.catalogmanagement.infrastructure.seed.CatalogSeedLoader;
+import com.nexa.api.catalogmanagement.infrastructure.seed.CatalogFamilySkuMappingLoader;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Profile;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,13 +24,19 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 @Component
+@Profile("test")
 public final class SeedCatalogItemQueryAdapter implements CatalogItemQueryPort {
 	private final List<CatalogItem> items;
 	private final CatalogItemProjectionMapper projectionMapper;
 
 	public SeedCatalogItemQueryAdapter(CatalogSeedLoader seedLoader) {
+		this(seedLoader, null);
+	}
+
+	@Autowired
+	public SeedCatalogItemQueryAdapter(CatalogSeedLoader seedLoader, CatalogFamilySkuMappingLoader mappingLoader) {
 		this.items = List.copyOf(Objects.requireNonNull(seedLoader, "Catalog seed loader is required").loadDomainCatalog());
-		this.projectionMapper = new CatalogItemProjectionMapper();
+		this.projectionMapper = new CatalogItemProjectionMapper(mappingLoader);
 	}
 
 	@Override

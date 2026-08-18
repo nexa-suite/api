@@ -5,14 +5,20 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -34,37 +40,96 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	@EventListener(ApplicationReadyEvent.class)
-	@Transactional
+	@Order(Ordered.LOWEST_PRECEDENCE - 30)
 	public void seed() {
 		Instant now = clock.instant();
 		UUID tenantId = tenant(now);
 		UUID workspaceId = workspace(tenantId, now);
-		List<UserSeed> users = List.of(
-				new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", "COMPANY_OWNER"),
-				new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", "SALES"),
-				new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", "WAREHOUSE"),
-				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", "LOGISTICS"),
-				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", "BUYER"));
+		RlsRequestScope.set(tenantId, workspaceId);
+		List<UserSeed> users = new ArrayList<>(List.of(
+				new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", Set.of("TENANT_ADMIN", "COMPANY_OWNER")),
+				new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", Set.of("SALES")),
+				new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", Set.of("WAREHOUSE")),
+				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", Set.of("LOGISTICS")),
+				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER"))));
+		addOptionalUser(users, "NEXA_DEV_TENANT_ADMIN_EMAIL", "NEXA_DEV_TENANT_ADMIN_PASSWORD", Set.of("TENANT_ADMIN"));
+		addOptionalUser(users, "NEXA_DEV_COMPANY_OWNER_EMAIL", "NEXA_DEV_COMPANY_OWNER_PASSWORD", Set.of("COMPANY_OWNER"));
 		UUID buyerUserId = null;
 		for (UserSeed user : users) {
 			UUID userId = user(user, now);
-			if ("BUYER".equals(user.role())) buyerUserId = userId;
+			if (user.roles().contains("BUYER")) buyerUserId = userId;
 			jdbc.update("insert into tenant_management.workspace_membership "
-					+ "(id, workspace_id, user_id, role, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
-					+ "on conflict (workspace_id, user_id) do update set role = excluded.role, status = 'ACTIVE', updated_at = excluded.updated_at",
-					UUID.randomUUID(), workspaceId, userId, user.role(), timestamp(now), timestamp(now));
+					+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
+					+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
+					LocalIdentityIds.forMembership(workspaceId, userId), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
+			UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
+			jdbc.update("delete from tenant_management.membership_role_definition a using tenant_management.role_definition r where a.role_id=r.id and a.membership_id=? and r.tenant_id is null", membershipId);
+			for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) select ?,?,?,r.id,? from tenant_management.role_definition r where r.tenant_id is null and r.code=lower(?) on conflict do nothing", membershipId, tenantId, workspaceId, timestamp(now), role);
+			jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?,?,?,?,?) on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=excluded.updated_at", membershipId, tenantId, workspaceId, 0, timestamp(now));
 		}
 		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
+		RlsRequestScope.clear();
+	}
+
+	/**
+	 * Warehouse lots depend on the canonical SKU projection. Run this after the
+	 * deterministic catalog import and Product Family/SKU reconciliation.
+	 */
+	@EventListener(ApplicationReadyEvent.class)
+	@Order(Ordered.LOWEST_PRECEDENCE)
+	@Transactional
+	public void seedWarehouseAfterCatalogReconciliation() {
+		Instant now = clock.instant();
+		UUID tenantId = tenant(now);
+		UUID workspaceId = workspace(tenantId, now);
+		seedWarehouse(tenantId, workspaceId, now);
+	}
+
+	private void seedWarehouse(UUID tenantId, UUID workspaceId, Instant now) {
+		String code = "ICISA-COLD-01";
+		UUID warehouseId = LocalIdentityIds.forWarehouse(tenantId, code);
+		jdbc.update("insert into warehouse.warehouse (id,tenant_id,workspace_id,code,name,address,status,created_at,updated_at) "
+				+ "values (?,?,?,?,?,?, 'ACTIVE',?,?) on conflict (tenant_id,workspace_id,code) do nothing",
+				warehouseId, tenantId, workspaceId, code, "ICISA Cold Chain Warehouse",
+				"Av. Argentina 1234, Callao, Lima, Peru", timestamp(now), timestamp(now));
+		UUID persistedWarehouseId = jdbc.queryForObject("select id from warehouse.warehouse where tenant_id=? and workspace_id=? and code=?",
+				UUID.class, tenantId, workspaceId, code);
+		jdbc.update("insert into warehouse.warehouse_service_configuration "
+				+ "(warehouse_id,tenant_id,workspace_id,service_status,priority,preferred,latitude,longitude,updated_at) "
+				+ "values (?,?,?,?,?,?,?,?,?) on conflict (warehouse_id) do nothing",
+				persistedWarehouseId, tenantId, workspaceId, "OPERATIONAL", 100, true,
+				new BigDecimal("-12.0464"), new BigDecimal("-77.0428"), timestamp(now));
+		UUID zoneId = LocalIdentityIds.forWarehouseZone(persistedWarehouseId, "CHILLED-A");
+		jdbc.update("insert into warehouse.storage_zone (id,tenant_id,workspace_id,warehouse_id,code,name,zone_type,temperature_min,temperature_max,status,created_at,updated_at,version) "
+				+ "values (?,?,?,?,?,?, 'CHILLED',?,?, 'ACTIVE',?,?,0) on conflict (tenant_id,workspace_id,warehouse_id,code) do nothing",
+				zoneId, tenantId, workspaceId, persistedWarehouseId, "CHILLED-A", "Cámara refrigerada A",
+				new BigDecimal("0"), new BigDecimal("8"), timestamp(now), timestamp(now));
+		UUID persistedZoneId = jdbc.queryForObject("select id from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? and code=?",
+				UUID.class, tenantId, workspaceId, persistedWarehouseId, "CHILLED-A");
+		seedInventory(tenantId, workspaceId, persistedWarehouseId, persistedZoneId, now);
+	}
+
+	private void seedInventory(UUID tenantId, UUID workspaceId, UUID warehouseId, UUID zoneId, Instant now) {
+		List<SkuSeed> skus = jdbc.query("select id,legacy_catalog_item_id,unit_of_measure from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and status='ACTIVE' and visible and legacy_catalog_item_id is not null and btrim(legacy_catalog_item_id) <> '' order by sku_code",
+				(rs, row) -> new SkuSeed(rs.getObject("id", UUID.class), rs.getString("legacy_catalog_item_id"), rs.getString("unit_of_measure")), tenantId, workspaceId);
+		for (SkuSeed sku : skus) {
+			String batch = "LOCAL-FOUNDATION-" + sku.legacyCatalogItemId();
+			UUID lotId = LocalIdentityIds.forInventoryLot(warehouseId, sku.id(), batch);
+			jdbc.update("insert into warehouse.inventory_lot (id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,version) "
+					+ "values (?,?,?,?,?,?,?,?,current_date + 365,current_timestamp - interval '1 day',1000,0,?,'AVAILABLE','0-8 C',0) on conflict do nothing",
+					lotId, tenantId, workspaceId, warehouseId, zoneId, sku.legacyCatalogItemId(), sku.id(), batch,
+					sku.unitOfMeasure() == null || sku.unitOfMeasure().isBlank() ? "UNIT" : sku.unitOfMeasure());
+		}
 	}
 
 	private void seedClientAccounts(UUID tenantId, UUID workspaceId, UUID buyerUserId, Instant now) {
 		if (buyerUserId == null) return;
-		List<UUID> memberships = jdbc.query("select id from tenant_management.workspace_membership where workspace_id=? and user_id=? and role='BUYER' and status='ACTIVE'", (rs, row) -> rs.getObject(1, UUID.class), workspaceId, buyerUserId);
+		List<UUID> memberships = jdbc.query("select id from tenant_management.workspace_membership where workspace_id=? and user_id=? and membership_type='BUYER' and status='ACTIVE'", (rs, row) -> rs.getObject(1, UUID.class), workspaceId, buyerUserId);
 		if (memberships.isEmpty()) return;
 		UUID membershipId = memberships.get(0);
 		for (var seed : clientAccountSeedLoader.load()) {
 			jdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) on conflict (tenant_id,code) do update set business_name=excluded.business_name,commercial_name=excluded.commercial_name,status=excluded.status,updated_at=excluded.updated_at",
-					UUID.randomUUID(), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
+					LocalIdentityIds.forClientAccount(tenantId, seed.code()), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
 			List<UUID> accounts = jdbc.query("select id from sales.client_account where tenant_id=? and workspace_id=? and code=?", (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, seed.code());
 			if (accounts.isEmpty() || !seed.portalAccess()) continue;
 			jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing", accounts.get(0), membershipId, tenantId, workspaceId, timestamp(now));
@@ -72,32 +137,32 @@ public class LocalDevelopmentBootstrap {
 	}
 
 	private UUID tenant(Instant now) {
-		String slug = required("NEXA_DEV_TENANT_SLUG").toLowerCase(java.util.Locale.ROOT);
-		String name = required("NEXA_DEV_TENANT_NAME");
+		String slug = defaulted("NEXA_DEV_TENANT_SLUG", "icisa").toLowerCase(java.util.Locale.ROOT);
+		String name = defaulted("NEXA_DEV_TENANT_NAME", "ICISA");
 		List<UUID> existing = jdbc.query("select id from tenant_management.tenant where slug = ?", (rs, row) -> rs.getObject(1, UUID.class), slug);
 		if (!existing.isEmpty()) return existing.get(0);
-		UUID id = UUID.randomUUID();
+		UUID id = LocalIdentityIds.forTenant(slug);
 		jdbc.update("insert into tenant_management.tenant (id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, 'ACTIVE', ?, ?, 0)", id, name, slug, timestamp(now), timestamp(now));
 		return id;
 	}
 
 	private UUID workspace(UUID tenantId, Instant now) {
-		String slug = required("NEXA_DEV_WORKSPACE_SLUG").toLowerCase(java.util.Locale.ROOT);
-		String name = required("NEXA_DEV_WORKSPACE_NAME");
+		String slug = defaulted("NEXA_DEV_WORKSPACE_SLUG", "icisa").toLowerCase(java.util.Locale.ROOT);
+		String name = defaulted("NEXA_DEV_WORKSPACE_NAME", "ICISA Workspace");
 		List<UUID> existing = jdbc.query("select id from tenant_management.workspace where tenant_id = ? and slug = ?",
 				(rs, row) -> rs.getObject(1, UUID.class), tenantId, slug);
 		if (!existing.isEmpty()) return existing.get(0);
-		UUID id = UUID.randomUUID();
+		UUID id = LocalIdentityIds.forWorkspace(tenantId, slug);
 		jdbc.update("insert into tenant_management.workspace (id, tenant_id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)",
 				id, tenantId, name, slug, timestamp(now), timestamp(now));
 		return id;
 	}
 
 	private UUID user(UserSeed seed, Instant now) {
-		String email = required(seed.emailKey()).toLowerCase(java.util.Locale.ROOT);
-		String password = required(seed.passwordKey());
+		String email = defaulted(seed.emailKey(), defaultEmail(seed.emailKey())).toLowerCase(java.util.Locale.ROOT);
+		String password = password(seed.passwordKey());
 		List<UUID> existing = jdbc.query("select id from iam.user_account where normalized_email = ?", (rs, row) -> rs.getObject(1, UUID.class), email);
-		UUID id = existing.isEmpty() ? UUID.randomUUID() : existing.get(0);
+		UUID id = existing.isEmpty() ? LocalIdentityIds.forUser(email) : existing.get(0);
 		if (existing.isEmpty()) {
 			jdbc.update("insert into iam.user_account (id, email, normalized_email, username, normalized_username, display_name, preferred_language, status, created_at, updated_at, version) values (?, ?, ?, ?, ?, ?, 'es', 'ACTIVE', ?, ?, 0)",
 					id, email, email, email, email, displayName(email), timestamp(now), timestamp(now));
@@ -114,6 +179,40 @@ public class LocalDevelopmentBootstrap {
 		return value.trim();
 	}
 
+	private String defaulted(String key, String fallback) {
+		String value = environment.getProperty(key);
+		return value == null || value.isBlank() ? fallback : value.trim();
+	}
+
+	private String password(String key) {
+		String configured = environment.getProperty(key);
+		if (configured == null || configured.isBlank()) configured = environment.getProperty("NEXA_DEV_DEMO_PASSWORD");
+		return configured == null || configured.isBlank() ? "NexaLocal!2026#" : configured.trim();
+	}
+
+	private static String defaultEmail(String key) {
+		return switch (key) {
+			case "NEXA_DEV_TENANT_ADMIN_EMAIL" -> "tenant.admin@icisa.test";
+			case "NEXA_DEV_COMPANY_OWNER_EMAIL" -> "company.owner@icisa.test";
+			case "NEXA_DEV_OWNER_EMAIL" -> "owner@icisa.test";
+			case "NEXA_DEV_SALES_EMAIL" -> "sales@icisa.test";
+			case "NEXA_DEV_WAREHOUSE_EMAIL" -> "warehouse@icisa.test";
+			case "NEXA_DEV_LOGISTICS_EMAIL" -> "logistics@icisa.test";
+			case "NEXA_DEV_BUYER_EMAIL" -> "buyer@icisa.test";
+			default -> throw new IllegalArgumentException("No deterministic local email for " + key);
+		};
+	}
+
+	private void addOptionalUser(List<UserSeed> users, String emailKey, String passwordKey, Set<String> roles) {
+		String email = environment.getProperty(emailKey);
+		String password = environment.getProperty(passwordKey);
+		if ((email == null || email.isBlank()) && (password == null || password.isBlank())) return;
+		if (email == null || email.isBlank() || password == null || password.isBlank()) {
+			throw new IllegalStateException("Pure role fixture requires both " + emailKey + " and " + passwordKey);
+		}
+		users.add(new UserSeed(emailKey, passwordKey, roles));
+	}
+
 	private static String displayName(String email) {
 		String localPart = email.substring(0, email.indexOf('@')).replace('.', ' ').replace('_', ' ');
 		return java.util.Arrays.stream(localPart.split("\\s+"))
@@ -126,5 +225,6 @@ public class LocalDevelopmentBootstrap {
 		return java.sql.Timestamp.from(instant);
 	}
 
-	private record UserSeed(String emailKey, String passwordKey, String role) {}
+	private record UserSeed(String emailKey, String passwordKey, Set<String> roles) {}
+	private record SkuSeed(UUID id, String legacyCatalogItemId, String unitOfMeasure) {}
 }

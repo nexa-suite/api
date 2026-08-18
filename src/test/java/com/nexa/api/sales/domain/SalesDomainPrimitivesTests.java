@@ -6,6 +6,8 @@ import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestStatus;
 import com.nexa.api.sales.domain.model.salesorder.SalesOrderId;
 import com.nexa.api.sales.domain.model.salesorder.SalesOrderStatus;
 import com.nexa.api.sales.domain.model.salesorder.SalesOrderInvariantViolation;
+import com.nexa.api.sales.domain.model.reference.PeruGeographyLevel;
+import com.nexa.api.sales.domain.model.reference.PeruGeographyOption;
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
 import org.junit.jupiter.api.Test;
 
@@ -44,5 +46,10 @@ class SalesDomainPrimitivesTests {
 			SalesOrderStatus.CONFIRMED,
 			SalesOrderStatus.REJECTED,
 			SalesOrderStatus.CANCELLED);
+	}
+
+	@Test
+	void roadTypesAreTopLevelReferenceData() {
+		assertThat(new PeruGeographyOption(1, PeruGeographyLevel.ROAD_TYPE, "AVENUE", "Avenida", null, true).parentCode()).isNull();
 	}
 }

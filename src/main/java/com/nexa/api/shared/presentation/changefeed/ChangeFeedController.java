@@ -1,6 +1,5 @@
 package com.nexa.api.shared.presentation.changefeed;
 
-import com.nexa.api.shared.application.changefeed.ChangeFeedStreamService;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;

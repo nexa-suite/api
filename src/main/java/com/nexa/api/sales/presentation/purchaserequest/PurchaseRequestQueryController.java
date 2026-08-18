@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -36,6 +37,7 @@ public class PurchaseRequestQueryController {
 	public PurchaseRequestQueryController(PurchaseRequestUseCase sales, PurchaseRequestHttpMapper mapper) { this.sales = sales; this.mapper = mapper; }
 
 	@GetMapping
+	@Operation(operationId = "listPurchaseRequests")
 	public PurchaseRequestPageResponse list(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)DRAFT|SUBMITTED|IN_REVIEW|NEEDS_ADJUSTMENT|APPROVED|REJECTED|CANCELLED|CONVERTED_TO_ORDER") String status,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)NORMAL|HIGH|URGENT") String priority, @RequestParam(required = false) String search,
@@ -46,12 +48,14 @@ public class PurchaseRequestQueryController {
 	}
 
 	@GetMapping("/{id}")
+	@Operation(operationId = "getPurchaseRequest")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Purchase Request returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Purchase Request not found")})
 	public ResponseEntity<PurchaseRequestDetailResponse> detail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
 		var value = sales.detail(context, id); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
 	}
 
 	@GetMapping("/{id}/events")
+	@Operation(operationId = "listPurchaseRequestEvents")
 	public List<com.nexa.api.sales.presentation.purchaserequest.response.PurchaseRequestEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
 		return sales.events(context, id).stream().map(mapper::event).toList();
 	}

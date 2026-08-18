@@ -7,7 +7,12 @@ spring:
       - org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration
       - org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
 nexa:
+  jdbc:
+    adapters-enabled: false
   security:
     allow-ephemeral-keys: true
     issuer: http://test.local
     audience: nexa-test
+    reset:
+      throttle-key: test-reset-throttle-key-012345678901234567890123456789
+    notification-outbox-key: test-notification-outbox-key-012345678901234567890123456789

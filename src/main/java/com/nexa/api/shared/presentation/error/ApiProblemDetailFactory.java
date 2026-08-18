@@ -21,6 +21,8 @@ public final class ApiProblemDetailFactory {
 		problem.setInstance(URI.create(request.getRequestURI()));
 		problem.setProperty("code", code.name());
 		problem.setProperty("correlationId", correlationId(request));
+		Object trace = request.getAttribute(com.nexa.api.shared.presentation.http.TraceIdFilter.ATTRIBUTE_NAME);
+		if (trace instanceof String traceId) problem.setProperty("traceId", traceId);
 		return problem;
 	}
 
@@ -52,12 +54,29 @@ public final class ApiProblemDetailFactory {
 			case PERMISSION_DENIED -> "Permission denied";
 			case ORIGIN_NOT_ALLOWED -> "Origin not allowed";
 			case CATALOG_ITEM_NOT_FOUND -> "Catalog item not found";
+			case CATALOG_CATEGORY_NOT_FOUND -> "Catalog category not found";
+			case CATALOG_BRAND_NOT_FOUND -> "Catalog brand not found";
+			case CATALOG_PRODUCT_NOT_FOUND -> "Catalog product not found";
+			case CATALOG_PRICE_NOT_FOUND -> "Catalog price not found";
+			case CATALOG_PROMOTION_NOT_FOUND -> "Catalog promotion not found";
+			case CATALOG_CATEGORY_CYCLE -> "Catalog category cycle";
+			case CATALOG_PRICE_OVERLAP -> "Catalog price overlap";
+			case CATALOG_CURRENCY_MISMATCH -> "Catalog currency mismatch";
+			case CATALOG_CONFLICT -> "Catalog conflict";
+			case PROMOTION_LIFECYCLE_INVALID -> "Promotion lifecycle invalid";
 			case INVALID_CATALOG_QUERY -> "Invalid catalog query";
 			case ORGANIZATION_NOT_FOUND -> "Organization not found";
 			case WORKSPACE_NOT_FOUND -> "Workspace not found";
 			case MEMBERSHIP_NOT_FOUND -> "Membership not found";
 			case LAST_ACTIVE_OWNER_REQUIRED -> "Last active owner required";
-			case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
+			case LAST_USABLE_ADMINISTRATIVE_WORKSPACE_REQUIRED -> "Last usable administrative workspace required";
+			case WORKSPACE_SLUG_CONFLICT -> "Workspace slug conflict";
+				case ROLE_TRANSITION_NOT_ALLOWED -> "Role transition not allowed";
+				case ROLE_DEFINITION_NOT_FOUND -> "Role definition not found";
+				case ROLE_DEFINITION_DUPLICATE -> "Role definition duplicate";
+				case ROLE_DEFINITION_IMMUTABLE -> "Role definition immutable";
+				case ROLE_DEFINITION_ASSIGNMENTS_ACTIVE -> "Role definition has active assignments";
+				case ROLE_DEFINITION_STORAGE_UNAVAILABLE -> "Role definition storage unavailable";
 			case CONCURRENCY_CONFLICT -> "Concurrency conflict";
 			case INVALID_TRANSITION -> "Invalid transition";
 			case PRECONDITION_REQUIRED -> "Precondition required";
@@ -94,8 +113,26 @@ public final class ApiProblemDetailFactory {
 				case DISPATCH_ALREADY_EXISTS -> "Dispatch already exists";
 				case RESERVATION_NOT_FOUND -> "Reservation not found";
 				case RESERVATION_NOT_READY -> "Reservation is not ready";
-				case RESPONSIBLE_MEMBERSHIP_INVALID -> "Responsible membership is invalid";
-				case INVALID_INVENTORY_SORT -> "Invalid inventory sort";
+					case RESPONSIBLE_MEMBERSHIP_INVALID -> "Responsible membership is invalid";
+					case OPERATIONAL_SETTINGS_NOT_FOUND -> "Operational settings not found";
+					case INVALID_INVENTORY_SORT -> "Invalid inventory sort";
+				case PROFILE_INVALID -> "Profile invalid";
+				case PROFILE_VERSION_CONFLICT -> "Profile version conflict";
+				case PASSWORD_POLICY_INVALID -> "Password policy invalid";
+				case PASSWORD_CHANGE_FAILED -> "Password change failed";
+				case PASSWORD_REUSE_NOT_ALLOWED -> "Password reuse not allowed";
+				case RESET_INVALID -> "Password reset invalid";
+				case RESET_RATE_LIMITED -> "Password reset rate limited";
+				case PUBLIC_CONTACT_RATE_LIMITED -> "Public contact request rate limited";
+				case REGISTRATION_INVALID -> "Organization registration invalid";
+				case REGISTRATION_SLUG_CONFLICT -> "Organization workspace slug conflict";
+				case FOUNDER_EMAIL_INCOMPATIBLE -> "Founder email is already used by an incompatible membership";
+				case REGISTRATION_NOT_PENDING -> "Organization registration is not pending";
+				case INVITATION_INVALID -> "Invitation invalid or expired";
+				case INVITATION_CONFLICT -> "Invitation conflict";
+				case CUSTOM_FIELD_CONFLICT -> "Custom field conflict";
+				case SYSTEM_OPERATOR_REQUIRED -> "System operator authorization required";
+				case REJECTION_REASON_REQUIRED -> "Rejection reason required";
 				case INTERNAL_ERROR -> "Internal server error";
 		};
 	}

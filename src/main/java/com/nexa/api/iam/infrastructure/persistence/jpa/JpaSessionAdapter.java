@@ -13,9 +13,8 @@ import com.nexa.api.iam.domain.model.session.RefreshTokenFamilyId;
 import com.nexa.api.iam.domain.model.session.SessionId;
 import com.nexa.api.iam.domain.model.useraccount.EmailAddress;
 import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
-import com.nexa.api.tenantmanagement.infrastructure.persistence.jpa.WorkspaceJpaRepository;
-import com.nexa.api.tenantmanagement.infrastructure.persistence.jpa.WorkspaceMembershipJpaRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Repository;
 import org.springframework.context.annotation.Profile;
@@ -27,6 +26,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.Set;
 import java.util.UUID;
 
 @Repository
@@ -35,19 +36,17 @@ public class JpaSessionAdapter implements SessionPort {
 	private final RefreshSessionJpaRepository sessions;
 	private final UserAccountJpaRepository users;
 	private final AccessPolicyPort accessPolicies;
-	private final WorkspaceMembershipJpaRepository memberships;
-	private final WorkspaceJpaRepository workspaces;
+	private final JdbcTemplate jdbc;
 	private final JwtDecoder decoder;
 	private final Duration accessTokenTtl;
 
 	public JpaSessionAdapter(RefreshSessionJpaRepository sessions, UserAccountJpaRepository users, AccessPolicyPort accessPolicies,
-			WorkspaceMembershipJpaRepository memberships, WorkspaceJpaRepository workspaces, JwtDecoder decoder,
+			JdbcTemplate jdbc, JwtDecoder decoder,
 			@Value("${nexa.security.access-token-ttl:PT15M}") Duration accessTokenTtl) {
 		this.sessions = sessions;
 		this.users = users;
 		this.accessPolicies = accessPolicies;
-		this.memberships = memberships;
-		this.workspaces = workspaces;
+		this.jdbc = jdbc;
 		this.decoder = decoder;
 		this.accessTokenTtl = accessTokenTtl;
 	}
@@ -76,8 +75,7 @@ public class JpaSessionAdapter implements SessionPort {
 	@Transactional(readOnly = true)
 	public Optional<SessionRecord> findBySessionId(SessionId sessionId) {
 		try {
-			return sessions.findById(UUID.fromString(sessionId.value())).flatMap(entity ->
-				toRecord(entity, null, null, entity.getCreatedAt(), entity.getCreatedAt().plus(accessTokenTtl)));
+			return sessions.findById(UUID.fromString(sessionId.value())).flatMap(this::toValidationRecord);
 		} catch (RuntimeException exception) {
 			return Optional.empty();
 		}
@@ -132,16 +130,24 @@ public class JpaSessionAdapter implements SessionPort {
 				.anyMatch(entity -> entity.getFamilyRevokedAt() != null);
 	}
 
+	@Override
+	@Transactional(readOnly = true)
+	public OptionalLong findAuthorizationVersion(SessionId sessionId) {
+		try {
+			return jdbc.query("select coalesce((select authorization_version from tenant_management.membership_authorization_state a where a.membership_id=m.id),m.version) "
+					+ "from iam.refresh_session s join tenant_management.workspace_membership m on m.id=s.membership_id where s.id=?",
+				rs -> rs.next() ? OptionalLong.of(rs.getLong(1)) : OptionalLong.empty(), UUID.fromString(sessionId.value()));
+		} catch (RuntimeException exception) {
+			return OptionalLong.empty();
+		}
+	}
+
 	private Optional<SessionRecord> toRecord(RefreshSessionJpaEntity entity, String accessToken, String refreshToken,
 			Instant accessIssuedAt, Instant accessExpiresAt) {
 		try {
 			UserAccountId userId = new UserAccountId(entity.getUserId().toString());
 			ClientSurface surface = ClientSurface.valueOf(entity.getSurface());
-			var membership = memberships.findById(entity.getMembershipId()).orElse(null);
-			if (membership == null) return Optional.empty();
-			var workspace = workspaces.findById(membership.getWorkspaceId()).orElse(null);
-			if (workspace == null) return Optional.empty();
-			AccessPolicy policy = accessPolicies.findFor(userId, workspace.getSlug(), surface).orElse(null);
+			AccessPolicy policy = accessPolicies.findForMembership(userId, entity.getMembershipId().toString(), surface).orElse(null);
 			if (policy == null) return Optional.empty();
 			var user = users.findById(entity.getUserId()).orElse(null);
 			if (user == null) return Optional.empty();
@@ -153,6 +159,28 @@ public class JpaSessionAdapter implements SessionPort {
 			Instant expires = accessExpiresAt == null ? issued.plus(accessTokenTtl) : accessExpiresAt;
 			var tokens = new IssuedAuthenticationTokens(accessToken == null ? "persisted-access-token" : accessToken,
 					refreshToken == null ? "persisted-refresh-token" : refreshToken, issued, expires, entity.getExpiresAt());
+			return Optional.of(new SessionRecord(session, subject, tokens));
+		} catch (RuntimeException exception) {
+			return Optional.empty();
+		}
+	}
+
+	/** Session validity is independent from current membership authorization. */
+	private Optional<SessionRecord> toValidationRecord(RefreshSessionJpaEntity entity) {
+		try {
+			UserAccountJpaEntity user = users.findById(entity.getUserId()).orElse(null);
+			if (user == null || !"ACTIVE".equals(user.getStatus())) return Optional.empty();
+			ClientSurface surface = ClientSurface.valueOf(entity.getSurface());
+			AccessPolicy policy = new AccessPolicy(surface, Set.of("SESSION_VALIDATION"), Set.of(), null, null, null, null,
+				entity.getMembershipId().toString(), user.getDisplayName(), user.getPreferredLanguage());
+			AuthenticationSubject subject = new AuthenticationSubject(new UserAccountId(entity.getUserId().toString()),
+				new EmailAddress(user.getEmail()), surface, policy);
+			AuthenticationSession session = AuthenticationSession.start(new SessionId(entity.getId().toString()), subject.userAccountId(),
+				surface, new RefreshTokenFamilyId(entity.getFamilyId().toString()), entity.getCreatedAt(), entity.getExpiresAt());
+			if (entity.getRevokedAt() != null) session.revoke(entity.getRevokedAt());
+			Instant expires = entity.getCreatedAt().plus(accessTokenTtl);
+			IssuedAuthenticationTokens tokens = new IssuedAuthenticationTokens("persisted-access-token", "persisted-refresh-token",
+				entity.getCreatedAt(), expires, entity.getExpiresAt());
 			return Optional.of(new SessionRecord(session, subject, tokens));
 		} catch (RuntimeException exception) {
 			return Optional.empty();

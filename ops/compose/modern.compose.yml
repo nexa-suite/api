@@ -26,27 +26,50 @@ services:
     image: nexa/modern-api:local
     container_name: nexa-modern-api
     environment:
-      SPRING_PROFILES_ACTIVE: ${NEXA_MODERN_SPRING_PROFILE:-local}
+      SPRING_PROFILES_ACTIVE: ${NEXA_MODERN_SPRING_PROFILE:-local,minio}
       SERVER_PORT: "8080"
       NEXA_DATABASE_URL: jdbc:postgresql://modern-postgres:5432/${NEXA_MODERN_POSTGRES_DB:?Set NEXA_MODERN_POSTGRES_DB in api/.env.local}
-      NEXA_DATABASE_USERNAME: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in api/.env.local}
+      NEXA_DATABASE_USERNAME: nexa_runtime
       NEXA_DATABASE_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
+      NEXA_DATABASE_RUNTIME_USERNAME: nexa_runtime
+      NEXA_DATABASE_RUNTIME_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
+      NEXA_DATABASE_MIGRATOR_USERNAME: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in api/.env.local}
+      NEXA_DATABASE_MIGRATOR_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
       NEXA_FLYWAY_ENABLED: "true"
+      NEXA_OTEL_METRICS_ENABLED: ${NEXA_OTEL_METRICS_ENABLED:-false}
       NEXA_SECURITY_ISSUER: ${NEXA_SECURITY_ISSUER:-http://localhost:8080}
       NEXA_SECURITY_AUDIENCE: ${NEXA_SECURITY_AUDIENCE:-nexa-local}
       NEXA_ACCESS_TOKEN_TTL: ${NEXA_ACCESS_TOKEN_TTL:-PT15M}
       NEXA_REFRESH_TOKEN_TTL: ${NEXA_REFRESH_TOKEN_TTL:-P30D}
       NEXA_BCRYPT_STRENGTH: ${NEXA_BCRYPT_STRENGTH:-12}
-      NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300}
+      NEXA_ALLOWED_ORIGINS: ${NEXA_ALLOWED_ORIGINS:-http://localhost:4200,http://localhost:4300,http://localhost:8000,http://127.0.0.1:4200,http://127.0.0.1:4300,http://127.0.0.1:8000}
       NEXA_SECURITY_RSA_PUBLIC_KEY: /run/secrets/nexa_access_token_public
       NEXA_SECURITY_RSA_PRIVATE_KEY: /run/secrets/nexa_access_token_private
+      NEXA_SMTP_HOST: ${NEXA_SMTP_HOST:-modern-mailpit}
+      NEXA_SMTP_PORT: ${NEXA_SMTP_PORT:-1025}
+      NEXA_SMTP_FROM: ${NEXA_SMTP_FROM:-no-reply@nexa.local}
+      NEXA_SMTP_REQUIRED: ${NEXA_SMTP_REQUIRED:-true}
+      SPRING_MAIL_HOST: ${NEXA_SMTP_HOST:-modern-mailpit}
+      SPRING_MAIL_PORT: ${NEXA_SMTP_PORT:-1025}
+      SPRING_MAIL_USERNAME: ${NEXA_SMTP_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${NEXA_SMTP_PASSWORD:-}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: ${NEXA_SMTP_AUTH:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${NEXA_SMTP_STARTTLS:-false}
+      NEXA_PASSWORD_RESET_THROTTLE_KEY: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:?Set NEXA_PASSWORD_RESET_THROTTLE_KEY in api/.env.local}
+      NEXA_NOTIFICATION_OUTBOX_KEY: ${NEXA_NOTIFICATION_OUTBOX_KEY:?Set NEXA_NOTIFICATION_OUTBOX_KEY in api/.env.local}
+      NEXA_SYSTEM_OPERATOR_TOKEN: ${NEXA_SYSTEM_OPERATOR_TOKEN:?Set NEXA_SYSTEM_OPERATOR_TOKEN in api/.env.local}
       NEXA_DEV_BOOTSTRAP_ENABLED: ${NEXA_DEV_BOOTSTRAP_ENABLED:-false}
+      NEXA_DEV_DEMO_PASSWORD: ${NEXA_DEV_DEMO_PASSWORD:-}
       NEXA_DEV_TENANT_NAME: ${NEXA_DEV_TENANT_NAME:-}
       NEXA_DEV_TENANT_SLUG: ${NEXA_DEV_TENANT_SLUG:-}
       NEXA_DEV_WORKSPACE_NAME: ${NEXA_DEV_WORKSPACE_NAME:-}
       NEXA_DEV_WORKSPACE_SLUG: ${NEXA_DEV_WORKSPACE_SLUG:-}
       NEXA_DEV_OWNER_EMAIL: ${NEXA_DEV_OWNER_EMAIL:-}
       NEXA_DEV_OWNER_PASSWORD: ${NEXA_DEV_OWNER_PASSWORD:-}
+      NEXA_DEV_TENANT_ADMIN_EMAIL: ${NEXA_DEV_TENANT_ADMIN_EMAIL:-}
+      NEXA_DEV_TENANT_ADMIN_PASSWORD: ${NEXA_DEV_TENANT_ADMIN_PASSWORD:-}
+      NEXA_DEV_COMPANY_OWNER_EMAIL: ${NEXA_DEV_COMPANY_OWNER_EMAIL:-}
+      NEXA_DEV_COMPANY_OWNER_PASSWORD: ${NEXA_DEV_COMPANY_OWNER_PASSWORD:-}
       NEXA_DEV_SALES_EMAIL: ${NEXA_DEV_SALES_EMAIL:-}
       NEXA_DEV_SALES_PASSWORD: ${NEXA_DEV_SALES_PASSWORD:-}
       NEXA_DEV_WAREHOUSE_EMAIL: ${NEXA_DEV_WAREHOUSE_EMAIL:-}
@@ -55,11 +78,33 @@ services:
       NEXA_DEV_LOGISTICS_PASSWORD: ${NEXA_DEV_LOGISTICS_PASSWORD:-}
       NEXA_DEV_BUYER_EMAIL: ${NEXA_DEV_BUYER_EMAIL:-}
       NEXA_DEV_BUYER_PASSWORD: ${NEXA_DEV_BUYER_PASSWORD:-}
+      NEXA_PAYMENTS_PROVIDER: ${NEXA_PAYMENTS_PROVIDER:-deterministic}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_service_foundation}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-pk_test_local_foundation}
+      NEXA_STRIPE_API_BASE_URL: ${NEXA_STRIPE_API_BASE_URL:-}
+      NEXA_OBJECT_STORAGE_ROOT: /app/.local-object-storage
+      NEXA_OBJECT_STORAGE_ENDPOINT: http://modern-minio:9000
+      NEXA_OBJECT_STORAGE_BUCKET: ${NEXA_OBJECT_STORAGE_BUCKET:-nexa-private}
+      NEXA_OBJECT_STORAGE_ACCESS_KEY: ${NEXA_MINIO_ROOT_USER:?Set NEXA_MINIO_ROOT_USER in api/.env.local}
+      NEXA_OBJECT_STORAGE_SECRET_KEY: ${NEXA_MINIO_ROOT_PASSWORD:?Set NEXA_MINIO_ROOT_PASSWORD in api/.env.local}
+      NEXA_OBJECT_STORAGE_REGION: ${NEXA_OBJECT_STORAGE_REGION:-us-east-1}
+      NEXA_CLAMAV_HOST: ${NEXA_CLAMAV_HOST:-modern-clamav}
+      NEXA_CLAMAV_PORT: ${NEXA_CLAMAV_PORT:-3310}
     volumes:
       - ../../.local-keys/access-token-public.pem:/run/secrets/nexa_access_token_public:ro
       - ../../.local-keys/access-token-private.pem:/run/secrets/nexa_access_token_private:ro
+      - nexa-modern-object-storage:/app/.local-object-storage
     depends_on:
       modern-postgres:
+        condition: service_healthy
+      modern-mailpit:
+        condition: service_healthy
+      modern-minio:
+        condition: service_healthy
+      modern-clamav:
+        condition: service_healthy
+      modern-stripe-mock:
         condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
@@ -73,6 +118,73 @@ services:
       timeout: 5s
       start_period: 20s
       retries: 12
+
+  modern-mailpit:
+    image: axllent/mailpit:v1.26.0
+    container_name: nexa-modern-mailpit
+    ports:
+      - "127.0.0.1:8025:8025"
+    networks:
+      - modern-edge
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8025/"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 12
+
+  modern-minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: nexa-modern-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${NEXA_MINIO_ROOT_USER:?Set NEXA_MINIO_ROOT_USER in api/.env.local}
+      MINIO_ROOT_PASSWORD: ${NEXA_MINIO_ROOT_PASSWORD:?Set NEXA_MINIO_ROOT_PASSWORD in api/.env.local}
+    volumes:
+      - nexa-modern-minio-data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    networks:
+      - modern-edge
+      - modern-data
+    healthcheck:
+      test: ["CMD-SHELL", "mc alias set local http://127.0.0.1:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" >/dev/null 2>&1 && mc mb --ignore-existing local/${NEXA_OBJECT_STORAGE_BUCKET:-nexa-private} >/dev/null 2>&1 && mc ready local"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 20
+
+  modern-clamav:
+    image: clamav/clamav-debian:1.4.3
+    container_name: nexa-modern-clamav
+    ports:
+      - "127.0.0.1:3310:3310"
+    networks:
+      - modern-data
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 1 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 45s
+      retries: 18
+
+  modern-stripe-mock:
+    image: wiremock/wiremock:3.13.1
+    container_name: nexa-modern-stripe-mock
+    command: ["--global-response-templating"]
+    volumes:
+      - ./stripe-mock/mappings:/home/wiremock/mappings:ro
+    ports:
+      - "127.0.0.1:12111:8080"
+    networks:
+      - modern-edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --output-document=/dev/null http://127.0.0.1:8080/__admin/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 18
 
   modern-platform:
     build:
@@ -114,13 +226,41 @@ services:
       start_period: 5s
       retries: 12
 
+  modern-jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: nexa-modern-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
+    networks:
+      - modern-edge
+
+  modern-otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.132.0
+    container_name: nexa-modern-otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./otel-collector-config.yml:/etc/otelcol-contrib/config.yml:ro
+    depends_on:
+      modern-jaeger:
+        condition: service_started
+    networks:
+      - modern-edge
+
 networks:
   modern-edge:
     name: nexa-modern-edge
   modern-data:
     name: nexa-modern-data
-    internal: true
 
 volumes:
   nexa-modern-postgres-data:
     name: nexa-modern-postgres-data
+  nexa-modern-object-storage:
+    name: nexa-modern-object-storage
+  nexa-modern-minio-data:
+    name: nexa-modern-minio-data

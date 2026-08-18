@@ -8,7 +8,7 @@ Nexa needs Platform internal access and Portal Buyer access while preserving one
 
 ## Decision
 
-Roles belong only to Workspace Membership. Canonical roles are `COMPANY_OWNER`, `SALES`, `WAREHOUSE`, `LOGISTICS` and `BUYER`. Surfaces are `PLATFORM` and `PORTAL`; internal roles authenticate only to Platform and Buyer only to Portal. A single role-to-permission policy defines immutable permissions, including `catalog:read`; clients consume session claims but do not become authorization authorities.
+Roles belong only to Workspace Membership. Canonical internal roles are `TENANT_ADMIN`, `COMPANY_OWNER`, `SALES`, `WAREHOUSE` and `LOGISTICS`; `BUYER` is the separate Portal role. Surfaces are `PLATFORM` and `PORTAL`; internal roles authenticate only to Platform and Buyer only to Portal. A single role-to-permission policy defines immutable permissions, including `catalog:read`; clients consume session claims but do not become authorization authorities. System-operator activation is an internal system boundary, not a membership role.
 
 ## Alternatives considered
 

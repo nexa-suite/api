@@ -1,0 +1,204 @@
+name: API Security and Load
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "integration/**"]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-load:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_DB: nexa
+          POSTGRES_USER: nexa
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U nexa -d nexa"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+      mailpit:
+        image: axllent/mailpit:v1.26.0
+        ports: ["1025:1025"]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Mask isolated test credentials before fixture generation
+        run: |
+          for encoded in \
+            'Y2ktcG9zdGdyZXMtcGFzc3dvcmQ=' \
+            'Q0ktT3duZXItUGFzc3dvcmQtMjAyNiE=' \
+            'Q0ktVGVuYW50LUFkbWluLVBhc3N3b3JkLTIwMjYh' \
+            'Q0ktQ29tcGFueS1Pd25lci1QYXNzd29yZC0yMDI2IQ==' \
+            'Q0ktU2FsZXMtUGFzc3dvcmQtMjAyNiE=' \
+            'Q0ktV2FyZWhvdXNlLVBhc3N3b3JkLTIwMjYh' \
+            'Q0ktTG9naXN0aWNzLVBhc3N3b3JkLTIwMjYh' \
+            'Q0ktQnV5ZXItUGFzc3dvcmQtMjAyNiE=' \
+            'Y2ktc3lzdGVtLW9wZXJhdG9yLXRva2VuLTAxMjM0NTY3ODktYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=' \
+            'Y2ktbm90aWZpY2F0aW9uLW91dGJveC1rZXktMDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5' \
+            'Y2ktcmVzZXQtdGhyb3R0bGUta2V5LTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OQ=='; do
+            echo "::add-mask::$(printf '%s' "$encoded" | base64 --decode)"
+          done
+      - name: Generate isolated runtime keys and local security fixture
+        run: |
+          mkdir -p .ci-keys .local-object-storage
+          openssl genrsa -out .ci-keys/access-token-private.pem 2048
+          openssl rsa -in .ci-keys/access-token-private.pem -pubout -out .ci-keys/access-token-public.pem
+          cat > .env.local <<'EOF'
+          NEXA_LOCAL_API_URL=http://127.0.0.1:8080
+          NEXA_DEV_WORKSPACE_SLUG=icisa
+          NEXA_DEV_OWNER_EMAIL=owner@icisa.test
+          NEXA_DEV_OWNER_PASSWORD=CI-Owner-Password-2026!
+          NEXA_DEV_TENANT_ADMIN_EMAIL=tenant-admin@icisa.test
+          NEXA_DEV_TENANT_ADMIN_PASSWORD=CI-Tenant-Admin-Password-2026!
+          NEXA_DEV_COMPANY_OWNER_EMAIL=company-owner@icisa.test
+          NEXA_DEV_COMPANY_OWNER_PASSWORD=CI-Company-Owner-Password-2026!
+          NEXA_DEV_SALES_EMAIL=sales@icisa.test
+          NEXA_DEV_SALES_PASSWORD=CI-Sales-Password-2026!
+          NEXA_DEV_WAREHOUSE_EMAIL=warehouse@icisa.test
+          NEXA_DEV_WAREHOUSE_PASSWORD=CI-Warehouse-Password-2026!
+          NEXA_DEV_LOGISTICS_EMAIL=logistics@icisa.test
+          NEXA_DEV_LOGISTICS_PASSWORD=CI-Logistics-Password-2026!
+          NEXA_DEV_BUYER_EMAIL=buyer@icisa.test
+          NEXA_DEV_BUYER_PASSWORD=CI-Buyer-Password-2026!
+          EOF
+      - name: Start isolated API runtime
+        env:
+          SPRING_PROFILES_ACTIVE: local
+          SERVER_PORT: "8080"
+          NEXA_DATABASE_URL: jdbc:postgresql://127.0.0.1:5432/nexa
+          NEXA_DATABASE_USERNAME: nexa
+          NEXA_DATABASE_PASSWORD: ci-postgres-password
+          NEXA_FLYWAY_ENABLED: "true"
+          NEXA_SECURITY_RSA_PUBLIC_KEY: ${{ github.workspace }}/.ci-keys/access-token-public.pem
+          NEXA_SECURITY_RSA_PRIVATE_KEY: ${{ github.workspace }}/.ci-keys/access-token-private.pem
+          NEXA_SECURITY_ISSUER: http://127.0.0.1:8080
+          NEXA_ALLOWED_ORIGINS: http://localhost:4200,http://localhost:4300
+          NEXA_SMTP_HOST: 127.0.0.1
+          NEXA_SMTP_PORT: "1025"
+          NEXA_SMTP_REQUIRED: "false"
+          NEXA_NOTIFICATION_OUTBOX_KEY: ci-notification-outbox-key-012345678901234567890123456789
+          NEXA_PASSWORD_RESET_THROTTLE_KEY: ci-reset-throttle-key-012345678901234567890123456789
+          NEXA_DEV_BOOTSTRAP_ENABLED: "true"
+          NEXA_DEV_TENANT_SLUG: icisa
+          NEXA_DEV_TENANT_NAME: ICISA
+          NEXA_DEV_WORKSPACE_SLUG: icisa
+          NEXA_DEV_WORKSPACE_NAME: ICISA
+          NEXA_DEV_OWNER_EMAIL: owner@icisa.test
+          NEXA_DEV_OWNER_PASSWORD: CI-Owner-Password-2026!
+          NEXA_DEV_TENANT_ADMIN_EMAIL: tenant-admin@icisa.test
+          NEXA_DEV_TENANT_ADMIN_PASSWORD: CI-Tenant-Admin-Password-2026!
+          NEXA_DEV_COMPANY_OWNER_EMAIL: company-owner@icisa.test
+          NEXA_DEV_COMPANY_OWNER_PASSWORD: CI-Company-Owner-Password-2026!
+          NEXA_DEV_SALES_EMAIL: sales@icisa.test
+          NEXA_DEV_SALES_PASSWORD: CI-Sales-Password-2026!
+          NEXA_DEV_WAREHOUSE_EMAIL: warehouse@icisa.test
+          NEXA_DEV_WAREHOUSE_PASSWORD: CI-Warehouse-Password-2026!
+          NEXA_DEV_LOGISTICS_EMAIL: logistics@icisa.test
+          NEXA_DEV_LOGISTICS_PASSWORD: CI-Logistics-Password-2026!
+          NEXA_DEV_BUYER_EMAIL: buyer@icisa.test
+          NEXA_DEV_BUYER_PASSWORD: CI-Buyer-Password-2026!
+          NEXA_SYSTEM_OPERATOR_TOKEN: ci-system-operator-token-0123456789-abcdefghijklmnopqrstuvwxyz
+          NEXA_OBJECT_STORAGE_ROOT: ${{ github.workspace }}/.local-object-storage
+          NEXA_CLAMAV_HOST: ""
+          NEXA_PAYMENTS_PROVIDER: deterministic
+        run: |
+          nohup ./mvnw spring-boot:run > api-runtime.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/actuator/health/readiness; then exit 0; fi
+            sleep 2
+          done
+          cat api-runtime.log
+          exit 1
+      - name: Run local security and abuse matrix
+        run: ./scripts/verify-local-security.sh
+      - name: Run authenticated OWASP ZAP role matrix
+        env:
+          BASE_URL: http://127.0.0.1:8080
+          NEXA_DEV_WORKSPACE: icisa
+          NEXA_DEV_OWNER_EMAIL: owner@icisa.test
+          NEXA_DEV_OWNER_PASSWORD: CI-Owner-Password-2026!
+          NEXA_DEV_COMPANY_OWNER_EMAIL: company-owner@icisa.test
+          NEXA_DEV_COMPANY_OWNER_PASSWORD: CI-Company-Owner-Password-2026!
+          NEXA_DEV_SALES_EMAIL: sales@icisa.test
+          NEXA_DEV_SALES_PASSWORD: CI-Sales-Password-2026!
+          NEXA_DEV_WAREHOUSE_EMAIL: warehouse@icisa.test
+          NEXA_DEV_WAREHOUSE_PASSWORD: CI-Warehouse-Password-2026!
+          NEXA_DEV_LOGISTICS_EMAIL: logistics@icisa.test
+          NEXA_DEV_LOGISTICS_PASSWORD: CI-Logistics-Password-2026!
+          NEXA_DEV_BUYER_EMAIL: buyer@icisa.test
+          NEXA_DEV_BUYER_PASSWORD: CI-Buyer-Password-2026!
+          ZAP_REPORT_DIR: zap-authenticated
+        run: ./ops/security/zap-authenticated.sh
+      - name: Run k6 service load smoke
+        run: |
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            -e BASE_URL=http://127.0.0.1:8080 \
+            -e NEXA_LOAD_WORKSPACE=icisa \
+            -e NEXA_LOAD_EMAIL=owner@icisa.test \
+            -e NEXA_LOAD_PASSWORD=CI-Owner-Password-2026! \
+            -e K6_VUS=4 -e K6_DURATION=20s \
+            -v "$GITHUB_WORKSPACE:/work" \
+            grafana/k6:0.56.0 run --summary-export=/work/k6-summary.json /work/ops/load/k6/service-foundation.js
+      - name: Run k6 business command matrix
+        env:
+          K6_BUSINESS_VUS: "4"
+          K6_BUSINESS_DURATION: 20s
+          NEXA_LOAD_WORKSPACE: icisa
+          NEXA_LOAD_OWNER_EMAIL: owner@icisa.test
+          NEXA_LOAD_OWNER_PASSWORD: CI-Owner-Password-2026!
+          NEXA_LOAD_BUYER_EMAIL: buyer@icisa.test
+          NEXA_LOAD_BUYER_PASSWORD: CI-Buyer-Password-2026!
+          NEXA_LOAD_SALES_EMAIL: sales@icisa.test
+          NEXA_LOAD_SALES_PASSWORD: CI-Sales-Password-2026!
+          NEXA_LOAD_WAREHOUSE_EMAIL: warehouse@icisa.test
+          NEXA_LOAD_WAREHOUSE_PASSWORD: CI-Warehouse-Password-2026!
+          NEXA_LOAD_LOGISTICS_EMAIL: logistics@icisa.test
+          NEXA_LOAD_LOGISTICS_PASSWORD: CI-Logistics-Password-2026!
+        run: |
+          docker run --rm --network host --user "$(id -u):$(id -g)" \
+            -e BASE_URL=http://127.0.0.1:8080 \
+            -e NEXA_LOAD_WORKSPACE="$NEXA_LOAD_WORKSPACE" \
+            -e NEXA_LOAD_OWNER_EMAIL="$NEXA_LOAD_OWNER_EMAIL" \
+            -e NEXA_LOAD_OWNER_PASSWORD="$NEXA_LOAD_OWNER_PASSWORD" \
+            -e NEXA_LOAD_BUYER_EMAIL="$NEXA_LOAD_BUYER_EMAIL" \
+            -e NEXA_LOAD_BUYER_PASSWORD="$NEXA_LOAD_BUYER_PASSWORD" \
+            -e NEXA_LOAD_SALES_EMAIL="$NEXA_LOAD_SALES_EMAIL" \
+            -e NEXA_LOAD_SALES_PASSWORD="$NEXA_LOAD_SALES_PASSWORD" \
+            -e NEXA_LOAD_WAREHOUSE_EMAIL="$NEXA_LOAD_WAREHOUSE_EMAIL" \
+            -e NEXA_LOAD_WAREHOUSE_PASSWORD="$NEXA_LOAD_WAREHOUSE_PASSWORD" \
+            -e NEXA_LOAD_LOGISTICS_EMAIL="$NEXA_LOAD_LOGISTICS_EMAIL" \
+            -e NEXA_LOAD_LOGISTICS_PASSWORD="$NEXA_LOAD_LOGISTICS_PASSWORD" \
+            -e K6_BUSINESS_VUS="$K6_BUSINESS_VUS" \
+            -e K6_BUSINESS_DURATION="$K6_BUSINESS_DURATION" \
+            -v "$GITHUB_WORKSPACE:/work" \
+            grafana/k6:0.56.0 run --summary-export=/work/k6-business-summary.json /work/ops/load/k6/business-foundation.js
+      - name: Run OWASP ZAP API baseline
+        run: |
+          docker run --rm --network host --user 0 \
+            -v "$GITHUB_WORKSPACE:/zap/wrk/:rw" \
+            zaproxy/zap-stable:2.16.1 \
+            zap-baseline.py -t http://127.0.0.1:8080/swagger-ui/index.html -m 3 -I -r zap-report.html
+      - name: Upload security and load evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: api-security-load-${{ github.run_id }}
+          path: |
+            api-runtime.log
+            zap-report.html
+            zap-authenticated/**/*
+            k6-summary.json
+            k6-business-summary.json
+          if-no-files-found: ignore

@@ -1,6 +1,7 @@
 package com.nexa.api.sales.application.clientaccount.service;
 
 import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
+import com.nexa.api.sales.application.clientaccount.model.BuyerMembershipCandidate;
 import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
 import com.nexa.api.sales.application.clientaccount.port.ClientAccountUseCase;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
@@ -12,6 +13,7 @@ import com.nexa.api.tenantmanagement.domain.model.access.Permission;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
+import java.util.List;
 
 public class ClientAccountService implements ClientAccountUseCase {
 	private final ClientAccountPersistencePort persistence;
@@ -22,6 +24,15 @@ public class ClientAccountService implements ClientAccountUseCase {
 	}
 	@Override public ClientAccountView detail(CurrentAccessContext context, String id) {
 		internal(context, Permission.SALES_READ); return persistence.find(scope(context), workspace(context), id).orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
+	}
+	@Override public ClientAccountView buyerDetail(CurrentAccessContext context) {
+		context.requirePermission(Permission.SALES_BUYER_READ);
+		return persistence.findForBuyer(scope(context), workspace(context), context.membershipId().toString())
+				.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
+	}
+	@Override public List<BuyerMembershipCandidate> buyerMembershipCandidates(CurrentAccessContext context) {
+		internal(context, Permission.SALES_READ);
+		return persistence.buyerMembershipCandidates(scope(context), workspace(context));
 	}
 	@Override @Transactional public ClientAccountView create(CurrentAccessContext context, ClientAccountView command) {
 		internal(context, Permission.SALES_WRITE); validateDomain(command);
@@ -42,6 +53,7 @@ public class ClientAccountService implements ClientAccountUseCase {
 		internal(context, Permission.SALES_WRITE);
 		ClientAccountView account = detail(context, id);
 		if (account.version() != version) throw new SalesConcurrencyConflictException();
+		if (account.buyerMembershipId() != null) throw new SalesConcurrencyConflictException();
 		if (!persistence.isAvailableBuyerMembership(scope(context), workspace(context), membershipId)) throw new SalesResourceNotFoundException("buyer-membership");
 		if (persistence.associateBuyer(scope(context), workspace(context), account.id(), membershipId, UUID.randomUUID(), now(), version) == 0) throw new SalesConcurrencyConflictException();
 		return detail(context, id);
@@ -52,7 +64,7 @@ public class ClientAccountService implements ClientAccountUseCase {
 		new BusinessName(command.businessName()); new CommercialName(command.commercialName()); new ContactEmail(command.contactEmail());
 		new PhoneNumber(command.phone()); new PaymentCondition(command.paymentCondition());
 	}
-	private static void internal(CurrentAccessContext context, Permission permission) { if (context.role().name().equals("BUYER")) throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Administrative sales access is not available to buyers"); context.requirePermission(permission); }
+	private static void internal(CurrentAccessContext context, Permission permission) { if (context.hasRole(com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole.BUYER)) throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Administrative sales access is not available to buyers"); context.requirePermission(permission); }
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }
 	private static String workspace(CurrentAccessContext context) { return context.workspaceId().toString(); }
 	private static long now() { return System.currentTimeMillis(); }

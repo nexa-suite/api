@@ -9,6 +9,7 @@ import com.nexa.api.sales.presentation.salesorder.response.SalesOrderEventRespon
 import com.nexa.api.sales.presentation.salesorder.response.SalesOrderPageResponse;
 import com.nexa.api.sales.presentation.salesorder.response.SalesOrderResponse;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
@@ -30,6 +31,7 @@ public final class SalesOrderQueryController {
 	private final SalesOrderUseCase sales; private final SalesOrderHttpMapper mapper;
 	public SalesOrderQueryController(SalesOrderUseCase sales, SalesOrderHttpMapper mapper) { this.sales = sales; this.mapper = mapper; }
 	@GetMapping("/api/v1/sales-orders")
+	@Operation(operationId = "listSalesOrders")
 	public SalesOrderPageResponse list(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)PENDING|CONFIRMED|REJECTED|CANCELLED") String status,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)NORMAL|HIGH|URGENT") String priority,
@@ -45,12 +47,15 @@ public final class SalesOrderQueryController {
 				requestedDeliveryFrom, requestedDeliveryTo, page, size, sort)));
 	}
 	@GetMapping("/api/v1/sales-orders/{id}")
+	@Operation(operationId = "getSalesOrder")
 	public org.springframework.http.ResponseEntity<SalesOrderResponse> detail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
 		var value = sales.detail(context, id); return org.springframework.http.ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.response(value));
 	}
 	@GetMapping("/api/v1/sales-orders/{id}/events")
+	@Operation(operationId = "listSalesOrderEvents")
 	public List<SalesOrderEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) { return sales.events(context, id).stream().map(mapper::event).toList(); }
 	@GetMapping("/api/v1/order-fulfillment-candidates")
+	@Operation(operationId = "listOrderFulfillmentCandidates")
 	public com.nexa.api.sales.presentation.salesorder.response.FulfillmentCandidatePageResponse candidates(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
 			@RequestParam(defaultValue = "0") @Min(0) int page, @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size) {
 		var value = sales.fulfillmentCandidates(context, new SalesOrderFilter("CONFIRMED", page, size, "createdAt,desc"));

@@ -89,11 +89,23 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	@Transactional
 	public PurchaseRequestView create(CurrentAccessContext context, String requestedClientAccountId, String priority,
 			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment, List<RequestedLine> requestedLines) {
-		buyerWrite(context);
-		String account = buyerAccount(context);
-		if (requestedClientAccountId != null && !requestedClientAccountId.isBlank()
-				&& !account.equals(requestedClientAccountId.trim())) {
-			throw new SalesResourceNotFoundException("client-account");
+		String account;
+		if (context.hasRole(MembershipRole.BUYER)) {
+			buyerWrite(context);
+			account = buyerAccount(context);
+			if (requestedClientAccountId != null && !requestedClientAccountId.isBlank()
+					&& !account.equals(requestedClientAccountId.trim())) {
+				throw new SalesResourceNotFoundException("client-account");
+			}
+		} else {
+			internal(context, Permission.SALES_WRITE);
+			if (requestedClientAccountId == null || requestedClientAccountId.isBlank()) {
+				throw new SalesInvariantViolation("Client Account is required for an internal Purchase Request");
+			}
+			account = accounts.find(scope(context), workspace(context), requestedClientAccountId.trim())
+					.filter(value -> "ACTIVE".equals(value.status()))
+					.map(ClientAccountView::id)
+					.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
 		}
 		PurchaseRequestPriority priorityValue = PurchaseRequestPriority.from(priority);
 		PaymentOption paymentValue = PaymentOption.from(paymentOption);
@@ -108,7 +120,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		aggregate.updateDetails(priorityValue, new RequestedDeliveryDate(deliveryDate), new DeliveryProfileSnapshot(deliveryProfile), paymentValue, new RequestComment(comment));
 		List<PurchaseRequestLineView> snapshots = new ArrayList<>();
 		for (RequestedLine requested : requestedLines == null ? List.<RequestedLine>of() : requestedLines) {
-			CatalogItemSnapshot item = catalog.findActive(requested.catalogItemId())
+			CatalogItemSnapshot item = catalog.findActive(requested.catalogItemId(), context.tenantId().value(), context.workspaceId().value())
 					.orElseThrow(() -> new SalesResourceNotFoundException("catalog-item"));
 			RequestedQuantity quantity = new RequestedQuantity(requested.quantity());
 			UUID lineId = UUID.randomUUID();
@@ -152,7 +164,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	public PurchaseRequestView addLine(CurrentAccessContext context, String id, String catalogItemId, BigDecimal quantity,
 			String unit, String notes, long version) {
 		PurchaseRequestView current = canEdit(context, id);
-		CatalogItemSnapshot item = catalog.findActive(catalogItemId)
+		CatalogItemSnapshot item = catalog.findActive(catalogItemId, context.tenantId().value(), context.workspaceId().value())
 				.orElseThrow(() -> new SalesResourceNotFoundException("catalog-item"));
 		if (current.lines().stream().anyMatch(line -> line.catalogItemId().equals(catalogItemId))) {
 			throw new SalesInvariantViolation("Catalog item already exists in request");
@@ -202,7 +214,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		String normalized = action == null ? "" : action.trim().toLowerCase(Locale.ROOT);
 		PurchaseRequestView current = detail(context, id);
 		if ("submit".equals(normalized)) {
-			buyerWrite(context);
+			if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
 			requireIdempotencyKey(idempotencyKey);
 			var prior = idempotency.find(scope(context), workspace(context), context.membershipId().toString(),
 					"purchase-request-submission", idempotencyKey);
@@ -226,6 +238,13 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PurchaseRequestView result = detail(context, id);
 		events.append(UUID.randomUUID(), id, scope(context), workspace(context), context.membershipId().toString(),
 				target, current.status(), target, now());
+		if ("submit".equals(normalized)) {
+			events.appendCanonical("PURCHASE_REQUEST_SUBMITTED", id, scope(context), workspace(context),
+				"purchase-request-" + id, null, java.util.Map.of("purchaseRequestId", UUID.fromString(id), "status", target), now());
+		} else if ("approve".equals(normalized)) {
+			events.appendCanonical("PURCHASE_REQUEST_APPROVED", id, scope(context), workspace(context),
+				"purchase-request-" + id, null, java.util.Map.of("purchaseRequestId", UUID.fromString(id), "purchaseRequestVersion", result.version()), now());
+		}
 		appendChange(context, result, eventType(normalized), target);
 		if ("submit".equals(normalized)) {
 			idempotency.save(scope(context), workspace(context), context.membershipId().toString(),
@@ -236,15 +255,15 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 
 	private PurchaseRequestView canEdit(CurrentAccessContext context, String id) {
 		PurchaseRequestView request = detail(context, id);
-		if (context.role() == MembershipRole.BUYER) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
-		if (!"DRAFT".equals(request.status()) && !(context.role() == MembershipRole.BUYER && "NEEDS_ADJUSTMENT".equals(request.status()))) {
+		if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
+		if (!"DRAFT".equals(request.status()) && !(context.hasRole(MembershipRole.BUYER) && "NEEDS_ADJUSTMENT".equals(request.status()))) {
 			throw new PurchaseRequestTransitionException();
 		}
 		return request;
 	}
 
 	private String buyerAccount(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.BUYER) {
+		if (!context.hasRole(MembershipRole.BUYER)) {
 			internal(context, Permission.SALES_READ);
 			return null;
 		}
@@ -253,12 +272,12 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	}
 
 	private static void buyerWrite(CurrentAccessContext context) {
-		if (context.role() != MembershipRole.BUYER) throw new AccessPolicyViolation("Purchase request creation is buyer-only");
+		if (!context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Purchase request creation is buyer-only");
 		context.requirePermission(Permission.SALES_BUYER_WRITE);
 	}
 
 	private static void internal(CurrentAccessContext context, Permission permission) {
-		if (context.role() == MembershipRole.BUYER) throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
+		if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
 		context.requirePermission(permission);
 	}
 

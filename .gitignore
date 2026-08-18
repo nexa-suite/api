@@ -6,6 +6,7 @@ dist/
 coverage/
 .env.local
 .local-keys/
+.local-object-storage/
 *.pem
 .DS_Store
 ._*
@@ -44,3 +45,5 @@ build/
 
 # Local git worktrees
 .worktrees/
+playwright-report/
+test-results/

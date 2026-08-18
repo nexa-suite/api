@@ -1,6 +1,8 @@
 package com.nexa.api.tenantmanagement.domain.model.membership;
 
 import com.nexa.api.tenantmanagement.domain.model.TenantManagementInvariantViolation;
+import com.nexa.api.tenantmanagement.domain.model.access.RoleCatalog;
+import com.nexa.api.tenantmanagement.domain.model.access.RoleDefinition;
 
 import java.util.Locale;
 
@@ -8,11 +10,20 @@ import java.util.Locale;
  * The role is owned by a workspace membership. IAM may authenticate a user, but it does not define this role.
  */
 public enum MembershipRole {
+	TENANT_ADMIN,
 	COMPANY_OWNER,
 	SALES,
 	WAREHOUSE,
 	LOGISTICS,
 	BUYER;
+
+	public RoleDefinition definition() {
+		return RoleCatalog.definitionFor(this);
+	}
+
+	public boolean isInternalAssignable() {
+		return RoleCatalog.internalAssignableRoles().contains(this);
+	}
 
 	public static MembershipRole from(String value) {
 		if (value == null || value.isBlank()) {

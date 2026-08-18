@@ -3,6 +3,10 @@ package com.nexa.api.warehouse.infrastructure.persistence;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.warehouse.application.WarehouseOperationsService.WarehouseException;
 import com.nexa.api.warehouse.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.warehouse.domain.model.inventorylot.InventoryLot;
+import com.nexa.api.warehouse.domain.model.inventorylot.InventoryLotStatus;
+import com.nexa.api.warehouse.domain.model.inventoryreservation.InventoryReservation;
+import com.nexa.api.warehouse.domain.model.inventoryreservation.InventoryReservationStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -79,6 +83,9 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
         if (!"RESERVED".equals(lock.status()) || !lock.expiresAt().isAfter(now)) throw error("RESERVATION_NOT_READY", false);
         List<Allocation> allocations = allocations(tenant, workspace, reservation);
         if (allocations.isEmpty()) throw error("RESERVATION_NOT_READY", false);
+        InventoryReservation aggregate = InventoryReservation.rehydrate(reservationId, InventoryReservationStatus.RESERVED,
+                allocations.stream().map(value -> new InventoryReservation.Allocation(value.lotId().toString(), value.quantity())).toList());
+        aggregate.consume();
         for (Allocation allocation : allocations) consumeLot(tenant, workspace, allocation, actor, correlationId, now);
         check(jdbc.update("update warehouse.inventory_reservation set status='CONSUMED',updated_at=?,version=version+1 "
                         + "where tenant_id=? and workspace_id=? and id=? and status='RESERVED' and version=?",
@@ -96,7 +103,11 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
         if (lock == null) throw error("RESERVATION_NOT_FOUND", true);
         if ("RELEASED".equals(lock.status()) || "EXPIRED".equals(lock.status())) return;
         if (!"RESERVED".equals(lock.status())) throw error("RESERVATION_NOT_READY", false);
-        for (Allocation allocation : allocations(tenant, workspace, reservation)) releaseLot(tenant, workspace, allocation, actor, correlationId, reason, now);
+        List<Allocation> allocations = allocations(tenant, workspace, reservation);
+        InventoryReservation aggregate = InventoryReservation.rehydrate(reservationId, InventoryReservationStatus.RESERVED,
+                allocations.stream().map(value -> new InventoryReservation.Allocation(value.lotId().toString(), value.quantity())).toList());
+        aggregate.release();
+        for (Allocation allocation : allocations) releaseLot(tenant, workspace, allocation, actor, correlationId, reason, now);
         check(jdbc.update("update warehouse.inventory_reservation set status='RELEASED',updated_at=?,version=version+1 "
                         + "where tenant_id=? and workspace_id=? and id=? and status='RESERVED' and version=?",
                 timestamp(now), tenant, workspace, reservation, lock.version()), "CONCURRENCY_CONFLICT");
@@ -120,22 +131,24 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
     }
 
     private List<Allocation> allocations(UUID tenant, UUID workspace, UUID reservation) {
-        return jdbc.query("select a.lot_id,a.quantity,a.unit,l.warehouse_id,l.zone_id,l.catalog_item_id,"
+        return jdbc.query("select a.lot_id,a.quantity,a.unit,l.warehouse_id,l.zone_id,l.catalog_item_id,l.sku_id,"
                         + "l.stock_quantity,l.reserved_quantity,l.status,l.version from warehouse.inventory_reservation_allocation a "
                         + "join warehouse.inventory_reservation_line rl on rl.id=a.reservation_line_id "
-                        + "join warehouse.inventory_lot l on l.id=a.lot_id and l.tenant_id=? and l.workspace_id=? "
-                        + "where rl.reservation_id=? order by a.lot_id for update of l",
+                        + "join warehouse.inventory_reservation r on r.id=rl.reservation_id "
+                        + "join warehouse.inventory_lot l on l.id=a.lot_id and l.tenant_id=r.tenant_id and l.workspace_id=r.workspace_id "
+                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by a.lot_id for update of l",
                 (rs, row) -> new Allocation(rs.getObject("lot_id", UUID.class), rs.getBigDecimal("quantity"),
                         rs.getString("unit"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class),
-                        rs.getString("catalog_item_id"), rs.getBigDecimal("stock_quantity"),
+                        rs.getString("catalog_item_id"), rs.getObject("sku_id", UUID.class), rs.getBigDecimal("stock_quantity"),
                         rs.getBigDecimal("reserved_quantity"), rs.getString("status"), rs.getLong("version")),
                 tenant, workspace, reservation);
     }
 
     private void consumeLot(UUID tenant, UUID workspace, Allocation a, UUID actor, String correlation, Instant now) {
-        if (!"AVAILABLE".equals(a.status()) || a.reserved().compareTo(a.quantity()) < 0 || a.stock().compareTo(a.quantity()) < 0) {
-            throw error("INVENTORY_SHORTAGE", false);
-        }
+        InventoryLot aggregate = InventoryLot.rehydrate(a.lotId().toString(), a.stock(), a.reserved(), a.unit(),
+                InventoryLotStatus.valueOf(a.status()));
+        try { aggregate.consume(a.quantity()); }
+        catch (IllegalStateException exception) { throw error("INVENTORY_SHORTAGE", false); }
         check(jdbc.update("update warehouse.inventory_lot set stock_quantity=stock_quantity-?,reserved_quantity=reserved_quantity-?,"
                         + "status=case when stock_quantity-?=0 then 'DEPLETED' else status end,version=version+1 "
                         + "where tenant_id=? and workspace_id=? and id=? and version=? and stock_quantity>=? and reserved_quantity>=?",
@@ -148,7 +161,10 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
 
     private void releaseLot(UUID tenant, UUID workspace, Allocation a, UUID actor, String correlation,
                             String reason, Instant now) {
-        if (a.reserved().compareTo(a.quantity()) < 0) throw error("CONCURRENCY_CONFLICT", false);
+        InventoryLot aggregate = InventoryLot.rehydrate(a.lotId().toString(), a.stock(), a.reserved(), a.unit(),
+                InventoryLotStatus.valueOf(a.status()));
+        try { aggregate.releaseReservation(a.quantity()); }
+        catch (IllegalStateException exception) { throw error("CONCURRENCY_CONFLICT", false); }
         check(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity-?,version=version+1 "
                         + "where tenant_id=? and workspace_id=? and id=? and version=? and reserved_quantity>=?",
                 a.quantity(), tenant, workspace, a.lotId(), a.version(), a.quantity()), "CONCURRENCY_CONFLICT");
@@ -160,10 +176,10 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
     private void movement(UUID tenant, UUID workspace, Allocation a, String type, BigDecimal quantity,
                           BigDecimal before, BigDecimal after, BigDecimal reservedBefore, BigDecimal reservedAfter,
                           UUID actor, String correlation, String reason, Instant now) {
-        check(jdbc.update("insert into warehouse.stock_movement(id,tenant_id,workspace_id,warehouse_id,zone_id,lot_id,catalog_item_id,"
+        check(jdbc.update("insert into warehouse.stock_movement(id,tenant_id,workspace_id,warehouse_id,zone_id,lot_id,catalog_item_id,sku_id,"
                         + "movement_type,quantity,unit,quantity_before,quantity_after,reserved_before,reserved_after,reason,"
-                        + "actor_membership_id,correlation_id,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                UUID.randomUUID(), tenant, workspace, a.warehouseId(), a.zoneId(), a.lotId(), a.catalogItemId(), type,
+                        + "actor_membership_id,correlation_id,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), tenant, workspace, a.warehouseId(), a.zoneId(), a.lotId(), a.catalogItemId(), a.skuId(), type,
                 quantity, a.unit(), before, after, reservedBefore, reservedAfter, reason, actor, correlation, timestamp(now)),
                 "MOVEMENT_INSERT_FAILED");
     }
@@ -179,5 +195,5 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
     private static WarehouseException error(String code, boolean notFound) { return new WarehouseException(code, notFound); }
     private record ReservationLock(UUID id, String status, Instant expiresAt, long version) { }
     private record Allocation(UUID lotId, BigDecimal quantity, String unit, UUID warehouseId, UUID zoneId,
-                              String catalogItemId, BigDecimal stock, BigDecimal reserved, String status, long version) { }
+                              String catalogItemId, UUID skuId, BigDecimal stock, BigDecimal reserved, String status, long version) { }
 }

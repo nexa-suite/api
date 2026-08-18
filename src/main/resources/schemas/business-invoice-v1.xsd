@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+           xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+           xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+           xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+           elementFormDefault="qualified">
+    <xs:import namespace="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" schemaLocation="business-document-common-basic-v1.xsd"/>
+    <xs:import namespace="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" schemaLocation="business-document-common-aggregate-v1.xsd"/>
+    <xs:element name="Invoice">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element ref="cbc:ID"/><xs:element ref="cbc:IssueDate"/><xs:element ref="cbc:DocumentCurrencyCode"/>
+                <xs:element ref="cac:AccountingSupplierParty"/><xs:element ref="cac:AccountingCustomerParty"/>
+                <xs:element ref="cbc:Note"/><xs:element ref="cac:InvoiceLine" minOccurs="1" maxOccurs="unbounded"/>
+                <xs:element ref="cac:TaxTotal"/><xs:element ref="cac:LegalMonetaryTotal"/>
+            </xs:sequence>
+            <xs:attribute name="schemaVersion" type="xs:string" use="required"/>
+        </xs:complexType>
+    </xs:element>
+</xs:schema>
