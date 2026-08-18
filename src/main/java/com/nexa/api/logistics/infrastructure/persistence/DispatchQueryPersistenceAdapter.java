@@ -44,11 +44,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
         }
         long total = jdbc.queryForObject("select count(*) from logistics.dispatch_order d" + where,
                 Long.class, args.toArray());
-        String order = sort(sort, "updatedAt", "d.updated_at desc,d.id desc",
-                "dispatchNumber", "d.dispatch_number asc,d.id asc",
-                "deliveryWindowStart", "d.delivery_window_start asc nulls last,d.id asc",
-                "priority", "d.priority asc,d.delivery_window_start asc nulls last,d.id asc",
-                "status", "d.status asc,d.id asc");
+        String order = DispatchSort.parse(sort).sql();
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
         pageArgs.add(page * size);

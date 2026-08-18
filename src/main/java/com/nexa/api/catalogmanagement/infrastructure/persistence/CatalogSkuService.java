@@ -244,9 +244,9 @@ public class CatalogSkuService implements CatalogSkuPort {
     }
 
     private static String skuWhere() {
-        return "s.tenant_id=? and s.workspace_id=? and (? is null or s.family_id=cast(? as uuid)) and " +
-                "(? is null or s.variant_id=cast(? as uuid)) and " +
-                "(? is null or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or " +
+        return "s.tenant_id=? and s.workspace_id=? and (cast(? as uuid) is null or s.family_id=cast(? as uuid)) and " +
+                "(cast(? as uuid) is null or s.variant_id=cast(? as uuid)) and " +
+                "(cast(? as text) is null or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or " +
                 "lower(coalesce(s.gtin,'')) like lower(?) or lower(f.name) like lower(?) or " +
                 "lower(coalesce(b.name,'')) like lower(?) or lower(coalesce(c.name,'')) like lower(?) or " +
                 "lower(coalesce(v.name,'')) like lower(?) or lower(coalesce(v.variant_code,'')) like lower(?))";
