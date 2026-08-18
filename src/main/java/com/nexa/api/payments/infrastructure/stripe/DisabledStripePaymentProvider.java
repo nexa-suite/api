@@ -1,6 +1,7 @@
 package com.nexa.api.payments.infrastructure.stripe;
 
 import com.nexa.api.payments.application.port.StripePaymentProvider;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
 
 import java.util.Optional;
 
@@ -20,5 +21,7 @@ public final class DisabledStripePaymentProvider implements StripePaymentProvide
     @Override
     public StripeWebhookEvent verifyWebhook(String payload, String signature) { throw unavailable(); }
 
-    private static IllegalStateException unavailable() { return new IllegalStateException(MESSAGE); }
+    private static TechnicalFailureException unavailable() {
+        return new TechnicalFailureException(TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE, MESSAGE);
+    }
 }

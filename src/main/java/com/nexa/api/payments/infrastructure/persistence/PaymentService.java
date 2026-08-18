@@ -1,5 +1,6 @@
 package com.nexa.api.payments.infrastructure.persistence;
 
+import com.nexa.api.payments.application.exception.PaymentOperationInProgressException;
 import com.nexa.api.payments.application.model.PaymentModels;
 import com.nexa.api.payments.application.port.PaymentPersistencePort;
 import com.nexa.api.payments.application.port.StripePaymentProvider;
@@ -12,10 +13,13 @@ import com.nexa.api.payments.domain.model.receivable.Receivable;
 import com.nexa.api.payments.domain.model.receivable.ReceivableAllocation;
 import com.nexa.api.payments.domain.model.receivable.ReceivableStatus;
 import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -53,14 +57,18 @@ public class PaymentService implements PaymentPersistencePort {
     private final String webhookSecret;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final TechnicalMetrics metrics;
 
     public PaymentService(JdbcTemplate jdbc, StripePaymentProvider stripe,
                           @Value("${nexa.payments.publishable-key:}") String publishableKey,
                           @Value("${nexa.payments.webhook-secret:}") String webhookSecret,
-                          PlatformTransactionManager transactionManager) {
+                          PlatformTransactionManager transactionManager,
+                          ObjectProvider<TechnicalMetrics> metrics) {
         this.jdbc = jdbc; this.stripe = stripe; this.publishableKey = publishableKey == null ? "" : publishableKey;
         this.webhookSecret = webhookSecret == null ? "" : webhookSecret;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.metrics = metrics == null ? null : metrics.getIfAvailable();
+        registerInboxGauges();
     }
 
     @Transactional(readOnly = true)
@@ -126,33 +134,27 @@ public class PaymentService implements PaymentPersistencePort {
         return getReceivable(context, id);
     }
 
-    @Transactional
     public PaymentModels.PaymentIntentView createCardPaymentIntent(CurrentAccessContext context, UUID receivableId, String idempotencyKey) {
-        context.requirePermission(PermissionKey.PAYMENT_CREATE); requireKey(idempotencyKey); lockIdempotencyKey(context, idempotencyKey);
-        ReceivableRow receivable = lockedReceivable(context, receivableId);
-        ensureBuyerScope(context, receivable.clientAccountId());
-        BigDecimal amount = receivable.amount().subtract(receivable.amountPaid());
-        if (amount.signum() <= 0 || !SetOfOpen.contains(receivable.status())) throw new IllegalArgumentException("Receivable is not payable");
-        ExistingPayment existing = existingPayment(context, idempotencyKey);
-        if (existing != null) {
-            ensureIdempotentPayment(existing, receivable, PaymentMethod.CARD_STRIPE, amount);
-            return paymentIntentView(existing.payment(), providerSecret(existing.payment()));
+        context.requirePermission(PermissionKey.PAYMENT_CREATE);
+        requireKey(idempotencyKey);
+        CardPaymentClaim claim = transactionTemplate.execute(status -> prepareCardPaymentClaim(context, receivableId, idempotencyKey));
+        if (claim == null) throw new IllegalStateException("Card payment claim could not be prepared");
+        if (claim.payment().providerId() != null) {
+            return paymentIntentView(claim.payment(), providerSecret(claim.payment()));
         }
-        long amountMinor = minor(amount, receivable.currency());
-        Map<String, String> metadata = Map.of("nexa_receivable_id", receivable.id().toString(), "nexa_tenant_id", tenant(context).toString(), "nexa_workspace_id", workspace(context).toString());
-        StripePaymentProvider.PaymentIntent intent = stripe.createPaymentIntent(new StripePaymentProvider.PaymentIntentRequest(amountMinor, receivable.currency(), idempotencyKey, metadata));
-        requireProviderIntent(intent);
-        UUID paymentId = UUID.randomUUID(); Instant now = Instant.now(); PaymentStatus status = initialPaymentStatus(intent.status());
-        Payment aggregate = Payment.rehydrate(paymentId.toString(), amount, status);
-        int inserted = jdbc.update("insert into payments.payment (id,tenant_id,workspace_id,client_account_id,receivable_id,created_by_membership_id,method,status,amount,currency,provider,provider_payment_intent_id,idempotency_key,metadata,created_at,updated_at) values (?,?,?,?,?,?, 'CARD_STRIPE',?,?,?,?,?,?,?::jsonb,?,?) on conflict (tenant_id,workspace_id,created_by_membership_id,idempotency_key) do nothing", paymentId, tenant(context), workspace(context), receivable.clientAccountId(), receivable.id(), context.membershipId().value(), aggregate.status().name(), aggregate.amount(), receivable.currency(), "STRIPE", intent.providerId(), idempotencyKey, json(metadata), Timestamp.from(now), Timestamp.from(now));
-        if (inserted == 0) {
-            ExistingPayment concurrent = existingPayment(context, idempotencyKey);
-            if (concurrent == null) throw new IllegalArgumentException("Payment idempotency claim was lost");
-            ensureIdempotentPayment(concurrent, receivable, PaymentMethod.CARD_STRIPE, amount);
-            return paymentIntentView(concurrent.payment(), providerSecret(concurrent.payment()));
+
+        StripePaymentProvider.PaymentIntent intent;
+        try {
+            intent = stripe.createPaymentIntent(new StripePaymentProvider.PaymentIntentRequest(
+                    claim.amountMinor(), claim.receivable().currency(), claim.providerIdempotencyKey(), claim.metadata()));
+            requireProviderIntent(intent);
+        } catch (RuntimeException exception) {
+            recordProviderFailure(context, claim, exception);
+            throw exception;
         }
-        jdbc.update("insert into payments.payment_attempt (id,tenant_id,workspace_id,payment_id,attempt_number,status,provider_reference,created_at) values (?,?,?,?,1,?,?,?)", UUID.randomUUID(), tenant(context), workspace(context), paymentId, status.name(), intent.providerId(), Timestamp.from(now));
-        PaymentRow payment = new PaymentRow(paymentId, receivable.id(), aggregate.status().name(), aggregate.amount(), receivable.currency(), intent.clientSecret(), intent.providerId(), now, null, receivable.clientAccountId(), tenant(context), workspace(context));
+
+        PaymentRow payment = transactionTemplate.execute(status -> persistProviderIntent(context, claim, intent));
+        if (payment == null) throw new IllegalStateException("Payment provider result could not be persisted");
         return paymentIntentView(payment, intent.clientSecret());
     }
 
@@ -162,13 +164,13 @@ public class PaymentService implements PaymentPersistencePort {
      * signed event through the same webhook inbox/worker used in production.
      * There is no route for this outside the local profile.
      */
-    @Transactional
     public PaymentModels.PaymentView confirmTestCardPayment(CurrentAccessContext context, UUID receivableId, String clientSecret) {
         context.requirePermission(PermissionKey.PAYMENT_CREATE);
         if (clientSecret == null || clientSecret.isBlank() || clientSecret.length() > 512) throw new IllegalArgumentException("Stripe client secret is required");
-        ReceivableRow receivable = lockedReceivable(context, receivableId);
-        ensureBuyerScope(context, receivable.clientAccountId());
-        PaymentRow payment = latestStripePayment(context, receivableId);
+        ConfirmationClaim claim = transactionTemplate.execute(status -> prepareConfirmationClaim(context, receivableId));
+        if (claim == null) throw new IllegalStateException("Stripe payment confirmation claim could not be prepared");
+        ReceivableRow receivable = claim.receivable();
+        PaymentRow payment = claim.payment();
         if (payment == null) throw new IllegalArgumentException("Stripe payment intent was not created");
         if (PaymentStatus.SUCCEEDED.name().equals(payment.status())) return paymentView(payment, PaymentMethod.CARD_STRIPE.name());
         if (!PaymentStatus.REQUIRES_ACTION.name().equals(payment.status()) && !PaymentStatus.PROCESSING.name().equals(payment.status())) {
@@ -289,49 +291,88 @@ public class PaymentService implements PaymentPersistencePort {
 
     @Scheduled(fixedDelayString = "${nexa.payments.webhook-worker-delay-ms:1000}")
     public void processStripeWebhookInbox() {
-        jdbc.update("update payments.stripe_event_inbox set status='FAILED',failure_detail='Stale processing attempt',next_attempt_at=current_timestamp where status='PROCESSING' and received_at < current_timestamp - interval '10 minutes'");
+        jdbc.update("update payments.stripe_event_inbox set status='FAILED',failure_detail='Stale processing attempt',next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where status='PROCESSING' and lease_until <= current_timestamp");
         List<WebhookWork> work = jdbc.query("select event_id,tenant_id,workspace_id from payments.stripe_event_inbox where status in ('RECEIVED','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp order by received_at,event_id limit 20", (rs, n) -> new WebhookWork(rs.getString("event_id"), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
         for (WebhookWork item : work) {
-            if (jdbc.update("update payments.stripe_event_inbox set status='PROCESSING',attempt_count=attempt_count+1,failure_detail=null where event_id=? and status in ('RECEIVED','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp", item.eventId()) == 0) continue;
+            UUID claimToken = UUID.randomUUID();
+            if (jdbc.update("update payments.stripe_event_inbox set status='PROCESSING',attempt_count=attempt_count+1,failure_detail=null,processing_started_at=current_timestamp,lease_until=current_timestamp + interval '10 minutes',claim_token=? where event_id=? and status in ('RECEIVED','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp", claimToken, item.eventId()) == 0) {
+                count("claim", "lost");
+                continue;
+            }
+            count("claim", "acquired");
+            TechnicalMetrics.TimerSample timer = start("process");
             try {
                 if (item.tenantId() != null && item.workspaceId() != null) RlsRequestScope.set(item.tenantId(), item.workspaceId());
                 transactionTemplate.executeWithoutResult(transaction -> {
-                    processWebhook(item.eventId());
-                    jdbc.update("update payments.stripe_event_inbox set status='PROCESSED',processed_at=current_timestamp,next_attempt_at=current_timestamp where event_id=?", item.eventId());
+                    assertInboxClaim(item.eventId(), claimToken);
+                    InboxOutcome outcome = processWebhook(item.eventId(), claimToken);
+                    int finalized = jdbc.update("update payments.stripe_event_inbox set status=?,processed_at=current_timestamp,next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp", outcome.name(), item.eventId(), claimToken);
+                    if (finalized != 1) throw new InboxClaimLostException();
                 });
+                record(timer, "processed");
+                count("process", "success");
             } catch (RuntimeException exception) {
-                jdbc.update("update payments.stripe_event_inbox set status='FAILED',failure_detail=?,next_attempt_at=current_timestamp + (least(power(2,attempt_count),300) * interval '1 second') where event_id=?", truncate(exception.getMessage()), item.eventId());
+                jdbc.update("update payments.stripe_event_inbox set status='FAILED',failure_detail=?,next_attempt_at=current_timestamp + (least(power(2,attempt_count),300) * interval '1 second'),processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=?", truncate(exception.getMessage()), item.eventId(), claimToken);
+                record(timer, "failed");
+                count("process", "failed");
             } finally {
                 RlsRequestScope.clear();
             }
         }
     }
 
+    private void registerInboxGauges() {
+        if (metrics == null) return;
+        metrics.gauge("inbox", "pending", () -> queryDouble("select count(*) from payments.stripe_event_inbox where status in ('RECEIVED','FAILED')"));
+        metrics.gauge("inbox", "oldest_pending_age_seconds", () -> queryDouble("select coalesce(extract(epoch from current_timestamp - min(received_at)),0) from payments.stripe_event_inbox where status in ('RECEIVED','FAILED')"));
+        metrics.gauge("inbox", "failed", () -> queryDouble("select count(*) from payments.stripe_event_inbox where status='FAILED'"));
+        metrics.gauge("inbox", "processing_age_seconds", () -> queryDouble("select coalesce(extract(epoch from current_timestamp - min(processing_started_at)),0) from payments.stripe_event_inbox where status='PROCESSING'"));
+    }
+
+    private double queryDouble(String sql) {
+        try {
+            Number value = jdbc.queryForObject(sql, Number.class);
+            return value == null ? 0 : value.doubleValue();
+        } catch (RuntimeException exception) {
+            return 0;
+        }
+    }
+
+    private TechnicalMetrics.TimerSample start(String operation) { return metrics == null ? null : metrics.start("inbox", operation); }
+    private void record(TechnicalMetrics.TimerSample timer, String outcome) { if (metrics != null && timer != null) timer.stop(outcome); }
+    private void count(String operation, String outcome) { if (metrics != null) metrics.count("inbox", operation, outcome); }
+
     @Transactional
-    void processWebhook(String eventId) {
+    InboxOutcome processWebhook(String eventId, UUID claimToken) {
+        assertInboxClaim(eventId, claimToken);
         StripeEventRow event = jdbc.query("select event_id,event_type,payment_intent_id,payment_status,amount_minor,currency,tenant_id,workspace_id from payments.stripe_event_inbox where event_id=?", (rs, n) -> new StripeEventRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getObject(5, Long.class), rs.getString(6), rs.getObject(7, UUID.class), rs.getObject(8, UUID.class)), eventId).stream().findFirst().orElseThrow();
-        if (event.paymentIntentId() == null || !event.eventType().startsWith("payment_intent.")) { jdbc.update("update payments.stripe_event_inbox set status='IGNORED',processed_at=current_timestamp where event_id=?", eventId); return; }
+        if (event.paymentIntentId() == null || !event.eventType().startsWith("payment_intent.")) return InboxOutcome.IGNORED;
         if (event.tenantId() == null || event.workspaceId() == null) throw new IllegalArgumentException("Stripe webhook tenant binding is missing");
         PaymentRow payment = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.provider_payment_intent_id=? for update", (rs, n) -> paymentRow(rs), event.tenantId(), event.workspaceId(), event.paymentIntentId()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Stripe payment intent is not known"));
         if (event.amountMinor() != null && event.amountMinor() != minor(payment.amount(), payment.currency())) throw new IllegalArgumentException("Stripe amount does not match receivable payment");
         if (event.currency() != null && !event.currency().equalsIgnoreCase(payment.currency())) throw new IllegalArgumentException("Stripe currency does not match receivable payment");
         PaymentStatus next = statusFromEvent(event.eventType(), event.paymentStatus());
-        if (next == null) { jdbc.update("update payments.stripe_event_inbox set status='IGNORED',processed_at=current_timestamp where event_id=?", eventId); return; }
+        if (next == null) return InboxOutcome.IGNORED;
         Payment aggregate = Payment.rehydrate(payment.id().toString(), payment.amount(), PaymentStatus.valueOf(payment.status()));
         final boolean changed;
         try {
             changed = aggregate.applyProviderStatus(next);
         } catch (IllegalArgumentException staleEvent) {
-            jdbc.update("update payments.stripe_event_inbox set status='IGNORED',failure_detail=?,processed_at=current_timestamp where event_id=?", truncate(staleEvent.getMessage()), eventId);
-            return;
+            return InboxOutcome.IGNORED;
         }
         if (!changed) {
-            jdbc.update("update payments.stripe_event_inbox set status='IGNORED',processed_at=current_timestamp where event_id=?", eventId);
-            return;
+            return InboxOutcome.IGNORED;
         }
         if (next == PaymentStatus.SUCCEEDED) applySucceededPaymentForStoredContext(payment, eventId);
+        assertInboxClaim(eventId, claimToken);
         jdbc.update("update payments.payment set status=?,updated_at=current_timestamp,completed_at=case when ?='SUCCEEDED' then current_timestamp else completed_at end,version=version+1 where tenant_id=? and workspace_id=? and id=?", aggregate.status().name(), aggregate.status().name(), event.tenantId(), event.workspaceId(), payment.id());
         jdbc.update("insert into payments.payment_attempt (id,tenant_id,workspace_id,payment_id,attempt_number,status,provider_reference,failure_code,created_at) select ?,p.tenant_id,p.workspace_id,p.id,coalesce((select max(a.attempt_number)+1 from payments.payment_attempt a where a.payment_id=p.id),1),?,?,case when ?='FAILED' then 'PROVIDER_DECLINED' else null end,current_timestamp from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=?", UUID.randomUUID(), aggregate.status().name(), event.paymentIntentId(), aggregate.status().name(), event.tenantId(), event.workspaceId(), payment.id());
+        return InboxOutcome.PROCESSED;
+    }
+
+    private void assertInboxClaim(String eventId, UUID claimToken) {
+        Boolean owner = jdbc.queryForObject("select exists(select 1 from payments.stripe_event_inbox where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp)", Boolean.class, eventId, claimToken);
+        if (!Boolean.TRUE.equals(owner)) throw new InboxClaimLostException();
     }
 
     private void applySucceededPaymentForStoredContext(PaymentRow payment, String eventKey) {
@@ -382,6 +423,108 @@ public class PaymentService implements PaymentPersistencePort {
         Receivable aggregate = receivableAggregate(row);
         return new PaymentModels.ReceivableView(row.id().toString(), row.clientAccountId().toString(), row.subjectType(), row.subjectId().toString(), row.number(), row.currency(), aggregate.amount(), aggregate.amountPaid(), aggregate.remaining(), aggregate.status().name(), row.dueAt(), row.version());
     }
+
+    private CardPaymentClaim prepareCardPaymentClaim(CurrentAccessContext context, UUID receivableId, String idempotencyKey) {
+        lockIdempotencyKey(context, idempotencyKey);
+        ReceivableRow receivable = lockedReceivable(context, receivableId);
+        ensureBuyerScope(context, receivable.clientAccountId());
+        BigDecimal amount = receivable.amount().subtract(receivable.amountPaid());
+        if (amount.signum() <= 0 || !SetOfOpen.contains(receivable.status())) throw new IllegalArgumentException("Receivable is not payable");
+
+        ExistingPayment existing = existingPayment(context, idempotencyKey);
+        if (existing != null) {
+            ensureIdempotentPayment(existing, receivable, PaymentMethod.CARD_STRIPE, amount);
+            return new CardPaymentClaim(existing.payment(), receivable, minor(amount, receivable.currency()),
+                    providerIdempotencyKey(context, idempotencyKey), paymentMetadata(context, receivable), idempotencyKey);
+        }
+        ActiveCardPayment active = activeCardPayment(context, receivable.id());
+        if (active != null) throw new PaymentOperationInProgressException();
+
+        UUID paymentId = UUID.randomUUID();
+        Instant now = Instant.now();
+        Map<String, String> metadata = paymentMetadata(context, receivable);
+        int inserted = jdbc.update("insert into payments.payment (id,tenant_id,workspace_id,client_account_id,receivable_id,created_by_membership_id,method,status,amount,currency,provider,idempotency_key,metadata,created_at,updated_at) values (?,?,?,?,?,?, 'CARD_STRIPE','CREATED',?,?, 'STRIPE',?,?::jsonb,?,?) on conflict (tenant_id,workspace_id,created_by_membership_id,idempotency_key) do nothing",
+                paymentId, tenant(context), workspace(context), receivable.clientAccountId(), receivable.id(), context.membershipId().value(), amount, receivable.currency(), idempotencyKey, json(metadata), Timestamp.from(now), Timestamp.from(now));
+        if (inserted == 0) {
+            ExistingPayment concurrent = existingPayment(context, idempotencyKey);
+            if (concurrent == null) throw new IllegalArgumentException("Payment idempotency claim was lost");
+            ensureIdempotentPayment(concurrent, receivable, PaymentMethod.CARD_STRIPE, amount);
+            return new CardPaymentClaim(concurrent.payment(), receivable, minor(amount, receivable.currency()),
+                    providerIdempotencyKey(context, idempotencyKey), metadata, idempotencyKey);
+        }
+        jdbc.update("insert into payments.payment_attempt (id,tenant_id,workspace_id,payment_id,attempt_number,status,created_at) values (?,?,?,?,1,'CREATED',?)",
+                UUID.randomUUID(), tenant(context), workspace(context), paymentId, Timestamp.from(now));
+        PaymentRow payment = new PaymentRow(paymentId, receivable.id(), "CREATED", amount, receivable.currency(), null, null,
+                now, null, receivable.clientAccountId(), tenant(context), workspace(context));
+        return new CardPaymentClaim(payment, receivable, minor(amount, receivable.currency()),
+                providerIdempotencyKey(context, idempotencyKey), metadata, idempotencyKey);
+    }
+
+    private PaymentRow persistProviderIntent(CurrentAccessContext context, CardPaymentClaim claim,
+                                              StripePaymentProvider.PaymentIntent intent) {
+        PaymentViewRow stored = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id,p.method,p.idempotency_key from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=? for update",
+                (rs, n) -> new PaymentViewRow(paymentRow(rs), rs.getString("method")), tenant(context), workspace(context), claim.payment().id())
+                .stream().findFirst().orElseThrow(() -> new IllegalStateException("Payment idempotency claim is no longer available"));
+        ensureIdempotentPayment(new ExistingPayment(stored.payment(), stored.method()), claim.receivable(), PaymentMethod.CARD_STRIPE, claim.payment().amount());
+        if (stored.payment().providerId() != null && !stored.payment().providerId().equals(intent.providerId())) {
+            throw new IllegalStateException("Payment provider idempotency claim returned a different PaymentIntent");
+        }
+        PaymentStatus status = initialPaymentStatus(intent.status());
+        int updated = jdbc.update("update payments.payment set status=?,provider=?,provider_payment_intent_id=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and method='CARD_STRIPE' and idempotency_key=? and (provider_payment_intent_id is null or provider_payment_intent_id=?)",
+                status.name(), "STRIPE", intent.providerId(), Timestamp.from(Instant.now()), tenant(context), workspace(context), claim.payment().id(), claim.idempotencyKey(), intent.providerId());
+        if (updated != 1) throw new IllegalStateException("Payment provider result lost its durable claim");
+        recordProviderAttempt(context, claim.payment().id(), status.name(), intent.providerId(), null, null);
+        return new PaymentRow(claim.payment().id(), claim.receivable().id(), status.name(), claim.payment().amount(), claim.receivable().currency(),
+                intent.clientSecret(), intent.providerId(), claim.payment().createdAt(), null, claim.receivable().clientAccountId(), tenant(context), workspace(context));
+    }
+
+    private void recordProviderFailure(CurrentAccessContext context, CardPaymentClaim claim, RuntimeException exception) {
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                PaymentViewRow stored = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id,p.method,p.idempotency_key from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=? for update",
+                        (rs, n) -> new PaymentViewRow(paymentRow(rs), rs.getString("method")), tenant(context), workspace(context), claim.payment().id())
+                        .stream().findFirst().orElse(null);
+                if (stored == null || stored.payment().providerId() != null) return;
+                String failureCode = exception instanceof TechnicalFailureException technical
+                        ? technical.kind().name() : "PROVIDER_REQUEST_FAILED";
+                jdbc.update("update payments.payment set status='FAILED',updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and provider_payment_intent_id is null",
+                        Timestamp.from(Instant.now()), tenant(context), workspace(context), claim.payment().id());
+                recordProviderAttempt(context, claim.payment().id(), "FAILED", null, failureCode, truncate(exception.getMessage()));
+            });
+        } catch (RuntimeException ignored) {
+            // Preserve original provider failure; next idempotent request reconciles durable claim.
+        }
+    }
+
+    private ConfirmationClaim prepareConfirmationClaim(CurrentAccessContext context, UUID receivableId) {
+        ReceivableRow receivable = lockedReceivable(context, receivableId);
+        ensureBuyerScope(context, receivable.clientAccountId());
+        return new ConfirmationClaim(latestStripePayment(context, receivableId), receivable);
+    }
+
+    private void recordProviderAttempt(CurrentAccessContext context, UUID paymentId, String status,
+                                       String providerReference, String failureCode, String failureDetail) {
+        Boolean alreadyRecorded = jdbc.queryForObject("select exists(select 1 from payments.payment_attempt where tenant_id=? and workspace_id=? and payment_id=? and provider_reference is not distinct from ? and status=?)",
+                Boolean.class, tenant(context), workspace(context), paymentId, providerReference, status);
+        if (Boolean.TRUE.equals(alreadyRecorded)) return;
+        jdbc.update("insert into payments.payment_attempt (id,tenant_id,workspace_id,payment_id,attempt_number,status,provider_reference,failure_code,failure_detail,created_at) select ?,tenant_id,workspace_id,id,coalesce((select max(a.attempt_number)+1 from payments.payment_attempt a where a.payment_id=p.id),1),?,?,?,?,current_timestamp from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=?",
+                UUID.randomUUID(), status, providerReference, failureCode, failureDetail, tenant(context), workspace(context), paymentId);
+    }
+
+    private ActiveCardPayment activeCardPayment(CurrentAccessContext context, UUID receivableId) {
+        return jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id,p.method,p.idempotency_key from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.receivable_id=? and p.method='CARD_STRIPE' and p.status in ('CREATED','REQUIRES_ACTION','PROCESSING') order by p.created_at asc limit 1",
+                (rs, n) -> new ActiveCardPayment(paymentRow(rs), rs.getString("idempotency_key")), tenant(context), workspace(context), receivableId)
+                .stream().findFirst().orElse(null);
+    }
+
+    private Map<String, String> paymentMetadata(CurrentAccessContext context, ReceivableRow receivable) {
+        return Map.of("nexa_receivable_id", receivable.id().toString(), "nexa_tenant_id", tenant(context).toString(), "nexa_workspace_id", workspace(context).toString());
+    }
+
+    private String providerIdempotencyKey(CurrentAccessContext context, String idempotencyKey) {
+        return "nexa-" + sha256("stripe-payment|" + tenant(context) + "|" + workspace(context) + "|" + context.membershipId().value() + "|" + idempotencyKey);
+    }
+
     private PaymentModels.PaymentIntentView paymentIntentView(PaymentRow row, String clientSecret) {
         Payment aggregate = paymentAggregate(row);
         return new PaymentModels.PaymentIntentView(row.id().toString(), row.receivableId().toString(), aggregate.status().name(), aggregate.amount(), row.currency(), clientSecret, publishableKey, row.providerId(), row.createdAt());
@@ -531,10 +674,19 @@ public class PaymentService implements PaymentPersistencePort {
     private record CreditRow(UUID id, BigDecimal limit, BigDecimal exposure, BigDecimal reserved) { }
     private record StripeEventRow(String id, String eventType, String paymentIntentId, String paymentStatus, Long amountMinor, String currency, UUID tenantId, UUID workspaceId) { }
     private record ExistingPayment(PaymentRow payment, String method) { }
+    private record ActiveCardPayment(PaymentRow payment, String idempotencyKey) { }
+    private record CardPaymentClaim(PaymentRow payment, ReceivableRow receivable, long amountMinor,
+                                    String providerIdempotencyKey, Map<String, String> metadata, String idempotencyKey) { }
+    private record ConfirmationClaim(PaymentRow payment, ReceivableRow receivable) { }
+    private enum InboxOutcome { PROCESSED, IGNORED }
     private record WebhookWork(String eventId, UUID tenantId, UUID workspaceId) { }
     private record PaymentViewRow(PaymentRow payment, String method) { }
     private record AuthoritativeSubject(UUID clientAccountId, BigDecimal amount, String currency, String status) { }
     private record PaymentRow(UUID id, UUID receivableId, String status, BigDecimal amount, String currency, String clientSecret, String providerId, Instant createdAt, Instant completedAt, UUID clientAccountId, UUID tenantId, UUID workspaceId) {
         private PaymentRow(UUID id, UUID receivableId, String status, BigDecimal amount, String currency, String clientSecret, String providerId, Instant createdAt, Instant completedAt, UUID clientAccountId) { this(id, receivableId, status, amount, currency, clientSecret, providerId, createdAt, completedAt, clientAccountId, null, null); }
+    }
+
+    private static final class InboxClaimLostException extends RuntimeException {
+        private InboxClaimLostException() { super("Stripe inbox claim is no longer owned by this worker"); }
     }
 }
