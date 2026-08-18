@@ -9,6 +9,7 @@ import com.nexa.api.payments.application.port.PaymentPort;
 import com.nexa.api.sales.application.port.out.SalesEventContextQueryPort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.shared.events.PaymentEventContextQueryPort;
+import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
@@ -21,12 +22,15 @@ import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.warehouse.application.port.out.WarehouseEventContextQueryPort;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -63,6 +67,8 @@ public final class CanonicalOutboxEventProcessor {
     private final LogisticsOperationsService logistics;
     private final BusinessDocumentPort documents;
     private final PaymentPort payments;
+    private final TechnicalMetrics metrics;
+    private final TransactionTemplate transactionTemplate;
 
     public CanonicalOutboxEventProcessor(JdbcTemplate jdbc, ObjectMapper mapper,
                                          @Qualifier("notificationProjectionPort") NotificationProjectionPort notifications,
@@ -76,7 +82,9 @@ public final class CanonicalOutboxEventProcessor {
                                          WarehouseOperationsService warehouse,
                                          LogisticsOperationsService logistics,
                                          BusinessDocumentPort documents,
-                                         PaymentPort payments) {
+                                         PaymentPort payments,
+                                         ObjectProvider<TechnicalMetrics> metrics,
+                                         PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.notifications = notifications;
@@ -91,11 +99,14 @@ public final class CanonicalOutboxEventProcessor {
         this.logistics = logistics;
         this.documents = documents;
         this.payments = payments;
+        this.metrics = metrics == null ? null : metrics.getIfAvailable();
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        registerGauges();
     }
 
     @Scheduled(fixedDelayString = "${nexa.integration.outbox-delay-ms:1000}")
     public void processBatch() {
-        jdbc.update("update integration.outbox_event set status='PENDING',next_attempt_at=current_timestamp where status='PROCESSING' and attempt_count > 0 and created_at < current_timestamp - interval '10 minutes'");
+        jdbc.update("update integration.outbox_event set status='PENDING',next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where status='PROCESSING' and lease_until <= current_timestamp");
         List<EventRow> rows = jdbc.query("select event_id,event_type,aggregate_type,aggregate_id,tenant_id,workspace_id,occurred_at,correlation_id,causation_id,schema_version,payload::text,attempt_count from integration.outbox_event where status in ('PENDING','FAILED') and next_attempt_at <= current_timestamp and attempt_count < 20 order by created_at,event_id limit 20", (rs, n) -> new EventRow(
                 rs.getObject("event_id", UUID.class), rs.getString("event_type"), rs.getString("aggregate_type"),
                 rs.getObject("aggregate_id", UUID.class), rs.getObject("tenant_id", UUID.class),
@@ -103,41 +114,85 @@ public final class CanonicalOutboxEventProcessor {
                 rs.getString("correlation_id"), rs.getObject("causation_id", UUID.class), rs.getString("schema_version"),
                 rs.getString("payload"), rs.getInt("attempt_count")));
         for (EventRow row : rows) {
-            if (jdbc.update("update integration.outbox_event set status='PROCESSING',attempt_count=attempt_count+1 where event_id=? and status in ('PENDING','FAILED') and attempt_count < 20", row.eventId()) != 1) continue;
+            UUID claimToken = UUID.randomUUID();
+            if (jdbc.update("update integration.outbox_event set status='PROCESSING',attempt_count=attempt_count+1,processing_started_at=current_timestamp,lease_until=current_timestamp + interval '10 minutes',claim_token=? where event_id=? and status in ('PENDING','FAILED') and attempt_count < 20 and next_attempt_at <= current_timestamp", claimToken, row.eventId()) != 1) {
+                count("claim", "lost");
+                continue;
+            }
+            count("claim", "acquired");
+            if (row.attemptCount() > 0) count("retry", "scheduled");
+            TechnicalMetrics.TimerSample timer = start("process");
             try {
-                processOne(row);
-                jdbc.update("update integration.outbox_event set status='PUBLISHED',processed_at=current_timestamp,next_attempt_at=current_timestamp where event_id=? and status='PROCESSING'", row.eventId());
+                RlsRequestScope.set(row.tenantId(), row.workspaceId());
+                transactionTemplate.executeWithoutResult(transaction -> {
+                    assertClaimOwner(row.eventId(), claimToken);
+                    processOne(row, claimToken);
+                    int finalized = jdbc.update("update integration.outbox_event set status='PUBLISHED',processed_at=current_timestamp,next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp", row.eventId(), claimToken);
+                    if (finalized != 1) throw new ClaimLostException();
+                });
+                record(timer, "published");
+                count("publish", "success");
             } catch (RuntimeException exception) {
                 LOG.error("Canonical outbox processing failed eventId={} eventType={} correlationId={}", row.eventId(), row.eventType(), row.correlationId(), exception);
-                jdbc.update("update integration.outbox_event set status=case when attempt_count >= 20 then 'DEAD_LETTER' else 'FAILED' end,next_attempt_at=current_timestamp + (least(power(2,attempt_count),300) * interval '1 second') where event_id=? and status='PROCESSING'", row.eventId());
+                jdbc.update("update integration.outbox_event set status=case when attempt_count >= 20 then 'DEAD_LETTER' else 'FAILED' end,next_attempt_at=current_timestamp + (least(power(2,attempt_count),300) * interval '1 second'),processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=?", row.eventId(), claimToken);
+                boolean deadLetter = row.attemptCount() + 1 >= 20;
+                record(timer, deadLetter ? "dead_letter" : "failed");
+                count("publish", deadLetter ? "dead_letter" : "failed");
             }
         }
     }
 
-    private void processOne(EventRow event) {
-        if (jdbc.queryForObject("select exists(select 1 from integration.inbox_event where consumer_name=? and event_id=?)", Boolean.class, CONSUMER, event.eventId())) return;
+    private void processOne(EventRow event, UUID claimToken) {
+        assertClaimOwner(event.eventId(), claimToken);
+        if (jdbc.queryForObject("select exists(select 1 from integration.inbox_event where consumer_name=? and event_id=?)", Boolean.class, CONSUMER, event.eventId())) {
+            count("inbox", "deduplicated");
+            return;
+        }
         Map<String, Object> payload = payload(event.payload());
-        RlsRequestScope.set(event.tenantId(), event.workspaceId());
-        try {
-            switch (event.eventType()) {
-                case "PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED", "SALES_ORDER_CONFIRMED", "DISPATCH_DELIVERED", "DELIVERY_COMPLETED", "POD_COMPLETED", "PAYMENT_SUCCEEDED" -> {
-                    projectNotification(event, payload);
-                    if ("PURCHASE_REQUEST_APPROVED".equals(event.eventType())) convertApproved(event, payload);
-                    if ("SALES_ORDER_CONFIRMED".equals(event.eventType())) {
-                        reserveConfirmed(event, payload);
-                    }
-                    if ("DISPATCH_DELIVERED".equals(event.eventType())) generateDeliveryDocuments(event, payload);
+        switch (event.eventType()) {
+            case "PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED", "SALES_ORDER_CONFIRMED", "DISPATCH_DELIVERED", "DELIVERY_COMPLETED", "POD_COMPLETED", "PAYMENT_SUCCEEDED" -> {
+                projectNotification(event, payload);
+                if ("PURCHASE_REQUEST_APPROVED".equals(event.eventType())) convertApproved(event, payload);
+                if ("SALES_ORDER_CONFIRMED".equals(event.eventType())) {
+                    reserveConfirmed(event, payload);
                 }
-                case "FULFILLMENT_READY" -> createDispatch(event, payload);
-                case "INVOICE_ISSUED" -> createReceivable(event, payload);
-                case "BUSINESS_DOCUMENT_GENERATION_REQUESTED" -> { /* durable fact; source service owns the generation effect */ }
-                default -> { /* forward-compatible event: durable inbox records that it was observed */ }
+                if ("DISPATCH_DELIVERED".equals(event.eventType())) generateDeliveryDocuments(event, payload);
             }
-            jdbc.update("insert into integration.inbox_event(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) values (?,?,?,?,?,'PROCESSED') on conflict (consumer_name,event_id) do nothing", CONSUMER, event.eventId(), event.tenantId(), event.workspaceId(), Timestamp.from(Instant.now()));
-        } finally {
-            RlsRequestScope.clear();
+            case "FULFILLMENT_READY" -> createDispatch(event, payload);
+            case "INVOICE_ISSUED" -> createReceivable(event, payload);
+            case "BUSINESS_DOCUMENT_GENERATION_REQUESTED" -> { /* durable fact; source service owns the generation effect */ }
+            default -> { /* forward-compatible event: durable inbox records that it was observed */ }
+        }
+        assertClaimOwner(event.eventId(), claimToken);
+        jdbc.update("insert into integration.inbox_event(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) values (?,?,?,?,?,'PROCESSED') on conflict (consumer_name,event_id) do nothing", CONSUMER, event.eventId(), event.tenantId(), event.workspaceId(), Timestamp.from(Instant.now()));
+    }
+
+    private void assertClaimOwner(UUID eventId, UUID claimToken) {
+        Boolean owner = jdbc.queryForObject("select exists(select 1 from integration.outbox_event where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp)", Boolean.class, eventId, claimToken);
+        if (!Boolean.TRUE.equals(owner)) throw new ClaimLostException();
+    }
+
+    private void registerGauges() {
+        if (metrics == null) return;
+        metrics.gauge("outbox", "pending", () -> queryDouble("select count(*) from integration.outbox_event where status in ('PENDING','FAILED')"));
+        metrics.gauge("outbox", "oldest_pending_age_seconds", () -> queryDouble("select coalesce(extract(epoch from current_timestamp - min(created_at)),0) from integration.outbox_event where status in ('PENDING','FAILED')"));
+        metrics.gauge("outbox", "failed", () -> queryDouble("select count(*) from integration.outbox_event where status='FAILED'"));
+        metrics.gauge("outbox", "dead_letter", () -> queryDouble("select count(*) from integration.outbox_event where status='DEAD_LETTER'"));
+        metrics.gauge("outbox", "processing_age_seconds", () -> queryDouble("select coalesce(extract(epoch from current_timestamp - min(processing_started_at)),0) from integration.outbox_event where status='PROCESSING'"));
+    }
+
+    private double queryDouble(String sql) {
+        try {
+            Number value = jdbc.queryForObject(sql, Number.class);
+            return value == null ? 0 : value.doubleValue();
+        } catch (RuntimeException exception) {
+            return 0;
         }
     }
+
+    private TechnicalMetrics.TimerSample start(String operation) { return metrics == null ? null : metrics.start("outbox", operation); }
+    private void record(TechnicalMetrics.TimerSample timer, String outcome) { if (metrics != null && timer != null) timer.stop(outcome); }
+    private void count(String operation, String outcome) { if (metrics != null) metrics.count("outbox", operation, outcome); }
 
     private void convertApproved(EventRow event, Map<String, Object> payload) {
         UUID requestId = uuid(payload.getOrDefault("purchaseRequestId", event.aggregateId()));
@@ -259,4 +314,8 @@ public final class CanonicalOutboxEventProcessor {
     private record EventRow(UUID eventId, String eventType, String aggregateType, UUID aggregateId, UUID tenantId,
                             UUID workspaceId, Instant occurredAt, String correlationId, UUID causationId,
                             String schemaVersion, String payload, int attemptCount) { }
+
+    private static final class ClaimLostException extends RuntimeException {
+        private ClaimLostException() { super("Outbox claim is no longer owned by this worker"); }
+    }
 }
