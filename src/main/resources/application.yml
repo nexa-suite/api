@@ -79,13 +79,22 @@ nexa:
     secret-key: ${STRIPE_SECRET_KEY:}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
     publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+    connect-timeout-ms: ${NEXA_STRIPE_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${NEXA_STRIPE_READ_TIMEOUT_MS:10000}
+    max-network-retries: ${NEXA_STRIPE_MAX_NETWORK_RETRIES:0}
+  clamav:
+    mode: ${NEXA_CLAMAV_MODE:network}
+    host: ${NEXA_CLAMAV_HOST:}
+    port: ${NEXA_CLAMAV_PORT:3310}
+    connect-timeout-ms: ${NEXA_CLAMAV_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${NEXA_CLAMAV_READ_TIMEOUT_MS:10000}
   object-storage:
-    root: ${NEXA_OBJECT_STORAGE_ROOT:./.local-object-storage}
-    endpoint: ${NEXA_OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
-    bucket: ${NEXA_OBJECT_STORAGE_BUCKET:nexa-private}
-    access-key: ${NEXA_OBJECT_STORAGE_ACCESS_KEY:nexa-minio}
-    secret-key: ${NEXA_OBJECT_STORAGE_SECRET_KEY:nexa-minio-local-foundation}
-    region: ${NEXA_OBJECT_STORAGE_REGION:us-east-1}
+    root: ${NEXA_OBJECT_STORAGE_ROOT:}
+    endpoint: ${NEXA_OBJECT_STORAGE_ENDPOINT:}
+    bucket: ${NEXA_OBJECT_STORAGE_BUCKET:}
+    access-key: ${NEXA_OBJECT_STORAGE_ACCESS_KEY:}
+    secret-key: ${NEXA_OBJECT_STORAGE_SECRET_KEY:}
+    region: ${NEXA_OBJECT_STORAGE_REGION:}
     timeout-ms: ${NEXA_OBJECT_STORAGE_TIMEOUT_MS:5000}
 
 springdoc:

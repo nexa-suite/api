@@ -21,6 +21,8 @@ public final class ApiProblemDetailFactory {
 		problem.setInstance(URI.create(request.getRequestURI()));
 		problem.setProperty("code", code.name());
 		problem.setProperty("correlationId", correlationId(request));
+		problem.setProperty("category", category(code));
+		problem.setProperty("retryable", retryable(code));
 		Object trace = request.getAttribute(com.nexa.api.shared.presentation.http.TraceIdFilter.ATTRIBUTE_NAME);
 		if (trace instanceof String traceId) problem.setProperty("traceId", traceId);
 		return problem;
@@ -132,8 +134,39 @@ public final class ApiProblemDetailFactory {
 				case INVITATION_CONFLICT -> "Invitation conflict";
 				case CUSTOM_FIELD_CONFLICT -> "Custom field conflict";
 				case SYSTEM_OPERATOR_REQUIRED -> "System operator authorization required";
-				case REJECTION_REASON_REQUIRED -> "Rejection reason required";
-				case INTERNAL_ERROR -> "Internal server error";
+			case REJECTION_REASON_REQUIRED -> "Rejection reason required";
+			case EXTERNAL_TEMPORARY_FAILURE -> "External service temporarily unavailable";
+			case EXTERNAL_TIMEOUT -> "External service timed out";
+			case TECHNICAL_CAPABILITY_UNAVAILABLE -> "Technical capability unavailable";
+			case STORAGE_UNAVAILABLE -> "Storage unavailable";
+			case SCANNER_UNAVAILABLE -> "Malware scanner unavailable";
+			case INTERNAL_ERROR -> "Internal server error";
+		};
+	}
+
+	private static boolean retryable(ApiErrorCode code) {
+		return switch (code) {
+			case AUTHENTICATION_THROTTLED, RESET_RATE_LIMITED, PUBLIC_CONTACT_RATE_LIMITED,
+				EXTERNAL_TEMPORARY_FAILURE, EXTERNAL_TIMEOUT, STORAGE_UNAVAILABLE, SCANNER_UNAVAILABLE -> true;
+			default -> false;
+		};
+	}
+
+	private static String category(ApiErrorCode code) {
+		return switch (code) {
+			case AUTHENTICATION_REQUIRED, AUTHENTICATION_FAILED, ACCESS_TOKEN_INVALID,
+				AUTHENTICATION_THROTTLED, REFRESH_SESSION_INVALID -> "AUTHENTICATION";
+			case FORBIDDEN, WORKSPACE_ACCESS_DENIED, SURFACE_ACCESS_DENIED, PERMISSION_DENIED,
+				ORIGIN_NOT_ALLOWED, SYSTEM_OPERATOR_REQUIRED -> "AUTHORIZATION";
+			case CONCURRENCY_CONFLICT -> "CONCURRENCY";
+			case PRECONDITION_REQUIRED -> "PRECONDITION";
+			case RESET_RATE_LIMITED, PUBLIC_CONTACT_RATE_LIMITED -> "RATE_LIMIT";
+			case EXTERNAL_TEMPORARY_FAILURE, EXTERNAL_TIMEOUT -> "EXTERNAL";
+			case TECHNICAL_CAPABILITY_UNAVAILABLE -> "TECHNICAL";
+			case STORAGE_UNAVAILABLE -> "STORAGE";
+			case SCANNER_UNAVAILABLE -> "SCANNER";
+			case INTERNAL_ERROR -> "INTERNAL";
+			default -> "CLIENT_ERROR";
 		};
 	}
 }

@@ -307,7 +307,13 @@ public class BusinessDocumentService implements BusinessDocumentPort {
     private static String requiredContentType(String value) { if (value == null || value.isBlank() || value.length() > 160) throw new IllegalArgumentException("Evidence content type is required"); return value.trim().toLowerCase(Locale.ROOT); }
     private static void requireIdempotencyKey(String value) { if (value == null || value.isBlank() || value.length() > 160) throw new IllegalArgumentException("Idempotency-Key is required"); }
     private static boolean extensionCompatible(String filename, String detected) { String lower = filename.toLowerCase(Locale.ROOT); return ("image/png".equalsIgnoreCase(detected) && lower.endsWith(".png")) || ("image/jpeg".equalsIgnoreCase(detected) && (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) || ("application/pdf".equalsIgnoreCase(detected) && lower.endsWith(".pdf")); }
-    private static boolean retryableScan(ContentScannerPort.ScanResult scan) { return scan.reason() != null && scan.reason().toUpperCase(Locale.ROOT).contains("UNAVAILABLE"); }
+    private static boolean retryableScan(ContentScannerPort.ScanResult scan) {
+        if (scan.reason() == null) return false;
+        String reason = scan.reason().toUpperCase(Locale.ROOT);
+        return reason.equals("MALWARE_SCANNER_UNAVAILABLE")
+                || reason.equals("MALWARE_SCANNER_TIMEOUT")
+                || reason.equals("MALFORMED_SCANNER_RESPONSE");
+    }
     private record EvidenceAccess(EvidenceRow row, BusinessDocumentModels.EvidenceView view) { }
     private record EvidenceRow(UUID id, UUID clientAccountId, String subjectType, UUID subjectId, String objectKey, String lifecycleStatus,
             String declaredContentType, String detectedContentType, String originalFilename, String checksumSha256, long byteSize,
