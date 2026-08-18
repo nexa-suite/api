@@ -1,6 +1,7 @@
 package com.nexa.api.iam.infrastructure;
 
 import com.nexa.api.support.PostgresIntegrationSupport;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.HttpHeaders;
@@ -48,7 +49,7 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk());
     }
 
-    @Test void refreshCookieRequiresAllowedOriginAndKeepsBoundaryAttributes() throws Exception {
+    @Test void refreshCookieRequiresAllowedOriginAndKeepsConfiguredBoundaryAttributes() throws Exception {
         var login = mockMvc.perform(post("/api/v1/authentication/sign-in")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -59,29 +60,29 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
         org.assertj.core.api.Assertions.assertThat(setCookie)
                 .contains("NEXA_PLATFORM_REFRESH=")
                 .contains("HttpOnly")
-                .contains("Secure")
+                .doesNotContain("Secure")
                 .contains("SameSite=Strict")
                 .contains("Path=/api/v1/authentication");
-        String cookiePair = setCookie.substring(0, setCookie.indexOf(';'));
+        String cookieValue = setCookie.substring(setCookie.indexOf('=') + 1, setCookie.indexOf(';'));
 
         mockMvc.perform(post("/api/v1/authentication/refresh")
                         .header("X-Nexa-Surface", "PLATFORM")
-                        .header(HttpHeaders.COOKIE, cookiePair))
+                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/v1/authentication/refresh")
                         .header(HttpHeaders.ORIGIN, "https://evil.example")
                         .header("X-Nexa-Surface", "PLATFORM")
-                        .header(HttpHeaders.COOKIE, cookiePair))
+                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue)))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/v1/authentication/refresh")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .header("X-Nexa-Surface", "PORTAL")
-                        .header(HttpHeaders.COOKIE, cookiePair))
+                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue)))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/authentication/refresh")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .header("X-Nexa-Surface", "PLATFORM")
-                        .header(HttpHeaders.COOKIE, cookiePair))
+                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue)))
                 .andExpect(status().isOk());
     }
 
