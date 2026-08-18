@@ -3,6 +3,17 @@ spring:
     name: nexa-api
   autoconfigure:
     exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
+  mail:
+    host: ${NEXA_SMTP_HOST:}
+    port: ${NEXA_SMTP_PORT:1025}
+    username: ${NEXA_SMTP_USERNAME:}
+    password: ${NEXA_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${NEXA_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${NEXA_SMTP_STARTTLS:false}
+      mail.smtp.connectiontimeout: ${NEXA_SMTP_CONNECTION_TIMEOUT_MS:5000}
+      mail.smtp.timeout: ${NEXA_SMTP_TIMEOUT_MS:5000}
+      mail.smtp.writetimeout: ${NEXA_SMTP_WRITE_TIMEOUT_MS:5000}
   datasource:
     url: ${NEXA_DATABASE_URL:jdbc:postgresql://localhost:5432/nexa}
     username: ${NEXA_DATABASE_RUNTIME_USERNAME:${NEXA_DATABASE_USERNAME:nexa}}
@@ -42,8 +53,29 @@ info:
     status: foundation
 
 nexa:
+  security:
+    issuer: ${NEXA_SECURITY_ISSUER:}
+    audience: ${NEXA_SECURITY_AUDIENCE:}
+    rsa-public-key: ${NEXA_SECURITY_RSA_PUBLIC_KEY:}
+    rsa-private-key: ${NEXA_SECURITY_RSA_PRIVATE_KEY:}
+    allowed-origins: ${NEXA_SECURITY_ALLOWED_ORIGINS:}
+    refresh-cookie-secure: ${NEXA_REFRESH_COOKIE_SECURE:true}
+    smtp:
+      host: ${NEXA_SMTP_HOST:}
+      port: ${NEXA_SMTP_PORT:1025}
+      from: ${NEXA_SMTP_FROM:no-reply@nexa.local}
+      timeout: ${NEXA_SMTP_TIMEOUT:PT5S}
+      required: ${NEXA_SMTP_REQUIRED:false}
+    reset:
+      platform-url: ${NEXA_PLATFORM_RESET_URL:http://localhost:4200/reset-password}
+      portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4300/reset-password}
+      throttle-key: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:}
+    system-operator-token: ${NEXA_SYSTEM_OPERATOR_TOKEN:}
+    notification-outbox-key: ${NEXA_NOTIFICATION_OUTBOX_KEY:}
+    notification-outbox-key-version: ${NEXA_NOTIFICATION_OUTBOX_KEY_VERSION:v1}
+    notification-outbox-previous-keys: ${NEXA_NOTIFICATION_OUTBOX_PREVIOUS_KEYS:}
   payments:
-    provider: ${NEXA_PAYMENTS_PROVIDER:}
+    provider: ${NEXA_PAYMENTS_PROVIDER:disabled}
     secret-key: ${STRIPE_SECRET_KEY:}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
     publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
