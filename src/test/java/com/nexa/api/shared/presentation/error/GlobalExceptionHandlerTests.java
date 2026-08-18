@@ -3,6 +3,7 @@ package com.nexa.api.shared.presentation.error;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,6 +13,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -66,6 +68,13 @@ class GlobalExceptionHandlerTests {
 				.andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("IllegalStateException"))));
 	}
 
+	@Test
+	void handlesControllerMethodValidationAsBadRequest() throws Exception {
+		mockMvc.perform(get("/validated-query").param("value", "invalid"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+	}
+
 	@RestController
 	public static class TestController {
 		@PostMapping("/test")
@@ -79,6 +88,10 @@ class GlobalExceptionHandlerTests {
 		@GetMapping("/explode")
 		void explode() {
 			throw new IllegalStateException("secret internal detail");
+		}
+
+		@GetMapping("/validated-query")
+		void validatedQuery(@RequestParam @Pattern(regexp = "VALID") String value) {
 		}
 	}
 

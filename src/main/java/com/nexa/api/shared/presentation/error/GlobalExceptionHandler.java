@@ -21,6 +21,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.validation.BindException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.security.access.AccessDeniedException;
@@ -359,6 +360,11 @@ public final class GlobalExceptionHandler {
 				.map(error -> Map.of("field", error.getPropertyPath().toString(), "message", "Invalid value"))
 				.toList());
 		return ResponseEntity.badRequest().body(problem);
+	}
+
+	@ExceptionHandler(HandlerMethodValidationException.class)
+	public ResponseEntity<ProblemDetail> handleMethodValidation(HandlerMethodValidationException exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Request validation failed", request);
 	}
 
 	@ExceptionHandler(BindException.class)
