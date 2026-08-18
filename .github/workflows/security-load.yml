@@ -115,7 +115,7 @@ jobs:
           NEXA_PAYMENTS_PROVIDER: deterministic
         run: |
           nohup ./mvnw spring-boot:run > api-runtime.log 2>&1 &
-          for attempt in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:8080/actuator/health/readiness; then exit 0; fi
             sleep 2
           done

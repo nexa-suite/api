@@ -25,7 +25,7 @@ jobs:
           docker run -d --name nexa-ci-stripe-mock -p 12111:8080 \
             -v "$GITHUB_WORKSPACE/ops/compose/stripe-mock/mappings:/home/wiremock/mappings:ro" \
             wiremock/wiremock:3.13.1 --global-response-templating
-          for attempt in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             stripe_ready=0
             clamav_ready=0
             curl --fail --silent http://127.0.0.1:12111/__admin/health >/dev/null && stripe_ready=1 || true
