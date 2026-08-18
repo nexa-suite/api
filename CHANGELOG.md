@@ -151,7 +151,7 @@ This release consolidates previously unreleased Identity, tenant, security and c
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v0.9.0...HEAD
 [0.8.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.8.0
 [0.6.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
