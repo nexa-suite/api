@@ -9,6 +9,7 @@ import java.util.UUID;
 /** Outbound payment use-case persistence/provider boundary. */
 public interface PaymentPersistencePort {
     PaymentModels.Page<PaymentModels.ReceivableView> listReceivables(CurrentAccessContext context, int page, int size);
+    PaymentModels.Page<PaymentModels.PaymentSummaryView> listPayments(CurrentAccessContext context, int page, int size, String method, String status);
     PaymentModels.ReceivableView getReceivable(CurrentAccessContext context, UUID receivableId);
     PaymentModels.PaymentView getPayment(CurrentAccessContext context, UUID paymentId);
     PaymentModels.ReceivableView createReceivable(CurrentAccessContext context, ReceivableCommand request);

@@ -74,6 +74,16 @@ public final class PaymentController {
         return ResponseEntity.created(URI.create("/api/v1/payments/" + value.id())).body(value);
     }
 
+    @GetMapping("/payments")
+    @Operation(operationId = "listPayments")
+    public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPayments(@RequestAttribute(ACCESS) CurrentAccessContext context,
+                                                                               @RequestParam(defaultValue = "0") @Min(0) int page,
+                                                                               @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
+                                                                               @RequestParam(required = false) String method,
+                                                                               @RequestParam(required = false) String status) {
+        return service.listPayments(context, page, size, method, status);
+    }
+
     @PostMapping("/payments/{paymentId}/bank-transfer/approve")
     @Operation(operationId = "approveBankTransfer")
     public PaymentModels.PaymentView approveBankTransfer(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID paymentId,
@@ -108,6 +118,6 @@ public final class PaymentController {
         PaymentServiceFacade.ReceivableRequest toCommand(String idempotencyKey) { return new PaymentServiceFacade.ReceivableRequest(subjectType, subjectId, dueAt, idempotencyKey); }
     }
 
-    public record BankTransferRequest(@NotBlank String reference, @NotNull UUID proofEvidenceId) { }
+    public record BankTransferRequest(@NotBlank String reference, UUID proofEvidenceId) { }
     public record BankTransferReviewRequest(@NotBlank String reason) { }
 }

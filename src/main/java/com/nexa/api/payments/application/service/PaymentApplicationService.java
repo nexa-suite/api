@@ -25,6 +25,11 @@ public class PaymentApplicationService implements PaymentPort {
     }
 
     @Override
+    public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPayments(CurrentAccessContext context, int page, int size, String method, String status) {
+        return persistence.listPayments(context, page, size, method, status);
+    }
+
+    @Override
     public PaymentModels.ReceivableView getReceivable(CurrentAccessContext context, UUID receivableId) {
         return persistence.getReceivable(context, receivableId);
     }

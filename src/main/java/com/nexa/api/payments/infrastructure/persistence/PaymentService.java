@@ -92,6 +92,46 @@ public class PaymentService implements PaymentPersistencePort {
     }
 
     @Transactional(readOnly = true)
+    public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPayments(CurrentAccessContext context, int page, int size, String method, String status) {
+        context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+        String methodFilter = normalizePaymentMethod(method);
+        String statusFilter = normalizePaymentStatus(status);
+        StringBuilder where = new StringBuilder(" where p.tenant_id=? and p.workspace_id=?");
+        List<Object> parameters = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        if (methodFilter != null) {
+            where.append(" and p.method=?");
+            parameters.add(methodFilter);
+        }
+        if (statusFilter != null) {
+            where.append(" and p.status=?");
+            parameters.add(statusFilter);
+        }
+        Long total = jdbc.queryForObject("select count(*) from payments.payment p" + where, Long.class, parameters.toArray());
+        List<Object> queryParameters = new ArrayList<>(parameters);
+        queryParameters.add(safeSize);
+        queryParameters.add(safePage * safeSize);
+        List<PaymentModels.PaymentSummaryView> values = jdbc.query(
+                "select p.id,p.receivable_id,r.receivable_number,p.client_account_id,p.method,p.status,p.amount,p.currency,p.bank_transfer_reference,p.review_reason,p.created_at,p.completed_at from payments.payment p join payments.receivable r on r.tenant_id=p.tenant_id and r.workspace_id=p.workspace_id and r.id=p.receivable_id" + where + " order by p.created_at desc,p.id desc limit ? offset ?",
+                (rs, n) -> new PaymentModels.PaymentSummaryView(
+                        rs.getObject("id", UUID.class).toString(),
+                        rs.getObject("receivable_id", UUID.class).toString(),
+                        rs.getString("receivable_number"),
+                        rs.getObject("client_account_id", UUID.class).toString(),
+                        rs.getString("method"),
+                        rs.getString("status"),
+                        rs.getBigDecimal("amount"),
+                        rs.getString("currency"),
+                        rs.getString("bank_transfer_reference"),
+                        rs.getString("review_reason"),
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()),
+                queryParameters.toArray());
+        return new PaymentModels.Page<>(values, safePage, safeSize, total == null ? 0 : total);
+    }
+
+    @Transactional(readOnly = true)
     public PaymentModels.ReceivableView getReceivable(CurrentAccessContext context, UUID receivableId) {
         context.requirePermission(PermissionKey.PAYMENT_READ);
         return receivableQuery(context, receivableId).stream().filter(row -> authorizedClient(context, row.clientAccountId())).findFirst()
@@ -648,13 +688,14 @@ public class PaymentService implements PaymentPersistencePort {
     private boolean authorizedClient(CurrentAccessContext c, UUID clientAccountId) { return !c.hasRole(MembershipRole.BUYER) || Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?)", Boolean.class, tenant(c), workspace(c), clientAccountId, c.membershipId().value())); }
     private void ensureBuyerScope(CurrentAccessContext c, UUID clientAccountId) { if (!authorizedClient(c, clientAccountId)) throw new IllegalArgumentException("Receivable is outside buyer scope"); }
     private void validateProofEvidence(CurrentAccessContext context, ReceivableRow receivable, UUID evidenceId) {
-        if (evidenceId == null) throw new IllegalArgumentException("Bank transfer proof evidence is required");
+        if (evidenceId == null) return;
         Boolean available = jdbc.queryForObject("select exists(select 1 from business_documents.evidence_object where tenant_id=? and workspace_id=? and id=? and client_account_id=? and lifecycle_status='AVAILABLE' and ((subject_type='RECEIVABLE' and subject_id=?) or (subject_type=? and subject_id=?)))", Boolean.class, tenant(context), workspace(context), evidenceId, receivable.clientAccountId(), receivable.id(), receivable.subjectType(), receivable.subjectId());
         if (!Boolean.TRUE.equals(available)) throw new IllegalArgumentException("Bank transfer proof evidence is not available or is bound to another subject");
     }
 
     private void validateStoredProofEvidence(CurrentAccessContext context, PaymentRow payment) {
         UUID evidenceId = jdbc.queryForObject("select bank_transfer_proof_evidence_id from payments.payment where tenant_id=? and workspace_id=? and id=?", UUID.class, tenant(context), workspace(context), payment.id());
+        if (evidenceId == null) return;
         ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=?", (rs, n) -> receivableRow(rs), tenant(context), workspace(context), payment.receivableId()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Receivable not found"));
         validateProofEvidence(context, receivable, evidenceId);
     }
@@ -667,6 +708,18 @@ public class PaymentService implements PaymentPersistencePort {
     private static String truncate(String value) { return value == null ? "unknown" : value.substring(0, Math.min(1000, value.length())); }
     private static UUID tenant(CurrentAccessContext c) { return c.tenantId().value(); } private static UUID workspace(CurrentAccessContext c) { return c.workspaceId().value(); }
     private static UUID tenant(PaymentRow row) { return row.tenantId(); } private static UUID workspace(PaymentRow row) { return row.workspaceId(); }
+    private static String normalizePaymentMethod(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("CARD_STRIPE", "BANK_TRANSFER", "CREDIT_LINE").contains(normalized)) throw new IllegalArgumentException("Payment method filter is invalid");
+        return normalized;
+    }
+    private static String normalizePaymentStatus(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("CREATED", "REQUIRES_ACTION", "PROCESSING", "SUCCEEDED", "FAILED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED").contains(normalized)) throw new IllegalArgumentException("Payment status filter is invalid");
+        return normalized;
+    }
     private static final java.util.Set<String> SetOfOpen = java.util.Set.of("OPEN", "PARTIALLY_PAID", "OVERDUE");
     private static final java.util.Set<String> SetOfZeroDecimalCurrencies = java.util.Set.of("JPY", "KRW", "CLP");
 
