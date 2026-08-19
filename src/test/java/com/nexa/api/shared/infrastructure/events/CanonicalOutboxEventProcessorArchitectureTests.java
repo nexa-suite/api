@@ -45,6 +45,13 @@ class CanonicalOutboxEventProcessorArchitectureTests {
     }
 
     @Test
+    void workerClearsTenantScopeAfterEveryEvent() throws Exception {
+        String source = Files.readString(PROCESSOR);
+
+        assertThat(source).contains("finally {", "RlsRequestScope.clear();");
+    }
+
+    @Test
     void workflowActorLookupIsExplicitAndCannotChooseTheFirstMembership() throws Exception {
         String source = Files.readString(ACTOR_ADAPTER);
 

@@ -138,6 +138,8 @@ public final class CanonicalOutboxEventProcessor {
                 boolean deadLetter = row.attemptCount() + 1 >= 20;
                 record(timer, deadLetter ? "dead_letter" : "failed");
                 count("publish", deadLetter ? "dead_letter" : "failed");
+            } finally {
+                RlsRequestScope.clear();
             }
         }
     }
