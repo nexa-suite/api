@@ -31,6 +31,10 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-SS-" + suffix, "Safety stock warehouse");
         zone(token, source.warehouseId(), "Z-SS-" + suffix, "Ambient");
+        MvcResult baselineAvailability = mockMvc.perform(get("/api/v1/inventory-availability")
+                        .header("Authorization", "Bearer " + token)
+                        .param("catalogItemId", "CAT-0002"))
+                .andExpect(status().isOk()).andReturn();
         MvcResult receipt = receive(token, source, "B-SS-" + suffix, "10", "ss-receipt-" + suffix);
         String lotEtag = receipt.getResponse().getHeader("ETag");
 
@@ -51,12 +55,17 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .param("catalogItemId", "CAT-0002"))
                 .andExpect(status().isOk()).andReturn();
         var availabilityRow = json(availability).get(0);
+        var baselineRow = json(baselineAvailability).get(0);
         assertThat(availabilityRow.get("status").asText()).isEqualTo("AVAILABLE");
+        BigDecimal baselinePhysicalQuantity = new BigDecimal(baselineRow.get("physicalQuantity").asText());
+        BigDecimal baselineSafetyStock = new BigDecimal(baselineRow.get("safetyStock").asText());
+        BigDecimal baselineSellableQuantity = new BigDecimal(baselineRow.get("sellableQuantity").asText());
         BigDecimal physicalQuantity = new BigDecimal(availabilityRow.get("physicalQuantity").asText());
-        assertThat(physicalQuantity).isGreaterThanOrEqualTo(new BigDecimal("10"));
-        assertThat(new BigDecimal(availabilityRow.get("safetyStock").asText())).isEqualByComparingTo("2");
-        assertThat(new BigDecimal(availabilityRow.get("sellableQuantity").asText()))
-                .isEqualByComparingTo(physicalQuantity.subtract(new BigDecimal("2")));
+        BigDecimal safetyStock = new BigDecimal(availabilityRow.get("safetyStock").asText());
+        BigDecimal sellableQuantity = new BigDecimal(availabilityRow.get("sellableQuantity").asText());
+        assertThat(physicalQuantity.subtract(baselinePhysicalQuantity)).isEqualByComparingTo("10");
+        assertThat(safetyStock.subtract(baselineSafetyStock)).isEqualByComparingTo("2");
+        assertThat(sellableQuantity.subtract(baselineSellableQuantity)).isEqualByComparingTo("8");
 
         String policyEtag = policy.getResponse().getHeader("ETag");
         mockMvc.perform(put("/api/v1/inventory/safety-stocks")

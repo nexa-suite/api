@@ -94,12 +94,13 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
                         + "from sales.client_account c where c.tenant_id=? and c.workspace_id=? and c.id=? "
                         + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
                 Timestamp.from(now), Timestamp.from(now), tenantId, workspaceId, clientAccountId);
-        CreditAccountRow account = jdbc.query("select id,credit_limit,reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=? and status='ACTIVE' for update",
-                (rs, n) -> rs.next() ? new CreditAccountRow(rs.getObject(1, UUID.class), rs.getBigDecimal(2), rs.getBigDecimal(3)) : null,
+        CreditAccountRow account = jdbc.query("select id,credit_limit,credit_exposure,reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=? and status='ACTIVE' for update",
+                (rs, n) -> new CreditAccountRow(rs.getObject(1, UUID.class), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getBigDecimal(4)),
                 tenantId, workspaceId, clientAccountId, amount.currency()).stream().findFirst().orElseThrow(() -> new IllegalStateException("Client credit account is not configured"));
         java.math.BigDecimal outstanding = jdbc.queryForObject("select coalesce(sum(amount-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? and client_account_id=? and currency=? and status in ('OPEN','PARTIALLY_PAID','OVERDUE')",
                 java.math.BigDecimal.class, tenantId, workspaceId, clientAccountId, amount.currency());
-        java.math.BigDecimal available = account.limit().subtract(account.reserved()).subtract(outstanding == null ? java.math.BigDecimal.ZERO : outstanding);
+        java.math.BigDecimal openReceivables = outstanding == null ? java.math.BigDecimal.ZERO : outstanding;
+        java.math.BigDecimal available = account.limit().subtract(account.exposure()).subtract(account.reserved()).subtract(openReceivables);
         if (available.compareTo(amount.amount()) < 0) throw new IllegalStateException("Credit limit exceeded");
         CreditReservationRow existing = jdbc.query("select id,amount,status from payments.credit_reservation where tenant_id=? and workspace_id=? and purchase_request_id=? for update",
                 (rs, n) -> new CreditReservationRow(rs.getObject(1, UUID.class), null, rs.getBigDecimal(2), rs.getString(3)),
@@ -113,8 +114,8 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
             jdbc.update("update payments.credit_reservation set credit_account_id=?,amount=?,status='RESERVED',released_at=null,created_at=? where tenant_id=? and workspace_id=? and id=?",
                     account.id(), amount.amount(), Timestamp.from(now), tenantId, workspaceId, existing.id());
         }
-        if (jdbc.update("update payments.credit_account set reserved_exposure=reserved_exposure+?,version=version+1,updated_at=? where tenant_id=? and workspace_id=? and id=? and reserved_exposure+?<=credit_limit-?",
-                amount.amount(), Timestamp.from(now), tenantId, workspaceId, account.id(), amount.amount(), outstanding == null ? java.math.BigDecimal.ZERO : outstanding) != 1) {
+        if (jdbc.update("update payments.credit_account set reserved_exposure=reserved_exposure+?,version=version+1,updated_at=? where tenant_id=? and workspace_id=? and id=? and credit_exposure+reserved_exposure+?<=credit_limit-?",
+                amount.amount(), Timestamp.from(now), tenantId, workspaceId, account.id(), amount.amount(), openReceivables) != 1) {
             throw new IllegalStateException("Credit limit exceeded");
         }
     }
@@ -140,6 +141,6 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
     private record CommitmentLine(UUID requestLineId, UUID skuId, String skuCode, java.math.BigDecimal quantity,
                                   String unit, String currency) { }
     private record AmountRow(java.math.BigDecimal amount, String currency) { }
-    private record CreditAccountRow(UUID id, java.math.BigDecimal limit, java.math.BigDecimal reserved) { }
+    private record CreditAccountRow(UUID id, java.math.BigDecimal limit, java.math.BigDecimal exposure, java.math.BigDecimal reserved) { }
     private record CreditReservationRow(UUID id, UUID creditAccountId, java.math.BigDecimal amount, String status) { }
 }
