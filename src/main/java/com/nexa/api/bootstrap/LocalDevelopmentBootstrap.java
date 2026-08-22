@@ -10,7 +10,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
 
 import java.math.BigDecimal;
@@ -30,13 +31,16 @@ public class LocalDevelopmentBootstrap {
 	private final org.springframework.core.env.Environment environment;
 	private final Clock clock;
 	private final ClientAccountSeedLoader clientAccountSeedLoader;
+	private final TransactionTemplate transactionTemplate;
 
-	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock, ClientAccountSeedLoader clientAccountSeedLoader) {
+	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock, ClientAccountSeedLoader clientAccountSeedLoader,
+			PlatformTransactionManager transactionManager) {
 		this.jdbc = jdbc;
 		this.environment = environment;
 		this.encoder = new BCryptPasswordEncoder(environment.getProperty("nexa.security.bcrypt-strength", Integer.class, 12));
 		this.clock = clock;
 		this.clientAccountSeedLoader = clientAccountSeedLoader;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
 	@EventListener(ApplicationReadyEvent.class)
@@ -77,12 +81,16 @@ public class LocalDevelopmentBootstrap {
 	 */
 	@EventListener(ApplicationReadyEvent.class)
 	@Order(Ordered.LOWEST_PRECEDENCE)
-	@Transactional
 	public void seedWarehouseAfterCatalogReconciliation() {
 		Instant now = clock.instant();
 		UUID tenantId = tenant(now);
 		UUID workspaceId = workspace(tenantId, now);
-		seedWarehouse(tenantId, workspaceId, now);
+		RlsRequestScope.set(tenantId, workspaceId);
+		try {
+			transactionTemplate.executeWithoutResult(status -> seedWarehouse(tenantId, workspaceId, now));
+		} finally {
+			RlsRequestScope.clear();
+		}
 	}
 
 	private void seedWarehouse(UUID tenantId, UUID workspaceId, Instant now) {

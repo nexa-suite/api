@@ -55,8 +55,8 @@ public class SalesRuntimeConfiguration {
 	}
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts,
-			ChangeEventPersistencePort changeFeed) {
-		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed);
+			ChangeEventPersistencePort changeFeed, com.nexa.api.sales.application.port.CommercialCommitmentPort commitments) {
+		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments);
 	}
 	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, ClientAccountPersistencePort accounts) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence); }
 }

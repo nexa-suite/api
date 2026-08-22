@@ -86,10 +86,17 @@ abstract class DispatchJdbcSupport {
                 "d.delivery_area_snapshot,d.priority,d.delivery_window_start,d.delivery_window_end,d.eta," +
                 "d.responsible_membership_id,d.responsible_display_name_snapshot,d.vehicle_reference,d.route_name," +
                 "d.temperature_min,d.temperature_max,d.temperature_unit,d.temperature_status,d.version,d.updated_at," +
-                "p.id,p.status,o.number from logistics.dispatch_order d " +
+                "p.id,p.status,o.number,a.id,a.attempt_number,a.status,a.failure_reason,a.occurred_at,c.id,c.status," +
+                "d.tenant_id,d.workspace_id from logistics.dispatch_order d " +
                 "join sales.sales_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.sales_order_id " +
                 "left join logistics.proof_of_delivery p on p.tenant_id=d.tenant_id and p.workspace_id=d.workspace_id " +
-                "and p.dispatch_order_id=d.id";
+                "and p.dispatch_order_id=d.id " +
+                "left join lateral (select da.id,da.attempt_number,da.status,da.failure_reason,da.occurred_at " +
+                "from logistics.delivery_attempt da where da.tenant_id=d.tenant_id and da.workspace_id=d.workspace_id " +
+                "and da.delivery_id=d.id order by da.attempt_number desc,da.occurred_at desc,da.id desc limit 1) a on true " +
+                "left join lateral (select cd.id,cd.status from logistics.continuation_delivery cd " +
+                "where cd.tenant_id=d.tenant_id and cd.workspace_id=d.workspace_id and cd.source_delivery_id=d.id " +
+                "order by cd.created_at desc,cd.id desc limit 1) c on true";
     }
 
     protected DispatchRow read(ResultSet rs) throws java.sql.SQLException {
@@ -101,7 +108,11 @@ abstract class DispatchJdbcSupport {
                 rs.getString(16), rs.getString(17), rs.getString(18), rs.getBigDecimal(19),
                 rs.getBigDecimal(20), rs.getString(21), rs.getString(22), rs.getLong(23), instant(rs, 24),
                 rs.getObject(25, UUID.class) == null ? null : rs.getObject(25, UUID.class).toString(),
-                rs.getString(26), rs.getString(27));
+                rs.getString(26), rs.getString(27),
+                rs.getObject(28, UUID.class) == null ? null : rs.getObject(28, UUID.class).toString(),
+                rs.getInt(29), rs.getString(30), rs.getString(31), instant(rs, 32),
+                rs.getObject(33, UUID.class) == null ? null : rs.getObject(33, UUID.class).toString(),
+                rs.getString(34), rs.getObject(35, UUID.class), rs.getObject(36, UUID.class));
     }
 
     protected LogisticsOperationsService.DispatchView view(DispatchRow row, boolean buyer) {
@@ -114,13 +125,37 @@ abstract class DispatchJdbcSupport {
         List<String> alerts = new ArrayList<>();
         if ("OUT_OF_RANGE".equals(row.temperatureStatus())) alerts.add("TEMPERATURE_ALERT");
         if ("IN_ROUTE".equals(row.status()) && row.podStatus() == null) alerts.add("POD_PENDING");
+        if (row.continuationDeliveryId() != null) alerts.add("CONTINUATION_REQUIRED");
+        LogisticsOperationsService.DeliveryAttemptView lastAttempt = row.lastAttemptId() == null ? null :
+                new LogisticsOperationsService.DeliveryAttemptView(row.lastAttemptId(), row.lastAttemptNumber(),
+                        row.lastAttemptStatus(), row.lastAttemptFailureReason(), row.lastAttemptOccurredAt(),
+                        attemptLines(row));
         LogisticsOperationsService.DispatchView value = new LogisticsOperationsService.DispatchView(
                 row.id().toString(), row.dispatchNumber(), row.reservationId().toString(), row.salesOrderId().toString(),
                 row.salesOrderNumber(), row.clientAccountId().toString(), row.clientCode(), row.clientName(), row.status(),
                 row.destination(), row.deliveryArea(), row.priority(), row.windowStart(), row.windowEnd(), row.eta(),
                 assignment, row.temperatureMin(), row.temperatureMax(), row.temperatureUnit(), row.temperatureStatus(),
-                row.podId(), row.podStatus(), row.version(), row.updatedAt(), alerts);
+                row.podId(), row.podStatus(), row.version(), row.updatedAt(), alerts, lastAttempt,
+                row.continuationDeliveryId(), row.continuationDeliveryStatus(), continuationLines(row));
         return buyer ? value.buyerSafe() : value;
+    }
+
+    private List<LogisticsOperationsService.ObligationLineView> attemptLines(DispatchRow row) {
+        if (row.lastAttemptId() == null) return List.of();
+        return jdbc.query("select catalog_item_id,quantity,unit from logistics.delivery_attempt_line " +
+                        "where tenant_id=? and workspace_id=? and delivery_attempt_id=? order by catalog_item_id",
+                (rs, index) -> new LogisticsOperationsService.ObligationLineView(
+                        rs.getString(1), rs.getBigDecimal(2), rs.getString(3)),
+                row.tenantId(), row.workspaceId(), UUID.fromString(row.lastAttemptId()));
+    }
+
+    private List<LogisticsOperationsService.ObligationLineView> continuationLines(DispatchRow row) {
+        if (row.continuationDeliveryId() == null) return List.of();
+        return jdbc.query("select catalog_item_id,quantity,unit from logistics.continuation_delivery_line " +
+                        "where tenant_id=? and workspace_id=? and continuation_delivery_id=? order by catalog_item_id",
+                (rs, index) -> new LogisticsOperationsService.ObligationLineView(
+                        rs.getString(1), rs.getBigDecimal(2), rs.getString(3)),
+                row.tenantId(), row.workspaceId(), UUID.fromString(row.continuationDeliveryId()));
     }
 
     protected DispatchOrder aggregate(DispatchRow row) {
@@ -296,7 +331,10 @@ abstract class DispatchJdbcSupport {
                                  String responsibleDisplayName, String vehicleReference, String routeName,
                                  BigDecimal temperatureMin, BigDecimal temperatureMax, String temperatureUnit,
                                  String temperatureStatus, long version, Instant updatedAt, String podId,
-                                 String podStatus, String salesOrderNumber) { }
+                                 String podStatus, String salesOrderNumber, String lastAttemptId, int lastAttemptNumber,
+                                 String lastAttemptStatus, String lastAttemptFailureReason, Instant lastAttemptOccurredAt,
+                                 String continuationDeliveryId, String continuationDeliveryStatus, UUID tenantId,
+                                 UUID workspaceId) { }
 
     protected record Idem(String resource, String hash) { }
 }

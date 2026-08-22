@@ -51,6 +51,15 @@ public final class PaymentController {
     @Operation(operationId = "getReceivable")
     public PaymentModels.ReceivableView getReceivable(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID receivableId) { return service.getReceivable(context, receivableId); }
 
+    @GetMapping("/receivables/{receivableId}/payments")
+    @Operation(operationId = "listReceivablePayments")
+    public PaymentModels.Page<PaymentModels.PaymentSummaryView> listReceivablePayments(@RequestAttribute(ACCESS) CurrentAccessContext context,
+                                                                                         @PathVariable UUID receivableId,
+                                                                                         @RequestParam(defaultValue = "0") @Min(0) int page,
+                                                                                         @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size) {
+        return service.listPaymentsForReceivable(context, receivableId, page, size);
+    }
+
     @PostMapping("/receivables/{receivableId}/payment-intents")
     @Operation(operationId = "createReceivablePaymentIntent")
     public ResponseEntity<PaymentModels.PaymentIntentView> createPaymentIntent(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID receivableId, @RequestHeader("Idempotency-Key") String idempotencyKey) {
@@ -82,6 +91,24 @@ public final class PaymentController {
                                                                                @RequestParam(required = false) String method,
                                                                                @RequestParam(required = false) String status) {
         return service.listPayments(context, page, size, method, status);
+    }
+
+    @GetMapping("/payments/reconciliation-cases")
+    @Operation(operationId = "listPaymentReconciliationCases")
+    public PaymentModels.Page<PaymentModels.ReconciliationCaseView> listReconciliationCases(@RequestAttribute(ACCESS) CurrentAccessContext context,
+                                                                                              @RequestParam(defaultValue = "0") @Min(0) int page,
+                                                                                              @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
+                                                                                              @RequestParam(required = false) String state) {
+        return service.listReconciliationCases(context, page, size, state);
+    }
+
+    @PostMapping("/payments/reconciliation-cases/{caseId}/refund-retries")
+    @Operation(operationId = "retryPaymentReconciliationRefund")
+    public PaymentModels.ReconciliationCaseView retryReconciliationCase(@RequestAttribute(ACCESS) CurrentAccessContext context,
+                                                                         @PathVariable UUID caseId,
+                                                                         @Parameter(required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
+                                                                         @RequestBody(required = false) ReconciliationRetryRequest request) {
+        return service.retryReconciliationCase(context, caseId, request == null ? null : request.operatorNote(), idempotencyKey);
     }
 
     @PostMapping("/payments/{paymentId}/bank-transfer/approve")
@@ -120,4 +147,5 @@ public final class PaymentController {
 
     public record BankTransferRequest(@NotBlank String reference, UUID proofEvidenceId) { }
     public record BankTransferReviewRequest(@NotBlank String reason) { }
+    public record ReconciliationRetryRequest(String operatorNote) { }
 }

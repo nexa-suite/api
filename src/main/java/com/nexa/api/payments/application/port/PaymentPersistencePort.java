@@ -10,6 +10,9 @@ import java.util.UUID;
 public interface PaymentPersistencePort {
     PaymentModels.Page<PaymentModels.ReceivableView> listReceivables(CurrentAccessContext context, int page, int size);
     PaymentModels.Page<PaymentModels.PaymentSummaryView> listPayments(CurrentAccessContext context, int page, int size, String method, String status);
+    PaymentModels.Page<PaymentModels.PaymentSummaryView> listPaymentsForReceivable(CurrentAccessContext context, UUID receivableId, int page, int size);
+    PaymentModels.Page<PaymentModels.ReconciliationCaseView> listReconciliationCases(CurrentAccessContext context, int page, int size, String state);
+    PaymentModels.ReconciliationCaseView retryReconciliationCase(CurrentAccessContext context, UUID caseId, String operatorNote, String idempotencyKey);
     PaymentModels.ReceivableView getReceivable(CurrentAccessContext context, UUID receivableId);
     PaymentModels.PaymentView getPayment(CurrentAccessContext context, UUID paymentId);
     PaymentModels.ReceivableView createReceivable(CurrentAccessContext context, ReceivableCommand request);

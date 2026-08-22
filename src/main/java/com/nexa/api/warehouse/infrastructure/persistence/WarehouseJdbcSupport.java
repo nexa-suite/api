@@ -28,7 +28,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -240,6 +242,7 @@ abstract class WarehouseJdbcSupport {
                         InventoryLotStatus.valueOf(rs.getString("status")),
                         rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString(),
                         rs.getObject("warehouse_id").toString()), queryArguments.toArray());
+        candidates = applySafetyStock(context, candidates, effectiveSkuId);
         FefoAllocationPolicy.Result result = FefoAllocationPolicy.allocate(candidates, line.quantity(), line.unit(),
                 effectiveSkuId == null ? null : effectiveSkuId.toString(),
                 selectedWarehouseId == null ? null : selectedWarehouseId.toString(), LocalDate.now());
@@ -247,6 +250,50 @@ abstract class WarehouseJdbcSupport {
                 result.allocations().stream().map(item -> new WarehouseOperationsService.AllocationView(
                         item.lotId(), item.quantity(), item.unit(), item.expirationDate())).toList(),
                 result.shortage(), result.complete(), effectiveSkuId == null ? null : effectiveSkuId.toString());
+    }
+
+    /**
+     * Protects the latest eligible lots first so FEFO continues to consume the
+     * oldest sellable stock while the configured warehouse reserve stays out of
+     * allocation. The query remains tenant-scoped and runs inside the caller's
+     * existing transaction/lock boundary.
+     */
+    protected List<FefoAllocationPolicy.LotSnapshot> applySafetyStock(
+            CurrentAccessContext context, List<FefoAllocationPolicy.LotSnapshot> candidates, UUID skuId) {
+        if (candidates.isEmpty() || skuId == null) return candidates;
+        Map<UUID, SafetyStockRow> policies = jdbc.query(
+                        "select warehouse_id,quantity,unit from warehouse.safety_stock_policy "
+                                + "where tenant_id=? and workspace_id=? and sku_id=?",
+                        (rs, row) -> Map.entry(rs.getObject("warehouse_id", UUID.class),
+                                new SafetyStockRow(rs.getBigDecimal("quantity"), rs.getString("unit"))),
+                        tenant(context), workspace(context), skuId)
+                .stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        if (policies.isEmpty()) return candidates;
+
+        List<FefoAllocationPolicy.LotSnapshot> ordered = candidates.stream()
+                .sorted(Comparator.comparing(FefoAllocationPolicy.LotSnapshot::expirationDate)
+                        .thenComparing(FefoAllocationPolicy.LotSnapshot::receivedAt)
+                        .thenComparing(FefoAllocationPolicy.LotSnapshot::lotId))
+                .toList();
+        Map<UUID, BigDecimal> remaining = new HashMap<>();
+        policies.forEach((warehouse, policy) -> remaining.put(warehouse, policy.quantity()));
+        List<FefoAllocationPolicy.LotSnapshot> adjusted = new ArrayList<>(ordered);
+        for (int index = adjusted.size() - 1; index >= 0; index--) {
+            FefoAllocationPolicy.LotSnapshot lot = adjusted.get(index);
+            UUID warehouseId = uuid(lot.warehouseId());
+            SafetyStockRow policy = policies.get(warehouseId);
+            if (policy == null) continue;
+            if (!policy.unit().equalsIgnoreCase(lot.unit())) throw error("INVENTORY_UNIT_MISMATCH", false);
+            BigDecimal protectedQuantity = remaining.getOrDefault(warehouseId, BigDecimal.ZERO)
+                    .min(lot.available()).max(BigDecimal.ZERO);
+            remaining.put(warehouseId, remaining.get(warehouseId).subtract(protectedQuantity));
+            if (protectedQuantity.signum() > 0) {
+                adjusted.set(index, new FefoAllocationPolicy.LotSnapshot(lot.lotId(),
+                        lot.available().subtract(protectedQuantity), lot.unit(), lot.expirationDate(),
+                        lot.receivedAt(), lot.status(), lot.skuId(), lot.warehouseId()));
+            }
+        }
+        return adjusted;
     }
 
     protected UUID selectedWarehouseId(OrderData order) {
@@ -385,6 +432,7 @@ abstract class WarehouseJdbcSupport {
 
     protected record Coordinates(BigDecimal latitude, BigDecimal longitude) { }
     protected record IdempotencyRecord(String resourceId, String requestHash) { }
+    protected record SafetyStockRow(BigDecimal quantity, String unit) { }
     protected record LineData(UUID skuId, String catalogItemId, BigDecimal quantity, String unit) { }
     protected record SkuReference(UUID id, String legacyCatalogItemId, String skuCode) { }
     protected record OrderData(UUID id, String number, String status, long version, UUID clientAccountId,

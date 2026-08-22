@@ -13,6 +13,7 @@ import com.stripe.model.Event;
 import com.stripe.model.StripeObject;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.PaymentIntentCreateParams;
+import com.stripe.param.RefundCreateParams;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -128,6 +129,25 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
         } catch (StripeException exception) {
             stop(timer, category(exception));
             throw translate("confirm", exception);
+        }
+    }
+
+    @Override
+    public StripePaymentProvider.Refund refundPayment(String providerId, long amountMinor, String currency, String idempotencyKey) {
+        if (providerId == null || providerId.isBlank()) throw new IllegalArgumentException("Stripe PaymentIntent id is required");
+        TechnicalMetrics.TimerSample timer = start("refund_payment");
+        try {
+            RefundCreateParams params = RefundCreateParams.builder()
+                    .setPaymentIntent(providerId)
+                    .setAmount(amountMinor)
+                    .setCurrency(currency.toLowerCase(Locale.ROOT))
+                    .build();
+            com.stripe.model.Refund refund = client.refunds().create(params, options(idempotencyKey));
+            stop(timer, "success");
+            return new StripePaymentProvider.Refund(refund.getId(), refund.getStatus());
+        } catch (StripeException exception) {
+            stop(timer, category(exception));
+            throw translate("refund", exception);
         }
     }
 

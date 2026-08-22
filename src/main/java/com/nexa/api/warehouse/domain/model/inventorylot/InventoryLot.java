@@ -89,8 +89,15 @@ public final class InventoryLot {
         validate();
     }
 
+    public void markHold() {
+        requireUnreservedForStateChange();
+        if (status != InventoryLotStatus.AVAILABLE) throw invalidTransition();
+        status = InventoryLotStatus.HOLD;
+        validate();
+    }
+
     public void restoreAvailability() {
-        if (status != InventoryLotStatus.BLOCKED && status != InventoryLotStatus.QUARANTINED) {
+        if (status != InventoryLotStatus.BLOCKED && status != InventoryLotStatus.QUARANTINED && status != InventoryLotStatus.HOLD) {
             throw invalidTransition();
         }
         if (onHand.signum() == 0) throw invalidTransition();

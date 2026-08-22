@@ -326,7 +326,7 @@ public final class GlobalExceptionHandler {
 		@ExceptionHandler(WarehouseOperationsService.WarehouseException.class)
 		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationsService.WarehouseException exception, HttpServletRequest request) {
 			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
-				HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
 		}
 		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)

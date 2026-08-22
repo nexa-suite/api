@@ -17,6 +17,9 @@ public class PaymentServiceFacade {
     public PaymentServiceFacade(PaymentPort port) { this.port = port; }
     public PaymentModels.Page<PaymentModels.ReceivableView> listReceivables(CurrentAccessContext c, int page, int size) { return port.listReceivables(c, page, size); }
     public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPayments(CurrentAccessContext c, int page, int size, String method, String status) { return port.listPayments(c, page, size, method, status); }
+    public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPaymentsForReceivable(CurrentAccessContext c, UUID receivableId, int page, int size) { return port.listPaymentsForReceivable(c, receivableId, page, size); }
+    public PaymentModels.Page<PaymentModels.ReconciliationCaseView> listReconciliationCases(CurrentAccessContext c, int page, int size, String state) { return port.listReconciliationCases(c, page, size, state); }
+    public PaymentModels.ReconciliationCaseView retryReconciliationCase(CurrentAccessContext c, UUID caseId, String operatorNote, String key) { return port.retryReconciliationCase(c, caseId, operatorNote, key); }
     public PaymentModels.ReceivableView getReceivable(CurrentAccessContext c, UUID id) { return port.getReceivable(c, id); }
     public PaymentModels.PaymentView getPayment(CurrentAccessContext c, UUID id) { return port.getPayment(c, id); }
     public PaymentModels.ReceivableView createReceivable(CurrentAccessContext c, ReceivableRequest r) { return port.createReceivable(c, new PaymentPort.ReceivableCommand(r.subjectType(), r.subjectId(), r.dueAt(), r.idempotencyKey())); }

@@ -1,6 +1,7 @@
 package com.nexa.api.sales.infrastructure.purchaserequestdraft;
 
 import com.nexa.api.sales.application.port.PurchaseRequestDraftPort;
+import com.nexa.api.sales.application.port.CommercialCommitmentPort;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.sales.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
@@ -11,6 +12,7 @@ import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,10 +41,17 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private static final String SCHEMA = "1.0";
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final CommercialCommitmentPort commitments;
 
     public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+        this(jdbc, objectMapper, null);
+    }
+
+    @Autowired
+    public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper, CommercialCommitmentPort commitments) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.commitments = commitments;
     }
 
     @Transactional
@@ -143,7 +152,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         DraftRow draft = mutable(context, draftId, expectedVersion);
         if (paymentPreference == null || !Set.of("CREDIT_LINE", "BANK_TRANSFER", "CARD_STRIPE", "CASH", "CASH_ON_DELIVERY").contains(paymentPreference.trim().toUpperCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Payment preference is invalid");
         if (requestedDeliveryDate == null || requestedDeliveryDate.isBefore(LocalDate.now())) throw new IllegalArgumentException("Requested delivery date is invalid");
-        jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", paymentPreference.trim().toUpperCase(java.util.Locale.ROOT), requestedDeliveryDate, creditResult(context, draft.clientAccountId, paymentPreference), tenant(context), workspace(context), draftId, expectedVersion);
+        jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", paymentPreference.trim().toUpperCase(java.util.Locale.ROOT), requestedDeliveryDate, creditResult(context, draftId, draft.clientAccountId, paymentPreference), tenant(context), workspace(context), draftId, expectedVersion);
         updateStatus(context, draftId, expectedVersion + 1, hasLines(draftId, context), hasDestination(draftId, context), hasRoute(draftId, context), true);
         return get(context, draftId);
     }
@@ -207,10 +216,17 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         jdbc.update("delete from sales.purchase_request_draft_warehouse_selection where tenant_id=? and workspace_id=? and draft_id=?", tenant(c), workspace(c), id);
     }
     private boolean hasCommercial(DraftRow d) { return d.paymentPreference != null && d.requestedDeliveryDate != null; }
-    private String creditResult(CurrentAccessContext context, UUID clientId, String payment) {
+    private String creditResult(CurrentAccessContext context, UUID draftId, UUID clientId, String payment) {
         if (!"CREDIT_LINE".equalsIgnoreCase(payment)) return "NOT_APPLICABLE";
         BigDecimal limit = jdbc.queryForObject("select coalesce(credit_limit,0) from sales.client_account where tenant_id=? and workspace_id=? and id=?", BigDecimal.class, tenant(context), workspace(context), clientId);
-        return limit != null && limit.signum() > 0 ? "AVAILABLE" : "UNAVAILABLE";
+        BigDecimal reserved = jdbc.queryForObject("select coalesce(reserved_exposure,0) from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=(select credit_currency from sales.client_account where tenant_id=? and workspace_id=? and id=?)", BigDecimal.class,
+                tenant(context), workspace(context), clientId, tenant(context), workspace(context), clientId);
+        BigDecimal outstanding = jdbc.queryForObject("select coalesce(sum(amount-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? and client_account_id=? and status in ('OPEN','PARTIALLY_PAID','OVERDUE')", BigDecimal.class,
+                tenant(context), workspace(context), clientId);
+        BigDecimal total = jdbc.queryForObject("select coalesce(sum(quantity * effective_unit_price),0) from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?", BigDecimal.class,
+                tenant(context), workspace(context), draftId);
+        BigDecimal available = (limit == null ? BigDecimal.ZERO : limit).subtract(reserved == null ? BigDecimal.ZERO : reserved).subtract(outstanding == null ? BigDecimal.ZERO : outstanding);
+        return available.compareTo(total == null ? BigDecimal.ZERO : total) >= 0 && available.signum() > 0 ? "AVAILABLE" : "UNAVAILABLE";
     }
     private WarehouseRow selectWarehouse(CurrentAccessContext context, UUID draftId) {
         Map<UUID, BigDecimal> requested = jdbc.query("select sku_id,quantity from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=? order by sku_id", (rs, n) -> Map.entry(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), draftId).stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
@@ -236,6 +252,9 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         jdbc.batchUpdate("insert into sales.purchase_request_line (id,purchase_request_id,catalog_item_id,product_family_id,product_family_code_snapshot,sku_id,sku_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,0) on conflict (purchase_request_id,catalog_item_id) do nothing", lines, lines.size(), (ps, line) -> {
             ps.setObject(1, UUID.randomUUID()); ps.setObject(2, requestId); ps.setString(3, line.catalogItemId()); ps.setObject(4, line.familyId()); ps.setString(5, line.familyCode()); ps.setObject(6, line.skuId()); ps.setString(7, line.skuCode()); ps.setString(8, line.presentation()); ps.setString(9, line.presentation()); ps.setBigDecimal(10, line.quantity()); ps.setString(11, line.unit()); ps.setBigDecimal(12, line.amount()); ps.setString(13, line.currency()); ps.setString(14, line.notes()); ps.setTimestamp(15, Timestamp.from(now)); ps.setTimestamp(16, Timestamp.from(now));
         });
+        if (commitments != null) {
+            commitments.activateForPurchaseRequest(tenant(context), workspace(context), requestId);
+        }
         Map<String, Object> payload = new LinkedHashMap<>(); payload.put("purchaseRequestId", requestId); payload.put("draftId", draft.id()); payload.put("clientAccountId", draft.clientAccountId()); payload.put("status", "SUBMITTED");
         CanonicalOutbox.append(jdbc, "PURCHASE_REQUEST_SUBMITTED", "PurchaseRequest", requestId, tenant(context), workspace(context), now,
                 "purchase-request-" + requestId, null, SCHEMA, payload);
