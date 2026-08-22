@@ -11,6 +11,7 @@ import com.nexa.api.sales.application.port.out.ReverseGeocodingPort;
 import com.nexa.api.sales.application.port.out.RoutePreviewPort;
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
 import com.nexa.api.sales.domain.model.delivery.RouteSnapshot;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -19,7 +20,8 @@ import java.util.Optional;
 
 /** Google Maps adapter. Credentials, HTTP and SDK details stay behind GoogleMapsBoundaryPort. */
 @Component
-@Profile("google-maps & !test")
+@Profile("!test")
+@ConditionalOnProperty(name = "nexa.maps.provider", havingValue = "google")
 public final class GoogleMapsRoutingAdapter implements MapRoutingPort, RoutePreviewPort,
         PlaceAutocompletePort, GeocodingPort, ReverseGeocodingPort, DistanceMatrixPort {
     private final GoogleMapsBoundaryPort google;

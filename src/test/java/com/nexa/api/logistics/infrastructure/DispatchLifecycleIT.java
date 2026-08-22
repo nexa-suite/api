@@ -53,6 +53,100 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         assertThatThrownBy(() -> jdbc.update("update logistics.proof_of_delivery set notes='tampered' where dispatch_order_id=?", java.util.UUID.fromString(deliveredDispatchId))).isInstanceOf(RuntimeException.class);
     }
 
+    @Test void failedAttemptRemainsOnTheSameDeliveryAndIsIdempotent() throws Exception {
+        var dispatch = ready(schedule(assign(prepare(createReservedDispatch()))));
+        dispatch = mutate(dispatch, "/route-starts", "{}", "route-failed-" + dispatch.id());
+        String originalEtag = dispatch.etag();
+        String body = "{\"failureReason\":\"Buyer unavailable\"}";
+
+        mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/delivery-attempts")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken())
+                        .header("Idempotency-Key", "failed-attempt-missing-etag-" + dispatch.id())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isPreconditionRequired());
+
+        MvcResult first = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/delivery-attempts")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
+                        .header("Idempotency-Key", "failed-attempt-" + dispatch.id()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult replay = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/delivery-attempts")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
+                        .header("Idempotency-Key", "failed-attempt-" + dispatch.id()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+
+        assertThat(json(first).get("status").asText()).isEqualTo("IN_ROUTE");
+        assertThat(json(first).get("lastAttempt").get("status").asText()).isEqualTo("FAILED");
+        assertThat(json(first).get("lastAttempt").get("failureReason").asText()).isEqualTo("Buyer unavailable");
+        assertThat(json(replay).get("lastAttempt").get("id").asText())
+                .isEqualTo(json(first).get("lastAttempt").get("id").asText());
+        assertThat(replay.getResponse().getHeader("ETag")).isEqualTo(first.getResponse().getHeader("ETag"));
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?", Integer.class,
+                java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
+
+        mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/delivery-attempts")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
+                        .header("Idempotency-Key", "failed-attempt-competing-" + dispatch.id())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+    }
+
+    @Test void partialDeliveryClosesTheDeliveryWithContinuationAndBuyerSafeProjection() throws Exception {
+        var dispatch = ready(schedule(assign(prepare(createReservedDispatch()))));
+        dispatch = mutate(dispatch, "/route-starts", "{}", "route-partial-" + dispatch.id());
+        String originalEtag = dispatch.etag();
+        String key = "partial-delivery-" + dispatch.id();
+        String body = "{\"catalogItemId\":\"CAT-0002\",\"deliveredQuantity\":0.5,\"unit\":\"UNIT\",\"notes\":\"Half delivered\"}";
+
+        MvcResult first = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/partial-deliveries")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
+                        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult replay = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/partial-deliveries")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
+                        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+
+        assertThat(json(first).get("status").asText()).isEqualTo("PARTIAL");
+        assertThat(json(first).get("lastAttempt").get("status").asText()).isEqualTo("PARTIAL");
+        assertThat(json(first).get("lastAttempt").get("deliveredLines").get(0).get("quantity").decimalValue())
+                .isEqualByComparingTo("0.5");
+        assertThat(json(first).get("continuationDeliveryId").asText()).isNotBlank();
+        assertThat(json(first).get("remainingObligation").get(0).get("quantity").decimalValue())
+                .isEqualByComparingTo("0.5");
+        assertThat(json(first).get("podId").isNull()).isTrue();
+        assertThat(json(replay).get("id").asText()).isEqualTo(dispatch.id());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?", Integer.class,
+                java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.continuation_delivery where source_delivery_id=?", Integer.class,
+                java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.proof_of_delivery where dispatch_order_id=?", Integer.class,
+                java.util.UUID.fromString(dispatch.id()))).isEqualTo(0);
+        MvcResult pendingPod = mockMvc.perform(get("/api/v1/proof-of-delivery?status=PENDING")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken())).andExpect(status().isOk()).andReturn();
+        assertThat(json(pendingPod).toString()).doesNotContain(dispatch.id());
+
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        MvcResult buyerView = mockMvc.perform(get("/api/v1/my-deliveries/" + dispatch.id())
+                        .header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
+        assertThat(json(buyerView).get("status").asText()).isEqualTo("PARTIAL");
+        assertThat(json(buyerView).get("reservationId").isNull()).isTrue();
+        assertThat(json(buyerView).get("salesOrderId").isNull()).isTrue();
+        assertThat(json(buyerView).get("clientAccountId").isNull()).isTrue();
+        assertThat(json(buyerView).get("assignment").isNull()).isTrue();
+        assertThat(json(buyerView).get("continuationDeliveryId").isNull()).isTrue();
+        assertThat(json(buyerView).get("lastAttempt").get("id").isNull()).isTrue();
+        assertThat(json(buyerView).get("lastAttempt").get("status").asText()).isEqualTo("DELIVERY_REVIEW");
+        assertThat(json(buyerView).get("lastAttempt").get("failureReason").isNull()).isTrue();
+        assertThat(json(buyerView).get("remainingObligation").get(0).get("quantity").decimalValue())
+                .isEqualByComparingTo("0.5");
+
+        mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/partial-deliveries")
+                        .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
+                        .header("Idempotency-Key", "partial-delivery-competing-" + dispatch.id())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+    }
+
     @Test void temperatureExcursionCreatesIncidentAndBuyerSeesOnlyMappedReview() throws Exception {
         var dispatch = ready(schedule(assign(prepare(createReservedDispatch()))));
         dispatch = mutate(dispatch, "/route-starts", "{}", "route-temperature");

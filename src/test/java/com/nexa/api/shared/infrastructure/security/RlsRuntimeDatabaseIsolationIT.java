@@ -114,6 +114,37 @@ class RlsRuntimeDatabaseIsolationIT {
         }
     }
 
+    @Test
+    void runtimeWorkerScopeCoversWarehouseLogisticsAndRejectsStaleDocumentClaims() throws Exception {
+        RuntimeSecurityFixture fixture = insertRuntimeSecurityFixture();
+        UUID staleToken = UUID.randomUUID();
+        try (Connection connection = openRuntimeConnection()) {
+            setSessionScope(connection, fixture.scope());
+            assertThat(count(connection, "select count(*) from warehouse.warehouse where id = ?", fixture.warehouseId())).isEqualTo(1);
+            assertThat(count(connection, "select count(*) from logistics.dispatch_number_counter where tenant_id = ? and workspace_id = ?", fixture.scope().tenantId(), fixture.scope().workspaceId())).isEqualTo(1);
+            assertThat(count(connection, "select count(*) from business_documents.document_generation_request where id = ?", fixture.generationId())).isEqualTo(1);
+            assertThat(count(connection, "select count(*) from business_documents.evidence_object where id = ?", fixture.evidenceId())).isEqualTo(1);
+
+            setSessionScope(connection, new Scope(UUID.randomUUID(), UUID.randomUUID()));
+            assertThat(count(connection, "select count(*) from warehouse.warehouse where id = ?", fixture.warehouseId())).isZero();
+            assertThat(count(connection, "select count(*) from logistics.dispatch_number_counter where tenant_id = ? and workspace_id = ?", fixture.scope().tenantId(), fixture.scope().workspaceId())).isZero();
+            assertThat(count(connection, "select count(*) from business_documents.evidence_object where id = ?", fixture.evidenceId())).isZero();
+
+            setSessionScope(connection, fixture.scope());
+            assertThat(execute(connection, "update business_documents.document_generation_request set status='COMPLETED',claim_token=null where id=? and tenant_id=? and workspace_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                    fixture.generationId(), fixture.scope().tenantId(), fixture.scope().workspaceId(), staleToken)).isZero();
+            assertThat(execute(connection, "update business_documents.evidence_object set lifecycle_status='AVAILABLE',claim_token=null,lease_until=null where id=? and tenant_id=? and workspace_id=? and lifecycle_status='SCANNING' and claim_token=? and lease_until > current_timestamp",
+                    fixture.evidenceId(), fixture.scope().tenantId(), fixture.scope().workspaceId(), staleToken)).isZero();
+            assertThat(execute(connection, "update business_documents.document_generation_request set status='COMPLETED',claim_token=null,lease_until=null where id=? and tenant_id=? and workspace_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                    fixture.generationId(), fixture.scope().tenantId(), fixture.scope().workspaceId(), fixture.currentToken())).isEqualTo(1);
+            assertThat(execute(connection, "update business_documents.evidence_object set lifecycle_status='DELETED',claim_token=null,lease_until=null where id=? and tenant_id=? and workspace_id=? and lifecycle_status='SCANNING' and claim_token=? and lease_until > current_timestamp",
+                    fixture.evidenceId(), fixture.scope().tenantId(), fixture.scope().workspaceId(), fixture.currentToken())).isEqualTo(1);
+        } finally {
+            deleteRuntimeSecurityFixture(fixture);
+            RlsRequestScope.clear();
+        }
+    }
+
     private static HikariDataSource runtimePool() {
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(runtimeJdbcUrl());
@@ -123,6 +154,69 @@ class RlsRuntimeDatabaseIsolationIT {
         config.setMinimumIdle(1);
         config.setConnectionTimeout(5_000);
         return new HikariDataSource(config);
+    }
+
+    private static RuntimeSecurityFixture insertRuntimeSecurityFixture() throws SQLException {
+        UUID tenantId = UUID.randomUUID();
+        UUID workspaceId = UUID.randomUUID();
+        UUID warehouseId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        UUID membershipId = UUID.randomUUID();
+        UUID generationId = UUID.randomUUID();
+        UUID evidenceId = UUID.randomUUID();
+        UUID subjectId = UUID.randomUUID();
+        UUID currentToken = UUID.randomUUID();
+        Timestamp now = Timestamp.from(Instant.now());
+        Scope scope = new Scope(tenantId, workspaceId);
+        try (Connection connection = openMigratorConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                setSessionScope(connection, scope);
+                execute(connection, "insert into tenant_management.tenant(id,name,slug,status,created_at,updated_at) values (?,?,?,'ACTIVE',?,?)",
+                        tenantId, "RLS worker tenant", "rls-worker-tenant-" + tenantId, now, now);
+                execute(connection, "insert into tenant_management.workspace(id,tenant_id,name,slug,status,created_at,updated_at) values (?,?,?,?,'ACTIVE',?,?)",
+                        workspaceId, tenantId, "RLS worker workspace", "rls-worker-workspace-" + workspaceId, now, now);
+                execute(connection, "insert into iam.user_account(id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',?,?,0)",
+                        userId, "rls-worker-" + userId + "@example.test", "rls-worker-" + userId + "@example.test", "rls-worker-" + userId, "rls-worker-" + userId, "RLS worker", "es", now, now);
+                execute(connection, "insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)",
+                        membershipId, workspaceId, userId, now, now);
+                execute(connection, "insert into warehouse.warehouse(id,tenant_id,workspace_id,code,name,status,created_at,updated_at) values (?,?,?,?,'RLS worker warehouse','ACTIVE',?,?)",
+                        warehouseId, tenantId, workspaceId, "RLS-" + warehouseId.toString().substring(0, 8), now, now);
+                execute(connection, "insert into logistics.dispatch_number_counter(tenant_id,workspace_id,dispatch_year,next_value) values (?,?,?,?)",
+                        tenantId, workspaceId, now.toLocalDateTime().getYear(), 1L);
+                execute(connection, "insert into business_documents.document_generation_request(id,tenant_id,workspace_id,requested_by_membership_id,document_id,subject_type,subject_id,document_type,format,status,idempotency_key,request_hash,attempt_count,requested_at,processing_started_at,lease_until,claim_token) values (?,?,?,?,null,'SALES_ORDER',?,'ORDER_SUMMARY','PDF','PROCESSING',?,?,1,?,?,?,?)",
+                        generationId, tenantId, workspaceId, membershipId, subjectId, "rls-worker-generation-" + generationId, "0".repeat(64), now, now, Timestamp.from(Instant.now().plusSeconds(600)), currentToken);
+                execute(connection, "insert into business_documents.evidence_object(id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,object_key,lifecycle_status,declared_content_type,original_filename,scan_attempt_count,next_scan_at,created_at,updated_at,lease_until,claim_token) values (?,?,?,null,'SALES_ORDER',?,null,'SCANNING','application/pdf','worker.pdf',1,?,?,?,?,?)",
+                        evidenceId, tenantId, workspaceId, subjectId, now, now, now, Timestamp.from(Instant.now().plusSeconds(600)), currentToken);
+                connection.commit();
+                return new RuntimeSecurityFixture(scope, warehouseId, generationId, evidenceId, currentToken,
+                        membershipId, userId, tenantId);
+            } catch (SQLException exception) {
+                connection.rollback();
+                throw exception;
+            }
+        }
+    }
+
+    private static void deleteRuntimeSecurityFixture(RuntimeSecurityFixture fixture) throws SQLException {
+        try (Connection connection = openMigratorConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                setSessionScope(connection, fixture.scope());
+                execute(connection, "delete from business_documents.document_generation_request where id=?", fixture.generationId());
+                execute(connection, "delete from business_documents.evidence_object where id=?", fixture.evidenceId());
+                execute(connection, "delete from logistics.dispatch_number_counter where tenant_id=? and workspace_id=?", fixture.scope().tenantId(), fixture.scope().workspaceId());
+                execute(connection, "delete from warehouse.warehouse where id=?", fixture.warehouseId());
+                execute(connection, "delete from tenant_management.workspace_membership where id=?", fixture.membershipId());
+                execute(connection, "delete from iam.user_account where id=?", fixture.userId());
+                execute(connection, "delete from tenant_management.workspace where id=?", fixture.scope().workspaceId());
+                execute(connection, "delete from tenant_management.tenant where id=?", fixture.tenantId());
+                connection.commit();
+            } catch (SQLException exception) {
+                connection.rollback();
+                throw exception;
+            }
+        }
     }
 
     private static void assertRuntimeIdentityAndPrivileges(Connection connection) throws SQLException {
@@ -171,8 +265,11 @@ class RlsRuntimeDatabaseIsolationIT {
                 .as("RLS must be enabled and forced for every table used by this isolation proof")
                 .containsExactlyInAnyOrder("business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
                         "notifications.inbox_item",
-                        "payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.receivable", "payments.receivable_allocation",
-                        "sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order");
+                        "payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.receivable", "payments.receivable_allocation",
+                        "warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation",
+                        "logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line",
+                        "warehouse.safety_stock_policy", "warehouse.inventory_transfer",
+                        "sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.commercial_commitment", "sales.commercial_commitment_line", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order");
     }
 
     private static void assertVisibleRows(Connection connection, ScopedRow expected, List<ScopedRow> allRows) throws SQLException {
@@ -293,15 +390,17 @@ class RlsRuntimeDatabaseIsolationIT {
         }
     }
 
-    private static void execute(Connection connection, String sql, Object... arguments) throws SQLException {
+    private static int execute(Connection connection, String sql, Object... arguments) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             for (int index = 0; index < arguments.length; index++) statement.setObject(index + 1, arguments[index]);
-            statement.executeUpdate();
+            return statement.executeUpdate();
         }
     }
 
     private record Scope(UUID tenantId, UUID workspaceId) { }
     private record ScopedRow(Scope scope, UUID accountId, UUID addressId) { }
     private record Fixture(List<ScopedRow> rows, List<UUID> tenantIds) { }
+    private record RuntimeSecurityFixture(Scope scope, UUID warehouseId, UUID generationId, UUID evidenceId,
+                                          UUID currentToken, UUID membershipId, UUID userId, UUID tenantId) { }
 
 }

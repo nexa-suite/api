@@ -33,6 +33,10 @@ public final class LocalIdentityIds {
 		return stable("client-account", Objects.requireNonNull(tenantId, "Tenant id is required") + ":" + normalize(code));
 	}
 
+	public static UUID forClientAccountAddress(UUID clientAccountId, String key) {
+		return stable("client-account-address", Objects.requireNonNull(clientAccountId, "Client account id is required") + ":" + normalize(key));
+	}
+
 	public static UUID forWarehouse(UUID tenantId, String code) {
 		return stable("warehouse", Objects.requireNonNull(tenantId, "Tenant id is required") + ":" + normalize(code));
 	}

@@ -20,6 +20,10 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
     void simultaneousCreditPaymentsCannotExceedAvailableLimit() throws Exception {
         OpenReceivable firstReceivable = createOpenReceivable();
         OpenReceivable secondReceivable = createOpenReceivable();
+        CreditAccountState originalAccount = jdbc.query("select credit_limit,credit_exposure,reserved_exposure,status from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+                        (rs, n) -> new CreditAccountState(rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getString(4)),
+                        tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency())
+                .stream().findFirst().orElseThrow();
         BigDecimal limit = firstReceivable.amount().max(secondReceivable.amount());
         jdbc.update("update payments.credit_account set credit_limit=?,credit_exposure=0,reserved_exposure=0 where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
                 limit, tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency());
@@ -37,6 +41,11 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
             assertThat(exposure).isLessThanOrEqualTo(limit);
         } finally {
             executor.shutdownNow();
+            jdbc.update("update payments.receivable set status='VOID',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id in (?,?)",
+                    tenantUuid(), workspaceUuid(), firstReceivable.id(), secondReceivable.id());
+            jdbc.update("update payments.credit_account set credit_limit=?,credit_exposure=?,reserved_exposure=?,status=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+                    originalAccount.limit(), originalAccount.exposure(), originalAccount.reserved(), originalAccount.status(),
+                    tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency());
         }
     }
 
@@ -44,4 +53,6 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
         return mockMvc.perform(post("/api/v1/receivables/" + receivableId + "/credit-line-payments")
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", key)).andReturn();
     }
+
+    private record CreditAccountState(BigDecimal limit, BigDecimal exposure, BigDecimal reserved, String status) { }
 }
