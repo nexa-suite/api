@@ -29,8 +29,8 @@
 	<properties>
 		<java.version>25</java.version>
 		<spring-modulith.version>2.1.0</spring-modulith.version>
-		<archunit.version>1.4.2</archunit.version>
-		<testcontainers.version>2.0.4</testcontainers.version>
+		<archunit.version>1.5.0</archunit.version>
+		<testcontainers.version>2.0.5</testcontainers.version>
 		<stripe-java.version>31.4.0</stripe-java.version>
 	</properties>
 	<dependencyManagement>
@@ -80,7 +80,7 @@
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
-			<version>42.7.12</version>
+			<version>42.7.13</version>
 			<scope>runtime</scope>
 		</dependency>
 		<dependency>
@@ -94,12 +94,12 @@
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-			<version>3.0.3</version>
+			<version>3.1.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.pdfbox</groupId>
 			<artifactId>pdfbox</artifactId>
-			<version>3.0.6</version>
+			<version>3.0.8</version>
 		</dependency>
 		<dependency>
 			<groupId>com.stripe</groupId>
