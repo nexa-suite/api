@@ -19,13 +19,16 @@ import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -41,16 +44,20 @@ import java.util.UUID;
 @Profile("!test")
 @Repository
 public class BusinessDocumentService implements BusinessDocumentPort {
+    private static final Logger LOGGER = LoggerFactory.getLogger(BusinessDocumentService.class);
+    private static final String WORKER_LEASE = "current_timestamp + interval '10 minutes'";
     private final JdbcTemplate jdbc;
     private final ObjectStoragePort storage;
     private final ContentScannerPort scanner;
     private final DocumentRendererPort renderer;
     private final DocumentSubjectLookupPort subjects;
     private final DocumentProjectionLookupPort projections;
+    private final TransactionTemplate transactionTemplate;
 
     public BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner, DocumentRendererPort renderer,
-            DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections) {
+            DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections, PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc; this.storage = storage; this.scanner = scanner; this.renderer = renderer; this.subjects = subjects; this.projections = projections;
+        this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
     }
 
     @Transactional
@@ -168,18 +175,30 @@ public class BusinessDocumentService implements BusinessDocumentPort {
         EvidenceRow row = access.row();
         if ("AVAILABLE".equals(row.lifecycleStatus()) || "DELETED".equals(row.lifecycleStatus())) return access.view();
         if ("REJECTED".equals(row.lifecycleStatus())) throw new IllegalArgumentException("Evidence was rejected and cannot be completed");
-        int claimed = jdbc.update("update business_documents.evidence_object set lifecycle_status='UPLOADING',updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status in ('REQUESTED','UPLOADING','SCANNING')",
-                tenant(context), workspace(context), evidenceId);
+        UUID uploadClaimToken = UUID.randomUUID();
+        int claimed = jdbc.update("update business_documents.evidence_object set lifecycle_status='UPLOADING',upload_claim_token=?,upload_lease_until=" + WORKER_LEASE + ",updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status in ('REQUESTED','UPLOADING') and (upload_claim_token is null or upload_lease_until <= current_timestamp)",
+                uploadClaimToken, tenant(context), workspace(context), evidenceId);
         if (claimed == 0) return loadEvidenceForWrite(context, evidenceId).view();
         String key = "evidence/quarantine/" + tenant(context) + "/" + evidenceId + "/" + UUID.randomUUID() + ".bin";
-        ObjectStoragePort.StoredObject stored = storage.put(key, content, contentLength, contentType);
-        Instant now = Instant.now();
-        jdbc.update("insert into business_documents.object_storage_object (object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?,?,?)",
-                key, tenant(context), workspace(context), "nexa-private", stored.checksumSha256(), contentType, stored.byteSize(), true, Timestamp.from(now));
-        jdbc.update("update business_documents.evidence_object set object_key=?,lifecycle_status='QUARANTINED',declared_content_type=?,original_filename=?,checksum_sha256=?,byte_size=?,failure_code=null,next_scan_at=current_timestamp,updated_at=? where tenant_id=? and workspace_id=? and id=?",
-                key, contentType, filename, stored.checksumSha256(), stored.byteSize(), Timestamp.from(now), tenant(context), workspace(context), evidenceId);
-        scanEvidence(context, evidenceId);
-        return loadEvidenceForWrite(context, evidenceId).view();
+        try {
+            ObjectStoragePort.StoredObject stored = storage.put(key, content, contentLength, contentType);
+            Instant now = Instant.now();
+            jdbc.update("insert into business_documents.object_storage_object (object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?,?,?)",
+                    key, tenant(context), workspace(context), "nexa-private", stored.checksumSha256(), contentType, stored.byteSize(), true, Timestamp.from(now));
+            int finalized = jdbc.update("update business_documents.evidence_object set object_key=?,lifecycle_status='QUARANTINED',upload_claim_token=null,upload_lease_until=null,declared_content_type=?,original_filename=?,checksum_sha256=?,byte_size=?,failure_code=null,next_scan_at=current_timestamp,updated_at=? where tenant_id=? and workspace_id=? and id=? and lifecycle_status='UPLOADING' and upload_claim_token=? and upload_lease_until > current_timestamp",
+                    key, contentType, filename, stored.checksumSha256(), stored.byteSize(), Timestamp.from(now), tenant(context), workspace(context), evidenceId, uploadClaimToken);
+            if (finalized != 1) {
+                discardEvidenceObject(key, tenant(context), workspace(context));
+                return loadEvidenceForWrite(context, evidenceId).view();
+            }
+            scanEvidence(context, evidenceId);
+            return loadEvidenceForWrite(context, evidenceId).view();
+        } catch (RuntimeException exception) {
+            jdbc.update("update business_documents.evidence_object set lifecycle_status='REQUESTED',upload_claim_token=null,upload_lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status='UPLOADING' and upload_claim_token=?",
+                    tenant(context), workspace(context), evidenceId, uploadClaimToken);
+            discardEvidenceObject(key, tenant(context), workspace(context));
+            throw exception;
+        }
     }
 
     public BusinessDocumentModels.EvidenceView evidence(CurrentAccessContext context, UUID evidenceId) {
@@ -217,67 +236,125 @@ public class BusinessDocumentService implements BusinessDocumentPort {
         context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
         EvidenceRow row = loadEvidenceForWrite(context, evidenceId).row();
         if ("DELETED".equals(row.lifecycleStatus())) return;
-        jdbc.update("update business_documents.evidence_object set lifecycle_status='DELETED',updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+        int deleted = jdbc.update("update business_documents.evidence_object set lifecycle_status='DELETED',claim_token=null,lease_until=null,upload_claim_token=null,upload_lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status <> 'DELETED'",
                 tenant(context), workspace(context), evidenceId);
-        if (row.objectKey() != null) storage.delete(row.objectKey());
+        if (deleted == 1 && row.objectKey() != null) storage.delete(row.objectKey());
     }
 
     @Scheduled(fixedDelayString = "${nexa.documents.worker-delay-ms:3000}")
     public void processPendingEvidenceScans() {
-        List<ScopedWork> work = jdbc.query("select id,tenant_id,workspace_id from business_documents.evidence_object where lifecycle_status='SCANNING' and scan_attempt_count < 10 and next_scan_at <= current_timestamp order by created_at,id limit 10",
-                (rs, n) -> new ScopedWork(rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
-        for (ScopedWork item : work) withScope(item, () -> scanEvidence(null, item.id()));
+        List<WorkspaceScope> scopes = jdbc.query("select tenant_id,id as workspace_id from tenant_management.workspace order by tenant_id,id",
+                (rs, n) -> new WorkspaceScope(rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
+        for (WorkspaceScope scope : scopes) withScope(scope, () -> {
+            List<UUID> work = jdbc.query("select id from business_documents.evidence_object where tenant_id=? and workspace_id=? and lifecycle_status='SCANNING' and scan_attempt_count < 10 and next_scan_at <= current_timestamp and (lease_until is null or lease_until <= current_timestamp) order by created_at,id limit 10",
+                    (rs, n) -> rs.getObject("id", UUID.class), scope.tenantId(), scope.workspaceId());
+            for (UUID evidenceId : work) scanEvidence(null, evidenceId);
+        });
     }
 
     private void scanEvidence(CurrentAccessContext context, UUID evidenceId) {
-        EvidenceRow row = context == null ? loadEvidenceRow(evidenceId) : loadEvidenceScoped(context, evidenceId);
+        EvidenceRow row = context == null ? loadEvidenceForWorker(evidenceId) : loadEvidenceScoped(context, evidenceId);
         if (row.objectKey() == null || "DELETED".equals(row.lifecycleStatus())) return;
-        jdbc.update("update business_documents.evidence_object set lifecycle_status='SCANNING',scan_attempt_count=scan_attempt_count+1,updated_at=current_timestamp where id=? and lifecycle_status in ('QUARANTINED','SCANNING')", evidenceId);
+        UUID tenantId = context == null ? workerScope().tenantId() : tenant(context);
+        UUID workspaceId = context == null ? workerScope().workspaceId() : workspace(context);
+        UUID claimToken = UUID.randomUUID();
+        int claimed = jdbc.update("update business_documents.evidence_object set lifecycle_status='SCANNING',scan_attempt_count=scan_attempt_count+1,claim_token=?,lease_until=" + WORKER_LEASE + ",updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status in ('QUARANTINED','SCANNING') and (claim_token is null or lease_until <= current_timestamp) and (next_scan_at is null or next_scan_at <= current_timestamp)",
+                claimToken, tenantId, workspaceId, evidenceId);
+        if (claimed != 1) return;
         try (InputStream input = storage.open(row.objectKey())) {
             ContentScannerPort.ScanResult scan = scanner.scan(input);
             String detected = scan.detectedContentType();
             if (scan.clean() && compatible(row.declaredContentType(), detected) && extensionCompatible(row.originalFilename(), detected)) {
-                jdbc.update("update business_documents.evidence_object set lifecycle_status='AVAILABLE',detected_content_type=?,failure_code=null,scanned_at=current_timestamp,next_scan_at=null,updated_at=current_timestamp where id=?",
-                        detected, evidenceId);
+                jdbc.update("update business_documents.evidence_object set lifecycle_status='AVAILABLE',detected_content_type=?,failure_code=null,scanned_at=current_timestamp,next_scan_at=null,claim_token=null,lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status='SCANNING' and claim_token=? and lease_until > current_timestamp",
+                        detected, tenantId, workspaceId, evidenceId, claimToken);
             } else if (retryableScan(scan)) {
-                jdbc.update("update business_documents.evidence_object set lifecycle_status=case when scan_attempt_count >= 10 then 'REJECTED' else 'SCANNING' end,detected_content_type=?,failure_code=?,scanned_at=case when scan_attempt_count >= 10 then current_timestamp else scanned_at end,next_scan_at=case when scan_attempt_count >= 10 then null else current_timestamp + (least(power(2,scan_attempt_count),300) * interval '1 second') end,updated_at=current_timestamp where id=?",
-                        detected, truncate(scan.reason()), evidenceId);
+                jdbc.update("update business_documents.evidence_object set lifecycle_status=case when scan_attempt_count >= 10 then 'REJECTED' else 'SCANNING' end,detected_content_type=?,failure_code=?,scanned_at=case when scan_attempt_count >= 10 then current_timestamp else scanned_at end,next_scan_at=case when scan_attempt_count >= 10 then null else current_timestamp + (least(power(2,scan_attempt_count),300) * interval '1 second') end,claim_token=null,lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status='SCANNING' and claim_token=? and lease_until > current_timestamp",
+                        detected, truncate(scan.reason()), tenantId, workspaceId, evidenceId, claimToken);
             } else {
                 String failure = !scan.clean() ? scan.reason() : !compatible(row.declaredContentType(), detected) ? "MIME_MISMATCH" : "EXTENSION_MISMATCH";
-                jdbc.update("update business_documents.evidence_object set lifecycle_status='REJECTED',detected_content_type=?,failure_code=?,scanned_at=current_timestamp,next_scan_at=null,updated_at=current_timestamp where id=?",
-                        detected, truncate(failure), evidenceId);
+                jdbc.update("update business_documents.evidence_object set lifecycle_status='REJECTED',detected_content_type=?,failure_code=?,scanned_at=current_timestamp,next_scan_at=null,claim_token=null,lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status='SCANNING' and claim_token=? and lease_until > current_timestamp",
+                        detected, truncate(failure), tenantId, workspaceId, evidenceId, claimToken);
             }
         } catch (Exception exception) {
-            jdbc.update("update business_documents.evidence_object set lifecycle_status=case when scan_attempt_count >= 10 then 'REJECTED' else 'SCANNING' end,failure_code=?,next_scan_at=current_timestamp + (least(power(2,scan_attempt_count),300) * interval '1 second'),updated_at=current_timestamp where id=?",
-                    truncate(exception.getMessage()), evidenceId);
+            jdbc.update("update business_documents.evidence_object set lifecycle_status=case when scan_attempt_count >= 10 then 'REJECTED' else 'SCANNING' end,failure_code=?,next_scan_at=current_timestamp + (least(power(2,scan_attempt_count),300) * interval '1 second'),claim_token=null,lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status='SCANNING' and claim_token=? and lease_until > current_timestamp",
+                    truncate(exception.getMessage()), tenantId, workspaceId, evidenceId, claimToken);
         }
     }
 
     @Scheduled(fixedDelayString = "${nexa.documents.worker-delay-ms:3000}")
     public void processPendingGenerationRequests() {
-        jdbc.update("update business_documents.document_generation_request set status='PENDING',processing_started_at=null,next_attempt_at=current_timestamp where status='PROCESSING' and (processing_started_at is null or processing_started_at < current_timestamp - interval '10 minutes')");
+        jdbc.update("update business_documents.document_generation_request set status='PENDING',processing_started_at=null,lease_until=null,claim_token=null,next_attempt_at=current_timestamp where status='PROCESSING' and (lease_until is null or lease_until <= current_timestamp)");
         List<ScopedWork> work = jdbc.query("select id,tenant_id,workspace_id from business_documents.document_generation_request where status in ('PENDING','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp and requested_at <= current_timestamp order by requested_at,id limit 10",
                 (rs, n) -> new ScopedWork(rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
-        for (ScopedWork item : work) withScope(item, () -> processOne(item.id()));
+        for (ScopedWork item : work) withScope(item, () -> processOne(item));
     }
 
-    private void processOne(UUID requestId) {
-        var rows = jdbc.query("select r.id,r.document_id,r.tenant_id,r.workspace_id,r.subject_type,r.subject_id,r.document_type,r.format from business_documents.document_generation_request r where r.id=? and r.status in ('PENDING','FAILED')", (rs, n) -> new GenerationRow(rs), requestId); if (rows.isEmpty()) return; GenerationRow request = rows.get(0);
-        int claimed = jdbc.update("update business_documents.document_generation_request set status='PROCESSING',attempt_count=attempt_count+1,processing_started_at=current_timestamp where id=? and status in ('PENDING','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp", requestId); if (claimed == 0) return;
-        jdbc.update("update business_documents.business_document set status='GENERATING',updated_at=current_timestamp where id=? and status in ('REQUESTED','FAILED')", request.documentId);
+    private void processOne(ScopedWork work) {
+        UUID claimToken = UUID.randomUUID();
+        List<GenerationRow> rows = jdbc.query("select r.id,r.document_id,r.tenant_id,r.workspace_id,r.subject_type,r.subject_id,r.document_type,r.format from business_documents.document_generation_request r where r.id=? and r.tenant_id=? and r.workspace_id=? and r.status in ('PENDING','FAILED')",
+                (rs, n) -> new GenerationRow(rs), work.id(), work.tenantId(), work.workspaceId());
+        if (rows.isEmpty()) return;
+        int claimed = jdbc.update("update business_documents.document_generation_request set status='PROCESSING',attempt_count=attempt_count+1,processing_started_at=current_timestamp,lease_until=" + WORKER_LEASE + ",claim_token=? where id=? and tenant_id=? and workspace_id=? and status in ('PENDING','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp and (lease_until is null or lease_until <= current_timestamp)",
+                claimToken, work.id(), work.tenantId(), work.workspaceId());
+        if (claimed != 1) return;
+        GenerationRow request = rows.get(0);
+        String key = null;
         try {
+            assertGenerationClaim(request, claimToken);
+            int generating = jdbc.update("update business_documents.business_document set status='GENERATING',updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and status in ('REQUESTED','FAILED') and exists(select 1 from business_documents.document_generation_request claim where claim.tenant_id=? and claim.workspace_id=? and claim.id=? and claim.status='PROCESSING' and claim.claim_token=? and claim.lease_until > current_timestamp)",
+                    request.tenantId(), request.workspaceId(), request.documentId(), request.tenantId(), request.workspaceId(), request.id(), claimToken);
+            if (generating != 1) throw new ClaimLostException();
             DocumentSubjectReference reference = new DocumentSubjectReference(DocumentSubjectType.valueOf(request.subjectType), request.subjectId.toString());
             BusinessDocumentType documentType = BusinessDocumentType.valueOf(request.documentType);
             BusinessDocumentProjections.DocumentProjection projection = projections.lookup(request.tenantId.toString(), request.workspaceId.toString(), reference, documentType);
-            DocumentRendererPort.RenderedDocument rendered = renderer.render(projection, BusinessDocumentFormat.valueOf(request.format())); String key = "documents/" + request.tenantId + "/" + UUID.randomUUID() + "." + rendered.extension(); ObjectStoragePort.StoredObject stored = storage.put(key, rendered.content(), rendered.contentType()); Instant now = Instant.now();
-            jdbc.update("insert into business_documents.object_storage_object (object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?,?,?)", key, request.tenantId, request.workspaceId, "nexa-private", stored.checksumSha256(), stored.contentType(), stored.byteSize(), true, Timestamp.from(now));
-            jdbc.update("update business_documents.business_document set status='GENERATED',storage_object_key=?,checksum_sha256=?,content_type=?,byte_size=?,generated_at=?,failure_code=null,failure_detail=null,updated_at=? where id=?", key, stored.checksumSha256(), stored.contentType(), stored.byteSize(), Timestamp.from(now), Timestamp.from(now), request.documentId);
-            jdbc.update("update business_documents.business_document old set status='SUPERSEDED',updated_at=current_timestamp where old.tenant_id=? and old.workspace_id=? and old.subject_type=? and old.subject_id=? and old.document_type=? and old.format=? and old.id<>? and old.status='GENERATED'", request.tenantId, request.workspaceId, request.subjectType, request.subjectId, request.documentType, request.format, request.documentId);
-            jdbc.update("update business_documents.document_generation_request set status='COMPLETED',last_error=null,processing_started_at=null,completed_at=current_timestamp where id=?", requestId);
+            DocumentRendererPort.RenderedDocument rendered = renderer.render(projection, BusinessDocumentFormat.valueOf(request.format()));
+            key = "documents/" + request.tenantId() + "/" + UUID.randomUUID() + "." + rendered.extension();
+            ObjectStoragePort.StoredObject stored = storage.put(key, rendered.content(), rendered.contentType());
+            completeGeneration(request, claimToken, key, stored);
+        } catch (ClaimLostException exception) {
+            discardStoredObject(key);
         } catch (Exception exception) {
-            jdbc.update("update business_documents.business_document set status='FAILED',failure_code='GENERATION_FAILED',failure_detail=?,updated_at=current_timestamp where id=?", truncate(exception.getMessage()), request.documentId);
-            jdbc.update("update business_documents.document_generation_request set status=case when attempt_count >= 10 then 'FAILED' else 'PENDING' end,last_error=?,processing_started_at=null,next_attempt_at=current_timestamp + (least(power(2,attempt_count),300) * interval '1 second'),completed_at=case when attempt_count >= 10 then current_timestamp else null end where id=?", truncate(exception.getMessage()), requestId);
+            discardStoredObject(key);
+            markGenerationFailed(request, claimToken, exception);
         }
+    }
+
+    private void completeGeneration(GenerationRow request, UUID claimToken, String key, ObjectStoragePort.StoredObject stored) {
+        inTransaction(() -> {
+            assertGenerationClaim(request, claimToken);
+            Instant now = Instant.now();
+            jdbc.update("insert into business_documents.object_storage_object (object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?,?,?)",
+                    key, request.tenantId(), request.workspaceId(), "nexa-private", stored.checksumSha256(), stored.contentType(), stored.byteSize(), true, Timestamp.from(now));
+            int generated = jdbc.update("update business_documents.business_document set status='GENERATED',storage_object_key=?,checksum_sha256=?,content_type=?,byte_size=?,generated_at=?,failure_code=null,failure_detail=null,updated_at=? where tenant_id=? and workspace_id=? and id=? and status='GENERATING' and exists(select 1 from business_documents.document_generation_request claim where claim.tenant_id=? and claim.workspace_id=? and claim.id=? and claim.status='PROCESSING' and claim.claim_token=? and claim.lease_until > current_timestamp)",
+                    key, stored.checksumSha256(), stored.contentType(), stored.byteSize(), Timestamp.from(now), Timestamp.from(now), request.tenantId(), request.workspaceId(), request.documentId(), request.tenantId(), request.workspaceId(), request.id(), claimToken);
+            if (generated != 1) throw new ClaimLostException();
+            jdbc.update("update business_documents.business_document old set status='SUPERSEDED',updated_at=current_timestamp where old.tenant_id=? and old.workspace_id=? and old.subject_type=? and old.subject_id=? and old.document_type=? and old.format=? and old.id<>? and old.status='GENERATED' and exists(select 1 from business_documents.document_generation_request claim where claim.tenant_id=? and claim.workspace_id=? and claim.id=? and claim.status='PROCESSING' and claim.claim_token=? and claim.lease_until > current_timestamp)",
+                    request.tenantId(), request.workspaceId(), request.subjectType(), request.subjectId(), request.documentType(), request.format(), request.documentId(), request.tenantId(), request.workspaceId(), request.id(), claimToken);
+            int completed = jdbc.update("update business_documents.document_generation_request set status='COMPLETED',last_error=null,processing_started_at=null,lease_until=null,claim_token=null,completed_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                    request.tenantId(), request.workspaceId(), request.id(), claimToken);
+            if (completed != 1) throw new ClaimLostException();
+        });
+    }
+
+    private void markGenerationFailed(GenerationRow request, UUID claimToken, Exception exception) {
+        inTransaction(() -> {
+            String failure = truncate(exception.getMessage());
+            jdbc.update("update business_documents.business_document set status='FAILED',failure_code='GENERATION_FAILED',failure_detail=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and status='GENERATING' and exists(select 1 from business_documents.document_generation_request claim where claim.tenant_id=? and claim.workspace_id=? and claim.id=? and claim.status='PROCESSING' and claim.claim_token=? and claim.lease_until > current_timestamp)",
+                    failure, request.tenantId(), request.workspaceId(), request.documentId(), request.tenantId(), request.workspaceId(), request.id(), claimToken);
+            jdbc.update("update business_documents.document_generation_request set status=case when attempt_count >= 10 then 'FAILED' else 'PENDING' end,last_error=?,processing_started_at=null,lease_until=null,claim_token=null,next_attempt_at=current_timestamp + (least(power(2,attempt_count),300) * interval '1 second'),completed_at=case when attempt_count >= 10 then current_timestamp else null end where tenant_id=? and workspace_id=? and id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                    failure, request.tenantId(), request.workspaceId(), request.id(), claimToken);
+        });
+    }
+
+    private void assertGenerationClaim(GenerationRow request, UUID claimToken) {
+        Boolean owner = jdbc.queryForObject("select exists(select 1 from business_documents.document_generation_request where tenant_id=? and workspace_id=? and id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp)", Boolean.class,
+                request.tenantId(), request.workspaceId(), request.id(), claimToken);
+        if (!Boolean.TRUE.equals(owner)) throw new ClaimLostException();
+    }
+
+    private void inTransaction(Runnable action) {
+        if (transactionTemplate == null) action.run();
+        else transactionTemplate.executeWithoutResult(status -> action.run());
     }
 
     private BusinessDocumentModels.GenerationRequestView requestView(java.sql.ResultSet rs) throws java.sql.SQLException { return new BusinessDocumentModels.GenerationRequestView(rs.getObject("id", UUID.class).toString(), rs.getObject("document_id", UUID.class) == null ? null : rs.getObject("document_id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("document_type"), rs.getString("format"), rs.getString("status"), rs.getTimestamp("requested_at").toInstant(), rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()); }
@@ -294,8 +371,10 @@ public class BusinessDocumentService implements BusinessDocumentPort {
                 .stream().filter(value -> authorizedDocument(context, value.clientAccountId() == null ? null : value.clientAccountId().toString())).findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
         return row;
     }
-    private EvidenceRow loadEvidenceRow(UUID evidenceId) {
-        return jdbc.query(evidenceSelect() + " where e.id=?", (rs, n) -> evidenceRow(rs), evidenceId).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
+    private EvidenceRow loadEvidenceForWorker(UUID evidenceId) {
+        RlsRequestScope.Scope scope = workerScope();
+        return jdbc.query(evidenceSelect() + " where e.tenant_id=? and e.workspace_id=? and e.id=?", (rs, n) -> evidenceRow(rs), scope.tenantId(), scope.workspaceId(), evidenceId)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
     }
     private UUID findEvidenceId(CurrentAccessContext context, String idempotencyKey) {
         return jdbc.query(evidenceSelect() + " where e.tenant_id=? and e.workspace_id=? and e.requested_by_membership_id=? and e.idempotency_key=?", (rs, n) -> rs.getObject("id", UUID.class), tenant(context), workspace(context), context.membershipId().value(), idempotencyKey)
@@ -335,10 +414,27 @@ public class BusinessDocumentService implements BusinessDocumentPort {
     private static boolean compatible(String declared, String detected) { return declared != null && detected != null && (declared.equalsIgnoreCase(detected) || (declared.equalsIgnoreCase("image/jpg") && detected.equalsIgnoreCase("image/jpeg"))); }
     private static String truncate(String value) { return value == null ? "unknown" : value.substring(0, Math.min(2000, value.length())); }
     private static String sha256(String value) { try { byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); StringBuilder out = new StringBuilder(64); for (byte b : digest) out.append(String.format("%02x", b)); return out.toString(); } catch (Exception e) { throw new IllegalStateException(e); } }
-    private static String idempotencyHash(String value) { return sha256(value); }
+    private void discardStoredObject(String key) {
+        if (key == null) return;
+        try { storage.delete(key); }
+        catch (RuntimeException exception) { LOGGER.warn("Business document object cleanup failed", exception); }
+    }
+    private void discardEvidenceObject(String key, UUID tenantId, UUID workspaceId) {
+        try { jdbc.update("delete from business_documents.object_storage_object where object_key=? and tenant_id=? and workspace_id=?", key, tenantId, workspaceId); }
+        catch (RuntimeException exception) { LOGGER.warn("Evidence metadata cleanup failed", exception); }
+        discardStoredObject(key);
+    }
+    private RlsRequestScope.Scope workerScope() {
+        RlsRequestScope.Scope scope = RlsRequestScope.current();
+        if (scope == null) throw new IllegalStateException("Document worker scope is required");
+        return scope;
+    }
     private static void withScope(ScopedWork work, Runnable action) { RlsRequestScope.set(work.tenantId(), work.workspaceId()); try { action.run(); } finally { RlsRequestScope.clear(); } }
+    private static void withScope(WorkspaceScope scope, Runnable action) { RlsRequestScope.set(scope.tenantId(), scope.workspaceId()); try { action.run(); } finally { RlsRequestScope.clear(); } }
 
     private record RequestClaim(BusinessDocumentModels.GenerationRequestView view, String requestHash) { }
     private record ScopedWork(UUID id, UUID tenantId, UUID workspaceId) { }
+    private record WorkspaceScope(UUID tenantId, UUID workspaceId) { }
     private record GenerationRow(UUID id, UUID documentId, UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId, String documentType, String format) { GenerationRow(java.sql.ResultSet rs) throws java.sql.SQLException { this(rs.getObject("id", UUID.class), rs.getObject("document_id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class), rs.getString("document_type"), rs.getString("format")); } }
+    private static final class ClaimLostException extends RuntimeException { }
 }

@@ -92,6 +92,120 @@ public class PaymentService implements PaymentPersistencePort {
     }
 
     @Transactional(readOnly = true)
+    public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPayments(CurrentAccessContext context, int page, int size, String method, String status) {
+        context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+        String methodFilter = normalizePaymentMethod(method);
+        String statusFilter = normalizePaymentStatus(status);
+        StringBuilder where = new StringBuilder(" where p.tenant_id=? and p.workspace_id=?");
+        List<Object> parameters = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        if (methodFilter != null) {
+            where.append(" and p.method=?");
+            parameters.add(methodFilter);
+        }
+        if (statusFilter != null) {
+            where.append(" and p.status=?");
+            parameters.add(statusFilter);
+        }
+        Long total = jdbc.queryForObject("select count(*) from payments.payment p" + where, Long.class, parameters.toArray());
+        List<Object> queryParameters = new ArrayList<>(parameters);
+        queryParameters.add(safeSize);
+        queryParameters.add(safePage * safeSize);
+        List<PaymentModels.PaymentSummaryView> values = jdbc.query(
+                "select p.id,p.receivable_id,r.receivable_number,p.client_account_id,p.method,p.status,p.amount,p.currency,p.bank_transfer_reference,p.review_reason,p.created_at,p.completed_at from payments.payment p join payments.receivable r on r.tenant_id=p.tenant_id and r.workspace_id=p.workspace_id and r.id=p.receivable_id" + where + " order by p.created_at desc,p.id desc limit ? offset ?",
+                (rs, n) -> new PaymentModels.PaymentSummaryView(
+                        rs.getObject("id", UUID.class).toString(),
+                        rs.getObject("receivable_id", UUID.class).toString(),
+                        rs.getString("receivable_number"),
+                        rs.getObject("client_account_id", UUID.class).toString(),
+                        rs.getString("method"),
+                        rs.getString("status"),
+                        rs.getBigDecimal("amount"),
+                        rs.getString("currency"),
+                        rs.getString("bank_transfer_reference"),
+                        rs.getString("review_reason"),
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()),
+                queryParameters.toArray());
+        return new PaymentModels.Page<>(values, safePage, safeSize, total == null ? 0 : total);
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPaymentsForReceivable(CurrentAccessContext context, UUID receivableId, int page, int size) {
+        context.requirePermission(PermissionKey.PAYMENT_READ);
+        ReceivableRow receivable = receivableQuery(context, receivableId).stream()
+                .filter(row -> authorizedClient(context, row.clientAccountId())).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Receivable not found"));
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+        Long total = jdbc.queryForObject("select count(*) from payments.payment where tenant_id=? and workspace_id=? and receivable_id=?",
+                Long.class, tenant(context), workspace(context), receivable.id());
+        List<PaymentModels.PaymentSummaryView> values = jdbc.query(
+                "select p.id,p.receivable_id,r.receivable_number,p.client_account_id,p.method,p.status,p.amount,p.currency,p.bank_transfer_reference,p.review_reason,p.created_at,p.completed_at "
+                        + "from payments.payment p join payments.receivable r on r.tenant_id=p.tenant_id and r.workspace_id=p.workspace_id and r.id=p.receivable_id "
+                        + "where p.tenant_id=? and p.workspace_id=? and p.receivable_id=? order by p.created_at desc,p.id desc limit ? offset ?",
+                (rs, n) -> new PaymentModels.PaymentSummaryView(rs.getObject("id", UUID.class).toString(),
+                        rs.getObject("receivable_id", UUID.class).toString(), rs.getString("receivable_number"),
+                        rs.getObject("client_account_id", UUID.class).toString(), rs.getString("method"), rs.getString("status"),
+                        rs.getBigDecimal("amount"), rs.getString("currency"), rs.getString("bank_transfer_reference"),
+                        rs.getString("review_reason"), rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()),
+                tenant(context), workspace(context), receivable.id(), safeSize, safePage * safeSize);
+        return new PaymentModels.Page<>(values, safePage, safeSize, total == null ? 0 : total);
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentModels.Page<PaymentModels.ReconciliationCaseView> listReconciliationCases(CurrentAccessContext context, int page, int size, String state) {
+        context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(100, Math.max(1, size));
+        String normalizedState = normalizeReconciliationState(state);
+        String where = " where c.tenant_id=? and c.workspace_id=?";
+        List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        if (normalizedState != null) { where += " and c.state=?"; args.add(normalizedState); }
+        Long total = jdbc.queryForObject("select count(*) from payments.payment_reconciliation_case c" + where, Long.class, args.toArray());
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(safeSize);
+        pageArgs.add(safePage * safeSize);
+        List<PaymentModels.ReconciliationCaseView> values = jdbc.query(
+                reconciliationCaseSql() + where + " order by c.updated_at desc,c.id desc limit ? offset ?",
+                (rs, n) -> reconciliationCaseView(rs), pageArgs.toArray());
+        return new PaymentModels.Page<>(values, safePage, safeSize, total == null ? 0 : total);
+    }
+
+    @Transactional
+    public PaymentModels.ReconciliationCaseView retryReconciliationCase(CurrentAccessContext context, UUID caseId,
+                                                                          String operatorNote, String idempotencyKey) {
+        context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
+        requireKey(idempotencyKey);
+        lockIdempotencyKey(context, "reconciliation:" + caseId + ":" + idempotencyKey);
+        ReconciliationCaseRow row = jdbc.query(reconciliationCaseSql() + " where c.tenant_id=? and c.workspace_id=? and c.id=? for update",
+                (rs, n) -> reconciliationCaseRow(rs), tenant(context), workspace(context), caseId)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Reconciliation case not found"));
+        if ("REFUNDED".equals(row.state()) || "RESOLVED".equals(row.state())) return reconciliationCase(context, caseId);
+        PaymentRow payment = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=? for update",
+                (rs, n) -> paymentRow(rs), tenant(context), workspace(context), row.paymentId())
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Reconciliation payment not found"));
+        int attempt = row.attemptCount() + 1;
+        jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PENDING',attempt_count=?,operator_note=?,last_error=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+                attempt, truncate(operatorNote), tenant(context), workspace(context), caseId);
+        try {
+            if (payment.providerId() == null || payment.providerId().isBlank()) throw new IllegalStateException("Captured payment has no provider reference");
+            StripePaymentProvider.Refund refund = stripe.refundPayment(payment.providerId(), minor(payment.amount(), payment.currency()), payment.currency(), "nexa-reconciliation-refund-" + caseId + "-" + attempt);
+            if (refund == null || refund.providerRefundId() == null || refund.providerRefundId().isBlank()) throw new IllegalStateException("Payment provider returned no refund reference");
+            jdbc.update("update payments.payment_reconciliation_case set state='REFUNDED',provider_refund_id=?,updated_at=current_timestamp,resolved_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+                    refund.providerRefundId(), tenant(context), workspace(context), caseId);
+            jdbc.update("update payments.payment set status='REFUNDED',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='SUCCEEDED'",
+                    tenant(context), workspace(context), payment.id());
+        } catch (RuntimeException exception) {
+            jdbc.update("update payments.payment_reconciliation_case set state='REFUND_FAILED',last_error=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+                    truncate(exception.getMessage()), tenant(context), workspace(context), caseId);
+        }
+        return reconciliationCase(context, caseId);
+    }
+
+    @Transactional(readOnly = true)
     public PaymentModels.ReceivableView getReceivable(CurrentAccessContext context, UUID receivableId) {
         context.requirePermission(PermissionKey.PAYMENT_READ);
         return receivableQuery(context, receivableId).stream().filter(row -> authorizedClient(context, row.clientAccountId())).findFirst()
@@ -128,10 +242,26 @@ public class PaymentService implements PaymentPersistencePort {
                     .orElseThrow(() -> new IllegalArgumentException("Receivable could not be created"));
         }
         ensureCreditAccount(context, subject.clientAccountId(), subject.currency(), now);
+        if ("SALES_ORDER".equals(subjectType)) {
+            settlePurchaseRequestCreditReservation(context, request.subjectId(), now);
+        }
         CanonicalOutbox.append(jdbc, "RECEIVABLE_CREATED", "Receivable", id, tenant(context), workspace(context), now,
                 "receivable-" + id, null, "1.0", Map.of("receivableId", id, "subjectType", subjectType,
                         "subjectId", request.subjectId(), "amount", subject.amount(), "currency", subject.currency()));
         return getReceivable(context, id);
+    }
+
+    private void settlePurchaseRequestCreditReservation(CurrentAccessContext context, UUID salesOrderId, Instant now) {
+        CreditReservationLink link = jdbc.query("select id,credit_account_id,amount from payments.credit_reservation where tenant_id=? and workspace_id=? and sales_order_id=? and status='RESERVED' for update",
+                (rs, n) -> new CreditReservationLink(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getBigDecimal(3)),
+                tenant(context), workspace(context), salesOrderId).stream().findFirst().orElse(null);
+        if (link == null) return;
+        if (jdbc.update("update payments.credit_account set reserved_exposure=reserved_exposure-?,version=version+1,updated_at=? where tenant_id=? and workspace_id=? and id=? and reserved_exposure>=?",
+                link.amount(), Timestamp.from(now), tenant(context), workspace(context), link.creditAccountId(), link.amount()) != 1) {
+            throw new IllegalStateException("Credit reservation balance is inconsistent");
+        }
+        jdbc.update("update payments.credit_reservation set status='CONSUMED',released_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and status='RESERVED'",
+                tenant(context), workspace(context), link.id());
     }
 
     public PaymentModels.PaymentIntentView createCardPaymentIntent(CurrentAccessContext context, UUID receivableId, String idempotencyKey) {
@@ -367,6 +497,7 @@ public class PaymentService implements PaymentPersistencePort {
         assertInboxClaim(eventId, claimToken);
         jdbc.update("update payments.payment set status=?,updated_at=current_timestamp,completed_at=case when ?='SUCCEEDED' then current_timestamp else completed_at end,version=version+1 where tenant_id=? and workspace_id=? and id=?", aggregate.status().name(), aggregate.status().name(), event.tenantId(), event.workspaceId(), payment.id());
         jdbc.update("insert into payments.payment_attempt (id,tenant_id,workspace_id,payment_id,attempt_number,status,provider_reference,failure_code,created_at) select ?,p.tenant_id,p.workspace_id,p.id,coalesce((select max(a.attempt_number)+1 from payments.payment_attempt a where a.payment_id=p.id),1),?,?,case when ?='FAILED' then 'PROVIDER_DECLINED' else null end,current_timestamp from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=?", UUID.randomUUID(), aggregate.status().name(), event.paymentIntentId(), aggregate.status().name(), event.tenantId(), event.workspaceId(), payment.id());
+        if (next == PaymentStatus.SUCCEEDED) reconcileCapturedPaymentIfSalesOrderMissing(payment, eventId);
         return InboxOutcome.PROCESSED;
     }
 
@@ -389,6 +520,54 @@ public class PaymentService implements PaymentPersistencePort {
         jdbc.update("insert into payments.payment_event (id,tenant_id,workspace_id,payment_id,event_type,event_key,occurred_at) values (?,?,?,?,?,?,current_timestamp) on conflict (payment_id,event_key) do nothing", UUID.randomUUID(), tenant(payment), workspace(payment), payment.id(), "PAYMENT_SUCCEEDED", eventKey);
         enqueuePaymentReceipt(payment, receivable, eventKey);
         outbox(payment, "PAYMENT_SUCCEEDED", Map.of("paymentId", payment.id(), "receivableId", receivable.id(), "amount", payment.amount(), "currency", payment.currency()));
+    }
+
+    private void reconcileCapturedPaymentIfSalesOrderMissing(PaymentRow payment, String eventKey) {
+        ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=?",
+                (rs, n) -> receivableRow(rs), payment.tenantId(), payment.workspaceId(), payment.receivableId()).stream().findFirst().orElse(null);
+        if (receivable == null || !"SALES_ORDER".equals(receivable.subjectType())) return;
+        boolean orderExists = Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.sales_order where tenant_id=? and workspace_id=? and id=?)",
+                Boolean.class, payment.tenantId(), payment.workspaceId(), receivable.subjectId()));
+        if (orderExists) return;
+        UUID caseId = UUID.randomUUID();
+        int inserted = jdbc.update("insert into payments.payment_reconciliation_case(id,tenant_id,workspace_id,payment_id,receivable_id,allocation_status,state,created_at,updated_at) values (?,?,?,?,?,'UNALLOCATED','RECONCILIATION_REQUIRED',current_timestamp,current_timestamp) on conflict (tenant_id,workspace_id,payment_id) do nothing",
+                caseId, payment.tenantId(), payment.workspaceId(), payment.id(), receivable.id());
+        if (inserted == 0) return;
+        try {
+            if (payment.providerId() == null || payment.providerId().isBlank()) throw new IllegalStateException("Captured payment has no provider reference");
+            StripePaymentProvider.Refund refund = stripe.refundPayment(payment.providerId(), minor(payment.amount(), payment.currency()), payment.currency(), "nexa-reconciliation-refund-" + payment.id());
+            if (refund == null || refund.providerRefundId() == null || refund.providerRefundId().isBlank()) throw new IllegalStateException("Payment provider returned no refund reference");
+            jdbc.update("update payments.payment_reconciliation_case set state='REFUNDED',provider_refund_id=?,attempt_count=1,updated_at=current_timestamp,resolved_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+                    refund.providerRefundId(), payment.tenantId(), payment.workspaceId(), caseId);
+            jdbc.update("update payments.payment set status='REFUNDED',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='SUCCEEDED'",
+                    payment.tenantId(), payment.workspaceId(), payment.id());
+        } catch (RuntimeException exception) {
+            jdbc.update("update payments.payment_reconciliation_case set state='REFUND_FAILED',attempt_count=1,last_error=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+                    truncate(exception.getMessage()), payment.tenantId(), payment.workspaceId(), caseId);
+        }
+    }
+
+    private PaymentModels.ReconciliationCaseView reconciliationCase(CurrentAccessContext context, UUID caseId) {
+        return jdbc.query(reconciliationCaseSql() + " where c.tenant_id=? and c.workspace_id=? and c.id=?",
+                (rs, n) -> reconciliationCaseView(rs), tenant(context), workspace(context), caseId)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Reconciliation case not found"));
+    }
+
+    private static String reconciliationCaseSql() {
+        return "select c.id,c.payment_id,c.receivable_id,c.sales_order_id,c.allocation_status,c.state,c.provider_refund_id,c.attempt_count,c.last_error,c.operator_note,c.created_at,c.updated_at,c.resolved_at from payments.payment_reconciliation_case c";
+    }
+
+    private static PaymentModels.ReconciliationCaseView reconciliationCaseView(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new PaymentModels.ReconciliationCaseView(rs.getObject("id", UUID.class).toString(), rs.getObject("payment_id", UUID.class).toString(),
+                rs.getObject("receivable_id", UUID.class).toString(), rs.getObject("sales_order_id", UUID.class) == null ? null : rs.getObject("sales_order_id", UUID.class).toString(),
+                rs.getString("allocation_status"), rs.getString("state"), rs.getString("provider_refund_id"), rs.getInt("attempt_count"),
+                rs.getString("last_error"), rs.getString("operator_note"), rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant(), rs.getTimestamp("resolved_at") == null ? null : rs.getTimestamp("resolved_at").toInstant());
+    }
+
+    private static ReconciliationCaseRow reconciliationCaseRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new ReconciliationCaseRow(rs.getObject("id", UUID.class), rs.getObject("payment_id", UUID.class), rs.getObject("receivable_id", UUID.class),
+                rs.getString("state"), rs.getInt("attempt_count"));
     }
 
     private void applySucceededPayment(CurrentAccessContext context, UUID paymentId, UUID receivableId, BigDecimal amount, String currency, String eventKey) {
@@ -648,17 +827,25 @@ public class PaymentService implements PaymentPersistencePort {
     private boolean authorizedClient(CurrentAccessContext c, UUID clientAccountId) { return !c.hasRole(MembershipRole.BUYER) || Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?)", Boolean.class, tenant(c), workspace(c), clientAccountId, c.membershipId().value())); }
     private void ensureBuyerScope(CurrentAccessContext c, UUID clientAccountId) { if (!authorizedClient(c, clientAccountId)) throw new IllegalArgumentException("Receivable is outside buyer scope"); }
     private void validateProofEvidence(CurrentAccessContext context, ReceivableRow receivable, UUID evidenceId) {
-        if (evidenceId == null) throw new IllegalArgumentException("Bank transfer proof evidence is required");
+        if (evidenceId == null) return;
         Boolean available = jdbc.queryForObject("select exists(select 1 from business_documents.evidence_object where tenant_id=? and workspace_id=? and id=? and client_account_id=? and lifecycle_status='AVAILABLE' and ((subject_type='RECEIVABLE' and subject_id=?) or (subject_type=? and subject_id=?)))", Boolean.class, tenant(context), workspace(context), evidenceId, receivable.clientAccountId(), receivable.id(), receivable.subjectType(), receivable.subjectId());
         if (!Boolean.TRUE.equals(available)) throw new IllegalArgumentException("Bank transfer proof evidence is not available or is bound to another subject");
     }
 
     private void validateStoredProofEvidence(CurrentAccessContext context, PaymentRow payment) {
         UUID evidenceId = jdbc.queryForObject("select bank_transfer_proof_evidence_id from payments.payment where tenant_id=? and workspace_id=? and id=?", UUID.class, tenant(context), workspace(context), payment.id());
+        if (evidenceId == null) return;
         ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=?", (rs, n) -> receivableRow(rs), tenant(context), workspace(context), payment.receivableId()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Receivable not found"));
         validateProofEvidence(context, receivable, evidenceId);
     }
-    private void ensureCreditAccount(CurrentAccessContext c, UUID clientAccountId, String currency, Instant now) { jdbc.update("insert into payments.credit_account (id,tenant_id,workspace_id,client_account_id,currency,credit_limit,created_at,updated_at) values (?,?,?,?,?,?,?,?) on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing", UUID.randomUUID(), tenant(c), workspace(c), clientAccountId, currency, BigDecimal.ZERO, Timestamp.from(now), Timestamp.from(now)); }
+    private void ensureCreditAccount(CurrentAccessContext c, UUID clientAccountId, String currency, Instant now) {
+        jdbc.update("insert into payments.credit_account (id,tenant_id,workspace_id,client_account_id,currency,credit_limit,credit_exposure,created_at,updated_at) "
+                        + "select md5(account.id::text || ':credit:' || ?)::uuid,account.tenant_id,account.workspace_id,account.id,?,"
+                        + "greatest(account.credit_limit,0),greatest(account.current_commercial_exposure,0),?,? "
+                        + "from sales.client_account account where account.tenant_id=? and account.workspace_id=? and account.id=? "
+                        + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
+                currency, currency, Timestamp.from(now), Timestamp.from(now), tenant(c), workspace(c), clientAccountId);
+    }
     private static PaymentStatus providerStatus(String value) { if (value == null) return PaymentStatus.REQUIRES_ACTION; return switch (value.toLowerCase(Locale.ROOT)) { case "succeeded" -> PaymentStatus.SUCCEEDED; case "processing" -> PaymentStatus.PROCESSING; case "canceled", "cancelled" -> PaymentStatus.CANCELLED; case "requires_payment_method", "requires_action" -> PaymentStatus.REQUIRES_ACTION; default -> PaymentStatus.CREATED; }; }
     private static PaymentStatus statusFromEvent(String type, String providerStatus) { if ("payment_intent.succeeded".equals(type)) return PaymentStatus.SUCCEEDED; if ("payment_intent.payment_failed".equals(type)) return PaymentStatus.FAILED; if ("payment_intent.processing".equals(type)) return PaymentStatus.PROCESSING; if ("payment_intent.canceled".equals(type)) return PaymentStatus.CANCELLED; return null; }
     private static long minor(BigDecimal amount, String currency) { int scale = SetOfZeroDecimalCurrencies.contains(currency.toUpperCase(Locale.ROOT)) ? 0 : 2; BigDecimal minor = amount.setScale(scale, RoundingMode.UNNECESSARY).movePointRight(scale); try { return minor.longValueExact(); } catch (ArithmeticException exception) { throw new IllegalArgumentException("Payment amount precision is invalid", exception); } }
@@ -667,6 +854,26 @@ public class PaymentService implements PaymentPersistencePort {
     private static String truncate(String value) { return value == null ? "unknown" : value.substring(0, Math.min(1000, value.length())); }
     private static UUID tenant(CurrentAccessContext c) { return c.tenantId().value(); } private static UUID workspace(CurrentAccessContext c) { return c.workspaceId().value(); }
     private static UUID tenant(PaymentRow row) { return row.tenantId(); } private static UUID workspace(PaymentRow row) { return row.workspaceId(); }
+    private static String normalizePaymentMethod(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("CARD_STRIPE", "BANK_TRANSFER", "CREDIT_LINE").contains(normalized)) throw new IllegalArgumentException("Payment method filter is invalid");
+        return normalized;
+    }
+    private static String normalizePaymentStatus(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("CREATED", "REQUIRES_ACTION", "PROCESSING", "SUCCEEDED", "FAILED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED").contains(normalized)) throw new IllegalArgumentException("Payment status filter is invalid");
+        return normalized;
+    }
+    private static String normalizeReconciliationState(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("RECONCILIATION_REQUIRED", "REFUND_PENDING", "REFUNDED", "REFUND_FAILED", "RESOLVED").contains(normalized)) {
+            throw new IllegalArgumentException("Reconciliation state filter is invalid");
+        }
+        return normalized;
+    }
     private static final java.util.Set<String> SetOfOpen = java.util.Set.of("OPEN", "PARTIALLY_PAID", "OVERDUE");
     private static final java.util.Set<String> SetOfZeroDecimalCurrencies = java.util.Set.of("JPY", "KRW", "CLP");
 
@@ -680,7 +887,9 @@ public class PaymentService implements PaymentPersistencePort {
     private record ConfirmationClaim(PaymentRow payment, ReceivableRow receivable) { }
     private enum InboxOutcome { PROCESSED, IGNORED }
     private record WebhookWork(String eventId, UUID tenantId, UUID workspaceId) { }
+    private record CreditReservationLink(UUID id, UUID creditAccountId, BigDecimal amount) { }
     private record PaymentViewRow(PaymentRow payment, String method) { }
+    private record ReconciliationCaseRow(UUID id, UUID paymentId, UUID receivableId, String state, int attemptCount) { }
     private record AuthoritativeSubject(UUID clientAccountId, BigDecimal amount, String currency, String status) { }
     private record PaymentRow(UUID id, UUID receivableId, String status, BigDecimal amount, String currency, String clientSecret, String providerId, Instant createdAt, Instant completedAt, UUID clientAccountId, UUID tenantId, UUID workspaceId) {
         private PaymentRow(UUID id, UUID receivableId, String status, BigDecimal amount, String currency, String clientSecret, String providerId, Instant createdAt, Instant completedAt, UUID clientAccountId) { this(id, receivableId, status, amount, currency, clientSecret, providerId, createdAt, completedAt, clientAccountId, null, null); }

@@ -105,6 +105,11 @@ public final class ApiProblemDetailFactory {
 				case INVENTORY_LOT_NOT_ALLOCATABLE -> "Inventory lot is not allocatable";
 				case INVENTORY_UNIT_MISMATCH -> "Inventory unit mismatch";
 				case INSUFFICIENT_AVAILABLE_STOCK -> "Insufficient available stock";
+				case INVENTORY_SAFETY_STOCK_NOT_FOUND -> "Safety stock policy not found";
+				case INVENTORY_SAFETY_STOCK_PROTECTED -> "Safety stock is protected";
+				case INVENTORY_TRANSFER_NOT_FOUND -> "Inventory transfer not found";
+				case INVENTORY_TRANSFER_SOURCE_REQUIRED -> "Transfer source is required";
+				case INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED -> "Transfer requires a single source lot";
 				case INVENTORY_SHORTAGE -> "Inventory shortage";
 				case INVENTORY_RESERVATION_NOT_FOUND -> "Inventory reservation not found";
 				case INVENTORY_RESERVATION_ALREADY_EXISTS -> "Inventory reservation already exists";

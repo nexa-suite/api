@@ -49,7 +49,7 @@ class ModernPostgresUpgradeMigrationTests {
         try (var connection = POSTGRES.createConnection("")) {
             try (var statement = connection.createStatement(); var version = statement.executeQuery("select version from flyway_schema_history order by installed_rank desc limit 1")) {
                 assertThat(version.next()).isTrue();
-                assertThat(version.getString(1)).isEqualTo("74");
+                assertThat(version.getString(1)).isEqualTo("82");
             }
             try (var statement = connection.prepareStatement("select count(*) from catalog_management.product where id=?")) {
                 statement.setObject(1, product);
