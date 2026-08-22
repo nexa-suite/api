@@ -45,6 +45,12 @@ public final class DeterministicLocalStripePaymentProvider implements StripePaym
     public Optional<PaymentIntent> retrievePaymentIntent(String providerId) { return Optional.ofNullable(intents.get(providerId)); }
 
     @Override
+    public Refund refundPayment(String providerId, long amountMinor, String currency, String idempotencyKey) {
+        if (providerId == null || !intents.containsKey(providerId)) throw new IllegalArgumentException("Local PaymentIntent was not found");
+        return new Refund("re_local_" + UUID.nameUUIDFromBytes(idempotencyKey.getBytes(StandardCharsets.UTF_8)).toString().replace("-", ""), "succeeded");
+    }
+
+    @Override
     public StripeWebhookEvent verifyWebhook(String payload, String signature) {
         if (signature == null || signature.isBlank()) throw new IllegalArgumentException("Stripe webhook signature is required");
         String timestamp = value(signature, "t"); String provided = value(signature, "v1");

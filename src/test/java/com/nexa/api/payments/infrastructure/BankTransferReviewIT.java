@@ -10,10 +10,54 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class BankTransferReviewIT extends PaymentIntegrationSupport {
+    @Test
+    void bankTransferMayBeReportedAndApprovedWithoutAttachment() throws Exception {
+        OpenReceivable receivable = createOpenReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        MvcResult created = mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", "bank-transfer-no-proof-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reference\":\"BT-NO-PROOF-" + uuid() + "\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String paymentId = json(created).get("id").asText();
+
+        MvcResult approved = mockMvc.perform(post("/api/v1/payments/" + paymentId + "/bank-transfer/approve")
+                        .header("Authorization", "Bearer " + owner).header("Idempotency-Key", "bank-approve-no-proof-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+
+        assertThat(json(approved).get("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(jdbc.queryForObject("select bank_transfer_proof_evidence_id from payments.payment where id=?", UUID.class, UUID.fromString(paymentId))).isNull();
+        assertThat(jdbc.queryForObject("select amount_paid from payments.receivable where id=?", BigDecimal.class, receivable.id()))
+                .isEqualByComparingTo(receivable.amount());
+    }
+
+    @Test
+    void financeCanListPendingTransfersButBuyerCannotUseTheReviewQueue() throws Exception {
+        OpenReceivable receivable = createOpenReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String reference = "BT-LIST-" + uuid();
+        mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", "bank-transfer-list-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reference\":\"" + reference + "\"}"))
+                .andExpect(status().isCreated());
+
+        MvcResult listed = mockMvc.perform(get("/api/v1/payments")
+                        .param("method", "BANK_TRANSFER").param("status", "PROCESSING")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(listed).get("items").toString()).contains(reference);
+
+        mockMvc.perform(get("/api/v1/payments").header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isForbidden());
+    }
+
     @Test
     void bankTransferStaysPendingUntilApproveAndReplayIsIdempotent() throws Exception {
         OpenReceivable receivable = createOpenReceivable();

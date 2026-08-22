@@ -22,5 +22,14 @@ public final class PaymentModels {
     public record PaymentView(String id, String receivableId, String method, String status, BigDecimal amount,
                               String currency, Instant createdAt, Instant completedAt) { }
 
+    public record PaymentSummaryView(String id, String receivableId, String receivableNumber, String clientAccountId,
+                                     String method, String status, BigDecimal amount, String currency,
+                                     String reference, String reviewReason, Instant createdAt, Instant completedAt) { }
+
+    public record ReconciliationCaseView(String id, String paymentId, String receivableId, String salesOrderId,
+                                         String allocationStatus, String state, String providerRefundId,
+                                         int attemptCount, String lastError, String operatorNote,
+                                         Instant createdAt, Instant updatedAt, Instant resolvedAt) { }
+
     public record WebhookReceipt(String eventId, String status) { }
 }

@@ -2,6 +2,7 @@ package com.nexa.api.warehouse.infrastructure.persistence;
 
 import com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
+import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.warehouse.application.port.WarehouseOperationalSettingsPort;
@@ -185,14 +186,22 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     public void expireReservations() {
-        List<ScopeId> expired = jdbc.query("select tenant_id,workspace_id,id from warehouse.inventory_reservation where status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100 for update skip locked",
-                (rs, row) -> new ScopeId(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class)));
-        for (ScopeId candidate : expired) {
+        List<WorkspaceScope> scopes = jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
+                (rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+        for (WorkspaceScope scope : scopes) {
+            RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
             try {
-                if (transactionTemplate == null) expireOne(candidate);
-                else transactionTemplate.executeWithoutResult(status -> expireOne(candidate));
+                Runnable expireScope = () -> {
+                    List<ScopeId> expired = jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100 for update skip locked",
+                            (rs, row) -> new ScopeId(scope.tenantId(), scope.workspaceId(), rs.getObject(1, UUID.class)), scope.tenantId(), scope.workspaceId());
+                    for (ScopeId candidate : expired) expireOne(candidate);
+                };
+                if (transactionTemplate == null) expireScope.run();
+                else transactionTemplate.executeWithoutResult(status -> expireScope.run());
             } catch (RuntimeException exception) {
-                LOGGER.error("Warehouse reservation expiration failed correlationId=reservation-expiry-{}", candidate.id(), exception);
+                LOGGER.error("Warehouse reservation expiration failed tenantId={} workspaceId={}", scope.tenantId(), scope.workspaceId(), exception);
+            } finally {
+                RlsRequestScope.clear();
             }
         }
     }
@@ -227,4 +236,6 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
     private void requireRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantmanagement.domain.model.access.Permission.WAREHOUSE_READ); }
     private void requireWrite(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantmanagement.domain.model.access.Permission.WAREHOUSE_WRITE); }
     private void requireFulfillmentRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantmanagement.domain.model.access.Permission.FULFILLMENT_READ); }
+
+    private record WorkspaceScope(UUID tenantId, UUID workspaceId) { }
 }

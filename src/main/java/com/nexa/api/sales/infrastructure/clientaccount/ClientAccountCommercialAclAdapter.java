@@ -17,7 +17,23 @@ import java.util.UUID;
 @Profile("!test")
 public class ClientAccountCommercialAclAdapter implements ClientAccountCommercialPort {
     private static final String SELECT = "select a.id,a.business_name,a.commercial_name,a.tax_identifier_value,"
-            + "a.credit_limit,a.current_commercial_exposure,a.available_credit,a.payment_condition,a.status "
+            + "a.credit_limit,"
+            + "coalesce((select sum(r.amount-r.amount_paid) from payments.receivable r "
+            + "where r.tenant_id=a.tenant_id and r.workspace_id=a.workspace_id "
+            + "and r.client_account_id=a.id and r.currency=a.credit_currency "
+            + "and r.status in ('OPEN','PARTIALLY_PAID','OVERDUE')),0) "
+            + "+ coalesce((select sum(ca.reserved_exposure) from payments.credit_account ca "
+            + "where ca.tenant_id=a.tenant_id and ca.workspace_id=a.workspace_id "
+            + "and ca.client_account_id=a.id and ca.currency=a.credit_currency and ca.status='ACTIVE'),0),"
+            + "greatest(a.credit_limit - ("
+            + "coalesce((select sum(r2.amount-r2.amount_paid) from payments.receivable r2 "
+            + "where r2.tenant_id=a.tenant_id and r2.workspace_id=a.workspace_id "
+            + "and r2.client_account_id=a.id and r2.currency=a.credit_currency "
+            + "and r2.status in ('OPEN','PARTIALLY_PAID','OVERDUE')),0) "
+            + "+ coalesce((select sum(ca2.reserved_exposure) from payments.credit_account ca2 "
+            + "where ca2.tenant_id=a.tenant_id and ca2.workspace_id=a.workspace_id "
+            + "and ca2.client_account_id=a.id and ca2.currency=a.credit_currency and ca2.status='ACTIVE'),0)),0),"
+            + "a.payment_condition,a.status "
             + "from sales.client_account a";
     private final JdbcTemplate jdbc;
 

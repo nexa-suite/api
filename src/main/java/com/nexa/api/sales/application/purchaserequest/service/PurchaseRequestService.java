@@ -11,6 +11,7 @@ import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestFilte
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestLineView;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestView;
 import com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.sales.application.port.CommercialCommitmentPort;
 import com.nexa.api.sales.application.purchaserequest.port.IdempotencyPersistencePort;
 import com.nexa.api.sales.application.purchaserequest.port.PurchaseRequestEventPersistencePort;
 import com.nexa.api.sales.application.purchaserequest.port.PurchaseRequestPersistencePort;
@@ -52,21 +53,29 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	private final CatalogItemSnapshotLookupPort catalog;
 	private final ClientAccountPersistencePort accounts;
 	private final ChangeEventPersistencePort changeFeed;
+	private final CommercialCommitmentPort commitments;
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts) {
-		this(persistence, events, idempotency, catalog, accounts, new NoopChangeEventPersistence());
+		this(persistence, events, idempotency, catalog, accounts, new NoopChangeEventPersistence(), null);
 	}
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts,
 			ChangeEventPersistencePort changeFeed) {
+		this(persistence, events, idempotency, catalog, accounts, changeFeed, null);
+	}
+
+	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts,
+			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments) {
 		this.persistence = persistence;
 		this.events = events;
 		this.idempotency = idempotency;
 		this.catalog = catalog;
 		this.accounts = accounts;
 		this.changeFeed = changeFeed;
+		this.commitments = commitments;
 	}
 
 	@Override
@@ -235,6 +244,11 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		int changed = persistence.transition(scope(context), workspace(context), buyerAccount(context), id,
 				current.status(), target, reviewNote, context.membershipId().toString(), version);
 		if (changed == 0) throw new SalesConcurrencyConflictException();
+		if ("submit".equals(normalized) && commitments != null) {
+			commitments.activateForPurchaseRequest(UUID.fromString(scope(context)), UUID.fromString(workspace(context)), UUID.fromString(id));
+		} else if (("reject".equals(normalized) || "cancel".equals(normalized)) && commitments != null) {
+			commitments.releaseForPurchaseRequest(UUID.fromString(scope(context)), UUID.fromString(workspace(context)), UUID.fromString(id), target);
+		}
 		PurchaseRequestView result = detail(context, id);
 		events.append(UUID.randomUUID(), id, scope(context), workspace(context), context.membershipId().toString(),
 				target, current.status(), target, now());

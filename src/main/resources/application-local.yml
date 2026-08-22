@@ -31,14 +31,20 @@ server:
 
 nexa:
   clamav:
+    mode: ${NEXA_CLAMAV_MODE:deterministic-local}
     host: ${NEXA_CLAMAV_HOST:}
     port: ${NEXA_CLAMAV_PORT:3310}
+    connect-timeout-ms: ${NEXA_CLAMAV_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${NEXA_CLAMAV_READ_TIMEOUT_MS:10000}
   payments:
     provider: ${NEXA_PAYMENTS_PROVIDER:deterministic}
     secret-key: ${STRIPE_SECRET_KEY:}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:whsec_local_service_foundation}
     publishable-key: ${STRIPE_PUBLISHABLE_KEY:pk_test_local_foundation}
     api-base-url: ${NEXA_STRIPE_API_BASE_URL:}
+    connect-timeout-ms: ${NEXA_STRIPE_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${NEXA_STRIPE_READ_TIMEOUT_MS:10000}
+    max-network-retries: ${NEXA_STRIPE_MAX_NETWORK_RETRIES:0}
     webhook-worker-delay-ms: ${NEXA_PAYMENT_WEBHOOK_WORKER_DELAY_MS:1000}
   documents:
     worker-delay-ms: ${NEXA_DOCUMENT_WORKER_DELAY_MS:3000}
@@ -50,6 +56,12 @@ nexa:
     secret-key: ${NEXA_OBJECT_STORAGE_SECRET_KEY:nexa-minio-local-foundation}
     region: ${NEXA_OBJECT_STORAGE_REGION:us-east-1}
     timeout-ms: ${NEXA_OBJECT_STORAGE_TIMEOUT_MS:5000}
+  maps:
+    provider: ${NEXA_MAPS_PROVIDER:local}
+    google:
+      api-key: ${NEXA_MAPS_GOOGLE_API_KEY:}
+      routes-base-url: ${NEXA_MAPS_GOOGLE_ROUTES_BASE_URL:https://routes.googleapis.com}
+      timeout-ms: ${NEXA_MAPS_GOOGLE_TIMEOUT_MS:10000}
   security:
     issuer: ${NEXA_SECURITY_ISSUER:http://localhost:8080}
     audience: ${NEXA_SECURITY_AUDIENCE:nexa-local}
@@ -57,7 +69,7 @@ nexa:
     refresh-token-ttl: ${NEXA_REFRESH_TOKEN_TTL:P30D}
     rsa-public-key: ${NEXA_SECURITY_RSA_PUBLIC_KEY:./.local-keys/access-token-public.pem}
     rsa-private-key: ${NEXA_SECURITY_RSA_PRIVATE_KEY:./.local-keys/access-token-private.pem}
-    allowed-origins: ${NEXA_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4300,http://localhost:8000,http://127.0.0.1:4200,http://127.0.0.1:4300,http://127.0.0.1:8000}
+    allowed-origins: ${NEXA_SECURITY_ALLOWED_ORIGINS:${NEXA_ALLOWED_ORIGINS:http://localhost:4200,http://localhost:4300,http://localhost:8000,http://127.0.0.1:4200,http://127.0.0.1:4300,http://127.0.0.1:8000}}
     trusted-proxies: ${NEXA_TRUSTED_PROXIES:}
     refresh-cookie-secure: ${NEXA_REFRESH_COOKIE_SECURE:false}
     bcrypt-strength: ${NEXA_BCRYPT_STRENGTH:12}

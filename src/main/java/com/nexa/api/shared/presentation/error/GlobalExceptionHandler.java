@@ -6,6 +6,7 @@ import com.nexa.api.iam.application.exception.SessionNotFoundException;
 import com.nexa.api.iam.application.exception.AuthenticationThrottledException;
 import com.nexa.api.iam.application.exception.IamSecurityException;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.validation.BindException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.security.access.AccessDeniedException;
@@ -324,7 +326,7 @@ public final class GlobalExceptionHandler {
 		@ExceptionHandler(WarehouseOperationsService.WarehouseException.class)
 		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationsService.WarehouseException exception, HttpServletRequest request) {
 			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
-				HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
 		}
 		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)
@@ -361,6 +363,11 @@ public final class GlobalExceptionHandler {
 		return ResponseEntity.badRequest().body(problem);
 	}
 
+	@ExceptionHandler(HandlerMethodValidationException.class)
+	public ResponseEntity<ProblemDetail> handleMethodValidation(HandlerMethodValidationException exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Request validation failed", request);
+	}
+
 	@ExceptionHandler(BindException.class)
 	public ResponseEntity<ProblemDetail> handleBinding(BindException exception, HttpServletRequest request) {
 		ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Request validation failed", request);
@@ -375,9 +382,31 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found", request);
 	}
 
+	@ExceptionHandler(com.nexa.api.payments.application.exception.PaymentOperationInProgressException.class)
+	public ResponseEntity<ProblemDetail> handlePaymentOperationInProgress(com.nexa.api.payments.application.exception.PaymentOperationInProgressException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "A payment operation is already in progress for this receivable", request);
+	}
+
 	@ExceptionHandler(IllegalArgumentException.class)
 	public ResponseEntity<ProblemDetail> handleDomainValidation(RuntimeException exception, HttpServletRequest request) {
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.INVALID_REQUEST, "Request parameters are invalid", request);
+	}
+
+	@ExceptionHandler(TechnicalFailureException.class)
+	public ResponseEntity<ProblemDetail> handleTechnicalFailure(TechnicalFailureException exception, HttpServletRequest request) {
+		ApiErrorCode code = switch (exception.kind()) {
+			case EXTERNAL_TEMPORARY_FAILURE -> ApiErrorCode.EXTERNAL_TEMPORARY_FAILURE;
+			case EXTERNAL_TIMEOUT -> ApiErrorCode.EXTERNAL_TIMEOUT;
+			case TECHNICAL_CAPABILITY_UNAVAILABLE -> ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE;
+			case STORAGE_UNAVAILABLE -> ApiErrorCode.STORAGE_UNAVAILABLE;
+			case SCANNER_UNAVAILABLE -> ApiErrorCode.SCANNER_UNAVAILABLE;
+		};
+		HttpStatus status = switch (exception.kind()) {
+			case TECHNICAL_CAPABILITY_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+			case EXTERNAL_TIMEOUT, EXTERNAL_TEMPORARY_FAILURE, STORAGE_UNAVAILABLE, SCANNER_UNAVAILABLE -> HttpStatus.BAD_GATEWAY;
+		};
+		LOGGER.warn("Technical failure code={} correlationId={} providerRequestId={}", code, ApiProblemDetailFactory.correlationId(request), exception.providerRequestId());
+		return response(status, code, detail(code), request);
 	}
 
 	@ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class, MissingRequestHeaderException.class, MethodArgumentTypeMismatchException.class})
@@ -411,6 +440,17 @@ public final class GlobalExceptionHandler {
 
 	private static ResponseEntity<ProblemDetail> response(HttpStatus status, ApiErrorCode code, String detail, HttpServletRequest request) {
 		return ResponseEntity.status(status).body(problem(status, code, detail, request));
+	}
+
+	private static String detail(ApiErrorCode code) {
+		return switch (code) {
+			case EXTERNAL_TIMEOUT -> "An external service did not respond in time";
+			case EXTERNAL_TEMPORARY_FAILURE -> "An external service is temporarily unavailable";
+			case TECHNICAL_CAPABILITY_UNAVAILABLE -> "The requested technical capability is unavailable";
+			case STORAGE_UNAVAILABLE -> "Private object storage is temporarily unavailable";
+			case SCANNER_UNAVAILABLE -> "Malware scanning is temporarily unavailable";
+			default -> "Technical operation could not be completed";
+		};
 	}
 
 	private static boolean hasCauseMessage(Throwable exception, String expected) {
