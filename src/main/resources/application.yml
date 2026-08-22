@@ -96,6 +96,12 @@ nexa:
     secret-key: ${NEXA_OBJECT_STORAGE_SECRET_KEY:}
     region: ${NEXA_OBJECT_STORAGE_REGION:}
     timeout-ms: ${NEXA_OBJECT_STORAGE_TIMEOUT_MS:5000}
+  maps:
+    provider: ${NEXA_MAPS_PROVIDER:local}
+    google:
+      api-key: ${NEXA_MAPS_GOOGLE_API_KEY:}
+      routes-base-url: ${NEXA_MAPS_GOOGLE_ROUTES_BASE_URL:https://routes.googleapis.com}
+      timeout-ms: ${NEXA_MAPS_GOOGLE_TIMEOUT_MS:10000}
 
 springdoc:
   api-docs:
