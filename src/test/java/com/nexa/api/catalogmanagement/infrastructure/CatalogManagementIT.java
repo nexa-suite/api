@@ -68,6 +68,18 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 	}
 
 	@Test
+	void ownerCanListSellableSkusWithoutOptionalUuidFilters() throws Exception {
+		String token = accessToken(OWNER_EMAIL, "PLATFORM");
+
+		mockMvc.perform(get("/api/v1/skus")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.param("page", "0")
+				.param("size", "5"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items").isNotEmpty());
+	}
+
+	@Test
 	void ownerCreatesAndReplaysCategoryThenMustUseIfMatchForUpdate() throws Exception {
 		String token = accessToken(OWNER_EMAIL, "PLATFORM");
 		String slug = "it-category-" + UUID.randomUUID().toString().substring(0, 8);

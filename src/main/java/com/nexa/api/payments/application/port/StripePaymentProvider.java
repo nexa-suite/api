@@ -14,10 +14,15 @@ public interface StripePaymentProvider {
     default PaymentIntent confirmPaymentIntent(String providerId) {
         throw new UnsupportedOperationException("Payment provider does not support confirmation");
     }
+    /** Attempts a compensating refund for a captured provider payment. */
+    default Refund refundPayment(String providerId, long amountMinor, String currency, String idempotencyKey) {
+        throw new UnsupportedOperationException("Payment provider does not support refunds");
+    }
     StripeWebhookEvent verifyWebhook(String payload, String signature);
 
     record PaymentIntentRequest(long amountMinor, String currency, String idempotencyKey, Map<String, String> metadata) { }
     record PaymentIntent(String providerId, String clientSecret, String status) { }
+    record Refund(String providerRefundId, String status) { }
     record StripeWebhookEvent(String eventId, String eventType, String paymentIntentId, String paymentStatus,
                               Long amountMinor, String currency, Map<String, String> metadata) {
         public StripeWebhookEvent(String eventId, String eventType, String paymentIntentId, String paymentStatus,

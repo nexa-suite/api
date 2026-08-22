@@ -54,15 +54,18 @@ public final class DispatchOrder {
     }
     public void markReadyForRoute() { if (status != DispatchStatus.SCHEDULED) throw invalid(); if (assignment == null || deliveryWindow == null) throw invalid(); status = DispatchStatus.READY_FOR_ROUTE; }
     public void startRoute() { require(DispatchStatus.READY_FOR_ROUTE); status = DispatchStatus.IN_ROUTE; }
+    /** A failed attempt is evidence on the open Delivery; it does not close or replace it. */
+    public void recordFailedAttempt() { require(DispatchStatus.IN_ROUTE); }
     public void recordIncident() {
         if (status != DispatchStatus.IN_ROUTE) throw invalid();
         status = DispatchStatus.INCIDENT;
     }
     public void reprogram(DeliveryWindow value, Instant newEta) { require(DispatchStatus.INCIDENT); deliveryWindow = Objects.requireNonNull(value); eta = newEta; status = DispatchStatus.REPROGRAMMED; }
     public void cancel() {
-        if (status == DispatchStatus.IN_ROUTE || status == DispatchStatus.DELIVERED || status == DispatchStatus.CANCELLED) throw invalid();
+        if (status == DispatchStatus.IN_ROUTE || status == DispatchStatus.PARTIAL || status == DispatchStatus.DELIVERED || status == DispatchStatus.CANCELLED) throw invalid();
         status = DispatchStatus.CANCELLED;
     }
+    public void deliverPartially() { require(DispatchStatus.IN_ROUTE); status = DispatchStatus.PARTIAL; }
     public void deliver() { require(DispatchStatus.IN_ROUTE); status = DispatchStatus.DELIVERED; }
 
     private void transition(DispatchStatus from, DispatchStatus to) { require(from); status = to; }

@@ -13,6 +13,7 @@ import com.nexa.api.sales.application.salesorder.model.SalesOrderView;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderAggregatePersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersistencePort;
+import com.nexa.api.sales.application.port.CommercialCommitmentPort;
 import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
 import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
@@ -49,10 +50,12 @@ import java.util.Map;
 public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, SalesOrderAggregatePersistencePort, SalesOrderConversionPersistencePort {
 	private final JdbcTemplate jdbc;
 	private final ChangeEventPersistencePort changeFeed;
+	private final CommercialCommitmentPort commitments;
 
-	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed) {
+	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments) {
 		this.jdbc = jdbc;
 		this.changeFeed = changeFeed;
+		this.commitments = commitments;
 	}
 
 	@Override
@@ -161,7 +164,8 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		for (SalesOrderLine line : aggregate.lines()) jdbc.update("insert into sales.sales_order_line (id,sales_order_id,catalog_item_id,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 				UUID.randomUUID(), orderId, line.catalogItemId(), line.sellableSkuId(), line.productFamilyId(), line.skuCodeSnapshot(), line.productFamilyCodeSnapshot(), line.itemNameSnapshot(), line.presentationSnapshot(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), timestamp(nowEpochMillis));
 		if (jdbc.update("update sales.purchase_request set status='CONVERTED_TO_ORDER',updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='APPROVED' and version=?",
-				timestamp(nowEpochMillis), tenant, workspace, request, purchaseRequestVersion) != 1) throw new SalesConcurrencyConflictException();
+				 timestamp(nowEpochMillis), tenant, workspace, request, purchaseRequestVersion) != 1) throw new SalesConcurrencyConflictException();
+		commitments.convertForSalesOrder(tenant, workspace, request, orderId);
 		jdbc.update("insert into sales.purchase_request_event (id,purchase_request_id,tenant_id,workspace_id,actor_membership_id,event_type,from_status,to_status,occurred_at) values (?,?,?,?,?,'CONVERTED_TO_ORDER','APPROVED','CONVERTED_TO_ORDER',?)",
 				UUID.randomUUID(), request, tenant, workspace, actor, timestamp(nowEpochMillis));
 		jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,to_status,reason,occurred_at) values (?,?,?,?,?,'ORDER_CREATED','PENDING',?,?)",
