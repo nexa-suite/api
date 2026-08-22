@@ -17,7 +17,8 @@ class CanonicalOutboxEventProcessorArchitectureTests {
     void processorOwnsOnlyCanonicalOutboxAndInboxPersistence() throws Exception {
         String source = Files.readString(PROCESSOR);
 
-        assertThat(source).contains("integration.outbox_event", "integration.inbox_event");
+        assertThat(source).contains("integration.outbox_event", "integration.inbox_event",
+                "processing_started_at", "lease_until", "claim_token");
         assertThat(source).doesNotContain(
                 "sales.purchase_request", "sales.sales_order", "sales.client_account_membership",
                 "warehouse.inventory_reservation", "logistics.dispatch_order", "tenant_management.",
@@ -32,6 +33,22 @@ class CanonicalOutboxEventProcessorArchitectureTests {
                 "SalesEventContextQueryPort", "WarehouseEventContextQueryPort",
                 "LogisticsEventContextQueryPort", "TenantEventContextQueryPort",
                 "PaymentEventContextQueryPort");
+    }
+
+    @Test
+    void deliveryFinalizationIsFencedByTheCurrentLeaseOwner() throws Exception {
+        String source = Files.readString(PROCESSOR);
+
+        assertThat(source).contains("processOne(row, claimToken)", "assertClaimOwner(row.eventId(), claimToken)",
+                "status='PROCESSING' and claim_token=? and lease_until > current_timestamp");
+        assertThat(source).doesNotContain("processOne(row);");
+    }
+
+    @Test
+    void workerClearsTenantScopeAfterEveryEvent() throws Exception {
+        String source = Files.readString(PROCESSOR);
+
+        assertThat(source).contains("finally {", "RlsRequestScope.clear();");
     }
 
     @Test

@@ -27,6 +27,25 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/handoff-notes")).isTrue();
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
 
+        var problem = document.at("/components/schemas/NexaProblemDetail");
+        assertThat(problem.isObject()).isTrue();
+        assertThat(problem.get("properties").has("type")).isTrue();
+        assertThat(problem.get("properties").has("title")).isTrue();
+        assertThat(problem.get("properties").has("status")).isTrue();
+        assertThat(problem.get("properties").has("detail")).isTrue();
+        assertThat(problem.get("properties").has("instance")).isTrue();
+        assertThat(problem.get("properties").has("code")).isTrue();
+        assertThat(problem.get("properties").has("correlationId")).isTrue();
+        assertThat(problem.get("properties").has("category")).isTrue();
+        assertThat(problem.get("properties").has("retryable")).isTrue();
+        assertThat(problem.get("required").toString()).contains("code", "correlationId", "category", "retryable");
+        var paymentIntent = document.get("paths").get("/api/v1/receivables/{receivableId}/payment-intents").get("post");
+        for (String status : new String[] {"400", "401", "403", "404", "409", "412", "429", "500", "502", "503", "504"}) {
+            assertThat(paymentIntent.get("responses").has(status)).as("technical response %s", status).isTrue();
+        }
+        assertThat(paymentIntent.get("responses").get("503").get("content").get("application/problem+json")
+                .get("schema").get("$ref").asText()).isEqualTo("#/components/schemas/NexaProblemDetail");
+
         var operationIds = new HashSet<String>();
         document.get("paths").properties().forEach(path -> path.getValue().properties().forEach(operation -> {
             var operationId = operation.getValue().get("operationId");

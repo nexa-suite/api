@@ -1,6 +1,10 @@
 package com.nexa.api.invoicing.infrastructure.storage;
 
 import com.nexa.api.invoicing.application.port.ObjectStoragePort;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -37,21 +41,34 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     private final String secretKey;
     private final String region;
     private final Duration timeout;
+    private final TechnicalMetrics metrics;
+
+    @Autowired
+    public S3CompatibleObjectStorageAdapter(org.springframework.core.env.Environment environment,
+                                            ObjectProvider<TechnicalMetrics> metrics) {
+        this(environment, metrics == null ? null : metrics.getIfAvailable());
+    }
 
     public S3CompatibleObjectStorageAdapter(org.springframework.core.env.Environment environment) {
-        this.endpoint = URI.create(environment.getProperty("nexa.object-storage.endpoint", "http://localhost:9000").replaceAll("/$", ""));
-        this.bucket = required(environment.getProperty("nexa.object-storage.bucket", "nexa-private"), "bucket");
-        this.accessKey = required(environment.getProperty("nexa.object-storage.access-key", "nexa-minio"), "access key");
-        this.secretKey = required(environment.getProperty("nexa.object-storage.secret-key", "nexa-minio-local-foundation"), "secret key");
-        this.region = environment.getProperty("nexa.object-storage.region", "us-east-1");
+        this(environment, (TechnicalMetrics) null);
+    }
+
+    private S3CompatibleObjectStorageAdapter(org.springframework.core.env.Environment environment, TechnicalMetrics metrics) {
+        this.endpoint = URI.create(required(environment.getProperty("nexa.object-storage.endpoint", ""), "endpoint").replaceAll("/$", ""));
+        this.bucket = required(environment.getProperty("nexa.object-storage.bucket", ""), "bucket");
+        this.accessKey = required(environment.getProperty("nexa.object-storage.access-key", ""), "access key");
+        this.secretKey = required(environment.getProperty("nexa.object-storage.secret-key", ""), "secret key");
+        this.region = required(environment.getProperty("nexa.object-storage.region", ""), "region");
         this.timeout = Duration.ofMillis(Long.parseLong(environment.getProperty("nexa.object-storage.timeout-ms", "5000")));
         this.client = HttpClient.newBuilder().connectTimeout(timeout).build();
+        this.metrics = metrics;
     }
 
     @Override
     public StoredObject put(String objectKey, InputStream content, long contentLength, String contentType) {
         validateKey(objectKey);
         if (content == null || contentLength < 0 || contentLength > 52428800) throw new IllegalArgumentException("Object size is invalid");
+        TechnicalMetrics.TimerSample timer = start("put");
         Path temporary = null;
         try {
             temporary = Files.createTempFile("nexa-object-", ".part");
@@ -72,11 +89,21 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
             String hash = HexFormat.of().formatHex(digest.digest());
             HttpResponse<byte[]> response = sendFile("PUT", objectKey, temporary, contentType, hash);
             requireSuccess(response.statusCode(), response.body());
-            return new StoredObject(objectKey, hash, contentType, total);
+            StoredObject stored = new StoredObject(objectKey, hash, contentType, total);
+            record(timer, "success");
+            return stored;
+        } catch (TechnicalFailureException exception) {
+            record(timer, "unavailable");
+            throw exception;
         } catch (IOException exception) {
-            throw new IllegalStateException("S3-compatible object write failed", exception);
+            record(timer, "unavailable");
+            throw unavailable("S3-compatible object write failed", exception);
         } catch (java.security.GeneralSecurityException exception) {
+            record(timer, "error");
             throw new IllegalStateException("SHA-256 unavailable", exception);
+        } catch (RuntimeException exception) {
+            record(timer, "error");
+            throw exception;
         } finally {
             if (temporary != null) try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
         }
@@ -85,28 +112,53 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     @Override
     public InputStream open(String objectKey) {
         validateKey(objectKey);
+        TechnicalMetrics.TimerSample timer = start("open");
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
                 HttpResponse<InputStream> response = client.send(request("GET", objectKey, new byte[0], null, sha256(new byte[0])), HttpResponse.BodyHandlers.ofInputStream());
-                if (response.statusCode() >= 200 && response.statusCode() < 300) return response.body();
+                if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    record(timer, "success");
+                    return response.body();
+                }
                 response.body().close();
                 if (attempt == 2 || response.statusCode() < 500) throw new IllegalArgumentException("Object is not available: HTTP " + response.statusCode());
             } catch (IOException exception) {
-                if (attempt == 2) throw new IllegalStateException("S3-compatible object read failed", exception);
+                if (attempt == 2) {
+                    record(timer, "unavailable");
+                    throw unavailable("S3-compatible object read failed", exception);
+                }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("S3-compatible object read interrupted", exception);
+                record(timer, "interrupted");
+                throw unavailable("S3-compatible object read interrupted", exception);
+            } catch (RuntimeException exception) {
+                record(timer, "rejected");
+                throw exception;
             }
         }
+        record(timer, "error");
         throw new IllegalStateException("S3-compatible object read failed");
     }
 
     @Override
     public void delete(String objectKey) {
         validateKey(objectKey);
-        HttpResponse<byte[]> response = sendBytes("DELETE", objectKey, new byte[0], null, sha256(new byte[0]));
-        requireSuccess(response.statusCode(), response.body());
+        TechnicalMetrics.TimerSample timer = start("delete");
+        try {
+            HttpResponse<byte[]> response = sendBytes("DELETE", objectKey, new byte[0], null, sha256(new byte[0]));
+            requireSuccess(response.statusCode(), response.body());
+            record(timer, "success");
+        } catch (TechnicalFailureException exception) {
+            record(timer, "unavailable");
+            throw exception;
+        } catch (RuntimeException exception) {
+            record(timer, "error");
+            throw exception;
+        }
     }
+
+    private TechnicalMetrics.TimerSample start(String operation) { return metrics == null ? null : metrics.start("storage_s3", operation); }
+    private void record(TechnicalMetrics.TimerSample timer, String outcome) { if (metrics != null) { metrics.count("storage_s3", "operation", outcome); if (timer != null) timer.stop(outcome); } }
 
     private HttpResponse<byte[]> sendBytes(String method, String objectKey, byte[] content, String contentType, String hash) {
         for (int attempt = 1; attempt <= 2; attempt++) {
@@ -116,10 +168,10 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
                 HttpResponse<byte[]> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
                 if (response.statusCode() < 500 || attempt == 2) return response;
             } catch (IOException exception) {
-                if (attempt == 2) throw new IllegalStateException("S3-compatible object write failed", exception);
+                if (attempt == 2) throw unavailable("S3-compatible object write failed", exception);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("S3-compatible object write interrupted", exception);
+                throw unavailable("S3-compatible object write interrupted", exception);
             }
         }
         throw new IllegalStateException("S3-compatible object write failed");
@@ -133,10 +185,10 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
                 HttpResponse<byte[]> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
                 if (response.statusCode() < 500 || attempt == 2) return response;
             } catch (IOException exception) {
-                if (attempt == 2) throw new IllegalStateException("S3-compatible object write failed", exception);
+                if (attempt == 2) throw unavailable("S3-compatible object write failed", exception);
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("S3-compatible object write interrupted", exception);
+                throw unavailable("S3-compatible object write interrupted", exception);
             }
         }
         throw new IllegalStateException("S3-compatible object write failed");
@@ -192,5 +244,13 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     private static String sha256(byte[] content) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)); } catch (Exception exception) { throw new IllegalStateException("SHA-256 unavailable", exception); } }
     private static void validateKey(String key) { if (key == null || key.isBlank() || key.startsWith("/") || key.contains("..") || key.contains("\\")) throw new IllegalArgumentException("Object key is invalid"); }
     private static String required(String value, String label) { if (value == null || value.isBlank()) throw new IllegalStateException("S3-compatible " + label + " is required"); return value; }
-    private static void requireSuccess(int status, byte[] body) { if (status < 200 || status >= 300) throw new IllegalStateException("S3-compatible storage rejected request: HTTP " + status + " " + new String(body == null ? new byte[0] : body, StandardCharsets.UTF_8)); }
+    private static TechnicalFailureException unavailable(String message, Throwable cause) {
+        return new TechnicalFailureException(TechnicalFailureException.Kind.STORAGE_UNAVAILABLE, message, cause);
+    }
+    private static void requireSuccess(int status, byte[] body) {
+        if (status < 200 || status >= 300) {
+            throw new TechnicalFailureException(TechnicalFailureException.Kind.STORAGE_UNAVAILABLE,
+                    "S3-compatible storage rejected request: HTTP " + status);
+        }
+    }
 }

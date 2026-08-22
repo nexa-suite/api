@@ -44,11 +44,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
         }
         long total = jdbc.queryForObject("select count(*) from logistics.dispatch_order d" + where,
                 Long.class, args.toArray());
-        String order = sort(sort, "updatedAt", "d.updated_at desc,d.id desc",
-                "dispatchNumber", "d.dispatch_number asc,d.id asc",
-                "deliveryWindowStart", "d.delivery_window_start asc nulls last,d.id asc",
-                "priority", "d.priority asc,d.delivery_window_start asc nulls last,d.id asc",
-                "status", "d.status asc,d.id asc");
+        String order = DispatchSort.parse(sort).sql();
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
         pageArgs.add(page * size);
@@ -160,7 +156,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
             String normalized = enumValue(status, "status", new ProofOfDeliveryStatus[]{
                     ProofOfDeliveryStatus.PENDING, ProofOfDeliveryStatus.COMPLETED});
             if ("PENDING".equals(normalized)) {
-                where += " and p.id is null and d.status not in ('DELIVERED','CANCELLED')";
+                where += " and p.id is null and d.status not in ('DELIVERED','PARTIAL','CANCELLED')";
             } else {
                 where += " and p.status=?";
                 args.add(normalized);
@@ -218,6 +214,9 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
             case "logistics.dispatch.delivered", "logistics.pod.completed" -> "DELIVERED";
             case "logistics.dispatch.cancelled" -> "DELIVERY_CANCELLED";
             case "logistics.dispatch.incident-recorded", "logistics.dispatch.buyer-temperature-review" -> "DELIVERY_REVIEW";
+            case "logistics.delivery.attempt-failed" -> "DELIVERY_REVIEW";
+            case "logistics.delivery.partially-completed" -> "PARTIAL";
+            case "logistics.delivery.continuation-created" -> "CONTINUATION_REQUIRED";
             default -> "DELIVERY_UPDATED";
         };
     }

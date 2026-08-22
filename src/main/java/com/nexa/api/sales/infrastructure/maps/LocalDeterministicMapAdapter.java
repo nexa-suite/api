@@ -9,6 +9,7 @@ import com.nexa.api.sales.application.port.out.PlaceAutocompletePort;
 import com.nexa.api.sales.application.port.out.ReverseGeocodingPort;
 import com.nexa.api.sales.application.port.out.RoutePreviewPort;
 import com.nexa.api.sales.domain.model.delivery.RouteSnapshot;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -22,7 +23,8 @@ import java.math.BigDecimal;
 
 /** Stable local route preview used until an external map provider is configured. */
 @Component
-@Profile("!test & !google-maps")
+@Profile("!test")
+@ConditionalOnProperty(name = "nexa.maps.provider", havingValue = "local", matchIfMissing = true)
 public final class LocalDeterministicMapAdapter implements MapRoutingPort, RoutePreviewPort,
         PlaceAutocompletePort, GeocodingPort, ReverseGeocodingPort, DistanceMatrixPort {
     @Override
