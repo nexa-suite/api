@@ -6,6 +6,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -246,9 +250,83 @@ public final class WarehouseController {
         return mutation(service.restoreLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
     }
 
+    @PostMapping("/inventory/lots/{lotId}/dispositions")
+    @Operation(operationId = "recordInventoryLotDisposition")
+    public ResponseEntity<LotResponse> disposition(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId,
+                                                   @RequestHeader(name = "If-Match", required = false) String ifMatch,
+                                                   @RequestHeader(name = "Idempotency-Key", required = false) String key,
+                                                   @RequestBody DispositionRequest r,
+                                                   @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+        return mutation(service.disposeLot(c, lotId, r.disposition(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+    }
+
     @GetMapping("/inventory-availability")
     public List<AvailabilityResponse> availability(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) List<String> catalogItemIds) {
         return service.availability(c, catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : List.of(catalogItemId)).stream().map(this::availability).toList();
+    }
+
+    @GetMapping("/inventory/safety-stocks")
+    @Operation(operationId = "listInventorySafetyStocks")
+    public PageResponse<SafetyStockResponse> safetyStocks(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                           @RequestParam(required = false) String warehouseId,
+                                                           @RequestParam(required = false) String skuId,
+                                                           @RequestParam(defaultValue = "0") int page,
+                                                           @RequestParam(defaultValue = "25") int size) {
+        return page(service.safetyStocks(c, warehouseId, skuId, page, size), this::safetyStock);
+    }
+
+    @GetMapping("/inventory/safety-stocks/{id}")
+    @Operation(operationId = "getInventorySafetyStock")
+    public ResponseEntity<SafetyStockResponse> safetyStock(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                            @PathVariable String id) {
+        SafetyStockResponse value = safetyStock(service.safetyStock(c, id));
+        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @PutMapping("/inventory/safety-stocks")
+    @Operation(operationId = "upsertInventorySafetyStock")
+    public ResponseEntity<SafetyStockResponse> upsertSafetyStock(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                                  @RequestHeader(name = "If-Match", required = false) String ifMatch,
+                                                                  @RequestHeader(name = "Idempotency-Key", required = false) String key,
+                                                                  @Valid @RequestBody SafetyStockRequest request,
+                                                                  @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+        WarehouseOperationsService.SafetyStockCommand command = new WarehouseOperationsService.SafetyStockCommand(
+                request.warehouseId(), request.skuId(), request.catalogItemId(), request.quantity(), request.unit());
+        SafetyStockResponse value = safetyStock(service.upsertSafetyStock(c, command, version(ifMatch), key, String.valueOf(correlation)));
+        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @GetMapping("/inventory/transfers")
+    @Operation(operationId = "listInventoryTransfers")
+    public PageResponse<TransferResponse> transfers(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                    @RequestParam(required = false) String sourceWarehouseId,
+                                                    @RequestParam(required = false) String destinationWarehouseId,
+                                                    @RequestParam(defaultValue = "0") int page,
+                                                    @RequestParam(defaultValue = "25") int size) {
+        return page(service.transfers(c, sourceWarehouseId, destinationWarehouseId, page, size), this::transfer);
+    }
+
+    @GetMapping("/inventory/transfers/{id}")
+    @Operation(operationId = "getInventoryTransfer")
+    public ResponseEntity<TransferResponse> transfer(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                      @PathVariable String id) {
+        TransferResponse value = transfer(service.transfer(c, id));
+        return ResponseEntity.ok().eTag(etag(value.sourceVersionAfter())).body(value);
+    }
+
+    @PostMapping("/inventory/transfers")
+    @Operation(operationId = "createInventoryTransfer")
+    public ResponseEntity<TransferResponse> transfer(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                      @RequestHeader(name = "If-Match", required = false) String ifMatch,
+                                                      @RequestHeader(name = "Idempotency-Key", required = false) String key,
+                                                      @Valid @RequestBody TransferRequest request,
+                                                      @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+        WarehouseOperationsService.TransferCommand command = new WarehouseOperationsService.TransferCommand(
+                request.sourceLotId(), request.sourceWarehouseId(), request.sourceZoneId(),
+                request.destinationWarehouseId(), request.destinationZoneId(), request.skuId(),
+                request.catalogItemId(), request.quantity(), request.unit(), request.reason());
+        TransferResponse value = transfer(service.transfer(c, command, version(ifMatch), key, String.valueOf(correlation)));
+        return ResponseEntity.status(201).eTag(etag(value.sourceVersionAfter())).body(value);
     }
 
     @GetMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservation-preview")
@@ -296,7 +374,9 @@ public final class WarehouseController {
     private ZoneResponse zone(WarehouseOperationsService.ZoneSummary x) { return new ZoneResponse(x.id(), x.warehouseId(), x.code(), x.name(), x.type(), x.temperatureMin(), x.temperatureMax(), x.status(), x.version()); }
     private LotResponse lot(WarehouseOperationsService.LotSummary x) { return new LotResponse(x.id(), x.warehouseId(), x.zoneId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.receivedAt(), x.onHand(), x.reserved(), x.available(), x.unit(), x.status(), x.version(), x.skuId()); }
     private MovementResponse movement(WarehouseOperationsService.MovementSummary x) { return new MovementResponse(x.id(), x.lotId(), x.catalogItemId(), x.type(), x.quantity(), x.unit(), x.quantityBefore(), x.quantityAfter(), x.reservedBefore(), x.reservedAfter(), x.reason(), x.occurredAt(), x.skuId()); }
-    private AvailabilityResponse availability(WarehouseOperationsService.Availability x) { return new AvailabilityResponse(x.catalogItemId(), x.status(), x.asOf()); }
+    private SafetyStockResponse safetyStock(WarehouseOperationsService.SafetyStockSummary x) { return new SafetyStockResponse(x.id(), x.warehouseId(), x.skuId(), x.catalogItemId(), x.quantity(), x.unit(), x.version(), x.updatedAt()); }
+    private TransferResponse transfer(WarehouseOperationsService.TransferSummary x) { return new TransferResponse(x.id(), x.sourceWarehouseId(), x.sourceZoneId(), x.sourceLotId(), x.destinationWarehouseId(), x.destinationZoneId(), x.destinationLotId(), x.skuId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.requestedQuantity(), x.transferredQuantity(), x.unit(), x.mode(), x.status(), x.reason(), x.createdAt(), x.sourceVersionBefore(), x.sourceVersionAfter(), x.destinationVersionAfter()); }
+    private AvailabilityResponse availability(WarehouseOperationsService.Availability x) { return new AvailabilityResponse(x.catalogItemId(), x.status(), x.asOf(), x.physicalQuantity(), x.safetyStock(), x.sellableQuantity()); }
     private ReservationPreviewResponse preview(WarehouseOperationsService.ReservationPreview x) { return new ReservationPreviewResponse(x.salesOrderId(), x.orderNumber(), x.lines().stream().map(this::proposal).toList(), x.complete(), x.generatedAt(), x.notice()); }
     private ProposalLineResponse proposal(WarehouseOperationsService.ProposalLine x) { return new ProposalLineResponse(x.catalogItemId(), x.requested(), x.unit(), x.allocations().stream().map(this::allocation).toList(), x.shortage(), x.complete(), x.skuId()); }
     private ReservationDetailResponse reservation(WarehouseOperationsService.ReservationDetail x) { return new ReservationDetailResponse(x.id(), x.salesOrderId(), x.orderNumber(), x.status(), x.createdAt(), x.reservedAt(), x.expiresAt(), x.version(), x.clientAccountId(), x.allocations().stream().map(this::allocation).toList()); }
@@ -318,7 +398,20 @@ public final class WarehouseController {
     public record ZoneResponse(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
     public record LotResponse(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId) { }
     public record MovementResponse(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt, String skuId) { }
-    public record AvailabilityResponse(String catalogItemId, String status, Instant asOf) { }
+    public record AvailabilityResponse(String catalogItemId, String status, Instant asOf,
+                                       BigDecimal physicalQuantity, BigDecimal safetyStock, BigDecimal sellableQuantity) {
+        public AvailabilityResponse(String catalogItemId, String status, Instant asOf) {
+            this(catalogItemId, status, asOf, null, null, null);
+        }
+    }
+    public record SafetyStockResponse(String id, String warehouseId, String skuId, String catalogItemId,
+                                      BigDecimal quantity, String unit, long version, Instant updatedAt) { }
+    public record TransferResponse(String id, String sourceWarehouseId, String sourceZoneId, String sourceLotId,
+                                   String destinationWarehouseId, String destinationZoneId, String destinationLotId,
+                                   String skuId, String catalogItemId, String batchNumber, LocalDate expirationDate,
+                                   BigDecimal requestedQuantity, BigDecimal transferredQuantity, String unit,
+                                   String mode, String status, String reason, Instant createdAt,
+                                   long sourceVersionBefore, long sourceVersionAfter, long destinationVersionAfter) { }
     public record ReservationPreviewResponse(String salesOrderId, String orderNumber, List<ProposalLineResponse> lines, boolean complete, Instant generatedAt, String notice) { }
     public record ProposalLineResponse(String catalogItemId, BigDecimal requested, String unit, List<AllocationResponse> allocations, BigDecimal shortage, boolean complete, String skuId) { }
     public record AllocationResponse(String lotId, BigDecimal quantity, String unit, LocalDate expirationDate) { }
@@ -350,4 +443,20 @@ public final class WarehouseController {
     public record ReceiptRequest(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) { }
     public record QuantityRequest(String lotId, BigDecimal quantity, String direction, String reason) { }
     public record ReasonRequest(String reason) { }
+    public record DispositionRequest(String disposition, String reason) { }
+    public record SafetyStockRequest(@NotBlank @Size(max = 64) String warehouseId,
+                                     @Size(max = 64) String skuId,
+                                     @Size(max = 64) String catalogItemId,
+                                     @NotNull @DecimalMin("0.0") BigDecimal quantity,
+                                     @NotBlank @Size(max = 32) String unit) { }
+    public record TransferRequest(@Size(max = 64) String sourceLotId,
+                                  @Size(max = 64) String sourceWarehouseId,
+                                  @Size(max = 64) String sourceZoneId,
+                                  @NotBlank @Size(max = 64) String destinationWarehouseId,
+                                  @NotBlank @Size(max = 64) String destinationZoneId,
+                                  @Size(max = 64) String skuId,
+                                  @Size(max = 64) String catalogItemId,
+                                  @NotNull @DecimalMin("0.0001") BigDecimal quantity,
+                                  @Size(max = 32) String unit,
+                                  @NotBlank @Size(max = 2000) String reason) { }
 }

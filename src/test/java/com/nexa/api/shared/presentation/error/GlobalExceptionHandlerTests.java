@@ -1,8 +1,10 @@
 package com.nexa.api.shared.presentation.error;
 
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -66,6 +69,23 @@ class GlobalExceptionHandlerTests {
 				.andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("IllegalStateException"))));
 	}
 
+	@Test
+	void exposesSafeTechnicalFailureContract() throws Exception {
+		mockMvc.perform(get("/technical-failure"))
+				.andExpect(status().isBadGateway())
+				.andExpect(jsonPath("$.code").value("EXTERNAL_TIMEOUT"))
+				.andExpect(jsonPath("$.category").value("EXTERNAL"))
+				.andExpect(jsonPath("$.retryable").value(true))
+				.andExpect(jsonPath("$.detail").value("An external service did not respond in time"));
+	}
+
+	@Test
+	void handlesControllerMethodValidationAsBadRequest() throws Exception {
+		mockMvc.perform(get("/validated-query").param("value", "invalid"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+	}
+
 	@RestController
 	public static class TestController {
 		@PostMapping("/test")
@@ -79,6 +99,16 @@ class GlobalExceptionHandlerTests {
 		@GetMapping("/explode")
 		void explode() {
 			throw new IllegalStateException("secret internal detail");
+		}
+
+		@GetMapping("/technical-failure")
+		void technicalFailure() {
+			throw new TechnicalFailureException(TechnicalFailureException.Kind.EXTERNAL_TIMEOUT,
+					"provider detail must not reach the client", null, "provider-request-id");
+		}
+
+		@GetMapping("/validated-query")
+		void validatedQuery(@RequestParam @Pattern(regexp = "VALID") String value) {
 		}
 	}
 

@@ -114,11 +114,16 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"provider\":\"LOCAL_ESTIMATE\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("READY_TO_SUBMIT"))
                 .andReturn();
-        mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/submissions")
+        MvcResult submitted = mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/submissions")
                         .header("Authorization", "Bearer " + buyer).header("If-Match", recalculated.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "valid-submit-" + uuid()))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUBMITTED"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUBMITTED"))
+                .andReturn();
         assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request where id=?", Integer.class, UUID.fromString(draftId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where tenant_id=? and workspace_id=? and purchase_request_id=?",
+                String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(draftId))).isEqualTo("ACTIVE");
+        assertThat(jdbc.queryForObject("select count(*) from sales.commercial_commitment_line c join sales.commercial_commitment h on h.id=c.commitment_id where h.purchase_request_id=?",
+                Integer.class, UUID.fromString(draftId))).isEqualTo(1);
     }
 
     private tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {

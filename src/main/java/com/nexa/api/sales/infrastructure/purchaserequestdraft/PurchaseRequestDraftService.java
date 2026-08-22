@@ -1,9 +1,15 @@
 package com.nexa.api.sales.infrastructure.purchaserequestdraft;
 
 import com.nexa.api.sales.application.port.PurchaseRequestDraftPort;
+import com.nexa.api.sales.application.port.CommercialCommitmentPort;
+import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.sales.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
+import com.nexa.api.sales.domain.model.address.Address;
+import com.nexa.api.sales.domain.model.delivery.DeliveryAddressSnapshot;
+import com.nexa.api.sales.domain.model.delivery.RouteSnapshot;
+import com.nexa.api.sales.domain.model.delivery.WarehouseSnapshot;
 import com.nexa.api.sales.domain.model.purchaserequestdraft.PurchaseRequestDraft;
 import com.nexa.api.sales.domain.model.purchaserequestdraft.PurchaseRequestDraftStatus;
 import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
@@ -11,6 +17,7 @@ import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,10 +46,24 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private static final String SCHEMA = "1.0";
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final CommercialCommitmentPort commitments;
+    private final MapRoutingPort maps;
 
     public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper) {
+        this(jdbc, objectMapper, null, null);
+    }
+
+    public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper, CommercialCommitmentPort commitments) {
+        this(jdbc, objectMapper, commitments, null);
+    }
+
+    @Autowired
+    public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                       CommercialCommitmentPort commitments, MapRoutingPort maps) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
+        this.commitments = commitments;
+        this.maps = maps == null ? new com.nexa.api.sales.infrastructure.maps.LocalDeterministicMapAdapter() : maps;
     }
 
     @Transactional
@@ -122,16 +143,17 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     public PurchaseRequestDraftModels.DraftView previewRoute(CurrentAccessContext context, UUID draftId, long expectedVersion, String provider) {
         buyerWrite(context);
         DraftRow draft = mutable(context, draftId, expectedVersion);
-        AddressCoordinates destination = jdbc.query("select a.latitude,a.longitude from sales.purchase_request_draft_destination d join sales.client_account_address a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.id=d.address_id where d.tenant_id=? and d.workspace_id=? and d.draft_id=?", (rs, n) -> new AddressCoordinates(rs.getBigDecimal(1), rs.getBigDecimal(2)), tenant(context), workspace(context), draftId).stream().findFirst().orElseThrow(() -> new IllegalStateException("Destination must be complete before route preview"));
+        AddressRow destination = jdbc.query("select a.id,a.recipient_name,a.recipient_phone,a.road_type,a.street_name,a.street_number,a.interior,a.department_code,a.province_code,a.district_code,a.postal_code,a.reference,a.receiving_instructions,a.receiving_hours,a.latitude,a.longitude,a.place_id,a.source from sales.purchase_request_draft_destination d join sales.client_account_address a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.id=d.address_id where d.tenant_id=? and d.workspace_id=? and d.draft_id=?", (rs, n) -> new AddressRow(rs), tenant(context), workspace(context), draftId).stream().findFirst().orElseThrow(() -> new IllegalStateException("Destination must be complete before route preview"));
         if (destination.latitude == null || destination.longitude == null) throw new IllegalStateException("Destination requires geocoded coordinates");
         WarehouseRow warehouse = selectWarehouse(context, draftId);
-        double distance = Math.sqrt(Math.pow(destination.latitude.doubleValue() + 12.0464, 2) + Math.pow(destination.longitude.doubleValue() + 77.0428, 2)) * 111.0;
-        long duration = Math.max(900, Math.round(distance / 24.0 * 3600));
-        String routeProvider = provider == null || provider.isBlank() ? "LOCAL_ESTIMATE" : provider.trim().toUpperCase(java.util.Locale.ROOT);
-        String route = json(Map.of("schemaVersion", SCHEMA, "provider", routeProvider, "estimated", true, "distanceKm", BigDecimal.valueOf(distance).setScale(3, java.math.RoundingMode.HALF_UP), "durationSeconds", duration, "originWarehouseId", warehouse.id.toString(), "destinationLatitude", destination.latitude, "destinationLongitude", destination.longitude));
-        String selection = json(Map.of("schemaVersion", SCHEMA, "strategy", "preferred-open-full-order-route-duration-distance-priority-id", "warehouseId", warehouse.id.toString(), "estimated", true));
         Instant now = Instant.now();
-        jdbc.update("insert into sales.purchase_request_draft_route (draft_id,tenant_id,workspace_id,provider,estimated,route_snapshot,snapshot_schema_version,calculated_at) values (?,?,?,?,?,?::jsonb,?,?) on conflict (draft_id) do update set provider=excluded.provider,estimated=excluded.estimated,route_snapshot=excluded.route_snapshot,snapshot_schema_version=excluded.snapshot_schema_version,calculated_at=excluded.calculated_at", draftId, tenant(context), workspace(context), routeProvider, true, route, SCHEMA, Timestamp.from(now));
+        DeliveryAddressSnapshot addressSnapshot = new DeliveryAddressSnapshot(destination.id.toString(), "Delivery destination", address(destination), true);
+        WarehouseSnapshot warehouseSnapshot = warehouseSnapshot(warehouse, now);
+        RouteSnapshot routeSnapshot = maps.preview(new MapRoutingPort.MapRouteRequest(warehouseSnapshot, addressSnapshot));
+        String routeProvider = routeSnapshot.provider();
+        String route = json(routeSnapshot(routeSnapshot, warehouse.id));
+        String selection = json(warehouseSelection(warehouse, now, routeSnapshot));
+        jdbc.update("insert into sales.purchase_request_draft_route (draft_id,tenant_id,workspace_id,provider,estimated,route_snapshot,snapshot_schema_version,calculated_at) values (?,?,?,?,?,?::jsonb,?,?) on conflict (draft_id) do update set provider=excluded.provider,estimated=excluded.estimated,route_snapshot=excluded.route_snapshot,snapshot_schema_version=excluded.snapshot_schema_version,calculated_at=excluded.calculated_at", draftId, tenant(context), workspace(context), routeProvider, !"GOOGLE".equals(routeProvider), route, SCHEMA, Timestamp.from(now));
         jdbc.update("insert into sales.purchase_request_draft_warehouse_selection (draft_id,tenant_id,workspace_id,warehouse_id,selection_snapshot,snapshot_schema_version,selected_at) values (?,?,?,?,?::jsonb,?,?) on conflict (draft_id) do update set warehouse_id=excluded.warehouse_id,selection_snapshot=excluded.selection_snapshot,snapshot_schema_version=excluded.snapshot_schema_version,selected_at=excluded.selected_at", draftId, tenant(context), workspace(context), warehouse.id, selection, SCHEMA, Timestamp.from(now));
         updateStatus(context, draftId, draft.version, hasLines(draftId, context), true, true, hasCommercial(draft));
         return get(context, draftId);
@@ -143,7 +165,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         DraftRow draft = mutable(context, draftId, expectedVersion);
         if (paymentPreference == null || !Set.of("CREDIT_LINE", "BANK_TRANSFER", "CARD_STRIPE", "CASH", "CASH_ON_DELIVERY").contains(paymentPreference.trim().toUpperCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Payment preference is invalid");
         if (requestedDeliveryDate == null || requestedDeliveryDate.isBefore(LocalDate.now())) throw new IllegalArgumentException("Requested delivery date is invalid");
-        jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", paymentPreference.trim().toUpperCase(java.util.Locale.ROOT), requestedDeliveryDate, creditResult(context, draft.clientAccountId, paymentPreference), tenant(context), workspace(context), draftId, expectedVersion);
+        jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", paymentPreference.trim().toUpperCase(java.util.Locale.ROOT), requestedDeliveryDate, creditResult(context, draftId, draft.clientAccountId, paymentPreference), tenant(context), workspace(context), draftId, expectedVersion);
         updateStatus(context, draftId, expectedVersion + 1, hasLines(draftId, context), hasDestination(draftId, context), hasRoute(draftId, context), true);
         return get(context, draftId);
     }
@@ -207,21 +229,70 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         jdbc.update("delete from sales.purchase_request_draft_warehouse_selection where tenant_id=? and workspace_id=? and draft_id=?", tenant(c), workspace(c), id);
     }
     private boolean hasCommercial(DraftRow d) { return d.paymentPreference != null && d.requestedDeliveryDate != null; }
-    private String creditResult(CurrentAccessContext context, UUID clientId, String payment) {
+    private String creditResult(CurrentAccessContext context, UUID draftId, UUID clientId, String payment) {
         if (!"CREDIT_LINE".equalsIgnoreCase(payment)) return "NOT_APPLICABLE";
         BigDecimal limit = jdbc.queryForObject("select coalesce(credit_limit,0) from sales.client_account where tenant_id=? and workspace_id=? and id=?", BigDecimal.class, tenant(context), workspace(context), clientId);
-        return limit != null && limit.signum() > 0 ? "AVAILABLE" : "UNAVAILABLE";
+        BigDecimal reserved = jdbc.queryForObject("select coalesce(reserved_exposure,0) from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=(select credit_currency from sales.client_account where tenant_id=? and workspace_id=? and id=?)", BigDecimal.class,
+                tenant(context), workspace(context), clientId, tenant(context), workspace(context), clientId);
+        BigDecimal outstanding = jdbc.queryForObject("select coalesce(sum(amount-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? and client_account_id=? and status in ('OPEN','PARTIALLY_PAID','OVERDUE')", BigDecimal.class,
+                tenant(context), workspace(context), clientId);
+        BigDecimal total = jdbc.queryForObject("select coalesce(sum(quantity * effective_unit_price),0) from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?", BigDecimal.class,
+                tenant(context), workspace(context), draftId);
+        BigDecimal available = (limit == null ? BigDecimal.ZERO : limit).subtract(reserved == null ? BigDecimal.ZERO : reserved).subtract(outstanding == null ? BigDecimal.ZERO : outstanding);
+        return available.compareTo(total == null ? BigDecimal.ZERO : total) >= 0 && available.signum() > 0 ? "AVAILABLE" : "UNAVAILABLE";
     }
     private WarehouseRow selectWarehouse(CurrentAccessContext context, UUID draftId) {
         Map<UUID, BigDecimal> requested = jdbc.query("select sku_id,quantity from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=? order by sku_id", (rs, n) -> Map.entry(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), draftId).stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         if (requested.isEmpty()) throw new IllegalStateException("Products must be complete before warehouse selection");
-        List<WarehouseRow> candidates = jdbc.query("select w.id,w.code,w.name from warehouse.warehouse w left join warehouse.warehouse_service_configuration c on c.warehouse_id=w.id and c.tenant_id=w.tenant_id and c.workspace_id=w.workspace_id where w.tenant_id=? and w.workspace_id=? and w.status='ACTIVE' and coalesce(c.service_status,'OPERATIONAL')='OPERATIONAL' order by coalesce(c.preferred,false) desc,coalesce(c.priority,0) desc,w.id", (rs, n) -> new WarehouseRow(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)), tenant(context), workspace(context));
+        List<WarehouseRow> candidates = jdbc.query("select w.id,w.code,w.name,w.address,coalesce(c.service_status,'OPERATIONAL'),coalesce(c.priority,0),coalesce(c.preferred,false),c.latitude,c.longitude from warehouse.warehouse w left join warehouse.warehouse_service_configuration c on c.warehouse_id=w.id and c.tenant_id=w.tenant_id and c.workspace_id=w.workspace_id where w.tenant_id=? and w.workspace_id=? and w.status='ACTIVE' and coalesce(c.service_status,'OPERATIONAL')='OPERATIONAL' order by coalesce(c.preferred,false) desc,coalesce(c.priority,0) desc,w.id", (rs, n) -> new WarehouseRow(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getInt(6), rs.getBoolean(7), rs.getBigDecimal(8), rs.getBigDecimal(9)), tenant(context), workspace(context));
         for (WarehouseRow candidate : candidates) {
             Map<UUID, BigDecimal> availability = jdbc.query("select sku_id,coalesce(sum(stock_quantity-reserved_quantity),0) from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=? and status='AVAILABLE' and expiration_date >= current_date and sku_id is not null group by sku_id", (rs, n) -> Map.entry(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), candidate.id()).stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
             List<UUID> unavailable = requested.keySet().stream().filter(sku -> availability.getOrDefault(sku, BigDecimal.ZERO).compareTo(requested.get(sku)) < 0).toList();
             if (unavailable.isEmpty()) return candidate;
         }
         throw new IllegalStateException("Warehouse serviceability conflict: no single warehouse can fulfill SKUs " + requested.keySet());
+    }
+
+    private Address address(AddressRow row) {
+        String line = java.util.stream.Stream.of(row.roadType, row.street, row.number)
+                .filter(value -> value != null && !value.isBlank()).collect(java.util.stream.Collectors.joining(" "));
+        if (line.isBlank()) line = "Delivery address";
+        return new Address(row.roadType == null ? "STREET" : row.roadType, line, row.reference, "PE",
+                row.department, row.province, row.district, row.recipient, row.phone, row.roadType,
+                row.street, row.number, row.interior, row.postalCode, row.instructions, row.hours,
+                row.latitude, row.longitude, row.placeId, row.source);
+    }
+
+    private WarehouseSnapshot warehouseSnapshot(WarehouseRow row, Instant selectedAt) {
+        return new WarehouseSnapshot(row.id.toString(), row.code, row.name, row.address,
+                "PREFERRED_OPERATIONAL_FULFILLABLE", row.serviceStatus, row.priority, row.preferred,
+                selectedAt, row.latitude, row.longitude);
+    }
+
+    private Map<String, Object> routeSnapshot(RouteSnapshot route, UUID warehouseId) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("schemaVersion", SCHEMA); value.put("provider", route.provider());
+        value.put("estimated", !"GOOGLE".equals(route.provider())); value.put("reference", route.reference());
+        value.put("originLabel", route.originLabel()); value.put("destinationLabel", route.destinationLabel());
+        value.put("distanceMeters", route.distanceMeters());
+        value.put("distanceKm", BigDecimal.valueOf(route.distanceMeters()).divide(BigDecimal.valueOf(1000), 3, java.math.RoundingMode.HALF_UP));
+        value.put("durationSeconds", route.durationSeconds()); value.put("previewUrl", route.previewUrl());
+        value.put("originWarehouseId", warehouseId); value.put("originLatitude", route.originLatitude());
+        value.put("originLongitude", route.originLongitude()); value.put("destinationLatitude", route.destinationLatitude());
+        value.put("destinationLongitude", route.destinationLongitude()); value.put("calculatedAt", route.calculatedAt());
+        value.put("mode", route.mode()); value.put("path", route.path());
+        return value;
+    }
+
+    private Map<String, Object> warehouseSelection(WarehouseRow warehouse, Instant selectedAt, RouteSnapshot route) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("schemaVersion", SCHEMA); value.put("strategy", "preferred-open-full-order-route-duration-distance-priority-id");
+        value.put("warehouseId", warehouse.id); value.put("code", warehouse.code); value.put("name", warehouse.name);
+        value.put("address", warehouse.address); value.put("serviceStatus", warehouse.serviceStatus);
+        value.put("priority", warehouse.priority); value.put("preferred", warehouse.preferred);
+        value.put("selectedAt", selectedAt); value.put("routeProvider", route.provider());
+        value.put("estimated", !"GOOGLE".equals(route.provider()));
+        return value;
     }
 
     private void submitPurchaseRequest(CurrentAccessContext context, DraftRow draft) {
@@ -236,6 +307,9 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         jdbc.batchUpdate("insert into sales.purchase_request_line (id,purchase_request_id,catalog_item_id,product_family_id,product_family_code_snapshot,sku_id,sku_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,0) on conflict (purchase_request_id,catalog_item_id) do nothing", lines, lines.size(), (ps, line) -> {
             ps.setObject(1, UUID.randomUUID()); ps.setObject(2, requestId); ps.setString(3, line.catalogItemId()); ps.setObject(4, line.familyId()); ps.setString(5, line.familyCode()); ps.setObject(6, line.skuId()); ps.setString(7, line.skuCode()); ps.setString(8, line.presentation()); ps.setString(9, line.presentation()); ps.setBigDecimal(10, line.quantity()); ps.setString(11, line.unit()); ps.setBigDecimal(12, line.amount()); ps.setString(13, line.currency()); ps.setString(14, line.notes()); ps.setTimestamp(15, Timestamp.from(now)); ps.setTimestamp(16, Timestamp.from(now));
         });
+        if (commitments != null) {
+            commitments.activateForPurchaseRequest(tenant(context), workspace(context), requestId);
+        }
         Map<String, Object> payload = new LinkedHashMap<>(); payload.put("purchaseRequestId", requestId); payload.put("draftId", draft.id()); payload.put("clientAccountId", draft.clientAccountId()); payload.put("status", "SUBMITTED");
         CanonicalOutbox.append(jdbc, "PURCHASE_REQUEST_SUBMITTED", "PurchaseRequest", requestId, tenant(context), workspace(context), now,
                 "purchase-request-" + requestId, null, SCHEMA, payload);
@@ -259,8 +333,8 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private record DraftRow(UUID id, UUID clientAccountId, UUID buyerMembershipId, String status, long version, LocalDate requestedDeliveryDate, String paymentPreference, String creditResult, String routeProvider, Instant createdAt, Instant updatedAt, Instant submittedAt) { }
     private record IdempotencyClaim(String requestHash, UUID draftId) { }
     private record PriceRow(UUID skuId, UUID familyId, String familyCode, String skuCode, String presentation, BigDecimal amount, String currency) { }
-    private record WarehouseRow(UUID id, String code, String name) { }
-    private record AddressCoordinates(BigDecimal latitude, BigDecimal longitude) { }
+    private record WarehouseRow(UUID id, String code, String name, String address, String serviceStatus,
+                                int priority, boolean preferred, BigDecimal latitude, BigDecimal longitude) { }
     private record SubmittedLine(String catalogItemId, UUID familyId, String familyCode, String skuCode, String presentation, BigDecimal quantity, String unit, BigDecimal amount, String currency, String notes, UUID skuId) { }
     private record AddressRow(UUID id, String recipient, String phone, String roadType, String street, String number, String interior, String department, String province, String district, String postalCode, String reference, String instructions, String hours, BigDecimal latitude, BigDecimal longitude, String placeId, String source) {
         AddressRow(java.sql.ResultSet rs) throws java.sql.SQLException { this(rs.getObject("id", UUID.class), rs.getString("recipient_name"), rs.getString("recipient_phone"), rs.getString("road_type"), rs.getString("street_name"), rs.getString("street_number"), rs.getString("interior"), rs.getString("department_code"), rs.getString("province_code"), rs.getString("district_code"), rs.getString("postal_code"), rs.getString("reference"), rs.getString("receiving_instructions"), rs.getString("receiving_hours"), rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"), rs.getString("place_id"), rs.getString("source")); }
