@@ -42,7 +42,7 @@ public class CatalogSkuService implements CatalogSkuPort {
         int safePage = boundedPage(page);
         int safeSize = boundedSize(size);
         String term = like(search);
-        String where = "f.tenant_id=? and f.workspace_id=? and (? is null or lower(f.name) like lower(?) or lower(f.family_code) like lower(?))";
+        String where = "f.tenant_id=? and f.workspace_id=? and (? is null or lower(f.name) like lower(?) or lower(f.family_code) like lower(?))" + familyVisibility(scope);
         Object[] arguments = { scope.tenantId(), scope.workspaceId(), term, term, term };
         long total = jdbc.queryForObject("select count(*) from catalog_management.product_family f where " + where,
                 Long.class, arguments);
@@ -54,7 +54,7 @@ public class CatalogSkuService implements CatalogSkuPort {
     @Override
     @Transactional(readOnly = true)
     public CatalogSkuModels.FamilyView family(CatalogScope scope, UUID id) {
-        String where = "f.tenant_id=? and f.workspace_id=? and f.id=?";
+        String where = "f.tenant_id=? and f.workspace_id=? and f.id=?" + familyVisibility(scope);
         return jdbc.query(familySql(where), (rs, row) -> family(rs), scope.tenantId(), scope.workspaceId(), id)
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Product family not found"));
     }
@@ -98,7 +98,7 @@ public class CatalogSkuService implements CatalogSkuPort {
         String term = like(search);
         String familyFilter = familyId == null ? null : familyId.toString();
         String variantFilter = variantId == null ? null : variantId.toString();
-        String where = skuWhere();
+        String where = skuWhere() + skuVisibility(scope);
         Object[] arguments = skuArguments(scope, familyFilter, variantFilter, term);
         long total = jdbc.queryForObject("select count(*) from catalog_management.sellable_sku s" + skuJoins() + " where " + where,
                 Long.class, arguments);
@@ -110,7 +110,7 @@ public class CatalogSkuService implements CatalogSkuPort {
     @Override
     @Transactional(readOnly = true)
     public CatalogSkuModels.SkuView sku(CatalogScope scope, UUID id) {
-        String where = "s.tenant_id=? and s.workspace_id=? and s.id=?";
+        String where = "s.tenant_id=? and s.workspace_id=? and s.id=?" + skuVisibility(scope);
         List<CatalogSkuModels.SkuView> rows = jdbc.query(skuSql(where), (rs, row) -> sku(rs), scope.tenantId(), scope.workspaceId(), id);
         if (rows.isEmpty()) throw new IllegalArgumentException("SKU not found");
         return enrichAvailability(scope, rows).get(0);
@@ -159,7 +159,8 @@ public class CatalogSkuService implements CatalogSkuPort {
     @Transactional(readOnly = true)
     public List<CatalogSkuModels.PriceView> prices(CatalogScope scope, UUID skuId) {
         requireSku(scope, skuId);
-        return jdbc.query("select id,sku_id,amount,currency,valid_from,valid_until,source_code,source_description,version,cancelled_at from catalog_management.sku_price where tenant_id=? and workspace_id=? and sku_id=? order by valid_from desc,id",
+        String visibility = scope.buyerView() ? " and cancelled_at is null and valid_from <= current_timestamp and (valid_until is null or valid_until > current_timestamp)" : "";
+        return jdbc.query("select id,sku_id,amount,currency,valid_from,valid_until,source_code,source_description,version,cancelled_at from catalog_management.sku_price where tenant_id=? and workspace_id=? and sku_id=?" + visibility + " order by valid_from desc,id",
                 (rs, row) -> price(rs), scope.tenantId(), scope.workspaceId(), skuId);
     }
 
@@ -216,7 +217,7 @@ public class CatalogSkuService implements CatalogSkuPort {
     }
 
     private void requireSku(CatalogScope scope, UUID skuId) {
-        Integer count = jdbc.queryForObject("select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
+        Integer count = jdbc.queryForObject("select count(*) from catalog_management.sellable_sku s join catalog_management.product_family f on f.tenant_id=s.tenant_id and f.workspace_id=s.workspace_id and f.id=s.family_id where s.tenant_id=? and s.workspace_id=? and s.id=?" + skuVisibility(scope),
                 Integer.class, scope.tenantId(), scope.workspaceId(), skuId);
         if (count == null || count != 1) throw new IllegalArgumentException("SKU not found");
     }
@@ -250,6 +251,14 @@ public class CatalogSkuService implements CatalogSkuPort {
                 "lower(coalesce(s.gtin,'')) like lower(?) or lower(f.name) like lower(?) or " +
                 "lower(coalesce(b.name,'')) like lower(?) or lower(coalesce(c.name,'')) like lower(?) or " +
                 "lower(coalesce(v.name,'')) like lower(?) or lower(coalesce(v.variant_code,'')) like lower(?))";
+    }
+
+    private static String familyVisibility(CatalogScope scope) {
+        return scope.buyerView() ? " and f.status='ACTIVE'" : "";
+    }
+
+    private static String skuVisibility(CatalogScope scope) {
+        return scope.buyerView() ? " and s.status='ACTIVE' and s.visible=true and f.status='ACTIVE'" : "";
     }
 
     private static String skuSql(String where) {

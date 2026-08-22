@@ -4,6 +4,7 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 
 | Published release | Summary |
 |---|---|
+| [v1.0.0](./v1.0.0.md) | V1 functional convergence API baseline |
 | [v0.9.0](./v0.9.0.md) | Operations stabilization and public contact request foundation |
 | [v0.8.0](./v0.8.0.md) | Consolidated commercial, warehouse, logistics and buyer delivery API |
 | [v0.6.0](./v0.6.0.md) | Consolidated identity, tenant administration, secured Catalog and commercial request foundation |
@@ -19,4 +20,4 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 | [UNRELEASED HISTORICAL CANDIDATE: v0.7.0](./v0.7.0.md) | Consolidated into later published work; no tag or GitHub Release |
 | [UNRELEASED DRAFT: v0.8.1 candidate](./v0.8.1.md) | Development material retained for historical context; no published tag or GitHub Release |
 
-Current release is `0.9.0`. Catalog remains shared local reference data; tenant-specific assortment and pricing remain future bounded-context work.
+Current release is `1.0.0`. Catalog remains shared local reference data; tenant-specific assortment and pricing remain future bounded-context work.

@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap;
 
 import com.nexa.api.sales.infrastructure.seed.ClientAccountSeedLoader;
+import com.nexa.api.sales.infrastructure.seed.ClientAccountSeedRecord;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
@@ -10,7 +11,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
 
 import java.math.BigDecimal;
@@ -30,13 +32,16 @@ public class LocalDevelopmentBootstrap {
 	private final org.springframework.core.env.Environment environment;
 	private final Clock clock;
 	private final ClientAccountSeedLoader clientAccountSeedLoader;
+	private final TransactionTemplate transactionTemplate;
 
-	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock, ClientAccountSeedLoader clientAccountSeedLoader) {
+	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock, ClientAccountSeedLoader clientAccountSeedLoader,
+			PlatformTransactionManager transactionManager) {
 		this.jdbc = jdbc;
 		this.environment = environment;
 		this.encoder = new BCryptPasswordEncoder(environment.getProperty("nexa.security.bcrypt-strength", Integer.class, 12));
 		this.clock = clock;
 		this.clientAccountSeedLoader = clientAccountSeedLoader;
+		this.transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
 	@EventListener(ApplicationReadyEvent.class)
@@ -77,28 +82,32 @@ public class LocalDevelopmentBootstrap {
 	 */
 	@EventListener(ApplicationReadyEvent.class)
 	@Order(Ordered.LOWEST_PRECEDENCE)
-	@Transactional
 	public void seedWarehouseAfterCatalogReconciliation() {
 		Instant now = clock.instant();
 		UUID tenantId = tenant(now);
 		UUID workspaceId = workspace(tenantId, now);
-		seedWarehouse(tenantId, workspaceId, now);
+		RlsRequestScope.set(tenantId, workspaceId);
+		try {
+			transactionTemplate.executeWithoutResult(status -> seedWarehouse(tenantId, workspaceId, now));
+		} finally {
+			RlsRequestScope.clear();
+		}
 	}
 
 	private void seedWarehouse(UUID tenantId, UUID workspaceId, Instant now) {
 		String code = "ICISA-COLD-01";
 		UUID warehouseId = LocalIdentityIds.forWarehouse(tenantId, code);
 		jdbc.update("insert into warehouse.warehouse (id,tenant_id,workspace_id,code,name,address,status,created_at,updated_at) "
-				+ "values (?,?,?,?,?,?, 'ACTIVE',?,?) on conflict (tenant_id,workspace_id,code) do nothing",
-				warehouseId, tenantId, workspaceId, code, "ICISA Cold Chain Warehouse",
-				"Av. Argentina 1234, Callao, Lima, Peru", timestamp(now), timestamp(now));
+				+ "values (?,?,?,?,?,?, 'ACTIVE',?,?) on conflict (tenant_id,workspace_id,code) do update set name=excluded.name,address=excluded.address,updated_at=excluded.updated_at",
+				warehouseId, tenantId, workspaceId, code, "Temporary cold-chain warehouse",
+				"Av. Arnaldo Márquez 1772, Jesús María, Lima, Lima, Perú", timestamp(now), timestamp(now));
 		UUID persistedWarehouseId = jdbc.queryForObject("select id from warehouse.warehouse where tenant_id=? and workspace_id=? and code=?",
 				UUID.class, tenantId, workspaceId, code);
 		jdbc.update("insert into warehouse.warehouse_service_configuration "
 				+ "(warehouse_id,tenant_id,workspace_id,service_status,priority,preferred,latitude,longitude,updated_at) "
-				+ "values (?,?,?,?,?,?,?,?,?) on conflict (warehouse_id) do nothing",
+				+ "values (?,?,?,?,?,?,?,?,?) on conflict (warehouse_id) do update set latitude=excluded.latitude,longitude=excluded.longitude,updated_at=excluded.updated_at",
 				persistedWarehouseId, tenantId, workspaceId, "OPERATIONAL", 100, true,
-				new BigDecimal("-12.0464"), new BigDecimal("-77.0428"), timestamp(now));
+				new BigDecimal("-12.0785"), new BigDecimal("-77.0525"), timestamp(now));
 		UUID zoneId = LocalIdentityIds.forWarehouseZone(persistedWarehouseId, "CHILLED-A");
 		jdbc.update("insert into warehouse.storage_zone (id,tenant_id,workspace_id,warehouse_id,code,name,zone_type,temperature_min,temperature_max,status,created_at,updated_at,version) "
 				+ "values (?,?,?,?,?,?, 'CHILLED',?,?, 'ACTIVE',?,?,0) on conflict (tenant_id,workspace_id,warehouse_id,code) do nothing",
@@ -128,12 +137,36 @@ public class LocalDevelopmentBootstrap {
 		if (memberships.isEmpty()) return;
 		UUID membershipId = memberships.get(0);
 		for (var seed : clientAccountSeedLoader.load()) {
-			jdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) on conflict (tenant_id,code) do update set business_name=excluded.business_name,commercial_name=excluded.commercial_name,status=excluded.status,updated_at=excluded.updated_at",
-					LocalIdentityIds.forClientAccount(tenantId, seed.code()), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
-			List<UUID> accounts = jdbc.query("select id from sales.client_account where tenant_id=? and workspace_id=? and code=?", (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, seed.code());
-			if (accounts.isEmpty() || !seed.portalAccess()) continue;
-			jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing", accounts.get(0), membershipId, tenantId, workspaceId, timestamp(now));
+			BigDecimal creditLimit = seed.monthlyCreditLimit() == null ? BigDecimal.ZERO : seed.monthlyCreditLimit();
+			BigDecimal creditUsed = seed.monthlyCreditUsed() == null ? BigDecimal.ZERO : seed.monthlyCreditUsed();
+			BigDecimal availableCredit = creditLimit.subtract(creditUsed).max(BigDecimal.ZERO);
+			jdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,credit_limit,current_commercial_exposure,available_credit,default_payment_preference,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) on conflict (tenant_id,code) do update set business_name=excluded.business_name,commercial_name=excluded.commercial_name,payment_condition=excluded.payment_condition,credit_limit=excluded.credit_limit,current_commercial_exposure=excluded.current_commercial_exposure,available_credit=excluded.available_credit,default_payment_preference=excluded.default_payment_preference,status=excluded.status,updated_at=excluded.updated_at",
+					LocalIdentityIds.forClientAccount(tenantId, seed.code()), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), creditLimit, creditUsed, availableCredit, seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
+				List<UUID> accounts = jdbc.query("select id from sales.client_account where tenant_id=? and workspace_id=? and code=?", (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, seed.code());
+				if (accounts.isEmpty() || !seed.portalAccess()) continue;
+				jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing", accounts.get(0), membershipId, tenantId, workspaceId, timestamp(now));
+				if ("CLI-001".equals(seed.code())) seedBuyerAddress(tenantId, workspaceId, accounts.get(0), seed, now);
+			}
 		}
+
+	private void seedBuyerAddress(UUID tenantId, UUID workspaceId, UUID clientAccountId,
+			ClientAccountSeedRecord seed, Instant now) {
+		UUID addressId = LocalIdentityIds.forClientAccountAddress(clientAccountId, "buyer-demo-pueblo-libre");
+		jdbc.update("update sales.client_account_address set default_address=false,updated_at=? where tenant_id=? and workspace_id=? and client_account_id=? and id<>? and default_address",
+				timestamp(now), tenantId, workspaceId, clientAccountId, addressId);
+		jdbc.update("insert into sales.client_account_address "
+				+ "(id,tenant_id,workspace_id,client_account_id,label,recipient_name,recipient_phone,road_type,street_name,street_number,"
+				+ "address_line,reference,receiving_instructions,receiving_hours,latitude,longitude,source,department_code,province_code,"
+				+ "district_code,default_address,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,true,'ACTIVE',0,?,?) "
+				+ "on conflict (id) do update set label=excluded.label,recipient_name=excluded.recipient_name,recipient_phone=excluded.recipient_phone,"
+				+ "road_type=excluded.road_type,street_name=excluded.street_name,street_number=excluded.street_number,address_line=excluded.address_line,"
+				+ "reference=excluded.reference,receiving_instructions=excluded.receiving_instructions,receiving_hours=excluded.receiving_hours,"
+				+ "latitude=excluded.latitude,longitude=excluded.longitude,source=excluded.source,department_code=excluded.department_code,"
+				+ "province_code=excluded.province_code,district_code=excluded.district_code,default_address=true,status='ACTIVE',updated_at=excluded.updated_at",
+				addressId, tenantId, workspaceId, clientAccountId, "Buyer delivery · Pueblo Libre", seed.contact(), seed.phone(),
+				"AVENUE", "Av. Sucre", "1992", "Av. Sucre 1992", "Ingreso de proveedores por recepción principal",
+				"Validar ventana de cadena de frío con el comprador", "08:00-17:00", new BigDecimal("-12.0725"),
+				new BigDecimal("-77.0685"), "MAP_PIN", "15", "1501", "150121", timestamp(now), timestamp(now));
 	}
 
 	private UUID tenant(Instant now) {

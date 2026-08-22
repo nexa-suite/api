@@ -156,7 +156,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
             String normalized = enumValue(status, "status", new ProofOfDeliveryStatus[]{
                     ProofOfDeliveryStatus.PENDING, ProofOfDeliveryStatus.COMPLETED});
             if ("PENDING".equals(normalized)) {
-                where += " and p.id is null and d.status not in ('DELIVERED','CANCELLED')";
+                where += " and p.id is null and d.status not in ('DELIVERED','PARTIAL','CANCELLED')";
             } else {
                 where += " and p.status=?";
                 args.add(normalized);
@@ -214,6 +214,9 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
             case "logistics.dispatch.delivered", "logistics.pod.completed" -> "DELIVERED";
             case "logistics.dispatch.cancelled" -> "DELIVERY_CANCELLED";
             case "logistics.dispatch.incident-recorded", "logistics.dispatch.buyer-temperature-review" -> "DELIVERY_REVIEW";
+            case "logistics.delivery.attempt-failed" -> "DELIVERY_REVIEW";
+            case "logistics.delivery.partially-completed" -> "PARTIAL";
+            case "logistics.delivery.continuation-created" -> "CONTINUATION_REQUIRED";
             default -> "DELIVERY_UPDATED";
         };
     }

@@ -1,6 +1,7 @@
 package com.nexa.api.shared.presentation.error;
 
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -69,6 +70,16 @@ class GlobalExceptionHandlerTests {
 	}
 
 	@Test
+	void exposesSafeTechnicalFailureContract() throws Exception {
+		mockMvc.perform(get("/technical-failure"))
+				.andExpect(status().isBadGateway())
+				.andExpect(jsonPath("$.code").value("EXTERNAL_TIMEOUT"))
+				.andExpect(jsonPath("$.category").value("EXTERNAL"))
+				.andExpect(jsonPath("$.retryable").value(true))
+				.andExpect(jsonPath("$.detail").value("An external service did not respond in time"));
+	}
+
+	@Test
 	void handlesControllerMethodValidationAsBadRequest() throws Exception {
 		mockMvc.perform(get("/validated-query").param("value", "invalid"))
 				.andExpect(status().isBadRequest())
@@ -88,6 +99,12 @@ class GlobalExceptionHandlerTests {
 		@GetMapping("/explode")
 		void explode() {
 			throw new IllegalStateException("secret internal detail");
+		}
+
+		@GetMapping("/technical-failure")
+		void technicalFailure() {
+			throw new TechnicalFailureException(TechnicalFailureException.Kind.EXTERNAL_TIMEOUT,
+					"provider detail must not reach the client", null, "provider-request-id");
 		}
 
 		@GetMapping("/validated-query")

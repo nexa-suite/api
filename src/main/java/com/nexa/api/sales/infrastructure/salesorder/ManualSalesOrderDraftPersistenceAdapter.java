@@ -2,14 +2,20 @@ package com.nexa.api.sales.infrastructure.salesorder;
 
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
+import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderDraftPersistencePort;
+import com.nexa.api.sales.domain.model.address.Address;
+import com.nexa.api.sales.domain.model.delivery.DeliveryAddressSnapshot;
+import com.nexa.api.sales.domain.model.delivery.RouteSnapshot;
+import com.nexa.api.sales.domain.model.delivery.WarehouseSnapshot;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.sales.domain.model.salesorder.ManualSalesOrderDraft;
 import com.nexa.api.sales.domain.model.salesorder.ManualSalesOrderDraftStatus;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import tools.jackson.databind.ObjectMapper;
@@ -39,10 +45,17 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     private static final String SCHEMA = "1.0";
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
+    private final MapRoutingPort maps;
 
     public ManualSalesOrderDraftPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper) {
+        this(jdbc, mapper, null);
+    }
+
+    @Autowired
+    public ManualSalesOrderDraftPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper, MapRoutingPort maps) {
         this.jdbc = jdbc;
         this.mapper = mapper;
+        this.maps = maps == null ? new com.nexa.api.sales.infrastructure.maps.LocalDeterministicMapAdapter() : maps;
     }
 
     @Override
@@ -182,22 +195,15 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
             throw new IllegalArgumentException("Delivery address requires geocoded coordinates");
         }
         WarehouseRow warehouse = selectWarehouse(context, draftId);
-        String provider = blank(command.routeProvider()) ? "LOCAL_ESTIMATE" : command.routeProvider().trim().toUpperCase(Locale.ROOT);
-        double originLatitude = warehouse.latitude() == null ? -12.0464 : warehouse.latitude().doubleValue();
-        double originLongitude = warehouse.longitude() == null ? -77.0428 : warehouse.longitude().doubleValue();
-        double distance = Math.sqrt(Math.pow(address.latitude().doubleValue() - originLatitude, 2)
-                + Math.pow(address.longitude().doubleValue() - originLongitude, 2)) * 111.0;
-        long duration = Math.max(900, Math.round(distance / 24.0 * 3600));
+        Instant now = Instant.now();
+        DeliveryAddressSnapshot addressSnapshotValue = new DeliveryAddressSnapshot(address.id().toString(), "Delivery destination", deliveryAddress(address), false);
+        WarehouseSnapshot warehouseSnapshotValue = warehouseSnapshot(warehouse, now);
+        RouteSnapshot route = maps.preview(new MapRoutingPort.MapRouteRequest(warehouseSnapshotValue, addressSnapshotValue));
         String addressSnapshot = json(addressSnapshot(address));
-        String routeSnapshot = json(Map.of("schemaVersion", SCHEMA, "provider", provider, "estimated", true,
-                "distanceKm", BigDecimal.valueOf(distance).setScale(3, RoundingMode.HALF_UP), "durationSeconds", duration,
-                "originWarehouseId", warehouse.id().toString(), "destinationLatitude", address.latitude(),
-                "destinationLongitude", address.longitude()));
-        String warehouseSnapshot = json(Map.of("schemaVersion", SCHEMA, "strategy", "preferred-open-full-order-route-duration-distance-priority-id",
-                "warehouseId", warehouse.id().toString(), "code", warehouse.code(), "name", warehouse.name(), "estimated", true));
+        String routeSnapshot = json(routeSnapshot(route, warehouse.id()));
+        String warehouseSnapshot = json(warehouseSelection(warehouse, now, route));
         String status = clientComplete(draft) && allAvailableLines(context, draftId)
                 ? ManualSalesOrderDraftStatus.READY_TO_CREATE.name() : ManualSalesOrderDraftStatus.DELIVERY_COMPLETE.name();
-        Instant now = Instant.now();
         Timestamp timestamp = Timestamp.from(now);
         int updated = jdbc.update("update sales.manual_sales_order_draft set delivery_address_id=?,delivery_address_snapshot=?::jsonb,"
                         + "route_snapshot=?::jsonb,warehouse_id=?,warehouse_selection_snapshot=?::jsonb,delivery_notes=?,status=?,"
@@ -332,11 +338,11 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
         jdbc.query("select sku_id,quantity from sales.manual_sales_order_draft_line where tenant_id=? and workspace_id=? and draft_id=?",
                 (rs, ignored) -> requested.put(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), draftId);
         if (requested.isEmpty()) throw new IllegalArgumentException("Products must be complete before warehouse selection");
-        List<WarehouseRow> candidates = jdbc.query("select w.id,w.code,w.name,c.latitude,c.longitude from warehouse.warehouse w "
+        List<WarehouseRow> candidates = jdbc.query("select w.id,w.code,w.name,w.address,coalesce(c.service_status,'OPERATIONAL'),coalesce(c.priority,0),coalesce(c.preferred,false),c.latitude,c.longitude from warehouse.warehouse w "
                         + "left join warehouse.warehouse_service_configuration c on c.warehouse_id=w.id and c.tenant_id=w.tenant_id and c.workspace_id=w.workspace_id "
                         + "where w.tenant_id=? and w.workspace_id=? and w.status='ACTIVE' and coalesce(c.service_status,'OPERATIONAL')='OPERATIONAL' "
                         + "order by coalesce(c.preferred,false) desc,coalesce(c.priority,0) desc,w.id",
-                (rs, ignored) -> new WarehouseRow(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getBigDecimal(5)),
+                (rs, ignored) -> new WarehouseRow(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getInt(6), rs.getBoolean(7), rs.getBigDecimal(8), rs.getBigDecimal(9)),
                 tenant(context), workspace(context));
         for (WarehouseRow warehouse : candidates) {
             Map<UUID, BigDecimal> available = new HashMap<>();
@@ -348,6 +354,48 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
             }
         }
         throw new IllegalArgumentException("Warehouse serviceability conflict: no warehouse can fulfill the manual order");
+    }
+
+    private Address deliveryAddress(AddressRow row) {
+        String line = java.util.stream.Stream.of(row.roadType(), row.street(), row.number())
+                .filter(value -> value != null && !value.isBlank()).collect(java.util.stream.Collectors.joining(" "));
+        if (line.isBlank()) line = "Delivery address";
+        return new Address(row.roadType() == null ? "STREET" : row.roadType(), line, row.reference(), "PE",
+                row.department(), row.province(), row.district(), row.recipient(), row.phone(), row.roadType(),
+                row.street(), row.number(), row.interior(), row.postalCode(), row.instructions(), row.hours(),
+                row.latitude(), row.longitude(), row.placeId(), row.source());
+    }
+
+    private WarehouseSnapshot warehouseSnapshot(WarehouseRow row, Instant selectedAt) {
+        return new WarehouseSnapshot(row.id().toString(), row.code(), row.name(), row.address(),
+                "PREFERRED_OPERATIONAL_FULFILLABLE", row.serviceStatus(), row.priority(), row.preferred(),
+                selectedAt, row.latitude(), row.longitude());
+    }
+
+    private Map<String, Object> routeSnapshot(RouteSnapshot route, UUID warehouseId) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("schemaVersion", SCHEMA); value.put("provider", route.provider());
+        value.put("estimated", !"GOOGLE".equals(route.provider())); value.put("reference", route.reference());
+        value.put("originLabel", route.originLabel()); value.put("destinationLabel", route.destinationLabel());
+        value.put("distanceMeters", route.distanceMeters());
+        value.put("distanceKm", BigDecimal.valueOf(route.distanceMeters()).divide(BigDecimal.valueOf(1000), 3, RoundingMode.HALF_UP));
+        value.put("durationSeconds", route.durationSeconds()); value.put("previewUrl", route.previewUrl());
+        value.put("originWarehouseId", warehouseId); value.put("originLatitude", route.originLatitude());
+        value.put("originLongitude", route.originLongitude()); value.put("destinationLatitude", route.destinationLatitude());
+        value.put("destinationLongitude", route.destinationLongitude()); value.put("calculatedAt", route.calculatedAt());
+        value.put("mode", route.mode()); value.put("path", route.path());
+        return value;
+    }
+
+    private Map<String, Object> warehouseSelection(WarehouseRow warehouse, Instant selectedAt, RouteSnapshot route) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("schemaVersion", SCHEMA); value.put("strategy", "preferred-open-full-order-route-duration-distance-priority-id");
+        value.put("warehouseId", warehouse.id()); value.put("code", warehouse.code()); value.put("name", warehouse.name());
+        value.put("address", warehouse.address()); value.put("serviceStatus", warehouse.serviceStatus());
+        value.put("priority", warehouse.priority()); value.put("preferred", warehouse.preferred());
+        value.put("selectedAt", selectedAt); value.put("routeProvider", route.provider());
+        value.put("estimated", !"GOOGLE".equals(route.provider()));
+        return value;
     }
 
     private BigDecimal availability(CurrentAccessContext context, UUID skuId) {
@@ -397,7 +445,15 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     private static UUID tenant(CurrentAccessContext context) { return context.tenantId().value(); }
     private static UUID workspace(CurrentAccessContext context) { return context.workspaceId().value(); }
     private static UUID actor(CurrentAccessContext context) { return context.membershipId().value(); }
-    private static String routeProvider(String routeSnapshot) { return routeSnapshot == null ? null : "LOCAL_ESTIMATE"; }
+    private String routeProvider(String routeSnapshot) {
+        if (routeSnapshot == null || routeSnapshot.isBlank()) return null;
+        try {
+            String provider = mapper.readTree(routeSnapshot).path("provider").asText("");
+            return provider.isBlank() ? null : provider;
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
 
     private Optional<IdempotencyClaim> claim(UUID tenant, UUID workspace, UUID actor, String key, boolean lock) {
         return jdbc.query("select request_hash,draft_id from sales.manual_sales_order_draft_idempotency where tenant_id=? and workspace_id=? "
@@ -460,5 +516,6 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                               String interior, String department, String province, String district, String postalCode,
                               String reference, String instructions, String hours, BigDecimal latitude, BigDecimal longitude,
                               String placeId, String source) { }
-    private record WarehouseRow(UUID id, String code, String name, BigDecimal latitude, BigDecimal longitude) { }
+    private record WarehouseRow(UUID id, String code, String name, String address, String serviceStatus,
+                                int priority, boolean preferred, BigDecimal latitude, BigDecimal longitude) { }
 }

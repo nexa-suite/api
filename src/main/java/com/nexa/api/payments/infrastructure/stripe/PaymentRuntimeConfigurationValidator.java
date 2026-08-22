@@ -22,5 +22,18 @@ public final class PaymentRuntimeConfigurationValidator {
         if ("deterministic".equals(provider) && !environment.acceptsProfiles("local")) {
             throw new IllegalStateException("The deterministic payment provider is available only with the local profile");
         }
+        positive(environment, "nexa.payments.connect-timeout-ms", "5000");
+        positive(environment, "nexa.payments.read-timeout-ms", "10000");
+        nonNegative(environment, "nexa.payments.max-network-retries", "0");
+    }
+
+    private static void positive(Environment environment, String key, String defaultValue) {
+        int value = Integer.parseInt(environment.getProperty(key, defaultValue));
+        if (value <= 0) throw new IllegalStateException(key + " must be positive");
+    }
+
+    private static void nonNegative(Environment environment, String key, String defaultValue) {
+        int value = Integer.parseInt(environment.getProperty(key, defaultValue));
+        if (value < 0) throw new IllegalStateException(key + " cannot be negative");
     }
 }

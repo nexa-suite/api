@@ -3,6 +3,9 @@ package com.nexa.api.logistics.infrastructure.persistence;
 import com.nexa.api.logistics.application.LogisticsOperationsService;
 import com.nexa.api.logistics.application.port.DispatchCommandPersistencePort;
 import com.nexa.api.logistics.application.port.OperationalHandoffNotificationPort;
+import com.nexa.api.logistics.domain.delivery.DeliveryAttempt;
+import com.nexa.api.logistics.domain.delivery.DeliveryAttemptLine;
+import com.nexa.api.logistics.domain.delivery.DeliveryAttemptStatus;
 import com.nexa.api.logistics.domain.dispatchorder.DeliveryWindow;
 import com.nexa.api.logistics.domain.dispatchorder.DispatchOrder;
 import com.nexa.api.logistics.domain.incident.DeliveryIncident;
@@ -23,8 +26,13 @@ import org.springframework.stereotype.Repository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.UUID;
+import org.springframework.jdbc.core.ResultSetExtractor;
 
 /** Owns the persisted DispatchOrder command workflows. */
 @Repository
@@ -276,6 +284,83 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
+    public LogisticsOperationsService.DispatchView failedAttempt(String tenantId, String workspaceId, String dispatchId,
+                                                                  long version, String actorMembershipId, String key,
+                                                                  String failureReason, Instant occurredAt, long now) {
+        UUID tenant = uuid(tenantId);
+        UUID workspace = uuid(workspaceId);
+        UUID id = uuid(dispatchId);
+        UUID actor = uuid(actorMembershipId);
+        String requestHash = hash("delivery-attempt-failed", dispatchId, version, failureReason, occurredAt);
+        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "delivery-attempt-failed", key, requestHash);
+        if (replay != null) return replay;
+        Instant effectiveOccurredAt = occurredAt == null ? Instant.now() : occurredAt;
+        DispatchRow row = locked(tenant, workspace, id, null);
+        requireVersion(row, version);
+        DispatchOrder aggregate = aggregate(row);
+        aggregate.recordFailedAttempt();
+        DeliveryAttempt attempt = new DeliveryAttempt(UUID.randomUUID(), id, nextAttemptNumber(tenant, workspace, id),
+                DeliveryAttemptStatus.FAILED, failureReason, effectiveOccurredAt, List.of());
+        insertAttempt(tenant, workspace, attempt, null, now);
+        touch(tenant, workspace, row, now);
+        appendEvent(tenant, workspace, id, "logistics.delivery.attempt-failed", row.status(), row.status(), actor,
+                true, "Delivery attempt failed", now, row.clientAccountId());
+        CanonicalOutbox.append(jdbc, "DELIVERY_FAILED", "DispatchOrder", id, tenant, workspace,
+                Instant.ofEpochMilli(now), "delivery-attempt-" + attempt.id(), null, "1.0", Map.of(
+                        "deliveryId", id, "attemptId", attempt.id(), "status", "FAILED"));
+        saveIdempotency(tenant, workspace, "delivery-attempt-failed", key, requestHash, id, now);
+        return detailView(tenantId, workspaceId, null, dispatchId);
+    }
+
+    @Override
+    public LogisticsOperationsService.DispatchView partial(String tenantId, String workspaceId, String dispatchId,
+                                                             long version, String actorMembershipId, String key,
+                                                             List<LogisticsOperationsService.DeliveryLineCommand> deliveredLines,
+                                                             Instant completedAt, String notes, long now) {
+        UUID tenant = uuid(tenantId);
+        UUID workspace = uuid(workspaceId);
+        UUID id = uuid(dispatchId);
+        UUID actor = uuid(actorMembershipId);
+        List<LogisticsOperationsService.DeliveryLineCommand> normalized = normalizeLines(deliveredLines);
+        String requestHash = hash("delivery-partial", dispatchId, version, canonicalLines(normalized), completedAt, notes);
+        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "delivery-partial", key, requestHash);
+        if (replay != null) return replay;
+        Instant effectiveCompletedAt = completedAt == null ? Instant.now() : completedAt;
+        DispatchRow row = locked(tenant, workspace, id, null);
+        requireVersion(row, version);
+        List<ObligationLine> obligations = obligations(tenant, workspace, row.salesOrderId());
+        Map<String, BigDecimal> alreadyDelivered = deliveredQuantities(tenant, workspace, id);
+        List<LogisticsOperationsService.DeliveryLineCommand> remaining = remainingAfter(obligations, alreadyDelivered, normalized);
+        if (remaining.isEmpty()) throw error("INVALID_REQUEST", false);
+        DispatchOrder aggregate = aggregate(row);
+        aggregate.deliverPartially();
+        DeliveryAttempt attempt = new DeliveryAttempt(UUID.randomUUID(), id, nextAttemptNumber(tenant, workspace, id),
+                DeliveryAttemptStatus.PARTIAL, null, effectiveCompletedAt, normalized.stream()
+                .map(line -> new DeliveryAttemptLine(line.catalogItemId(), line.quantity(), line.unit())).toList());
+        insertAttempt(tenant, workspace, attempt, notes, now);
+        UUID continuationId = UUID.randomUUID();
+        jdbc.update("insert into logistics.continuation_delivery(id,tenant_id,workspace_id,source_delivery_id,sales_order_id,client_account_id,status,created_at,updated_at,version) values (?,?,?,?,?,?,'OPEN'::varchar,?,?,0)",
+                continuationId, tenant, workspace, id, row.salesOrderId(), row.clientAccountId(), timestamp(now), timestamp(now));
+        for (LogisticsOperationsService.DeliveryLineCommand line : remaining) {
+            jdbc.update("insert into logistics.continuation_delivery_line(id,tenant_id,workspace_id,continuation_delivery_id,catalog_item_id,quantity,unit,created_at) values (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), tenant, workspace, continuationId, line.catalogItemId(), line.quantity(), line.unit(), timestamp(now));
+        }
+        updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.delivery.partially-completed", true,
+                "Delivery partially completed");
+        appendEvent(tenant, workspace, id, "logistics.delivery.continuation-created", row.status(), "PARTIAL", actor,
+                true, "Continuation delivery required", now, row.clientAccountId());
+        CanonicalOutbox.append(jdbc, "DELIVERY_PARTIALLY_COMPLETED", "DispatchOrder", id, tenant, workspace,
+                Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", Map.of(
+                        "deliveryId", id, "attemptId", attempt.id(), "status", "PARTIAL", "continuationDeliveryId", continuationId));
+        CanonicalOutbox.append(jdbc, "CONTINUATION_REQUIRED", "ContinuationDelivery", continuationId, tenant, workspace,
+                Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", Map.of(
+                        "continuationDeliveryId", continuationId, "sourceDeliveryId", id, "salesOrderId", row.salesOrderId(),
+                        "status", "OPEN"));
+        saveIdempotency(tenant, workspace, "delivery-partial", key, requestHash, id, now);
+        return detailView(tenantId, workspaceId, null, dispatchId);
+    }
+
+    @Override
     public LogisticsOperationsService.DispatchView complete(String tenantId, String workspaceId, String dispatchId,
                                                              long version, String actorMembershipId, String key,
                                                              String receiverName, Instant completedAt, String notes,
@@ -288,20 +373,29 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                 photoDeclared, signatureDeclared);
         LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-delivery", key, requestHash);
         if (replay != null) return replay;
+        Instant effectiveCompletedAt = completedAt == null ? Instant.now() : completedAt;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
+        List<ObligationLine> obligations = obligations(tenant, workspace, row.salesOrderId());
+        List<LogisticsOperationsService.DeliveryLineCommand> finalLines = remainingAfter(obligations,
+                deliveredQuantities(tenant, workspace, id), List.of());
+        if (finalLines.isEmpty()) throw error("INVALID_REQUEST", false);
         DispatchOrder aggregate = aggregate(row);
         aggregate.deliver();
         ProofOfDeliveryRecord pod = new ProofOfDeliveryRecord(receiverName,
-                completedAt == null ? Instant.now() : completedAt, notes, photoDeclared, signatureDeclared,
+                effectiveCompletedAt, notes, photoDeclared, signatureDeclared,
                 ProofOfDeliveryStatus.COMPLETED);
         UUID podId = UUID.randomUUID();
+        DeliveryAttempt attempt = new DeliveryAttempt(UUID.randomUUID(), id, nextAttemptNumber(tenant, workspace, id),
+                DeliveryAttemptStatus.FINAL, null, effectiveCompletedAt, finalLines.stream()
+                .map(line -> new DeliveryAttemptLine(line.catalogItemId(), line.quantity(), line.unit())).toList());
+        updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.delivered", true, null);
+        insertAttempt(tenant, workspace, attempt, notes, now);
         jdbc.update("insert into logistics.proof_of_delivery(id,tenant_id,workspace_id,dispatch_order_id,receiver_name," +
                         "completed_at,notes,photo_evidence_declared,signature_evidence_declared,status,created_at) " +
                         "values (?,?,?,?,?,?,?,?,?,?,?)", podId, tenant, workspace, id, pod.receiverName(),
                 timestamp(pod.completedAt()), pod.notes(), pod.photoEvidenceDeclared(), pod.signatureEvidenceDeclared(),
                 pod.status().name(), timestamp(now));
-        updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.delivered", true, null);
         appendEvent(tenant, workspace, id, "logistics.pod.completed", row.status(), "DELIVERED", actor, true, null,
                 now, row.clientAccountId());
         CanonicalOutbox.append(jdbc, "DISPATCH_DELIVERED", "DispatchOrder", id, tenant, workspace,
@@ -315,6 +409,81 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                         "dispatchOrderId", id, "salesOrderId", row.salesOrderId(), "podId", podId, "status", "COMPLETED"));
         saveIdempotency(tenant, workspace, "dispatch-delivery", key, requestHash, id, now);
         return detailView(tenantId, workspaceId, null, dispatchId);
+    }
+
+    private void insertAttempt(UUID tenant, UUID workspace, DeliveryAttempt attempt, String notes, long now) {
+        jdbc.update("insert into logistics.delivery_attempt(id,tenant_id,workspace_id,delivery_id,attempt_number,status,failure_reason,notes,occurred_at,created_at) values (?,?,?,?,?,?,?,?,?,?)",
+                attempt.id(), tenant, workspace, attempt.deliveryId(), attempt.number(), attempt.status().name(),
+                attempt.failureReason(), notes == null ? null : notes.trim(), timestamp(attempt.occurredAt()), timestamp(now));
+        for (DeliveryAttemptLine line : attempt.lines()) {
+            jdbc.update("insert into logistics.delivery_attempt_line(id,tenant_id,workspace_id,delivery_attempt_id,catalog_item_id,quantity,unit,created_at) values (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), tenant, workspace, attempt.id(), line.catalogItemId(), line.quantity(), line.unit(), timestamp(now));
+        }
+    }
+
+    private int nextAttemptNumber(UUID tenant, UUID workspace, UUID deliveryId) {
+        Integer value = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
+                Integer.class, tenant, workspace, deliveryId);
+        return value == null ? 1 : value;
+    }
+
+    private List<LogisticsOperationsService.DeliveryLineCommand> normalizeLines(List<LogisticsOperationsService.DeliveryLineCommand> values) {
+        if (values == null || values.isEmpty() || values.size() > 100) throw error("INVALID_REQUEST", false);
+        Map<String, LogisticsOperationsService.DeliveryLineCommand> normalized = new LinkedHashMap<>();
+        for (LogisticsOperationsService.DeliveryLineCommand value : values) {
+            if (value == null || value.catalogItemId() == null || value.catalogItemId().isBlank()
+                    || value.quantity() == null || value.quantity().signum() <= 0 || value.unit() == null || value.unit().isBlank()
+                    || value.catalogItemId().trim().length() > 64 || value.unit().trim().length() > 32
+                    || value.quantity().stripTrailingZeros().scale() > 4) throw error("INVALID_REQUEST", false);
+            String catalogItemId = value.catalogItemId().trim();
+            if (normalized.put(catalogItemId, new LogisticsOperationsService.DeliveryLineCommand(catalogItemId,
+                    value.quantity(), value.unit().trim().toUpperCase(Locale.ROOT))) != null) {
+                throw error("INVALID_REQUEST", false);
+            }
+        }
+        return List.copyOf(normalized.values());
+    }
+
+    private String canonicalLines(List<LogisticsOperationsService.DeliveryLineCommand> values) {
+        return values.stream().map(value -> value.catalogItemId() + ":" + value.quantity().stripTrailingZeros().toPlainString() + ":" + value.unit()).toList().toString();
+    }
+
+    private List<ObligationLine> obligations(UUID tenant, UUID workspace, UUID salesOrderId) {
+        return jdbc.query("select l.catalog_item_id,l.quantity,l.unit from sales.sales_order_line l join sales.sales_order o on o.id=l.sales_order_id and o.tenant_id=? and o.workspace_id=? where l.sales_order_id=? order by l.catalog_item_id",
+                (rs, row) -> new ObligationLine(rs.getString("catalog_item_id"), rs.getBigDecimal("quantity"), rs.getString("unit").toUpperCase(Locale.ROOT)),
+                tenant, workspace, salesOrderId);
+    }
+
+    private Map<String, BigDecimal> deliveredQuantities(UUID tenant, UUID workspace, UUID deliveryId) {
+        Map<String, BigDecimal> values = new LinkedHashMap<>();
+        jdbc.query("select l.catalog_item_id,sum(l.quantity) quantity from logistics.delivery_attempt a join logistics.delivery_attempt_line l on l.tenant_id=a.tenant_id and l.workspace_id=a.workspace_id and l.delivery_attempt_id=a.id where a.tenant_id=? and a.workspace_id=? and a.delivery_id=? group by l.catalog_item_id",
+                (ResultSetExtractor<Void>) rs -> { while (rs.next()) values.put(rs.getString("catalog_item_id"), rs.getBigDecimal("quantity")); return null; },
+                tenant, workspace, deliveryId);
+        return values;
+    }
+
+    private List<LogisticsOperationsService.DeliveryLineCommand> remainingAfter(List<ObligationLine> obligations,
+                                                                                  Map<String, BigDecimal> alreadyDelivered,
+                                                                                  List<LogisticsOperationsService.DeliveryLineCommand> additional) {
+        Map<String, BigDecimal> remaining = new LinkedHashMap<>();
+        Map<String, String> units = new LinkedHashMap<>();
+        for (ObligationLine obligation : obligations) {
+            BigDecimal prior = alreadyDelivered.getOrDefault(obligation.catalogItemId(), BigDecimal.ZERO);
+            if (prior.compareTo(obligation.quantity()) > 0) throw error("INVALID_REQUEST", false);
+            remaining.put(obligation.catalogItemId(), obligation.quantity().subtract(prior));
+            units.put(obligation.catalogItemId(), obligation.unit());
+        }
+        for (LogisticsOperationsService.DeliveryLineCommand line : additional) {
+            if (!remaining.containsKey(line.catalogItemId()) || !units.get(line.catalogItemId()).equalsIgnoreCase(line.unit())
+                    || line.quantity().compareTo(remaining.get(line.catalogItemId())) > 0) throw error("INVALID_REQUEST", false);
+            remaining.put(line.catalogItemId(), remaining.get(line.catalogItemId()).subtract(line.quantity()));
+        }
+        List<LogisticsOperationsService.DeliveryLineCommand> result = new ArrayList<>();
+        for (ObligationLine obligation : obligations) {
+            BigDecimal value = remaining.get(obligation.catalogItemId());
+            if (value.signum() > 0) result.add(new LogisticsOperationsService.DeliveryLineCommand(obligation.catalogItemId(), value, obligation.unit()));
+        }
+        return result;
     }
 
     private LogisticsOperationsService.DispatchView statusCommand(String tenantId, String workspaceId,
@@ -397,4 +566,6 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                     ? TemperatureReadingStatus.WITHIN_RANGE : TemperatureReadingStatus.OUT_OF_RANGE;
         }
     }
+
+    private record ObligationLine(String catalogItemId, BigDecimal quantity, String unit) { }
 }

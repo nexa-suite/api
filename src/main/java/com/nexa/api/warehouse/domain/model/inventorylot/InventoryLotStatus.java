@@ -1,3 +1,3 @@
 package com.nexa.api.warehouse.domain.model.inventorylot;
 
-public enum InventoryLotStatus { AVAILABLE, BLOCKED, QUARANTINED, EXPIRED, DEPLETED }
+public enum InventoryLotStatus { AVAILABLE, BLOCKED, QUARANTINED, HOLD, EXPIRED, DEPLETED }
