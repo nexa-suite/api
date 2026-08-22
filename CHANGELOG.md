@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [1.0.0] - 2026-08-22
+
+V1 functional convergence baseline for the API.
+
+### Added
+
+- Consolidated Purchase Request and Sales Order continuation foundations across the current V1 API baseline.
+- Integrated the current security, tenant, catalog, warehouse, logistics, payments and document runtime work on `develop`.
+
+### Changed
+
+- Aligned ArchUnit, Testcontainers, PostgreSQL, Springdoc and PDFBox dependency baselines.
+- Preserved the boundary that Payments is broader than Stripe and that technical foundations do not imply complete business capability acceptance.
+
+### Validation
+
+- API CI, integration verification, CodeQL, container and security-load gates passed for the release candidate.
+
 ## Unreleased
 
 No unreleased changes are included in this baseline.
@@ -151,7 +169,7 @@ This release consolidates previously unreleased Identity, tenant, security and c
 
 - Independent Spring Boot 4.1 modular monolith package structure and Actuator health/info application.
 
-[Unreleased]: https://github.com/nexa-suite/api/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/nexa-suite/api/compare/v1.0.0...HEAD
 [0.8.0]: https://github.com/nexa-suite/api/compare/v0.6.0...v0.8.0
 [0.6.0]: https://github.com/nexa-suite/api/compare/v0.4.0...v0.6.0
 [0.4.0]: https://github.com/nexa-suite/api/compare/v0.3.0...v0.4.0
