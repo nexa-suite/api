@@ -64,19 +64,20 @@ public class ClientAccountAddressPersistenceAdapter
     @Override
     public Optional<CustomerAddressReference> findReference(
             String tenantId, String workspaceId, String customerAccountId, String addressId) {
-        return find(tenantId, workspaceId, customerAccountId, addressId).map(ClientAccountAddressPersistenceAdapter::reference);
+        return activeReference("a.client_account_id=? and a.id=?", tenantId, workspaceId,
+                uuid(customerAccountId), uuid(addressId));
     }
 
     @Override
     public Optional<CustomerAddressReference> findBuyerReference(
             String tenantId, String workspaceId, String membershipId, String addressId) {
-        return findForBuyer(tenantId, workspaceId, membershipId, addressId).map(ClientAccountAddressPersistenceAdapter::reference);
+        return activeBuyerReference(tenantId, workspaceId, membershipId, "a.id=?", uuid(addressId));
     }
 
     @Override
     public Optional<CustomerAddressReference> findDefaultBuyerReference(
             String tenantId, String workspaceId, String membershipId) {
-        return findDefaultForBuyer(tenantId, workspaceId, membershipId).map(ClientAccountAddressPersistenceAdapter::reference);
+        return activeBuyerReference(tenantId, workspaceId, membershipId, "a.default_address", null);
     }
 
     @Override
@@ -154,6 +155,31 @@ public class ClientAccountAddressPersistenceAdapter
 
     private static CustomerAddressReference reference(ClientAccountAddress address) {
         return new CustomerAddressReference(address.id().toString(), address.label(), address.address(), address.defaultAddress());
+    }
+
+    private Optional<CustomerAddressReference> activeReference(
+            String predicate, String tenantId, String workspaceId, Object... values) {
+        java.util.List<Object> parameters = new java.util.ArrayList<>();
+        parameters.add(uuid(tenantId)); parameters.add(uuid(workspaceId));
+        parameters.addAll(java.util.List.of(values));
+        return jdbc.query(SELECT + " join sales.client_account ca on ca.id=a.client_account_id "
+                        + "and ca.tenant_id=a.tenant_id and ca.workspace_id=a.workspace_id "
+                        + "where a.tenant_id=? and a.workspace_id=? and a.status='ACTIVE' and ca.status='ACTIVE' and " + predicate,
+                rs -> rs.next() ? Optional.of(reference(address(rs))) : Optional.empty(), parameters.toArray());
+    }
+
+    private Optional<CustomerAddressReference> activeBuyerReference(
+            String tenantId, String workspaceId, String membershipId, String predicate, Object value) {
+        java.util.List<Object> parameters = new java.util.ArrayList<>(java.util.List.of(
+                uuid(tenantId), uuid(workspaceId), uuid(membershipId)));
+        if (value != null) parameters.add(value);
+        return jdbc.query(SELECT + " join sales.client_account ca on ca.id=a.client_account_id "
+                        + "and ca.tenant_id=a.tenant_id and ca.workspace_id=a.workspace_id "
+                        + "join sales.client_account_membership m on m.client_account_id=a.client_account_id "
+                        + "and m.tenant_id=a.tenant_id and m.workspace_id=a.workspace_id "
+                        + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? "
+                        + "and a.status='ACTIVE' and ca.status='ACTIVE' and " + predicate,
+                rs -> rs.next() ? Optional.of(reference(address(rs))) : Optional.empty(), parameters.toArray());
     }
 
     private static UUID uuid(String value) { return UUID.fromString(value); }

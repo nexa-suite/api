@@ -6,13 +6,14 @@ import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderUseCase;
 import com.nexa.api.sales.presentation.SalesHttpHeaders;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
-import com.nexa.api.customerrelationships.presentation.contract.DeliveryAddressRequest;
+import com.nexa.api.customerrelationships.contract.Address;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.FutureOrPresent;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Digits;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -49,7 +50,7 @@ public final class ManualSalesOrderController {
     }
 
     public record CreateRequest(@NotBlank @Size(max = 64) String clientAccountId,
-                                @Size(max = 64) String addressId, @Valid DeliveryAddressRequest manualAddress,
+                                @Size(max = 64) String addressId, @Valid ManualAddressRequest manualAddress,
                                 @NotNull @FutureOrPresent LocalDate requestedDeliveryDate, @Size(max = 2000) String deliveryNotes,
                                 @Size(max = 64) String warehouseId, @Size(max = 40) String routeProvider,
                                 @NotBlank @Size(max = 40) String paymentOption, String priority,
@@ -60,6 +61,35 @@ public final class ManualSalesOrderController {
                     requestedDeliveryDate, deliveryNotes, warehouseId, routeProvider, PaymentOption.from(paymentOption),
                     priority == null ? null : PurchaseRequestPriority.from(priority), currency, notes,
                     lines.stream().map(line -> new CreateManualSalesOrderCommand.Line(line.skuId(), line.catalogItemId(), line.quantity(), line.unit(), line.notes())).toList());
+        }
+    }
+
+    /** Sales-owned transport shape translated into the Customer address value contract. */
+    public record ManualAddressRequest(@Size(max = 32) String addressType,
+                                       @NotBlank @Size(max = 240) String line,
+                                       @Size(max = 500) String reference,
+                                       @Size(max = 8) String countryCode,
+                                       @NotBlank @Size(max = 40) String departmentCode,
+                                       @NotBlank @Size(max = 40) String provinceCode,
+                                       @NotBlank @Size(max = 40) String districtCode,
+                                       @Size(max = 160) String recipientName,
+                                       @Size(max = 48) String recipientPhone,
+                                       @Size(max = 32) String roadType,
+                                       @Size(max = 180) String streetName,
+                                       @Size(max = 32) String streetNumber,
+                                       @Size(max = 64) String interior,
+                                       @Size(max = 32) String postalCode,
+                                       @Size(max = 1000) String receivingInstructions,
+                                       @Size(max = 240) String receivingHours,
+                                       @Digits(integer = 3, fraction = 7) java.math.BigDecimal latitude,
+                                       @Digits(integer = 3, fraction = 7) java.math.BigDecimal longitude,
+                                       @Size(max = 240) String placeId,
+                                       @Size(max = 24) String source) {
+        Address toDomain() {
+            return new Address(addressType, line, reference, countryCode == null ? "PE" : countryCode,
+                    departmentCode, provinceCode, districtCode, recipientName, recipientPhone, roadType,
+                    streetName, streetNumber, interior, postalCode, receivingInstructions, receivingHours,
+                    latitude, longitude, placeId, source);
         }
     }
 

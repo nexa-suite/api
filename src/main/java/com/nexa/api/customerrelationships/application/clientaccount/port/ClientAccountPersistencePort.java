@@ -5,9 +5,6 @@ import com.nexa.api.customerrelationships.application.clientaccount.model.Custom
 
 import java.util.Optional;
 import java.util.UUID;
-import java.util.List;
-
-import com.nexa.api.customerrelationships.application.clientaccount.model.BuyerMembershipCandidate;
 
 public interface ClientAccountPersistencePort {
 	CustomerAccountPage<ClientAccountView> list(String tenantId, String workspaceId, String search, String status, int page, int size);
@@ -17,7 +14,6 @@ public interface ClientAccountPersistencePort {
 			String contactEmail, String phone, String deliveryProfile, String paymentCondition, long version);
 	int updateStatus(String tenantId, String workspaceId, String id, String status, long version);
 	Optional<ClientAccountView> findForBuyer(String tenantId, String workspaceId, String membershipId);
-	default List<BuyerMembershipCandidate> buyerMembershipCandidates(String tenantId, String workspaceId) { return List.of(); }
-	boolean isAvailableBuyerMembership(String tenantId, String workspaceId, String membershipId);
+	boolean isBuyerMembershipAssigned(String tenantId, String workspaceId, String membershipId);
 	int associateBuyer(String tenantId, String workspaceId, String accountId, String membershipId, UUID associationId, long nowEpochMillis, long version);
 }

@@ -7,6 +7,7 @@ import com.nexa.api.customerrelationships.application.clientaccountaddress.port.
 import com.nexa.api.customerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerrelationships.application.clientaccountaddress.service.ClientAccountAddressService;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -15,8 +16,9 @@ import org.springframework.context.annotation.Profile;
 @Profile("!test")
 public class CustomerRelationshipsRuntimeConfiguration {
     @Bean
-    ClientAccountUseCase clientAccountUseCase(ClientAccountPersistencePort persistence) {
-        return new ClientAccountService(persistence);
+    ClientAccountUseCase clientAccountUseCase(
+            ClientAccountPersistencePort persistence, BuyerMembershipDirectory buyerMemberships) {
+        return new ClientAccountService(persistence, buyerMemberships);
     }
 
     @Bean

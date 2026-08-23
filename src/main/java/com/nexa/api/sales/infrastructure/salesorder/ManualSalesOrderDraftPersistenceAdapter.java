@@ -3,6 +3,12 @@ package com.nexa.api.sales.infrastructure.salesorder;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.application.port.out.MapRoutingPort;
+import com.nexa.api.catalogmanagement.application.publicapi.SellableSkuQuery;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountDetails;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAddressQuery;
+import com.nexa.api.customerrelationships.contract.CustomerAddressReference;
+import com.nexa.api.warehouse.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.sales.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderDraftPersistencePort;
 import com.nexa.api.customerrelationships.contract.Address;
@@ -46,16 +52,22 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final MapRoutingPort maps;
-
-    public ManualSalesOrderDraftPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper) {
-        this(jdbc, mapper, null);
-    }
+    private final CustomerAccountQuery customers;
+    private final CustomerAddressQuery addresses;
+    private final SellableSkuQuery sellableSkus;
+    private final WarehouseSelectionQuery warehouses;
 
     @Autowired
-    public ManualSalesOrderDraftPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper, MapRoutingPort maps) {
+    public ManualSalesOrderDraftPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper, MapRoutingPort maps,
+                                                    CustomerAccountQuery customers, CustomerAddressQuery addresses,
+                                                    SellableSkuQuery sellableSkus, WarehouseSelectionQuery warehouses) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.maps = maps == null ? new com.nexa.api.sales.infrastructure.maps.LocalDeterministicMapAdapter() : maps;
+        this.customers = customers;
+        this.addresses = addresses;
+        this.sellableSkus = sellableSkus;
+        this.warehouses = warehouses;
     }
 
     @Override
@@ -109,7 +121,7 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
         PaymentOption payment = PaymentOption.from(command.paymentPreference());
         if (payment == null) throw new IllegalArgumentException("Payment preference is required");
         PurchaseRequestPriority priority = PurchaseRequestPriority.from(command.priority());
-        ClientRow client = client(context, command.clientAccountId())
+        ClientRow client = activeClient(context, command.clientAccountId())
                 .orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
         if (!"ACTIVE".equalsIgnoreCase(client.status())) throw new IllegalArgumentException("Client account is not active");
         String creditResult = creditResult(payment, client.availableCredit());
@@ -265,7 +277,7 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
 
     private ManualSalesOrderDraftModels.DraftView view(CurrentAccessContext context, DraftRow row) {
         ManualSalesOrderDraftModels.ClientView client = row.clientAccountId() == null ? null
-                : client(context, row.clientAccountId()).map(value -> new ManualSalesOrderDraftModels.ClientView(
+                : historicalClient(context, row.clientAccountId()).map(value -> new ManualSalesOrderDraftModels.ClientView(
                 value.id().toString(), value.code(), value.businessName(), value.commercialName(), value.taxIdentifierType(),
                 value.taxIdentifierValue(), value.status(), value.paymentTerms(), value.creditLimit(), value.currentExposure(),
                 value.availableCredit())).orElse(null);
@@ -289,48 +301,30 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                 row.salesOrderId() == null ? null : row.salesOrderId().toString(), row.createdAt(), row.updatedAt(), row.submittedAt());
     }
 
-    private Optional<ClientRow> client(CurrentAccessContext context, UUID id) {
-        return jdbc.query("select id,code,business_name,commercial_name,tax_identifier_type,tax_identifier_value,status,"
-                        + "payment_condition,coalesce(credit_limit,0),coalesce(current_commercial_exposure,0),coalesce(available_credit,0) "
-                        + "from sales.client_account where tenant_id=? and workspace_id=? and id=?",
-                (rs, ignored) -> new ClientRow(rs.getObject("id", UUID.class), rs.getString("code"), rs.getString("business_name"),
-                        rs.getString("commercial_name"), rs.getString("tax_identifier_type"), rs.getString("tax_identifier_value"),
-                        rs.getString("status"), rs.getString("payment_condition"), rs.getBigDecimal(9), rs.getBigDecimal(10), rs.getBigDecimal(11)),
-                tenant(context), workspace(context), id).stream().findFirst();
+    private Optional<ClientRow> activeClient(CurrentAccessContext context, UUID id) {
+        return customers.findActiveDetails(tenant(context).toString(), workspace(context).toString(), id.toString())
+                .map(ManualSalesOrderDraftPersistenceAdapter::clientRow);
+    }
+
+    private Optional<ClientRow> historicalClient(CurrentAccessContext context, UUID id) {
+        return customers.findHistoricalDetails(tenant(context).toString(), workspace(context).toString(), id.toString())
+                .map(ManualSalesOrderDraftPersistenceAdapter::clientRow);
     }
 
     private Optional<SkuRow> findSku(CurrentAccessContext context, ManualSalesOrderDraftModels.LineCommand command) {
-        String selector;
-        Object selectorValue;
-        if (command.skuId() != null) {
-            selector = "s.id=?";
-            selectorValue = command.skuId();
-        } else {
-            selector = "s.legacy_catalog_item_id=?";
-            selectorValue = command.catalogItemId().trim();
-        }
-        return jdbc.query("select s.id,coalesce(nullif(s.legacy_catalog_item_id,''),s.sku_code),s.family_id,f.family_code,f.name,"
-                        + "s.sku_code,s.presentation,s.unit_of_measure,p.amount,p.currency from catalog_management.sellable_sku s "
-                        + "join catalog_management.product_family f on f.tenant_id=s.tenant_id and f.workspace_id=s.workspace_id and f.id=s.family_id "
-                        + "join lateral (select amount,currency from catalog_management.sku_price p0 where p0.tenant_id=s.tenant_id and "
-                        + "p0.workspace_id=s.workspace_id and p0.sku_id=s.id and p0.cancelled_at is null and p0.valid_from <= current_timestamp "
-                        + "and (p0.valid_until is null or p0.valid_until > current_timestamp) order by p0.valid_from desc,p0.id limit 1) p on true "
-                        + "where s.tenant_id=? and s.workspace_id=? and s.status='ACTIVE' and s.visible and " + selector,
-                (rs, ignored) -> new SkuRow(rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, UUID.class), rs.getString(4),
-                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8), rs.getBigDecimal(9), rs.getString(10)),
-                tenant(context), workspace(context), selectorValue).stream().findFirst();
+        var reference = command.skuId() != null
+                ? sellableSkus.findActive(tenant(context), workspace(context), command.skuId())
+                : sellableSkus.findActiveByLegacyCatalogItemId(tenant(context), workspace(context), command.catalogItemId().trim());
+        return reference.map(sku -> new SkuRow(sku.skuId(),
+                blank(sku.legacyCatalogItemId()) ? sku.skuCode() : sku.legacyCatalogItemId(),
+                sku.familyId(), sku.familyCode(), sku.familyName(), sku.skuCode(), sku.presentation(),
+                sku.unitOfMeasure(), sku.price(), sku.currency()));
     }
 
     private Optional<AddressRow> address(CurrentAccessContext context, UUID clientId, UUID addressId) {
-        return jdbc.query("select id,recipient_name,recipient_phone,road_type,street_name,street_number,interior,department_code,"
-                        + "province_code,district_code,postal_code,reference,receiving_instructions,receiving_hours,latitude,longitude,place_id,source "
-                        + "from sales.client_account_address where tenant_id=? and workspace_id=? and client_account_id=? and id=? and status='ACTIVE'",
-                (rs, ignored) -> new AddressRow(rs.getObject("id", UUID.class), rs.getString("recipient_name"), rs.getString("recipient_phone"),
-                        rs.getString("road_type"), rs.getString("street_name"), rs.getString("street_number"), rs.getString("interior"),
-                        rs.getString("department_code"), rs.getString("province_code"), rs.getString("district_code"), rs.getString("postal_code"),
-                        rs.getString("reference"), rs.getString("receiving_instructions"), rs.getString("receiving_hours"),
-                        rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"), rs.getString("place_id"), rs.getString("source")),
-                tenant(context), workspace(context), clientId, addressId).stream().findFirst();
+        return addresses.findReference(tenant(context).toString(), workspace(context).toString(),
+                        clientId.toString(), addressId.toString())
+                .map(ManualSalesOrderDraftPersistenceAdapter::addressRow);
     }
 
     private WarehouseRow selectWarehouse(CurrentAccessContext context, UUID draftId) {
@@ -338,22 +332,9 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
         jdbc.query("select sku_id,quantity from sales.manual_sales_order_draft_line where tenant_id=? and workspace_id=? and draft_id=?",
                 (rs, ignored) -> requested.put(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), draftId);
         if (requested.isEmpty()) throw new IllegalArgumentException("Products must be complete before warehouse selection");
-        List<WarehouseRow> candidates = jdbc.query("select w.id,w.code,w.name,w.address,coalesce(c.service_status,'OPERATIONAL'),coalesce(c.priority,0),coalesce(c.preferred,false),c.latitude,c.longitude from warehouse.warehouse w "
-                        + "left join warehouse.warehouse_service_configuration c on c.warehouse_id=w.id and c.tenant_id=w.tenant_id and c.workspace_id=w.workspace_id "
-                        + "where w.tenant_id=? and w.workspace_id=? and w.status='ACTIVE' and coalesce(c.service_status,'OPERATIONAL')='OPERATIONAL' "
-                        + "order by coalesce(c.preferred,false) desc,coalesce(c.priority,0) desc,w.id",
-                (rs, ignored) -> new WarehouseRow(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getInt(6), rs.getBoolean(7), rs.getBigDecimal(8), rs.getBigDecimal(9)),
-                tenant(context), workspace(context));
-        for (WarehouseRow warehouse : candidates) {
-            Map<UUID, BigDecimal> available = new HashMap<>();
-            jdbc.query("select sku_id,coalesce(sum(stock_quantity-reserved_quantity),0) from warehouse.inventory_lot where tenant_id=? and workspace_id=? "
-                            + "and warehouse_id=? and status='AVAILABLE' and expiration_date >= current_date and sku_id is not null group by sku_id",
-                    (rs, ignored) -> available.put(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), warehouse.id());
-            if (requested.entrySet().stream().allMatch(entry -> available.getOrDefault(entry.getKey(), BigDecimal.ZERO).compareTo(entry.getValue()) >= 0)) {
-                return warehouse;
-            }
-        }
-        throw new IllegalArgumentException("Warehouse serviceability conflict: no warehouse can fulfill the manual order");
+        return warehouses.findFulfillable(tenant(context), workspace(context), requested)
+                .map(ManualSalesOrderDraftPersistenceAdapter::warehouseRow)
+                .orElseThrow(() -> new IllegalArgumentException("Warehouse serviceability conflict: no warehouse can fulfill the manual order"));
     }
 
     private Address deliveryAddress(AddressRow row) {
@@ -399,10 +380,8 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     }
 
     private BigDecimal availability(CurrentAccessContext context, UUID skuId) {
-        BigDecimal value = jdbc.queryForObject("select coalesce(sum(stock_quantity-reserved_quantity),0) from warehouse.inventory_lot "
-                        + "where tenant_id=? and workspace_id=? and sku_id=? and status='AVAILABLE' and expiration_date >= current_date",
-                BigDecimal.class, tenant(context), workspace(context), skuId);
-        return value == null ? BigDecimal.ZERO : value;
+        return warehouses.availability(tenant(context), workspace(context), List.of(skuId))
+                .getOrDefault(skuId, BigDecimal.ZERO);
     }
 
     private boolean allAvailableLines(CurrentAccessContext context, UUID draftId) {
@@ -499,6 +478,26 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     }
 
     private static String nullSafe(String value) { return value == null ? "" : value; }
+
+    private static ClientRow clientRow(CustomerAccountDetails value) {
+        return new ClientRow(UUID.fromString(value.id()), value.code(), value.businessName(), value.commercialName(),
+                value.taxIdentifierType(), value.taxIdentifierValue(), value.status(), value.paymentCondition(),
+                value.creditLimit(), value.currentCommercialExposure(), value.availableCredit());
+    }
+
+    private static AddressRow addressRow(CustomerAddressReference reference) {
+        Address value = reference.address();
+        return new AddressRow(UUID.fromString(reference.id()), value.recipientName(), value.recipientPhone(),
+                value.roadType(), value.streetName(), value.streetNumber(), value.interior(), value.departmentCode(),
+                value.provinceCode(), value.districtCode(), value.postalCode(), value.reference(),
+                value.receivingInstructions(), value.receivingHours(), value.latitude(), value.longitude(),
+                value.placeId(), value.source());
+    }
+
+    private static WarehouseRow warehouseRow(WarehouseSelectionQuery.WarehouseReference value) {
+        return new WarehouseRow(value.id(), value.code(), value.name(), value.address(), value.serviceStatus(),
+                value.priority(), value.preferred(), value.latitude(), value.longitude());
+    }
 
     private record DraftRow(UUID id, UUID clientAccountId, UUID deliveryAddressId, String status, String priority,
                              LocalDate requestedDeliveryDate, String paymentPreference, String currency, String notes,

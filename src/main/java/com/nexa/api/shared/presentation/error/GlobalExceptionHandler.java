@@ -393,7 +393,11 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(com.nexa.api.shared.application.error.ApiResourceNotFoundException.class)
 	public ResponseEntity<ProblemDetail> handleApiNotFound(com.nexa.api.shared.application.error.ApiResourceNotFoundException exception, HttpServletRequest request) {
-		return response(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found", request);
+		ApiErrorCode code = switch (exception.resource()) {
+			case "client-account", "client-account-address", "buyer-membership" -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
+			default -> ApiErrorCode.RESOURCE_NOT_FOUND;
+		};
+		return response(HttpStatus.NOT_FOUND, code, "Resource not found", request);
 	}
 
 	@ExceptionHandler(com.nexa.api.payments.application.exception.PaymentOperationInProgressException.class)

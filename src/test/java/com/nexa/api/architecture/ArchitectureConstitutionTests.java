@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.modulith.core.ApplicationModules;
 
 import java.nio.file.Files;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,8 +33,8 @@ class ArchitectureConstitutionTests {
     void springModulithModulesVerify() {
         ApplicationModules modules = ApplicationModules.of(NexaApiApplication.class);
         assertThat(modules.stream().map(module -> module.getIdentifier().toString()).toList())
-                .contains("iam", "tenantmanagement", "customerrelationships", "catalogmanagement", "sales", "warehouse",
-                        "logistics", "invoicing", "payments", "notifications", "audit", "shared");
+                .containsExactlyInAnyOrder("audit", "bootstrap", "catalogmanagement", "customerrelationships", "iam",
+                        "invoicing", "logistics", "notifications", "payments", "sales", "shared", "tenantmanagement", "warehouse");
         assertDoesNotThrow(() -> modules.verify());
     }
 
@@ -55,6 +56,10 @@ class ArchitectureConstitutionTests {
         TARGET_BOUNDED_CONTEXT_OWNERS.values().stream().flatMap(Set::stream)
                 .forEach(owner -> assertThat(CLASSES.stream().anyMatch(type -> type.getPackageName().startsWith(owner)))
                         .as("concrete owner package %s", owner).isTrue());
+        assertThat(TARGET_BOUNDED_CONTEXT_OWNERS.values().stream().flatMap(Set::stream)
+                .map(owner -> owner.split("\\.")[3]).collect(java.util.stream.Collectors.toSet()))
+                .containsExactlyInAnyOrder("audit", "catalogmanagement", "customerrelationships", "iam", "invoicing",
+                        "logistics", "notifications", "payments", "sales", "tenantmanagement", "warehouse");
     }
 
     @Test
@@ -71,6 +76,27 @@ class ArchitectureConstitutionTests {
                 .filter(dependency -> dependency.getTargetClass().getSimpleName().equals("ClientAccountPersistencePort")
                         || dependency.getTargetClass().getSimpleName().equals("ClientAccountAddressPersistencePort"))
                 .map(Object::toString).toList()).isEmpty();
+    }
+
+    @Test
+    void salesUsesPublicContractsInsteadOfForeignSqlOrCustomerPresentation() throws IOException {
+        String salesSources = sourcesUnder(Path.of("src/main/java/com/nexa/api/sales"));
+        assertThat(salesSources).doesNotContain(" from catalog_management.", " join catalog_management.",
+                " from payments.", " join payments.", " update payments.", "insert into payments.",
+                " from tenant_management.", " join tenant_management.", " from iam.", " join iam.",
+                " from warehouse.", " join warehouse.", " from sales.client_account", " join sales.client_account");
+
+        noClasses().that().resideInAPackage("com.nexa.api.sales..")
+                .should().dependOnClassesThat().resideInAPackage("com.nexa.api.customerrelationships.presentation..")
+                .check(CLASSES);
+    }
+
+    @Test
+    void customerRelationshipsDoesNotQueryOtherBoundedContextSchemas() throws IOException {
+        assertThat(sourcesUnder(Path.of("src/main/java/com/nexa/api/customerrelationships")))
+                .doesNotContain(" from catalog_management.", " join catalog_management.", " from payments.", " join payments.",
+                        " from tenant_management.", " join tenant_management.", " from iam.", " join iam.",
+                        " from warehouse.", " join warehouse.");
     }
 
     @Test
@@ -127,5 +153,15 @@ class ArchitectureConstitutionTests {
         owners.put("Notifications", Set.of("com.nexa.api.notifications"));
         owners.put("Business Traceability", Set.of("com.nexa.api.audit"));
         return Collections.unmodifiableMap(owners);
+    }
+
+    private static String sourcesUnder(Path root) throws IOException {
+        try (var paths = Files.walk(root)) {
+            return paths.filter(path -> path.toString().endsWith(".java"))
+                    .sorted().map(path -> {
+                        try { return Files.readString(path); }
+                        catch (IOException exception) { throw new java.io.UncheckedIOException(exception); }
+                    }).collect(java.util.stream.Collectors.joining("\n"));
+        }
     }
 }

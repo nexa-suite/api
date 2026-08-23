@@ -10,6 +10,7 @@ import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.customerrelationships.domain.model.clientaccount.*;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
@@ -17,7 +18,11 @@ import java.util.List;
 
 public class ClientAccountService implements ClientAccountUseCase {
 	private final ClientAccountPersistencePort persistence;
-	public ClientAccountService(ClientAccountPersistencePort persistence) { this.persistence = persistence; }
+	private final BuyerMembershipDirectory buyerMemberships;
+	public ClientAccountService(ClientAccountPersistencePort persistence, BuyerMembershipDirectory buyerMemberships) {
+		this.persistence = persistence;
+		this.buyerMemberships = buyerMemberships;
+	}
 
 	@Override public CustomerAccountPage<ClientAccountView> list(CurrentAccessContext context, String search, String status, int page, int size) {
 		internal(context, Permission.SALES_READ); return persistence.list(scope(context), workspace(context), search, status, page, size);
@@ -32,7 +37,10 @@ public class ClientAccountService implements ClientAccountUseCase {
 	}
 	@Override public List<BuyerMembershipCandidate> buyerMembershipCandidates(CurrentAccessContext context) {
 		internal(context, Permission.SALES_READ);
-		return persistence.buyerMembershipCandidates(scope(context), workspace(context));
+		return buyerMemberships.findActiveBuyers(scope(context), workspace(context)).stream()
+				.filter(candidate -> !persistence.isBuyerMembershipAssigned(scope(context), workspace(context), candidate.id()))
+				.map(candidate -> new BuyerMembershipCandidate(candidate.id(), candidate.email(), candidate.displayName()))
+				.toList();
 	}
 	@Override @Transactional public ClientAccountView create(CurrentAccessContext context, ClientAccountView command) {
 		internal(context, Permission.SALES_WRITE); validateDomain(command);
@@ -54,7 +62,10 @@ public class ClientAccountService implements ClientAccountUseCase {
 		ClientAccountView account = detail(context, id);
 		if (account.version() != version) throw new CustomerRelationshipConflictException();
 		if (account.buyerMembershipId() != null) throw new CustomerRelationshipConflictException();
-		if (!persistence.isAvailableBuyerMembership(scope(context), workspace(context), membershipId)) throw new ApiResourceNotFoundException("buyer-membership");
+		if (buyerMemberships.findActiveBuyer(scope(context), workspace(context), membershipId).isEmpty()
+				|| persistence.isBuyerMembershipAssigned(scope(context), workspace(context), membershipId)) {
+			throw new ApiResourceNotFoundException("buyer-membership");
+		}
 		if (persistence.associateBuyer(scope(context), workspace(context), account.id(), membershipId, UUID.randomUUID(), now(), version) == 0) throw new CustomerRelationshipConflictException();
 		return detail(context, id);
 	}
