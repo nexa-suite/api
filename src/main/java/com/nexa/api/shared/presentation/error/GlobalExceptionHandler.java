@@ -5,6 +5,7 @@ import com.nexa.api.iam.application.exception.InvalidRefreshTokenException;
 import com.nexa.api.iam.application.exception.SessionNotFoundException;
 import com.nexa.api.iam.application.exception.AuthenticationThrottledException;
 import com.nexa.api.iam.application.exception.IamSecurityException;
+import com.nexa.api.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -115,6 +116,32 @@ public final class GlobalExceptionHandler {
 				: code == ApiErrorCode.PUBLIC_CONTACT_RATE_LIMITED ? "Contact requests are temporarily limited"
 				: code == ApiErrorCode.RESET_INVALID ? "The reset request is invalid or expired" : "The requested security operation could not be completed";
 		return response(status, code, detail, request);
+	}
+
+	@ExceptionHandler(OrganizationRegistrationDraftException.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationRegistrationDraft(OrganizationRegistrationDraftException exception, HttpServletRequest request) {
+		ApiErrorCode code = switch (exception.code()) {
+			case "DRAFT_NOT_FOUND" -> ApiErrorCode.DRAFT_NOT_FOUND;
+			case "DRAFT_NOT_EDITABLE" -> ApiErrorCode.DRAFT_NOT_EDITABLE;
+			case "DRAFT_STEP_INVALID" -> ApiErrorCode.DRAFT_STEP_INVALID;
+			case "DRAFT_INCOMPLETE" -> ApiErrorCode.DRAFT_INCOMPLETE;
+			case "DRAFT_TERMS_REQUIRED" -> ApiErrorCode.DRAFT_TERMS_REQUIRED;
+			case "DRAFT_SECRET_FIELD_NOT_ALLOWED" -> ApiErrorCode.DRAFT_SECRET_FIELD_NOT_ALLOWED;
+			case "DRAFT_REFERENCE_METADATA_ONLY" -> ApiErrorCode.DRAFT_REFERENCE_METADATA_ONLY;
+			case "DRAFT_VERSION_CONFLICT" -> ApiErrorCode.DRAFT_VERSION_CONFLICT;
+			case "PRECONDITION_REQUIRED" -> ApiErrorCode.PRECONDITION_REQUIRED;
+			case "IDEMPOTENCY_KEY_REQUIRED" -> ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED;
+			case "IDEMPOTENCY_PAYLOAD_CONFLICT" -> ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT;
+			default -> ApiErrorCode.REGISTRATION_INVALID;
+		};
+		HttpStatus status = switch (code) {
+			case DRAFT_NOT_FOUND -> HttpStatus.NOT_FOUND;
+			case PRECONDITION_REQUIRED -> HttpStatus.PRECONDITION_REQUIRED;
+			case DRAFT_VERSION_CONFLICT -> HttpStatus.PRECONDITION_FAILED;
+			case DRAFT_NOT_EDITABLE, DRAFT_REFERENCE_METADATA_ONLY, IDEMPOTENCY_PAYLOAD_CONFLICT -> HttpStatus.CONFLICT;
+			default -> HttpStatus.BAD_REQUEST;
+		};
+		return response(status, code, "Organization onboarding draft operation could not be completed", request);
 	}
 
 	@ExceptionHandler({InvalidRefreshTokenException.class, SessionNotFoundException.class})

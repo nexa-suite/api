@@ -103,6 +103,9 @@ public class OrganizationRegistrationService implements SubmitOrganizationRegist
             return new Activation(registrationId.toString(), snapshot.status(), snapshot.tenantId(), snapshot.workspaceId(),
                     snapshot.founderUserId(), FOUNDER_ROLES);
         }
+        if (!OrganizationRegistrationStatus.PENDING_ACTIVATION.name().equals(snapshot.status())) {
+            throw new IamSecurityException("REGISTRATION_NOT_PENDING");
+        }
         OrganizationRegistration aggregate = restore(snapshot);
         try { aggregate.activate(); } catch (IllegalStateException exception) { throw new IamSecurityException("REGISTRATION_NOT_PENDING"); }
 
@@ -130,6 +133,9 @@ public class OrganizationRegistrationService implements SubmitOrganizationRegist
         if (reason == null || reason.isBlank() || reason.length() > 500) throw new IamSecurityException("REJECTION_REASON_REQUIRED");
         Instant now = clock.instant();
         var snapshot = activations.findForUpdate(registrationId).orElseThrow(() -> new com.nexa.api.shared.application.error.ApiResourceNotFoundException("organization registration"));
+        if (!OrganizationRegistrationStatus.PENDING_ACTIVATION.name().equals(snapshot.status())) {
+            throw new IamSecurityException("REGISTRATION_NOT_PENDING");
+        }
         OrganizationRegistration aggregate = restore(snapshot);
         try { aggregate.reject(); } catch (IllegalStateException exception) { throw new IamSecurityException("REGISTRATION_NOT_PENDING"); }
         activations.markRejected(registrationId, reason.trim(), now);
