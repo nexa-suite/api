@@ -231,12 +231,19 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                 .andExpect(status().isCreated());
         String memberToken = accessToken(email, "PLATFORM");
         String membershipId = membershipId(email);
+        long authorizationVersionBeforeSuspension = jdbc.queryForObject(
+                "select authorization_version from tenant_management.membership_authorization_state where membership_id=?",
+                Long.class, UUID.fromString(membershipId));
         MvcResult detail = mockMvc.perform(get("/api/v1/workspace-memberships/" + membershipId).header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();
         String version = detail.getResponse().getHeader("ETag");
         mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", version))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isForbidden());
+        assertThat(jdbc.queryForObject("select authorization_version from tenant_management.membership_authorization_state where membership_id=?",
+                Long.class, UUID.fromString(membershipId))).isEqualTo(authorizationVersionBeforeSuspension + 1);
+        assertThat(jdbc.queryForObject("select count(*) from iam.refresh_session where membership_id=? and revoked_at is not null",
+                Integer.class, UUID.fromString(membershipId))).isGreaterThanOrEqualTo(1);
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", version))
                 .andExpect(status().isConflict());
 
@@ -244,10 +251,9 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/reactivations").header("Authorization", "Bearer " + owner).header("If-Match", suspended.getResponse().getHeader("ETag")))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/authentication/sign-out").header("Authorization", "Bearer " + memberToken).header("X-Nexa-Surface", "PLATFORM").header("Origin", ALLOWED_ORIGIN))
-                .andExpect(status().isNoContent());
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isUnauthorized());
+        String replacementToken = accessToken(email, "PLATFORM");
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + replacementToken)).andExpect(status().isOk());
     }
 
     @Test

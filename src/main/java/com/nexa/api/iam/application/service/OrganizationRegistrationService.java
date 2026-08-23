@@ -96,6 +96,13 @@ public class OrganizationRegistrationService implements SubmitOrganizationRegist
         requireOperator(operator);
         Instant now = clock.instant();
         var snapshot = activations.findForUpdate(registrationId).orElseThrow(() -> new com.nexa.api.shared.application.error.ApiResourceNotFoundException("organization registration"));
+        if (OrganizationRegistrationStatus.ACTIVE.name().equals(snapshot.status())) {
+            if (snapshot.tenantId() == null || snapshot.workspaceId() == null || snapshot.founderUserId() == null) {
+                throw new IamSecurityException("REGISTRATION_ACTIVATION_OUTCOME_UNAVAILABLE");
+            }
+            return new Activation(registrationId.toString(), snapshot.status(), snapshot.tenantId(), snapshot.workspaceId(),
+                    snapshot.founderUserId(), FOUNDER_ROLES);
+        }
         OrganizationRegistration aggregate = restore(snapshot);
         try { aggregate.activate(); } catch (IllegalStateException exception) { throw new IamSecurityException("REGISTRATION_NOT_PENDING"); }
 
@@ -110,7 +117,7 @@ public class OrganizationRegistrationService implements SubmitOrganizationRegist
                 new PasswordResetTokenHash(tokens.sha256(resetToken)), now, new PasswordResetExpiry(now.plus(resetTtl)));
         resets.save(activated.founderEmail(), "PLATFORM", reset);
         outbox.enqueuePasswordReset(activated.founderEmail(), "PLATFORM", resetToken, reset.expiry().value());
-        activations.markActivated(registrationId, activated.tenantId(), activated.workspaceId(), now);
+        activations.markActivated(registrationId, activated.tenantId(), activated.workspaceId(), activated.founderUserId(), now);
         audit.append(new SecurityAuditPort.Event("ORGANIZATION_ACTIVATED", null, activated.founderUserId(), activated.tenantId(), activated.workspaceId(),
                 "SYSTEM", valueOrUnknown(correlationId), valueOrUnknown(traceId), now, Map.of("registrationId", registrationId.toString())));
         return new Activation(registrationId.toString(), aggregate.status().name(), activated.tenantId(), activated.workspaceId(), activated.founderUserId(), FOUNDER_ROLES);
