@@ -2,8 +2,6 @@
 
 <br />
 
-<img src="./docs/assets/nexa.svg" alt="Nexa" width="240" />
-
 # Nexa API
 
 **Business and integration backbone for the Nexa product ecosystem.**
