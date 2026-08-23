@@ -21,6 +21,8 @@ public interface InvitationPersistencePort {
 	int expirePending(Instant now, int batchSize);
 	Optional<InvitationSnapshot> findForUpdateByTokenHash(String tokenHash);
 	Optional<MembershipRecord> findActiveMembershipByEmail(String workspaceId, String normalizedEmail);
+	default int activeCompanyOwnerCount(String tenantId) { return 0; }
+	default void lockTenant(String tenantId) { }
 	Optional<UserRecord> findUserByEmail(String normalizedEmail);
 	UUID createUser(String email, String displayName, String passwordHash, Instant now);
 	UUID createMembership(String tenantId, String workspaceId, UUID userId, Instant now);

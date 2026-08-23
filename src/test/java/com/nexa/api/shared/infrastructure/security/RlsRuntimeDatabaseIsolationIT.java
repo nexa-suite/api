@@ -293,11 +293,12 @@ class RlsRuntimeDatabaseIsolationIT {
     private static Fixture insertFixture() throws SQLException {
         UUID tenantOne = UUID.randomUUID();
         UUID tenantTwo = UUID.randomUUID();
+        UUID tenantThree = UUID.randomUUID();
         List<ScopedRow> rows = new ArrayList<>();
         rows.add(insertRow(tenantOne, UUID.randomUUID(), "one", true));
-        rows.add(insertRow(tenantOne, UUID.randomUUID(), "two", false));
-        rows.add(insertRow(tenantTwo, UUID.randomUUID(), "three", true));
-        return new Fixture(rows, List.of(tenantOne, tenantTwo));
+        rows.add(insertRow(tenantTwo, UUID.randomUUID(), "two", true));
+        rows.add(insertRow(tenantThree, UUID.randomUUID(), "three", true));
+        return new Fixture(rows, List.of(tenantOne, tenantTwo, tenantThree));
     }
 
     private static ScopedRow insertRow(UUID tenantId, UUID workspaceId, String label, boolean createTenant) throws SQLException {
