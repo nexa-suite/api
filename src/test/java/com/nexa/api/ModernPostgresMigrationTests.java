@@ -78,11 +78,13 @@ class ModernPostgresMigrationTests {
 			assertThat(columns(connection, "tenant_management", "operational_settings")).containsExactlyInAnyOrder(
 				"workspace_id", "warehouse_preference_strategy", "order_cutoff_policy", "fulfillment_defaults",
 				"inventory_visibility_policy", "buyer_availability_policy", "operating_hours_start",
-				"operating_hours_end", "order_cutoff_minutes", "thermal_log_required", "version", "updated_at");
+				"operating_hours_end", "order_cutoff_minutes", "thermal_log_required", "purchase_request_expiry_days", "version", "updated_at");
+			assertThat(columns(connection, "sales", "purchase_request")).contains("expires_at");
 			assertThat(columns(connection, "catalog_management", "promotion")).contains("priority");
 			assertThat(indexColumns(connection, "sales", "uq_client_account_one_buyer"))
 			.containsExactly("tenant_id", "workspace_id", "client_account_id");
 			assertTenantWorkspaceRls(connection);
+			assertPurchaseRequestExpiryIndex(connection);
 		}
 		assertOnlyOneConcurrentOutboxLeaseClaimWins();
 	}
@@ -206,7 +208,7 @@ class ModernPostgresMigrationTests {
 				"warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation",
 				"logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line",
 				"warehouse.safety_stock_policy", "warehouse.inventory_transfer",
-				"sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.commercial_commitment", "sales.commercial_commitment_line", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order");
+				"sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.commercial_commitment", "sales.commercial_commitment_line", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_event", "sales.idempotency_record", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order", "sales.sales_order_event");
 		Set<String> actualTables = new java.util.HashSet<>();
 		Set<String> policyTables = new java.util.HashSet<>();
 		try (var statement = connection.createStatement(); var result = statement.executeQuery("select n.nspname || '.' || c.relname, p.policyname, p.qual, p.with_check from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_policies p on p.schemaname=n.nspname and p.tablename=c.relname where c.relkind='r' and c.relrowsecurity and c.relforcerowsecurity order by 1")) {
@@ -221,6 +223,17 @@ class ModernPostgresMigrationTests {
 		assertThat(actualTables).as("all forced RLS tables must be explicitly inventoried").containsExactlyInAnyOrderElementsOf(expectedTables);
 		assertThat(policyTables).as("all forced RLS tables must have an explicit tenant/workspace policy")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
+	}
+
+	private static void assertPurchaseRequestExpiryIndex(java.sql.Connection connection) throws SQLException {
+		try (var statement = connection.createStatement()) {
+			statement.execute("set enable_seqscan = off");
+			try (var result = statement.executeQuery("explain (costs off) select id from sales.purchase_request where tenant_id = '00000000-0000-0000-0000-000000000001' and workspace_id = '00000000-0000-0000-0000-000000000002' and status in ('SUBMITTED','IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED') and expires_at <= current_timestamp order by expires_at,id limit 100")) {
+				StringBuilder plan = new StringBuilder();
+				while (result.next()) plan.append(result.getString(1));
+				assertThat(plan).contains("ix_purchase_request_expiry_due");
+			}
+		}
 	}
 
 	private static Set<String> indexColumns(java.sql.Connection connection, String schema, String index) throws SQLException {
