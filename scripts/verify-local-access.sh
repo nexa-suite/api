@@ -48,7 +48,6 @@ verify_login() {
 
 verify_login 'TENANT_ADMIN+COMPANY_OWNER Platform sign-in' "$NEXA_DEV_OWNER_EMAIL" "$NEXA_DEV_OWNER_PASSWORD" PLATFORM 'http://localhost:4200' success
 verify_login 'TENANT_ADMIN-only Platform sign-in' "$NEXA_DEV_TENANT_ADMIN_EMAIL" "$NEXA_DEV_TENANT_ADMIN_PASSWORD" PLATFORM 'http://localhost:4200' success
-verify_login 'COMPANY_OWNER-only Platform sign-in' "$NEXA_DEV_COMPANY_OWNER_EMAIL" "$NEXA_DEV_COMPANY_OWNER_PASSWORD" PLATFORM 'http://localhost:4200' success
 verify_login 'SALES Platform sign-in' "$NEXA_DEV_SALES_EMAIL" "$NEXA_DEV_SALES_PASSWORD" PLATFORM 'http://localhost:4200' success
 verify_login 'WAREHOUSE Platform sign-in' "$NEXA_DEV_WAREHOUSE_EMAIL" "$NEXA_DEV_WAREHOUSE_PASSWORD" PLATFORM 'http://localhost:4200' success
 verify_login 'LOGISTICS Platform sign-in' "$NEXA_DEV_LOGISTICS_EMAIL" "$NEXA_DEV_LOGISTICS_PASSWORD" PLATFORM 'http://localhost:4200' success

@@ -18,7 +18,6 @@ printf '%s\n' 'Nexa local-only access'
 printf '%s\n' "Workspace: ${NEXA_DEV_WORKSPACE_SLUG}"
 printf '%s\n' "TENANT_ADMIN+COMPANY_OWNER | Platform | ${NEXA_DEV_OWNER_EMAIL} | [redacted]"
 printf '%s\n' "TENANT_ADMIN-only          | Platform | ${NEXA_DEV_TENANT_ADMIN_EMAIL} | [redacted]"
-printf '%s\n' "COMPANY_OWNER-only         | Platform | ${NEXA_DEV_COMPANY_OWNER_EMAIL} | [redacted]"
 printf '%s\n' "SALES         | Platform | ${NEXA_DEV_SALES_EMAIL} | [redacted]"
 printf '%s\n' "WAREHOUSE     | Platform | ${NEXA_DEV_WAREHOUSE_EMAIL} | [redacted]"
 printf '%s\n' "LOGISTICS     | Platform | ${NEXA_DEV_LOGISTICS_EMAIL} | [redacted]"
@@ -37,7 +36,6 @@ fi
 printf '%s\n' 'Interactive password output enabled for local development only.'
 printf '%s\n' "COMPANY_OWNER password: ${NEXA_DEV_OWNER_PASSWORD}"
 printf '%s\n' "TENANT_ADMIN password: ${NEXA_DEV_TENANT_ADMIN_PASSWORD}"
-printf '%s\n' "COMPANY_OWNER-only password: ${NEXA_DEV_COMPANY_OWNER_PASSWORD}"
 printf '%s\n' "SALES password: ${NEXA_DEV_SALES_PASSWORD}"
 printf '%s\n' "WAREHOUSE password: ${NEXA_DEV_WAREHOUSE_PASSWORD}"
 printf '%s\n' "LOGISTICS password: ${NEXA_DEV_LOGISTICS_PASSWORD}"
