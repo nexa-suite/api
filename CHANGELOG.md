@@ -22,11 +22,31 @@ Tenant onboarding draft persistence and visual convergence backend alignment.
 
 ## [0.11.0] - 2026-08-23
 
-Stabilization and release closure baseline for v0.11.0 milestone.
+PRE-V1 Architecture & Governance Foundation release for the API.
 
 ### Added
 
-- Synchronized release governance and release closure metadata.
+- Customer & Buyer Relationships boundary extraction, establishing dedicated customer account query services and client relationship interfaces.
+- Purchase Request expiry persistence foundation with UTC absolute timestamps (`expires_at`) and automatic validation.
+- Tenant & Workspace governance invariants enforcing exactly-one Company Owner protection and single workspace operation.
+- Token and session revocation hardening on tenant suspension/deactivation with stateful epoch validation.
+- Row Level Security (RLS) policies and tenant isolation boundary hardening across transactional schemas.
+
+### Changed
+
+- Realigned cross-module communication to use explicit public application contracts between business capabilities.
+- Strengthened Spring Modulith and ArchUnit architecture fitness rules preventing direct boundary leaks.
+- Improved payment credit account bootstrapping on initial reservation request.
+
+### Known limitations
+
+- Commercial Commitment currently uses warehouse reservation backing; canonical independent Inventory Reservation and Credit & Receivables separation remain scheduled for next construction wave.
+
+### Validation
+
+- Clean build, 398 unit/integration/architecture tests passed (105 profile-dependent skips).
+- Flyway migration and upgrade verification passed.
+- Spring Modulith and ArchUnit architectural compliance verified.
 
 ## [0.10.0] - 2026-08-22
 
