@@ -84,6 +84,8 @@ public class ApiSecurityConfiguration {
 						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
 						"/api/v1/organization-invitation-acceptances",
 						"/api/v1/public/contact-requests",
+						"/api/v1/tenant-management/organization-registration-drafts",
+						"/api/v1/tenant-management/organization-registration-drafts/**",
 						"/api/v1/tenant-management/organization-registrations",
 						"/api/v1/tenant-management/organization-registrations/**").permitAll();
 					authorize.requestMatchers("/api/**").authenticated();
@@ -99,7 +101,7 @@ public class ApiSecurityConfiguration {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Resume-Token", "X-Organization-Registration-Token", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface"));
 		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-ID", "X-Trace-ID"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();
