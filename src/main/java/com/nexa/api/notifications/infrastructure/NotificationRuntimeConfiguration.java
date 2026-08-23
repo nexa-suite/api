@@ -5,7 +5,7 @@ import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.service.NotificationService;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Profile;
 public class NotificationRuntimeConfiguration {
 	@Bean
 	NotificationUseCase notificationUseCase(NotificationInboxPersistencePort inbox,
-			NotificationPreferencePersistencePort preferences, ClientAccountPersistencePort accounts) {
+			NotificationPreferencePersistencePort preferences, CustomerAccountQuery accounts) {
 		return new NotificationService(inbox, preferences, accounts);
 	}
 

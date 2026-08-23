@@ -4,8 +4,8 @@ import com.nexa.api.logistics.application.port.DispatchCommandPersistencePort;
 import com.nexa.api.logistics.application.port.DispatchQueryPersistencePort;
 import com.nexa.api.logistics.application.port.OperationalHandoffPort;
 import com.nexa.api.logistics.application.service.StartDispatchRouteService;
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
@@ -21,16 +21,16 @@ import java.util.List;
 public class LogisticsOperationsService {
     private final DispatchQueryPersistencePort queries;
     private final DispatchCommandPersistencePort commands;
-    private final ClientAccountPersistencePort accounts;
+    private final CustomerAccountQuery accounts;
     private final StartDispatchRouteService startDispatchRoute;
     private final OperationalHandoffPort handoff;
 
-    public LogisticsOperationsService(DispatchQueryPersistencePort queries, DispatchCommandPersistencePort commands, ClientAccountPersistencePort accounts,
+    public LogisticsOperationsService(DispatchQueryPersistencePort queries, DispatchCommandPersistencePort commands, CustomerAccountQuery accounts,
                                       StartDispatchRouteService startDispatchRoute) {
         this(queries, commands, accounts, startDispatchRoute, null);
     }
 
-    public LogisticsOperationsService(DispatchQueryPersistencePort queries, DispatchCommandPersistencePort commands, ClientAccountPersistencePort accounts,
+    public LogisticsOperationsService(DispatchQueryPersistencePort queries, DispatchCommandPersistencePort commands, CustomerAccountQuery accounts,
                                       StartDispatchRouteService startDispatchRoute,
                                       OperationalHandoffPort handoff) {
         this.queries = queries; this.commands = commands; this.accounts = accounts; this.startDispatchRoute = startDispatchRoute;
@@ -75,7 +75,7 @@ public class LogisticsOperationsService {
     public List<AssigneeView> assignees(CurrentAccessContext c) { logisticsRead(c); return queries.assignees(tenant(c), workspace(c)); }
 
     private String readScope(CurrentAccessContext c) {
-        if (c.hasRole(MembershipRole.BUYER)) { c.requirePermission(Permission.TRACKING_BUYER_READ); return accounts.findForBuyer(tenant(c), workspace(c), actor(c)).map(ClientAccountView::id).orElseThrow(() -> error("RESOURCE_NOT_FOUND", true)); }
+        if (c.hasRole(MembershipRole.BUYER)) { c.requirePermission(Permission.TRACKING_BUYER_READ); return accounts.findBuyerReference(tenant(c), workspace(c), actor(c)).map(CustomerAccountReference::id).orElseThrow(() -> error("RESOURCE_NOT_FOUND", true)); }
         /* Company Owner is a governance/commercial role. A legacy sales-read
          * capability must not widen into the operational dispatch board; only
          * an explicit logistics/fulfillment grant (fixed or custom) can do so. */

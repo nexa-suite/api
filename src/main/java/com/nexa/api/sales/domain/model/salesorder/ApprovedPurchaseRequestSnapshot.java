@@ -1,6 +1,6 @@
 package com.nexa.api.sales.domain.model.salesorder;
 
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerAccountId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
@@ -13,11 +13,11 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 
-public record ApprovedPurchaseRequestSnapshot(TenantId tenantId, WorkspaceId workspaceId, ClientAccountId clientAccountId,
+public record ApprovedPurchaseRequestSnapshot(TenantId tenantId, WorkspaceId workspaceId, CustomerAccountId clientAccountId,
 		BuyerMembershipId buyerMembershipId, PurchaseRequestId purchaseRequestId, List<SalesOrderLine> lines,
 		PurchaseRequestPriority priority, LocalDate requestedDeliveryDate, String deliverySnapshot,
 		PaymentOption paymentOption, String notes, String currency, BigDecimal totalSnapshot) {
-	public ApprovedPurchaseRequestSnapshot(TenantId tenantId, WorkspaceId workspaceId, ClientAccountId clientAccountId,
+	public ApprovedPurchaseRequestSnapshot(TenantId tenantId, WorkspaceId workspaceId, CustomerAccountId clientAccountId,
 			PurchaseRequestId purchaseRequestId, List<SalesOrderLine> lines, BigDecimal totalSnapshot) {
 		this(tenantId, workspaceId, clientAccountId, new BuyerMembershipId(java.util.UUID.randomUUID()), purchaseRequestId,
 				lines, PurchaseRequestPriority.NORMAL, null, null, null, null,

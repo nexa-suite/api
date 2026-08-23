@@ -4,8 +4,8 @@ import com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase;
 import com.nexa.api.iam.domain.model.access.ClientSurface;
 import com.nexa.api.iam.domain.model.session.SessionId;
 import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.changefeed.ChangeEventAudience;
 import com.nexa.api.shared.application.changefeed.ChangeEventView;
 import com.nexa.api.shared.application.changefeed.ChangeFeedCapacityException;
@@ -41,7 +41,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
     private final ChangeFeedQueryPort feed;
     private final ResolveCurrentAccessContextUseCase accessContext;
     private final ValidateAccessSessionUseCase accessSession;
-    private final ClientAccountPersistencePort accounts;
+    private final CustomerAccountQuery accounts;
     private final ChangeFeedConnectionRegistry connections;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "nexa-change-feed"); thread.setDaemon(true); return thread;
@@ -49,7 +49,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
     private final AtomicInteger activeStreams = new AtomicInteger();
 
     public ChangeFeedStreamService(ChangeFeedQueryPort feed, ResolveCurrentAccessContextUseCase accessContext,
-            ValidateAccessSessionUseCase accessSession, ClientAccountPersistencePort accounts,
+            ValidateAccessSessionUseCase accessSession, CustomerAccountQuery accounts,
             ChangeFeedConnectionRegistry connections) {
         this.feed = feed; this.accessContext = accessContext; this.accessSession = accessSession; this.accounts = accounts; this.connections = connections;
     }
@@ -122,7 +122,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
         if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.roleCodes().equals(expected.roleCodes()) || !resolved.roleDefinitionIds().equals(expected.roleDefinitionIds()) || !resolved.tenantId().equals(expected.tenantId()) || !resolved.workspaceId().equals(expected.workspaceId()) || !resolved.surface().equals(expected.surface()) || resolved.authorizationVersion() != requiredLong(jwt, "authorization_version")) throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Change feed access context changed");
         return resolved;
     }
-    private String clientAccount(CurrentAccessContext context) { return context.hasRole(com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole.BUYER) ? accounts.findForBuyer(scope(context), workspace(context), context.membershipId().toString()).map(ClientAccountView::id).orElseThrow() : null; }
+    private String clientAccount(CurrentAccessContext context) { return context.hasRole(com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole.BUYER) ? accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString()).map(CustomerAccountReference::id).orElseThrow() : null; }
     private static String required(Jwt jwt, String name) { String value = jwt.getClaimAsString(name); if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing JWT claim " + name); return value; }
     private static long requiredLong(Jwt jwt, String name) { Object raw = jwt.getClaims().get(name); try { long value = raw instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(raw)); if (value < 0) throw new NumberFormatException(); return value; } catch (RuntimeException exception) { throw new IllegalArgumentException("Missing or invalid JWT claim " + name, exception); } }
     private static long parseLastEventId(String value) { if (value == null || value.isBlank()) return 0; try { long parsed = Long.parseLong(value); if (parsed < 0) throw new NumberFormatException(); return parsed; } catch (NumberFormatException exception) { throw new IllegalArgumentException("Last-Event-ID is invalid"); } }

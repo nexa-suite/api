@@ -1,7 +1,7 @@
 package com.nexa.api.sales.application.salesorder.service;
 
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.sales.application.exception.SalesOrderRejectionReasonRequiredException;
 import com.nexa.api.sales.application.exception.SalesOrderTransitionException;
 import com.nexa.api.sales.application.model.SalesPage;
@@ -26,23 +26,23 @@ import java.util.Objects;
 
 public class SalesOrderService implements SalesOrderUseCase {
 	private final SalesOrderPersistencePort persistence;
-	private final ClientAccountPersistencePort accounts;
+	private final CustomerAccountQuery accounts;
 	private final SalesOrderAggregatePersistencePort aggregatePersistence;
 	private final SalesOrderConversionPersistencePort conversionPersistence;
 	private final ConvertApprovedPurchaseRequestToSalesOrderService conversionService;
 
-	public SalesOrderService(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts) {
+	public SalesOrderService(SalesOrderPersistencePort persistence, CustomerAccountQuery accounts) {
 		this(persistence, accounts, persistence instanceof SalesOrderAggregatePersistencePort aggregate ? aggregate : null,
 				persistence instanceof SalesOrderConversionPersistencePort conversion ? conversion : null);
 	}
 
-	public SalesOrderService(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts,
+	public SalesOrderService(SalesOrderPersistencePort persistence, CustomerAccountQuery accounts,
 			SalesOrderAggregatePersistencePort aggregatePersistence) {
 		this(persistence, accounts, aggregatePersistence,
 				persistence instanceof SalesOrderConversionPersistencePort conversion ? conversion : null);
 	}
 
-	public SalesOrderService(SalesOrderPersistencePort persistence, ClientAccountPersistencePort accounts,
+	public SalesOrderService(SalesOrderPersistencePort persistence, CustomerAccountQuery accounts,
 			SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence) {
 		this.persistence = Objects.requireNonNull(persistence, "Sales Order persistence is required");
 		this.accounts = Objects.requireNonNull(accounts, "Client Account persistence is required");
@@ -104,8 +104,8 @@ public class SalesOrderService implements SalesOrderUseCase {
 			context.requirePermission(Permission.SALES_READ);
 			return null;
 		}
-		return accounts.findForBuyer(scope(context), workspace(context), context.membershipId().toString())
-				.map(ClientAccountView::id).orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("client-account"));
+		return accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString())
+				.map(CustomerAccountReference::id).orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("client-account"));
 	}
 
 	private static void commercialWrite(CurrentAccessContext context) {

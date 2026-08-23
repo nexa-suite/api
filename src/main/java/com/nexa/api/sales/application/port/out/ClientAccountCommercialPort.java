@@ -5,7 +5,7 @@ import com.nexa.api.sales.domain.model.credit.CreditProfile;
 
 import java.util.Optional;
 
-/** Narrow Sales ACL for the commercial facts needed by order workflows. */
+/** Narrow Sales ACL for ACTIVE customer commercial facts needed by order workflows. */
 public interface ClientAccountCommercialPort {
     Optional<ClientAccountCommercialProfile> find(String tenantId, String workspaceId, String clientAccountId);
 

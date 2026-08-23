@@ -6,7 +6,7 @@ import com.nexa.api.logistics.application.port.DispatchQueryPersistencePort;
 import com.nexa.api.logistics.application.port.DispatchRouteStartPort;
 import com.nexa.api.logistics.application.port.OperationalHandoffPort;
 import com.nexa.api.warehouse.application.port.WarehouseLogisticsFulfillmentPort;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -20,7 +20,7 @@ public class LogisticsRuntimeConfiguration {
                                                           DispatchRouteStartPort routeStart,
                                                           OperationalHandoffPort handoff,
                                                           WarehouseLogisticsFulfillmentPort warehouse,
-                                                          ClientAccountPersistencePort accounts) {
+                                                          CustomerAccountQuery accounts) {
         return new LogisticsOperationsService(queries, commands, accounts,
                 new com.nexa.api.logistics.application.service.StartDispatchRouteService(routeStart, warehouse), handoff);
     }

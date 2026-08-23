@@ -14,7 +14,8 @@ import com.nexa.api.sales.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderAggregatePersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersistencePort;
 import com.nexa.api.sales.application.port.CommercialCommitmentPort;
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerAccountId;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.sales.domain.model.salesorder.ApprovedPurchaseRequestSnapshot;
@@ -51,11 +52,14 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	private final JdbcTemplate jdbc;
 	private final ChangeEventPersistencePort changeFeed;
 	private final CommercialCommitmentPort commitments;
+	private final CustomerAccountQuery customers;
 
-	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments) {
+	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers) {
 		this.jdbc = jdbc;
 		this.changeFeed = changeFeed;
 		this.commitments = commitments;
+		this.customers = customers;
 	}
 
 	@Override
@@ -127,7 +131,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		String currency = requestLines.getFirst().currency();
 		List<SalesOrderLine> lines = requestLines.stream().map(line -> new SalesOrderLine(line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(), line.unit(), line.price(), line.currency(), line.quantity().multiply(line.price()), line.skuId(), line.familyId(), line.skuCode(), line.familyCode())).toList();
 		BigDecimal total = lines.stream().map(line -> line.quantity().multiply(line.unitPriceAmount())).reduce(BigDecimal.ZERO, BigDecimal::add);
-		return Optional.of(new ApprovedPurchaseRequestSnapshot(new TenantId(tenant), new WorkspaceId(workspace), new ClientAccountId(pr.clientAccountId()),
+		return Optional.of(new ApprovedPurchaseRequestSnapshot(new TenantId(tenant), new WorkspaceId(workspace), new CustomerAccountId(pr.clientAccountId()),
 				new BuyerMembershipId(uuid(pr.buyerMembershipId())), new PurchaseRequestId(purchaseRequestId), lines,
 				PurchaseRequestPriority.from(pr.priority()), pr.requestedDeliveryDate(), pr.deliverySnapshot(), PaymentOption.from(pr.paymentOption()), pr.notes(), currency, total));
 	}
@@ -191,7 +195,18 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		if (filter.status() != null) { where += " and o.status=?"; args.add(filter.status()); }
 		if (filter.priority() != null && !filter.priority().isBlank()) { where += " and o.priority=?"; args.add(filter.priority()); }
 		if (filter.clientAccountId() != null && !filter.clientAccountId().isBlank()) { where += " and o.client_account_id=?"; args.add(uuid(filter.clientAccountId())); }
-		if (filter.search() != null && !filter.search().isBlank()) { where += " and (lower(o.number) like ? or lower(c.code) like ? or lower(c.business_name) like ? or lower(c.commercial_name) like ?)"; String value = "%" + filter.search().toLowerCase(java.util.Locale.ROOT) + "%"; args.add(value); args.add(value); args.add(value); args.add(value); }
+		if (filter.search() != null && !filter.search().isBlank()) {
+			String value = "%" + filter.search().toLowerCase(java.util.Locale.ROOT) + "%";
+			List<String> customerIds = customers.findHistoricalIdsMatching(tenantId, workspaceId, filter.search());
+			where += " and (lower(o.number) like ?";
+			args.add(value);
+			if (!customerIds.isEmpty()) {
+				where += " or o.client_account_id in (" + customerIds.stream().map(ignored -> "?")
+						.collect(java.util.stream.Collectors.joining(",")) + ")";
+				customerIds.stream().map(SalesOrderPersistenceAdapter::uuid).forEach(args::add);
+			}
+			where += ")";
+		}
 		if (filter.createdFrom() != null) { where += " and o.created_at >= ?"; args.add(filter.createdFrom()); }
 		if (filter.createdTo() != null) { where += " and o.created_at < ?"; args.add(filter.createdTo().plusDays(1)); }
 		if (filter.requestedDeliveryFrom() != null) { where += " and o.requested_delivery_date >= ?"; args.add(filter.requestedDeliveryFrom()); }
@@ -250,7 +265,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	}
 	private SalesOrder aggregate(SalesOrderView view) {
 		List<SalesOrderLine> lines = view.lines().stream().map(line -> new SalesOrderLine(line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), parseUuid(line.skuId()), parseUuid(line.familyId()), line.skuCode(), line.familyCode())).toList();
-        return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new ClientAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), new PurchaseRequestId(view.sourcePurchaseRequestId()), new MembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
+        return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new CustomerAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), new PurchaseRequestId(view.sourcePurchaseRequestId()), new MembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
 	}
 	private long nextSequence(UUID tenant, UUID workspace, int year) {
 		jdbc.update("insert into sales.sales_order_sequence (tenant_id,workspace_id,order_year,next_value) values (?,?,?,1) on conflict do nothing", tenant, workspace, year);
@@ -258,7 +273,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		jdbc.update("update sales.sales_order_sequence set next_value=? where tenant_id=? and workspace_id=? and order_year=?", value + 1, tenant, workspace, year);
 		return value;
 	}
-	private String orderFromSql() { return " from sales.sales_order o left join sales.client_account c on c.id=o.client_account_id and c.tenant_id=o.tenant_id and c.workspace_id=o.workspace_id"; }
+	private String orderFromSql() { return " from sales.sales_order o"; }
 	private String orderSql() { return "select o.id,o.number,o.tenant_id,o.workspace_id,o.client_account_id,o.created_by_membership_id,o.buyer_membership_id,o.source_purchase_request_id,o.priority,o.requested_delivery_date,o.delivery_snapshot,o.payment_option,o.notes,o.currency,o.total_amount,o.status,o.created_at,o.updated_at,o.confirmed_at,o.rejected_at,o.cancelled_at,o.rejection_reason,o.version" + orderFromSql(); }
 	private SalesOrderView summary(ResultSet rs) throws java.sql.SQLException { return new SalesOrderView(rs.getObject(1).toString(), rs.getString(2), rs.getObject(3).toString(), rs.getObject(4).toString(), rs.getObject(5).toString(), rs.getObject(6).toString(), rs.getObject(7).toString(), stringUuid(rs.getObject(8)), com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority.from(rs.getString(9)), rs.getObject(10, java.time.LocalDate.class), rs.getString(11), com.nexa.api.sales.domain.model.purchaserequest.PaymentOption.from(rs.getString(12)), rs.getString(13), rs.getString(14), rs.getBigDecimal(15), rs.getString(16), rs.getTimestamp(17).toInstant(), rs.getTimestamp(18).toInstant(), rs.getTimestamp(19) == null ? null : rs.getTimestamp(19).toInstant(), rs.getTimestamp(20) == null ? null : rs.getTimestamp(20).toInstant(), rs.getTimestamp(21) == null ? null : rs.getTimestamp(21).toInstant(), rs.getString(22), rs.getLong(23), List.of()); }
 	private Optional<SalesOrderView> optionalDetail(ResultSet rs) throws java.sql.SQLException { return rs.next() ? Optional.of(detail(rs)) : Optional.empty(); }

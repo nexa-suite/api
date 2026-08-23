@@ -1,7 +1,7 @@
 package com.nexa.api.sales.application.salesorder.export.service;
 
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.application.salesorder.export.model.SalesOrderSummaryExportFormat;
 import com.nexa.api.sales.application.salesorder.export.model.SalesOrderSummaryExportResult;
@@ -18,10 +18,10 @@ import java.util.Objects;
 
 public final class SalesOrderSummaryExportService implements SalesOrderSummaryExportUseCase {
 	private final SalesOrderSummaryProjectionPort projection;
-	private final ClientAccountPersistencePort accounts;
+	private final CustomerAccountQuery accounts;
 	private final SalesOrderSummaryRendererStrategy renderers;
 
-	public SalesOrderSummaryExportService(SalesOrderSummaryProjectionPort projection, ClientAccountPersistencePort accounts,
+	public SalesOrderSummaryExportService(SalesOrderSummaryProjectionPort projection, CustomerAccountQuery accounts,
 			SalesOrderSummaryRendererStrategy renderers) {
 		this.projection = Objects.requireNonNull(projection, "Sales order summary projection is required");
 		this.accounts = Objects.requireNonNull(accounts, "Client accounts are required");
@@ -54,8 +54,8 @@ public final class SalesOrderSummaryExportService implements SalesOrderSummaryEx
 			return null;
 		}
 		context.requirePermission(PermissionKey.BUYER_ORDER_READ);
-		return accounts.findForBuyer(tenantId, workspaceId, context.membershipId().toString())
-				.map(ClientAccountView::id)
+		return accounts.findBuyerReference(tenantId, workspaceId, context.membershipId().toString())
+				.map(CustomerAccountReference::id)
 				.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
 	}
 

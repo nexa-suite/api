@@ -41,6 +41,9 @@ import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyE
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
+import com.nexa.api.customerrelationships.application.exception.CustomerRelationshipConflictException;
+import com.nexa.api.customerrelationships.application.exception.CustomerRelationshipPreconditionRequiredException;
+import com.nexa.api.customerrelationships.contract.CustomerRelationshipInvariantViolation;
 import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
@@ -299,6 +302,17 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request); }
+	@ExceptionHandler(CustomerRelationshipConflictException.class)
+	public ResponseEntity<ProblemDetail> handleCustomerRelationshipConflict(CustomerRelationshipConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Customer relationship changed by another request", request); }
+	@ExceptionHandler(CustomerRelationshipPreconditionRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleCustomerRelationshipPrecondition(CustomerRelationshipPreconditionRequiredException exception, HttpServletRequest request) {
+		return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
+	}
+	@ExceptionHandler(CustomerRelationshipInvariantViolation.class)
+	public ResponseEntity<ProblemDetail> handleCustomerRelationshipInvariant(CustomerRelationshipInvariantViolation exception, HttpServletRequest request) {
+		LOGGER.warn("Customer relationship invariant rejected request {}: {}", request.getRequestURI(), exception.getMessage());
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.INVALID_REQUEST, "Customer relationship request is invalid", request);
+	}
 	@ExceptionHandler(PurchaseRequestDraftConcurrencyException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.CONCURRENCY_CONFLICT, "Purchase request draft version is stale", request); }
 	@ExceptionHandler(PurchaseRequestDraftInvariantException.class)
@@ -379,7 +393,11 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(com.nexa.api.shared.application.error.ApiResourceNotFoundException.class)
 	public ResponseEntity<ProblemDetail> handleApiNotFound(com.nexa.api.shared.application.error.ApiResourceNotFoundException exception, HttpServletRequest request) {
-		return response(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Resource not found", request);
+		ApiErrorCode code = switch (exception.resource()) {
+			case "client-account", "client-account-address", "buyer-membership" -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
+			default -> ApiErrorCode.RESOURCE_NOT_FOUND;
+		};
+		return response(HttpStatus.NOT_FOUND, code, "Resource not found", request);
 	}
 
 	@ExceptionHandler(com.nexa.api.payments.application.exception.PaymentOperationInProgressException.class)

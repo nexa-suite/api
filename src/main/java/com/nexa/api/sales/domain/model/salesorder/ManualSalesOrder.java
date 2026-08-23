@@ -1,6 +1,6 @@
 package com.nexa.api.sales.domain.model.salesorder;
 
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerAccountId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
@@ -17,7 +17,7 @@ public final class ManualSalesOrder {
     private final SalesOrderNumber number;
     private final TenantId tenantId;
     private final WorkspaceId workspaceId;
-    private final ClientAccountId clientAccountId;
+    private final CustomerAccountId clientAccountId;
     private final MembershipId createdByMembershipId;
     private final List<SalesOrderLine> lines;
     private final PurchaseRequestPriority priority;
@@ -27,7 +27,7 @@ public final class ManualSalesOrder {
     private long version;
 
     private ManualSalesOrder(SalesOrderId id, SalesOrderNumber number, TenantId tenantId, WorkspaceId workspaceId,
-                             ClientAccountId clientAccountId, MembershipId createdByMembershipId,
+                             CustomerAccountId clientAccountId, MembershipId createdByMembershipId,
                              List<SalesOrderLine> lines, PurchaseRequestPriority priority,
                              ManualSalesOrderSnapshot snapshot, Instant createdAt) {
         this.id = Objects.requireNonNull(id, "Sales order id is required");
@@ -50,7 +50,7 @@ public final class ManualSalesOrder {
     }
 
     public static ManualSalesOrder create(SalesOrderId id, SalesOrderNumber number, TenantId tenantId,
-                                          WorkspaceId workspaceId, ClientAccountId clientAccountId,
+                                          WorkspaceId workspaceId, CustomerAccountId clientAccountId,
                                           MembershipId createdByMembershipId, List<SalesOrderLine> lines,
                                           PurchaseRequestPriority priority, ManualSalesOrderSnapshot snapshot,
                                           Instant createdAt) {
@@ -70,7 +70,7 @@ public final class ManualSalesOrder {
     public SalesOrderNumber number() { return number; }
     public TenantId tenantId() { return tenantId; }
     public WorkspaceId workspaceId() { return workspaceId; }
-    public ClientAccountId clientAccountId() { return clientAccountId; }
+    public CustomerAccountId clientAccountId() { return clientAccountId; }
     public MembershipId createdByMembershipId() { return createdByMembershipId; }
     public List<SalesOrderLine> lines() { return lines; }
     public PurchaseRequestPriority priority() { return priority; }
