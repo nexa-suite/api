@@ -135,6 +135,14 @@ public final class ApiProblemDetailFactory {
 				case REGISTRATION_SLUG_CONFLICT -> "Organization workspace slug conflict";
 				case FOUNDER_EMAIL_INCOMPATIBLE -> "Founder email is already used by an incompatible membership";
 				case REGISTRATION_NOT_PENDING -> "Organization registration is not pending";
+				case DRAFT_NOT_FOUND -> "Organization onboarding draft not found";
+				case DRAFT_NOT_EDITABLE -> "Organization onboarding draft is not editable";
+				case DRAFT_STEP_INVALID -> "Organization onboarding step is invalid";
+				case DRAFT_INCOMPLETE -> "Organization onboarding draft is incomplete";
+				case DRAFT_TERMS_REQUIRED -> "Organization onboarding terms are required";
+				case DRAFT_SECRET_FIELD_NOT_ALLOWED -> "Secrets are not allowed in onboarding drafts";
+				case DRAFT_REFERENCE_METADATA_ONLY -> "Commercial setup accepts reference metadata only";
+				case DRAFT_VERSION_CONFLICT -> "Organization onboarding draft version conflict";
 				case INVITATION_INVALID -> "Invitation invalid or expired";
 				case INVITATION_CONFLICT -> "Invitation conflict";
 				case CUSTOM_FIELD_CONFLICT -> "Custom field conflict";
