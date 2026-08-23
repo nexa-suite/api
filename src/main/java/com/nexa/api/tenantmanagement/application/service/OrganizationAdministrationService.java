@@ -89,6 +89,10 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			WorkspaceSummary existing = port.findWorkspace(context.tenantId().toString(), previous.get().toString()).orElseThrow(() -> new ApiResourceNotFoundException("workspace"));
 			return new OrganizationAdministrationResult<>(existing, existing.version());
 		}
+		port.lockTenant(context.tenantId().toString());
+		if (port.tenantHasWorkspace(context.tenantId().toString())) {
+			throw new OrganizationAdministrationInvariantViolation("Tenant already has its V1 workspace");
+		}
 		UUID id = UUID.randomUUID();
 		if (port.createWorkspace(context.tenantId().toString(), id, safeName, safeSlug, Instant.now()) == 0) throw new ConcurrencyConflictException();
 		port.createWorkspaceMembership(context.tenantId().toString(), id.toString(), context.userId().value(), context.roles().stream().filter(role -> role != MembershipRole.BUYER).map(Enum::name).collect(Collectors.toUnmodifiableSet()), Instant.now());
@@ -163,6 +167,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			port.lockTenant(context.tenantId().toString());
 			if (port.activeTenantAdminCount(current.workspaceId()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active tenant admin must remain");
 		}
+		guardCompanyOwnerTransition(context.tenantId().toString(), before.contains(MembershipRole.COMPANY_OWNER), roles.contains(MembershipRole.COMPANY_OWNER));
 		if (AssignableRolePolicy.isCompanyOwner(context.roleCodes()) && !AssignableRolePolicy.isTenantAdmin(context.roleCodes())
 				&& (before.contains(MembershipRole.TENANT_ADMIN) || before.contains(MembershipRole.COMPANY_OWNER)
 						|| roles.contains(MembershipRole.TENANT_ADMIN) || roles.contains(MembershipRole.COMPANY_OWNER))) {
@@ -196,6 +201,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			if ("BUYER".equalsIgnoreCase(target.code())) throw new OrganizationAdministrationInvariantViolation("Buyer cannot be assigned to an internal membership");
 		}
 		Set<String> targetCodes = targets.stream().map(RoleDefinition::code).collect(Collectors.toUnmodifiableSet());
+		guardCompanyOwnerTransition(context.tenantId().toString(), containsRole(current, MembershipRole.COMPANY_OWNER), targetCodes.stream().anyMatch(code -> "COMPANY_OWNER".equalsIgnoreCase(code)));
 		if (containsRole(current, MembershipRole.TENANT_ADMIN)
 				&& targetCodes.stream().noneMatch(code -> "TENANT_ADMIN".equalsIgnoreCase(code))) {
 			port.lockTenant(context.tenantId().toString());
@@ -226,6 +232,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			return new OrganizationAdministrationResult<>(current, current.version());
 		}
 		if (containsRole(current, MembershipRole.TENANT_ADMIN)) { port.lockTenant(context.tenantId().toString()); if (port.activeTenantAdminCount(current.workspaceId()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active tenant admin must remain"); }
+		if (containsRole(current, MembershipRole.COMPANY_OWNER)) { port.lockTenant(context.tenantId().toString()); if (port.activeCompanyOwnerCount(context.tenantId().toString()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active company owner must remain"); }
 		if (port.updateStatus(context.tenantId().toString(), current.id(), "DISABLED", expectedVersion) == 0) throw new ConcurrencyConflictException();
 		port.appendMembershipEvent("MEMBERSHIP_SUSPENDED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), String.join(",", current.roles()), current.status(), String.join(",", current.roles()), "DISABLED", correlationId);
 		audit(context, "MEMBERSHIP_SUSPENDED", current.id(), correlationId, java.util.Map.of("status", "DISABLED"));
@@ -269,6 +276,17 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			}
 		}
 		return java.util.Set.copyOf(roles);
+	}
+	private void guardCompanyOwnerTransition(String tenantId, boolean beforeOwner, boolean afterOwner) {
+		if (beforeOwner == afterOwner) return;
+		port.lockTenant(tenantId);
+		int activeOwners = port.activeCompanyOwnerCount(tenantId);
+		if (!beforeOwner && afterOwner && activeOwners >= 1) {
+			throw new OrganizationAdministrationInvariantViolation("Exactly one active company owner is required");
+		}
+		if (beforeOwner && !afterOwner && activeOwners <= 1) {
+			throw new OrganizationAdministrationInvariantViolation("At least one active company owner must remain");
+		}
 	}
 	private RoleDefinition resolveRoleDefinition(CurrentAccessContext context, String rawId) {
 		try {

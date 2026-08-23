@@ -88,6 +88,12 @@ public class OrganizationInvitationService implements InvitationUseCase {
 		for (MembershipRole role : roleSet) {
 			AssignableRolePolicy.requireCanAssign(context.roleCodes(), context.permissionCodes(), RoleCatalog.definitionFor(role));
 		}
+		if (roleSet.contains(MembershipRole.COMPANY_OWNER)) {
+			invitations.lockTenant(context.tenantId().toString());
+			if (invitations.activeCompanyOwnerCount(context.tenantId().toString()) >= 1) {
+				throw new InvitationConflictException("An active company owner already exists");
+			}
+		}
 		String requestHash = tokens.sha256(normalizedEmail + "|" + normalizedName + "|" + roleSet.stream().map(Enum::name).sorted().collect(Collectors.joining(",")));
 		if (invitations.idempotencyKeyHasDifferentPayload(context.tenantId().toString(), idempotencyKey, requestHash)) throw new InvitationIdempotencyConflictException();
 		var previous = invitations.findIdempotent(context.tenantId().toString(), idempotencyKey, requestHash);
@@ -167,6 +173,12 @@ public class OrganizationInvitationService implements InvitationUseCase {
 			return existing.userId();
 		}).orElseGet(() -> invitations.createUser(invitation.email(), displayName == null || displayName.isBlank() ? invitation.displayName() : displayName.strip(), hasher.encode(password), clock.instant()));
 		UUID membershipId;
+		if (invitation.roles().contains(MembershipRole.COMPANY_OWNER)) {
+			invitations.lockTenant(invitation.tenantId().toString());
+			if (invitations.activeCompanyOwnerCount(invitation.tenantId().toString()) >= 1) {
+				throw new InvitationConflictException("An active company owner already exists");
+			}
+		}
 		try {
 			membershipId = invitations.createMembership(invitation.tenantId().toString(), invitation.workspaceId().toString(), userId, clock.instant());
 		} catch (InvitationPersistencePort.DuplicateMembershipException exception) {
