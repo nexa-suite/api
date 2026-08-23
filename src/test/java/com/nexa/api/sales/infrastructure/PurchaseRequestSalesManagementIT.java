@@ -32,5 +32,10 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "sales-submit-" + uuid()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SUBMITTED"));
+
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+                "select count(*) from payments.credit_account where tenant_id=?::uuid and workspace_id=?::uuid "
+                        + "and client_account_id=?::uuid and currency='PEN' and status='ACTIVE'",
+                Integer.class, tenantId(), workspaceId(), buyerClientAccountId())).isEqualTo(1);
     }
 }

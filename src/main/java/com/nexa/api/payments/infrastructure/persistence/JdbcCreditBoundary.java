@@ -44,6 +44,13 @@ public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservatio
         if (amount == null || amount.signum() <= 0 || currency == null || currency.isBlank()) {
             throw new IllegalStateException("Credit commitment requires priced lines");
         }
+        jdbc.update("insert into payments.credit_account "
+                        + "(id,tenant_id,workspace_id,client_account_id,currency,credit_limit,created_at,updated_at) "
+                        + "select md5(c.id::text || ':' || c.credit_currency)::uuid,c.tenant_id,c.workspace_id,c.id,"
+                        + "c.credit_currency,c.credit_limit,?,? from sales.client_account c "
+                        + "where c.tenant_id=? and c.workspace_id=? and c.id=? and c.credit_currency=? "
+                        + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
+                timestamp(now), timestamp(now), tenantId, workspaceId, customerAccountId, currency);
         CreditAccountRow account = jdbc.query(
                 "select id,credit_limit,credit_exposure,reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? "
                         + "and client_account_id=? and currency=? and status='ACTIVE' for update",
