@@ -1,7 +1,7 @@
 package com.nexa.api.sales.application.salesorder.export;
 
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.sales.application.salesorder.export.model.SalesOrderSummaryExportFormat;
 import com.nexa.api.sales.application.salesorder.export.model.SalesOrderSummaryLineSnapshot;
 import com.nexa.api.sales.application.salesorder.export.model.SalesOrderSummarySnapshot;
@@ -39,7 +39,7 @@ class SalesOrderSummaryExportIsolationTests {
 	@Test
 	void rejectsProjectionThatCrossesWorkspaceBoundary() {
 		SalesOrderSummaryProjectionPort projection = mock(SalesOrderSummaryProjectionPort.class);
-		ClientAccountPersistencePort accounts = mock(ClientAccountPersistencePort.class);
+		CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
 		when(projection.find(TENANT, WORKSPACE, null, ORDER)).thenReturn(Optional.of(snapshot(CLIENT_A, "different-workspace")));
 		SalesOrderSummaryExportService service = service(projection, accounts);
 
@@ -51,8 +51,8 @@ class SalesOrderSummaryExportIsolationTests {
 	@Test
 	void buyerProjectionIsClientScopedAndFailsClosedOnMismatch() {
 		CurrentAccessContext context = buyerContext();
-		ClientAccountPersistencePort accounts = mock(ClientAccountPersistencePort.class);
-		when(accounts.findForBuyer(TENANT, WORKSPACE, context.membershipId().toString())).thenReturn(Optional.of(client(CLIENT_A)));
+		CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+		when(accounts.findBuyerReference(TENANT, WORKSPACE, context.membershipId().toString())).thenReturn(Optional.of(client(CLIENT_A)));
 		SalesOrderSummaryProjectionPort projection = mock(SalesOrderSummaryProjectionPort.class);
 		when(projection.find(TENANT, WORKSPACE, CLIENT_A, ORDER)).thenReturn(Optional.of(snapshot(CLIENT_B, WORKSPACE)));
 		SalesOrderSummaryExportService service = service(projection, accounts);
@@ -62,7 +62,7 @@ class SalesOrderSummaryExportIsolationTests {
 		verify(projection).find(TENANT, WORKSPACE, CLIENT_A, ORDER);
 	}
 
-	private static SalesOrderSummaryExportService service(SalesOrderSummaryProjectionPort projection, ClientAccountPersistencePort accounts) {
+	private static SalesOrderSummaryExportService service(SalesOrderSummaryProjectionPort projection, CustomerAccountQuery accounts) {
 		SalesOrderSummaryRenderer renderer = new SalesOrderSummaryRenderer() {
 			@Override public SalesOrderSummaryExportFormat format() { return SalesOrderSummaryExportFormat.CSV; }
 			@Override public byte[] render(SalesOrderSummarySnapshot snapshot) { return "ok".getBytes(); }
@@ -87,8 +87,8 @@ class SalesOrderSummaryExportIsolationTests {
 		return context;
 	}
 
-	private static ClientAccountView client(String id) {
-		return new ClientAccountView(id, "C-001", "Client", "Client", "PE", "RUC", "20123456789", "B2B", null, null, null, null, null, "ACTIVE", null, 0);
+	private static CustomerAccountReference client(String id) {
+		return new CustomerAccountReference(id, "ACTIVE");
 	}
 
 	private static SalesOrderSummarySnapshot snapshot(String client, String workspace) {

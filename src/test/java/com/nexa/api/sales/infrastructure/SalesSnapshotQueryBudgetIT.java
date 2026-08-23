@@ -42,7 +42,8 @@ class SalesSnapshotQueryBudgetIT extends PostgresIntegrationSupport {
             catalogQueryCounts.add(catalogJdbc.queryCount());
 
             CountingJdbcTemplate skuJdbc = new CountingJdbcTemplate(jdbc.getDataSource());
-            var skuAdapter = new SellableSkuSnapshotPersistenceAdapter(skuJdbc);
+            var skuAdapter = new SellableSkuSnapshotPersistenceAdapter(
+                    new com.nexa.api.catalogmanagement.infrastructure.query.JdbcSellableSkuQuery(skuJdbc));
             assertThat(skuAdapter.findActive(skuIds.subList(0, lineCount), UUID.fromString(tenantId()), UUID.fromString(workspaceId())))
                     .hasSize(lineCount);
             skuQueryCounts.add(skuJdbc.queryCount());

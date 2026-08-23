@@ -1,7 +1,7 @@
 package com.nexa.api.sales.application.purchaserequest.service;
 
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
@@ -51,23 +51,23 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	private final PurchaseRequestEventPersistencePort events;
 	private final IdempotencyPersistencePort idempotency;
 	private final CatalogItemSnapshotLookupPort catalog;
-	private final ClientAccountPersistencePort accounts;
+	private final CustomerAccountQuery accounts;
 	private final ChangeEventPersistencePort changeFeed;
 	private final CommercialCommitmentPort commitments;
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
-			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts) {
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts) {
 		this(persistence, events, idempotency, catalog, accounts, new NoopChangeEventPersistence(), null);
 	}
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
-			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 			ChangeEventPersistencePort changeFeed) {
 		this(persistence, events, idempotency, catalog, accounts, changeFeed, null);
 	}
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
-			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments) {
 		this.persistence = persistence;
 		this.events = events;
@@ -111,9 +111,9 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			if (requestedClientAccountId == null || requestedClientAccountId.isBlank()) {
 				throw new SalesInvariantViolation("Client Account is required for an internal Purchase Request");
 			}
-			account = accounts.find(scope(context), workspace(context), requestedClientAccountId.trim())
+			account = accounts.findReference(scope(context), workspace(context), requestedClientAccountId.trim())
 					.filter(value -> "ACTIVE".equals(value.status()))
-					.map(ClientAccountView::id)
+					.map(CustomerAccountReference::id)
 					.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
 		}
 		PurchaseRequestPriority priorityValue = PurchaseRequestPriority.from(priority);
@@ -281,8 +281,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			internal(context, Permission.SALES_READ);
 			return null;
 		}
-		return accounts.findForBuyer(scope(context), workspace(context), context.membershipId().toString())
-				.map(ClientAccountView::id).orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
+		return accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString())
+				.map(CustomerAccountReference::id).orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
 	}
 
 	private static void buyerWrite(CurrentAccessContext context) {

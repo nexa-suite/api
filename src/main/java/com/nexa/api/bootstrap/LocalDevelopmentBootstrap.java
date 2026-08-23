@@ -58,7 +58,6 @@ public class LocalDevelopmentBootstrap {
 				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", Set.of("LOGISTICS")),
 				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER"))));
 		addOptionalUser(users, "NEXA_DEV_TENANT_ADMIN_EMAIL", "NEXA_DEV_TENANT_ADMIN_PASSWORD", Set.of("TENANT_ADMIN"));
-		addOptionalUser(users, "NEXA_DEV_COMPANY_OWNER_EMAIL", "NEXA_DEV_COMPANY_OWNER_PASSWORD", Set.of("COMPANY_OWNER"));
 		UUID buyerUserId = null;
 		for (UserSeed user : users) {
 			UUID userId = user(user, now);
@@ -226,7 +225,6 @@ public class LocalDevelopmentBootstrap {
 	private static String defaultEmail(String key) {
 		return switch (key) {
 			case "NEXA_DEV_TENANT_ADMIN_EMAIL" -> "tenant.admin@icisa.test";
-			case "NEXA_DEV_COMPANY_OWNER_EMAIL" -> "company.owner@icisa.test";
 			case "NEXA_DEV_OWNER_EMAIL" -> "owner@icisa.test";
 			case "NEXA_DEV_SALES_EMAIL" -> "sales@icisa.test";
 			case "NEXA_DEV_WAREHOUSE_EMAIL" -> "warehouse@icisa.test";

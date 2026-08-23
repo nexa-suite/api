@@ -2,6 +2,7 @@ package com.nexa.api.shared.presentation.error;
 
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -86,6 +87,16 @@ class GlobalExceptionHandlerTests {
 				.andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
 	}
 
+	@Test
+	void preservesClientAccountNotFoundCodeForCustomerRelationshipResources() throws Exception {
+		mockMvc.perform(get("/missing-client-account"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.code").value("CLIENT_ACCOUNT_NOT_FOUND"));
+		mockMvc.perform(get("/missing-client-address"))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.code").value("CLIENT_ACCOUNT_NOT_FOUND"));
+	}
+
 	@RestController
 	public static class TestController {
 		@PostMapping("/test")
@@ -109,6 +120,16 @@ class GlobalExceptionHandlerTests {
 
 		@GetMapping("/validated-query")
 		void validatedQuery(@RequestParam @Pattern(regexp = "VALID") String value) {
+		}
+
+		@GetMapping("/missing-client-account")
+		void missingClientAccount() {
+			throw new ApiResourceNotFoundException("client-account");
+		}
+
+		@GetMapping("/missing-client-address")
+		void missingClientAddress() {
+			throw new ApiResourceNotFoundException("client-account-address");
 		}
 	}
 

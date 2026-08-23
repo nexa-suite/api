@@ -40,6 +40,7 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         MvcResult profile = mockMvc.perform(get("/api/v1/organization").header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();
         String etag = profile.getResponse().getHeader("ETag");
+        long initialVersion = Long.parseLong(etag.replace("\"", ""));
         assertThat(etag).isNotBlank();
 
         mockMvc.perform(patch("/api/v1/organization").header("Authorization", "Bearer " + owner)
@@ -48,7 +49,7 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         MvcResult updated = mockMvc.perform(patch("/api/v1/organization").header("Authorization", "Bearer " + owner).header("If-Match", etag)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"legalName\":\"ICISA Test\",\"displayName\":\"ICISA Administration\",\"businessIdentifier\":\"IT-ADMIN\",\"operationCategory\":\"B2B_COLD_CHAIN_DISTRIBUTOR\"}"))
                 .andExpect(status().isOk()).andReturn();
-        assertThat(updated.getResponse().getHeader("ETag")).isEqualTo("\"1\"");
+        assertThat(Long.parseLong(updated.getResponse().getHeader("ETag").replace("\"", ""))).isEqualTo(initialVersion + 1);
         String organizationAudit = jdbc.queryForObject("select metadata_json::text from iam.security_audit_event where event_type='ORGANIZATION_UPDATED' order by occurred_at desc limit 1", String.class);
         assertThat(organizationAudit).contains("oldValues", "newValues", "ICISA Test", "ICISA Administration", "IT-ADMIN");
         mockMvc.perform(patch("/api/v1/organization").header("Authorization", "Bearer " + owner).header("If-Match", etag)
@@ -66,16 +67,16 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
 
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         mockMvc.perform(get("/api/v1/organization").header("Authorization", "Bearer " + buyer)).andExpect(status().isForbidden());
-        String pureOwner = createPureOwner();
+		String pureOwner = accessToken(OWNER_EMAIL, "PLATFORM");
         String securityEtag = mockMvc.perform(get("/api/v1/settings/security").header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn().getResponse().getHeader("ETag");
-        mockMvc.perform(patch("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner).header("If-Match", securityEtag)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"passwordMinLength\":12,\"sessionDurationMinutes\":480,\"invitationExpirationHours\":72,\"requiredEmailDomain\":null}"))
-                .andExpect(status().isForbidden());
+		mockMvc.perform(patch("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner).header("If-Match", securityEtag)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"passwordMinLength\":12,\"sessionDurationMinutes\":480,\"invitationExpirationHours\":72,\"requiredEmailDomain\":null}"))
+				.andExpect(status().isOk());
     }
 
     @Test
-    void pureCompanyOwnerCanManageOrganizationAndWorkforceButNotTechnicalSettings() throws Exception {
-        String pureOwner = createPureOwner();
+    void companyOwnerCanManageOrganizationAndWorkforce() throws Exception {
+        String pureOwner = accessToken(OWNER_EMAIL, "PLATFORM");
         MvcResult profile = mockMvc.perform(get("/api/v1/organization").header("Authorization", "Bearer " + pureOwner))
                 .andExpect(status().isOk()).andReturn();
         String profileEtag = profile.getResponse().getHeader("ETag");
@@ -108,37 +109,18 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                         .header("Authorization", "Bearer " + pureOwner).header("If-Match", suspended.getResponse().getHeader("ETag")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
 
-        String securityEtag = mockMvc.perform(get("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner))
-                .andExpect(status().isOk()).andReturn().getResponse().getHeader("ETag");
-        mockMvc.perform(patch("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner).header("If-Match", securityEtag)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"passwordMinLength\":12,\"sessionDurationMinutes\":480,\"invitationExpirationHours\":72,\"requiredEmailDomain\":null}"))
-                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/settings/security").header("Authorization", "Bearer " + pureOwner))
+                .andExpect(status().isOk());
     }
 
     @Test
-    void workspacesAreIdempotentUniqueAndProtectTheFinalAdministrativeMembership() throws Exception {
+    void tenantAllowsOnlyItsExistingV1WorkspaceAndProtectsFinalOwnerAndAdministrator() throws Exception {
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
-        String slug = "admin-" + uuid().substring(0, 8);
-        String key = "workspace-" + uuid();
-        MvcResult created = mockMvc.perform(post("/api/v1/workspaces").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Administration Workspace\",\"slug\":\"" + slug + "\"}"))
-                .andExpect(status().isCreated()).andReturn();
-        String workspaceId = json(created).get("id").asText();
-        String workspaceEtag = created.getResponse().getHeader("ETag");
-        MvcResult repeated = mockMvc.perform(post("/api/v1/workspaces").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Administration Workspace\",\"slug\":\"" + slug + "\"}"))
-                .andExpect(status().isCreated()).andReturn();
-        assertThat(json(repeated).get("id").asText()).isEqualTo(workspaceId);
+        String key = "workspace-extra-" + uuid();
         mockMvc.perform(post("/api/v1/workspaces").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Other\",\"slug\":\"other-" + uuid().substring(0, 8) + "\"}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Extra Workspace\",\"slug\":\"extra-" + uuid().substring(0, 8) + "\"}"))
                 .andExpect(status().isConflict());
-        mockMvc.perform(patch("/api/v1/workspaces/" + workspaceId).header("Authorization", "Bearer " + owner).header("If-Match", workspaceEtag)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Administration Workspace Updated\",\"slug\":\"" + slug + "\"}"))
-                .andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/workspaces/" + workspaceId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", "\"1\""))
-                .andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/workspaces/" + workspaceId + "/reactivations").header("Authorization", "Bearer " + owner).header("If-Match", "\"2\""))
-                .andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace where tenant_id=?", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
 
         String ownerMembership = jdbc.queryForObject("select m.id::text from tenant_management.workspace_membership m join iam.user_account u on u.id=m.user_id where u.normalized_email=? and m.workspace_id=?", String.class, OWNER_EMAIL, UUID.fromString(workspaceId()));
         String ownerMembershipVersion = jdbc.queryForObject("select version::text from tenant_management.workspace_membership where id=?", String.class, UUID.fromString(ownerMembership));
@@ -146,18 +128,16 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"roles\":[\"COMPANY_OWNER\"]}"))
                 .andExpect(status().isConflict());
         mockMvc.perform(get("/api/v1/workspaces/" + UUID.randomUUID()).header("Authorization", "Bearer " + owner)).andExpect(status().isNotFound());
+    }
 
-        String raceSlug = "race-" + uuid().substring(0, 8);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        try {
-            List<Callable<Integer>> calls = List.of(
-                    () -> createWorkspaceStatus(owner, raceSlug, "race-a-" + uuid()),
-                    () -> createWorkspaceStatus(owner, raceSlug, "race-b-" + uuid()));
-            List<Integer> statuses = executor.invokeAll(calls).stream().map(future -> {
-                try { return future.get(); } catch (Exception exception) { throw new RuntimeException(exception); }
-            }).toList();
-            assertThat(statuses).containsExactlyInAnyOrder(201, 409);
-        } finally { executor.shutdownNow(); }
+    @Test
+    void companyOwnerInvitationCannotCreateASecondActiveOwner() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
+                        .header("Idempotency-Key", "owner-invite-" + uuid()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"second-owner-" + uuid().substring(0, 8) + "@example.test\",\"displayName\":\"Second Owner\",\"roles\":[\"COMPANY_OWNER\"]}"))
+                .andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join tenant_management.membership_role_definition a on a.membership_id=m.id join tenant_management.role_definition r on r.id=a.role_id where w.tenant_id=? and m.status='ACTIVE' and r.code='company_owner'", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
     }
 
     @Test
@@ -251,12 +231,19 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                 .andExpect(status().isCreated());
         String memberToken = accessToken(email, "PLATFORM");
         String membershipId = membershipId(email);
+        long authorizationVersionBeforeSuspension = jdbc.queryForObject(
+                "select authorization_version from tenant_management.membership_authorization_state where membership_id=?",
+                Long.class, UUID.fromString(membershipId));
         MvcResult detail = mockMvc.perform(get("/api/v1/workspace-memberships/" + membershipId).header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();
         String version = detail.getResponse().getHeader("ETag");
         mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", version))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isForbidden());
+        assertThat(jdbc.queryForObject("select authorization_version from tenant_management.membership_authorization_state where membership_id=?",
+                Long.class, UUID.fromString(membershipId))).isEqualTo(authorizationVersionBeforeSuspension + 1);
+        assertThat(jdbc.queryForObject("select count(*) from iam.refresh_session where membership_id=? and revoked_at is not null",
+                Integer.class, UUID.fromString(membershipId))).isGreaterThanOrEqualTo(1);
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", version))
                 .andExpect(status().isConflict());
 
@@ -264,10 +251,9 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/reactivations").header("Authorization", "Bearer " + owner).header("If-Match", suspended.getResponse().getHeader("ETag")))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/authentication/sign-out").header("Authorization", "Bearer " + memberToken).header("X-Nexa-Surface", "PLATFORM").header("Origin", ALLOWED_ORIGIN))
-                .andExpect(status().isNoContent());
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isUnauthorized());
+        String replacementToken = accessToken(email, "PLATFORM");
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + replacementToken)).andExpect(status().isOk());
     }
 
     @Test
@@ -378,18 +364,4 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         return tools.jackson.databind.json.JsonMapper.shared().readTree(result.getResponse().getContentAsString());
     }
 
-    private String createPureOwner() throws Exception {
-        String email = "pure-owner-" + uuid().substring(0, 8) + "@example.test";
-        UUID userId = UUID.randomUUID(); UUID membershipId = UUID.randomUUID();
-        UUID tenant = UUID.fromString(tenantId()); UUID workspace = UUID.fromString(workspaceId());
-        String passwordHash = jdbc.queryForObject("select password_hash from iam.password_credential c join iam.user_account u on u.id=c.user_id where u.normalized_email=?", String.class, OWNER_EMAIL);
-        String username = "pure_owner_" + userId.toString().replace("-", "").substring(0, 12);
-        jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)", userId, email, email, username, username, "Pure Owner", "en");
-        jdbc.update("insert into iam.password_credential (user_id,password_hash,algorithm,changed_at) values (?,?,'bcrypt',current_timestamp)", userId, passwordHash);
-        jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)", membershipId, workspace, userId);
-        jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) "
-                + "select ?,?,?,r.id,current_timestamp from tenant_management.role_definition r where r.tenant_id is null and r.code='company_owner'",
-                membershipId, tenant, workspace);
-        return accessToken(email, "PLATFORM");
-    }
 }

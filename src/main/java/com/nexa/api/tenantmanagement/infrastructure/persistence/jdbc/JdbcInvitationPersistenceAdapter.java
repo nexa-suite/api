@@ -105,6 +105,10 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 		return jdbc.query("select m.id,m.user_id from tenant_management.workspace_membership m join iam.user_account u on u.id=m.user_id where m.workspace_id=? and u.normalized_email=? and m.status='ACTIVE'",
 				(rs, row) -> new MembershipRecord(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)), uuid(workspaceId), normalizedEmail).stream().findFirst();
 	}
+	@Override public int activeCompanyOwnerCount(String tenantId) {
+		return jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id where w.tenant_id=? and m.status='ACTIVE' and exists (select 1 from tenant_management.membership_role_definition a join tenant_management.role_definition r on r.id=a.role_id where a.membership_id=m.id and r.code='company_owner' and r.status='ACTIVE')", Integer.class, uuid(tenantId));
+	}
+	@Override public void lockTenant(String tenantId) { jdbc.queryForObject("select id from tenant_management.tenant where id=? for update", UUID.class, uuid(tenantId)); }
 
 	@Override
 	public Optional<UserRecord> findUserByEmail(String normalizedEmail) {

@@ -115,7 +115,7 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
                         .header("If-Match", currentMembership.getResponse().getHeader("ETag"))
                         .header("X-Correlation-ID", "change-feed-role-removal-" + uuid())
                         .contentType("application/json")
-                        .content("{\"roles\":[\"TENANT_ADMIN\"]}"))
+                        .content("{\"roles\":[\"TENANT_ADMIN\",\"COMPANY_OWNER\",\"SALES\"]}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + initialToken))
@@ -127,12 +127,12 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
         var newSession = mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + newToken))
                 .andExpect(status().isOk()).andReturn();
         var newRoles = json(newSession).at("/membership/roles");
-        assertThat(newRoles.size()).isEqualTo(1);
-        assertThat(newRoles.get(0).asText()).isEqualTo("TENANT_ADMIN");
+        assertThat(newRoles.size()).isEqualTo(3);
+        assertThat(newRoles.toString()).contains("TENANT_ADMIN", "COMPANY_OWNER", "SALES");
 
         String newStream = streamBody(newToken, cursor);
         assertThat(occurrences(newStream, "organization.membership.role-changed")).isEqualTo(1);
-        assertThat(newStream).doesNotContain("sales.purchase-request.created");
+        assertThat(newStream).contains("sales.purchase-request.created");
 
         mockMvc.perform(post("/api/v1/authentication/sign-out")
                         .header("Authorization", "Bearer " + newToken)

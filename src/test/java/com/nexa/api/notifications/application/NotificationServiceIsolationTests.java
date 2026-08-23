@@ -4,8 +4,8 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.service.NotificationService;
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
@@ -26,7 +26,7 @@ class NotificationServiceIsolationTests {
 	void inboxUsesCurrentTenantWorkspaceAndMembershipScope() {
 		NotificationInboxPersistencePort inbox = mock(NotificationInboxPersistencePort.class);
 		NotificationPreferencePersistencePort preferences = mock(NotificationPreferencePersistencePort.class);
-		ClientAccountPersistencePort accounts = mock(ClientAccountPersistencePort.class);
+		CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
 		CurrentAccessContext context = mock(CurrentAccessContext.class);
 		when(context.tenantId()).thenReturn(new TenantId("3a0a7af1-83ad-4c20-bb31-3ea89f4e4f10"));
 		when(context.workspaceId()).thenReturn(new WorkspaceId("7c30dcf8-bf35-40dc-bd3d-fad4dd1b3a17"));

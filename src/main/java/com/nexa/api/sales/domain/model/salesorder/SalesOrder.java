@@ -1,6 +1,6 @@
 package com.nexa.api.sales.domain.model.salesorder;
 
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerAccountId;
 import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
@@ -20,7 +20,7 @@ public final class SalesOrder {
 	private final SalesOrderNumber number;
 	private final TenantId tenantId;
 	private final WorkspaceId workspaceId;
-	private final ClientAccountId clientAccountId;
+	private final CustomerAccountId clientAccountId;
 	private final MembershipId createdByMembershipId;
 	private final BuyerMembershipId buyerMembershipId;
 	private final PurchaseRequestId sourcePurchaseRequestId;
@@ -58,7 +58,7 @@ public final class SalesOrder {
 	}
 
 	public static SalesOrder rehydrate(SalesOrderId id, SalesOrderNumber number, TenantId tenantId, WorkspaceId workspaceId,
-			ClientAccountId clientAccountId, BuyerMembershipId buyerMembershipId, PurchaseRequestId sourcePurchaseRequestId,
+			CustomerAccountId clientAccountId, BuyerMembershipId buyerMembershipId, PurchaseRequestId sourcePurchaseRequestId,
 			MembershipId createdByMembershipId, List<SalesOrderLine> lines, PurchaseRequestPriority priority,
 			LocalDate requestedDeliveryDate, String deliverySnapshot, PaymentOption paymentOption, String notes,
 			String currency, BigDecimal totalSnapshot, Instant createdAt, SalesOrderStatus status, Instant confirmedAt,
@@ -84,7 +84,7 @@ public final class SalesOrder {
 	public SalesOrderNumber number() { return number; }
 	public TenantId tenantId() { return tenantId; }
 	public WorkspaceId workspaceId() { return workspaceId; }
-	public ClientAccountId clientAccountId() { return clientAccountId; }
+	public CustomerAccountId clientAccountId() { return clientAccountId; }
 	public MembershipId createdByMembershipId() { return createdByMembershipId; }
 	public BuyerMembershipId buyerMembershipId() { return buyerMembershipId; }
 	public PurchaseRequestId sourcePurchaseRequestId() { return sourcePurchaseRequestId; }

@@ -1,15 +1,24 @@
 package com.nexa.api.architecture;
 
 import com.nexa.api.NexaApiApplication;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountDetails;
+import com.nexa.api.catalogmanagement.application.publicapi.CustomerTermsQuery;
+import com.nexa.api.payments.application.publicapi.CreditExposureQuery;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 import org.springframework.modulith.core.ApplicationModules;
 
 import java.nio.file.Files;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
@@ -18,14 +27,93 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ArchitectureConstitutionTests {
 
-    private static final JavaClasses CLASSES = new ClassFileImporter().importPackages("com.nexa.api");
+    private static final JavaClasses CLASSES = new ClassFileImporter()
+            .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
+            .importPackages("com.nexa.api");
+    private static final Map<String, Set<String>> TARGET_BOUNDED_CONTEXT_OWNERS = targetBoundedContextOwners();
 
     @Test
     void springModulithModulesVerify() {
         ApplicationModules modules = ApplicationModules.of(NexaApiApplication.class);
         assertThat(modules.stream().map(module -> module.getIdentifier().toString()).toList())
-                .contains("iam", "tenantmanagement", "catalogmanagement", "sales", "warehouse", "logistics", "invoicing", "shared");
+                .containsExactlyInAnyOrder("audit", "bootstrap", "catalogmanagement", "customerrelationships", "iam",
+                        "invoicing", "logistics", "notifications", "payments", "sales", "shared", "tenantmanagement", "warehouse");
         assertDoesNotThrow(() -> modules.verify());
+    }
+
+    @Test
+    void targetHasExactlyElevenSemanticBoundedContextsWithConcreteOwners() {
+        assertThat(TARGET_BOUNDED_CONTEXT_OWNERS.keySet()).containsExactly(
+                "Tenant & Access Governance",
+                "Customer & Buyer Relationships",
+                "Catalog & Commercial Policy",
+                "Sales Commitment",
+                "Inventory Availability",
+                "Fulfillment & Delivery",
+                "Credit & Receivables",
+                "Payments",
+                "Business Documents",
+                "Notifications",
+                "Business Traceability");
+        assertThat(TARGET_BOUNDED_CONTEXT_OWNERS).hasSize(11);
+        TARGET_BOUNDED_CONTEXT_OWNERS.values().stream().flatMap(Set::stream)
+                .forEach(owner -> assertThat(CLASSES.stream().anyMatch(type -> type.getPackageName().startsWith(owner)))
+                        .as("concrete owner package %s", owner).isTrue());
+        assertThat(TARGET_BOUNDED_CONTEXT_OWNERS.values().stream().flatMap(Set::stream)
+                .map(owner -> owner.split("\\.")[3]).collect(java.util.stream.Collectors.toSet()))
+                .containsExactlyInAnyOrder("audit", "catalogmanagement", "customerrelationships", "iam", "invoicing",
+                        "logistics", "notifications", "payments", "sales", "tenantmanagement", "warehouse");
+    }
+
+    @Test
+    void customerRelationshipAuthorityDoesNotLeakThroughPersistencePorts() {
+        assertThat(CLASSES.stream()
+                .filter(type -> type.getSimpleName().equals("ClientAccountPersistenceAdapter")
+                        || type.getSimpleName().equals("ClientAccountAddressPersistenceAdapter"))
+                .map(type -> type.getPackageName()).toList())
+                .containsOnly("com.nexa.api.customerrelationships.infrastructure.persistence");
+
+        assertThat(CLASSES.stream()
+                .filter(type -> !type.getPackageName().startsWith("com.nexa.api.customerrelationships"))
+                .flatMap(type -> type.getDirectDependenciesFromSelf().stream())
+                .filter(dependency -> dependency.getTargetClass().getSimpleName().equals("ClientAccountPersistencePort")
+                        || dependency.getTargetClass().getSimpleName().equals("ClientAccountAddressPersistencePort"))
+                .map(Object::toString).toList()).isEmpty();
+    }
+
+    @Test
+    void salesUsesPublicContractsInsteadOfForeignSqlOrCustomerPresentation() throws IOException {
+        String salesSources = sourcesUnder(Path.of("src/main/java/com/nexa/api/sales"));
+        assertThat(salesSources).doesNotContain(" from catalog_management.", " join catalog_management.",
+                " from payments.", " join payments.", " update payments.", "insert into payments.",
+                " from tenant_management.", " join tenant_management.", " from iam.", " join iam.",
+                " from warehouse.", " join warehouse.", " from sales.client_account", " join sales.client_account");
+
+        noClasses().that().resideInAPackage("com.nexa.api.sales..")
+                .should().dependOnClassesThat().resideInAPackage("com.nexa.api.customerrelationships.presentation..")
+                .check(CLASSES);
+    }
+
+    @Test
+    void customerRelationshipsDoesNotQueryOtherBoundedContextSchemas() throws IOException {
+        assertThat(sourcesUnder(Path.of("src/main/java/com/nexa/api/customerrelationships")))
+                .doesNotContain(" from catalog_management.", " join catalog_management.", " from payments.", " join payments.",
+                        " from tenant_management.", " join tenant_management.", " from iam.", " join iam.",
+                        " from warehouse.", " join warehouse.");
+    }
+
+    @Test
+    void customerRelationshipSnapshotExcludesCommercialTermsAndCreditAuthority() {
+        assertThat(java.util.Arrays.stream(CustomerAccountDetails.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).toList())
+                .containsExactly("id", "code", "businessName", "commercialName", "taxIdentifierType",
+                        "taxIdentifierValue", "segment", "status")
+                .doesNotContain("paymentCondition", "creditLimit", "creditCurrency",
+                        "currentCommercialExposure", "availableCredit");
+        assertThat(CustomerTermsQuery.class.getPackageName())
+                .isEqualTo("com.nexa.api.catalogmanagement.application.publicapi");
+        assertThat(CreditExposureQuery.class.getPackageName())
+                .isEqualTo("com.nexa.api.payments.application.publicapi");
     }
 
     @Test
@@ -66,5 +154,32 @@ class ArchitectureConstitutionTests {
     void iamHasNoGodInboundSecurityInterface() {
         assertThat(Files.exists(Path.of("src/main/java/com/nexa/api/iam/application/port/in/IamSecurityUseCase.java"))).isFalse();
         assertThat(CLASSES.stream().map(type -> type.getSimpleName()).filter("IamSecurityUseCase"::equals)).isEmpty();
+    }
+
+    private static Map<String, Set<String>> targetBoundedContextOwners() {
+        Map<String, Set<String>> owners = new LinkedHashMap<>();
+        owners.put("Tenant & Access Governance", Set.of("com.nexa.api.iam", "com.nexa.api.tenantmanagement"));
+        owners.put("Customer & Buyer Relationships", Set.of("com.nexa.api.customerrelationships"));
+        owners.put("Catalog & Commercial Policy", Set.of("com.nexa.api.catalogmanagement"));
+        owners.put("Sales Commitment", Set.of("com.nexa.api.sales"));
+        owners.put("Inventory Availability", Set.of("com.nexa.api.warehouse"));
+        owners.put("Fulfillment & Delivery", Set.of("com.nexa.api.logistics"));
+        owners.put("Credit & Receivables", Set.of("com.nexa.api.payments.application.publicapi",
+                "com.nexa.api.payments.domain.model.credit"));
+        owners.put("Payments", Set.of("com.nexa.api.payments"));
+        owners.put("Business Documents", Set.of("com.nexa.api.invoicing"));
+        owners.put("Notifications", Set.of("com.nexa.api.notifications"));
+        owners.put("Business Traceability", Set.of("com.nexa.api.audit"));
+        return Collections.unmodifiableMap(owners);
+    }
+
+    private static String sourcesUnder(Path root) throws IOException {
+        try (var paths = Files.walk(root)) {
+            return paths.filter(path -> path.toString().endsWith(".java"))
+                    .sorted().map(path -> {
+                        try { return Files.readString(path); }
+                        catch (IOException exception) { throw new java.io.UncheckedIOException(exception); }
+                    }).collect(java.util.stream.Collectors.joining("\n"));
+        }
     }
 }
