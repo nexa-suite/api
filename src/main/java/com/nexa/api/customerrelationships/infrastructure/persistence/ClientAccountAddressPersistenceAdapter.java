@@ -44,6 +44,15 @@ public class ClientAccountAddressPersistenceAdapter
                 uuid(tenantId), uuid(workspaceId), uuid(clientAccountId), uuid(addressId));
     }
 
+    @Override
+    public Optional<ClientAccountAddress> findActiveForUpdate(
+            String tenantId, String workspaceId, String clientAccountId, String addressId) {
+        return jdbc.query(SELECT + " where a.tenant_id=? and a.workspace_id=? and a.client_account_id=? "
+                        + "and a.id=? and a.status='ACTIVE' for update",
+                rs -> rs.next() ? Optional.of(address(rs)) : Optional.empty(),
+                uuid(tenantId), uuid(workspaceId), uuid(clientAccountId), uuid(addressId));
+    }
+
     public Optional<ClientAccountAddress> findForBuyer(String tenantId, String workspaceId, String membershipId, String addressId) {
         return jdbc.query(SELECT + " join sales.client_account_membership m on m.client_account_id=a.client_account_id "
                         + "and m.tenant_id=a.tenant_id and m.workspace_id=a.workspace_id "

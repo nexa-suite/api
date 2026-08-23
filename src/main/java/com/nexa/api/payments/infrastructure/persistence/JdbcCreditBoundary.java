@@ -22,28 +22,28 @@ public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservatio
 
     @Override
     public CreditExposureSnapshot find(String tenantId, String workspaceId, String customerAccountId, String currency) {
+        CreditAccountRow account = jdbc.query(
+                "select id,credit_limit,credit_exposure,reserved_exposure from payments.credit_account "
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? and currency=? and status='ACTIVE'",
+                (rs, ignored) -> new CreditAccountRow(rs.getObject(1, UUID.class), rs.getBigDecimal(2),
+                        rs.getBigDecimal(3), rs.getBigDecimal(4)),
+                uuid(tenantId), uuid(workspaceId), uuid(customerAccountId), currency)
+                .stream().findFirst().orElse(null);
+        if (account == null) return CreditExposureSnapshot.unavailable(currency);
         BigDecimal outstanding = jdbc.queryForObject(
                 "select coalesce(sum(amount-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? "
                         + "and client_account_id=? and currency=? and status in ('OPEN','PARTIALLY_PAID','OVERDUE')",
                 BigDecimal.class, uuid(tenantId), uuid(workspaceId), uuid(customerAccountId), currency);
-        BigDecimal reserved = jdbc.queryForObject(
-                "select coalesce(sum(reserved_exposure),0) from payments.credit_account where tenant_id=? and workspace_id=? "
-                        + "and client_account_id=? and currency=? and status='ACTIVE'",
-                BigDecimal.class, uuid(tenantId), uuid(workspaceId), uuid(customerAccountId), currency);
-        return new CreditExposureSnapshot(outstanding, reserved);
+        return new CreditExposureSnapshot(currency, account.limit(), account.exposure(), outstanding,
+                account.reserved(), true);
     }
 
     @Override
     public void reserve(UUID tenantId, UUID workspaceId, UUID customerAccountId, UUID purchaseRequestId,
-                        BigDecimal amount, String currency, BigDecimal creditLimit, Instant now) {
+                        BigDecimal amount, String currency, Instant now) {
         if (amount == null || amount.signum() <= 0 || currency == null || currency.isBlank()) {
             throw new IllegalStateException("Credit commitment requires priced lines");
         }
-        jdbc.update("insert into payments.credit_account (id,tenant_id,workspace_id,client_account_id,currency,credit_limit,created_at,updated_at) "
-                        + "values (md5(? || ':' || ?)::uuid,?,?,?,?,?,?,?) "
-                        + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
-                customerAccountId.toString(), currency, tenantId, workspaceId, customerAccountId, currency,
-                value(creditLimit), timestamp(now), timestamp(now));
         CreditAccountRow account = jdbc.query(
                 "select id,credit_limit,credit_exposure,reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? "
                         + "and client_account_id=? and currency=? and status='ACTIVE' for update",
@@ -51,9 +51,7 @@ public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservatio
                         rs.getBigDecimal(3), rs.getBigDecimal(4)), tenantId, workspaceId, customerAccountId, currency)
                 .stream().findFirst().orElseThrow(() -> new IllegalStateException("Client credit account is not configured"));
         CreditExposureSnapshot exposure = find(tenantId.toString(), workspaceId.toString(), customerAccountId.toString(), currency);
-        BigDecimal available = account.limit().subtract(account.exposure()).subtract(account.reserved())
-                .subtract(exposure.outstandingReceivables());
-        if (available.compareTo(amount) < 0) throw new IllegalStateException("Credit limit exceeded");
+        if (exposure.availableCredit().compareTo(amount) < 0) throw new IllegalStateException("Credit limit exceeded");
         CreditReservationRow existing = jdbc.query(
                 "select id,credit_account_id,amount,status from payments.credit_reservation where tenant_id=? and workspace_id=? "
                         + "and purchase_request_id=? for update",

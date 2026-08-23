@@ -7,7 +7,7 @@ import java.util.UUID;
 /** Payments-owned credit reservation commands participating in the caller's local transaction. */
 public interface CreditReservationCommands {
     void reserve(UUID tenantId, UUID workspaceId, UUID customerAccountId, UUID purchaseRequestId,
-                 BigDecimal amount, String currency, BigDecimal creditLimit, Instant now);
+                 BigDecimal amount, String currency, Instant now);
 
     void release(UUID tenantId, UUID workspaceId, UUID purchaseRequestId);
 

@@ -247,13 +247,17 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private boolean hasCommercial(DraftRow d) { return d.paymentPreference != null && d.requestedDeliveryDate != null; }
     private String creditResult(CurrentAccessContext context, UUID draftId, UUID clientId, String payment) {
         if (!"CREDIT_LINE".equalsIgnoreCase(payment)) return "NOT_APPLICABLE";
-        var customer = customers.findActiveDetails(tenant(context).toString(), workspace(context).toString(), clientId.toString())
+        customers.findReference(tenant(context).toString(), workspace(context).toString(), clientId.toString())
                 .orElseThrow(() -> new IllegalArgumentException("Client account is not active"));
+        String currency = jdbc.queryForObject("select case when count(distinct currency)=1 then max(currency) else null end "
+                        + "from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?",
+                String.class, tenant(context), workspace(context), draftId);
+        if (currency == null) throw new IllegalStateException("Credit evaluation requires one draft currency");
         var exposure = creditExposure.find(tenant(context).toString(), workspace(context).toString(),
-                clientId.toString(), customer.creditCurrency());
+                clientId.toString(), currency);
         BigDecimal total = jdbc.queryForObject("select coalesce(sum(quantity * effective_unit_price),0) from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?", BigDecimal.class,
                 tenant(context), workspace(context), draftId);
-        BigDecimal available = customer.creditLimit().subtract(exposure.used());
+        BigDecimal available = exposure.availableCredit();
         return available.compareTo(total == null ? BigDecimal.ZERO : total) >= 0 && available.signum() > 0 ? "AVAILABLE" : "UNAVAILABLE";
     }
     private WarehouseRow selectWarehouse(CurrentAccessContext context, UUID draftId) {

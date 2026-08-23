@@ -2,6 +2,7 @@
         id = "customerrelationships",
         allowedDependencies = {
                 "shared",
+                "catalogmanagement :: sales-catalog",
                 "tenantmanagement :: access",
                 "tenantmanagement :: access-context",
                 "tenantmanagement :: buyer-memberships",

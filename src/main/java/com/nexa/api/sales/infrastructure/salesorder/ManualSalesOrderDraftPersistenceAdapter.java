@@ -4,11 +4,13 @@ import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyE
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.catalogmanagement.application.publicapi.SellableSkuQuery;
+import com.nexa.api.catalogmanagement.application.publicapi.CustomerTermsQuery;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountDetails;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAddressQuery;
 import com.nexa.api.customerrelationships.contract.CustomerAddressReference;
 import com.nexa.api.warehouse.application.publicapi.WarehouseSelectionQuery;
+import com.nexa.api.payments.application.publicapi.CreditExposureQuery;
 import com.nexa.api.sales.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderDraftPersistencePort;
 import com.nexa.api.customerrelationships.contract.Address;
@@ -53,6 +55,8 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     private final ObjectMapper mapper;
     private final MapRoutingPort maps;
     private final CustomerAccountQuery customers;
+    private final CustomerTermsQuery customerTerms;
+    private final CreditExposureQuery creditExposure;
     private final CustomerAddressQuery addresses;
     private final SellableSkuQuery sellableSkus;
     private final WarehouseSelectionQuery warehouses;
@@ -60,12 +64,15 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     @Autowired
     public ManualSalesOrderDraftPersistenceAdapter(JdbcTemplate jdbc, ObjectMapper mapper, MapRoutingPort maps,
                                                     CustomerAccountQuery customers, CustomerAddressQuery addresses,
+                                                    CustomerTermsQuery customerTerms, CreditExposureQuery creditExposure,
                                                     SellableSkuQuery sellableSkus, WarehouseSelectionQuery warehouses) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.maps = maps == null ? new com.nexa.api.sales.infrastructure.maps.LocalDeterministicMapAdapter() : maps;
         this.customers = customers;
         this.addresses = addresses;
+        this.customerTerms = customerTerms;
+        this.creditExposure = creditExposure;
         this.sellableSkus = sellableSkus;
         this.warehouses = warehouses;
     }
@@ -121,7 +128,8 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
         PaymentOption payment = PaymentOption.from(command.paymentPreference());
         if (payment == null) throw new IllegalArgumentException("Payment preference is required");
         PurchaseRequestPriority priority = PurchaseRequestPriority.from(command.priority());
-        ClientRow client = activeClient(context, command.clientAccountId())
+        String draftCurrency = currency(command.currency());
+        ClientRow client = activeClient(context, command.clientAccountId(), draftCurrency)
                 .orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
         if (!"ACTIVE".equalsIgnoreCase(client.status())) throw new IllegalArgumentException("Client account is not active");
         String creditResult = creditResult(payment, client.availableCredit());
@@ -136,7 +144,7 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                         + "delivery_address_id=null,delivery_address_snapshot=null,route_snapshot=null,warehouse_id=null,"
                         + "warehouse_selection_snapshot=null,delivery_notes=null,status=?,version=version+1,updated_at=? "
                         + "where tenant_id=? and workspace_id=? and id=? and version=?",
-                command.clientAccountId(), priority.name(), command.requestedDeliveryDate(), payment.name(), currency(command.currency()),
+                command.clientAccountId(), priority.name(), command.requestedDeliveryDate(), payment.name(), draftCurrency,
                 command.notes(), creditResult, snapshot, status, timestamp, tenant(context), workspace(context), draftId, expectedVersion);
         if (updated != 1) throw new PurchaseRequestDraftConcurrencyException();
         return get(context, draftId);
@@ -277,7 +285,7 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
 
     private ManualSalesOrderDraftModels.DraftView view(CurrentAccessContext context, DraftRow row) {
         ManualSalesOrderDraftModels.ClientView client = row.clientAccountId() == null ? null
-                : historicalClient(context, row.clientAccountId()).map(value -> new ManualSalesOrderDraftModels.ClientView(
+                : historicalClient(context, row.clientAccountId(), row.currency()).map(value -> new ManualSalesOrderDraftModels.ClientView(
                 value.id().toString(), value.code(), value.businessName(), value.commercialName(), value.taxIdentifierType(),
                 value.taxIdentifierValue(), value.status(), value.paymentTerms(), value.creditLimit(), value.currentExposure(),
                 value.availableCredit())).orElse(null);
@@ -301,14 +309,14 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                 row.salesOrderId() == null ? null : row.salesOrderId().toString(), row.createdAt(), row.updatedAt(), row.submittedAt());
     }
 
-    private Optional<ClientRow> activeClient(CurrentAccessContext context, UUID id) {
+    private Optional<ClientRow> activeClient(CurrentAccessContext context, UUID id, String currency) {
         return customers.findActiveDetails(tenant(context).toString(), workspace(context).toString(), id.toString())
-                .map(ManualSalesOrderDraftPersistenceAdapter::clientRow);
+                .map(value -> clientRow(context, value, currency));
     }
 
-    private Optional<ClientRow> historicalClient(CurrentAccessContext context, UUID id) {
+    private Optional<ClientRow> historicalClient(CurrentAccessContext context, UUID id, String currency) {
         return customers.findHistoricalDetails(tenant(context).toString(), workspace(context).toString(), id.toString())
-                .map(ManualSalesOrderDraftPersistenceAdapter::clientRow);
+                .map(value -> clientRow(context, value, currency));
     }
 
     private Optional<SkuRow> findSku(CurrentAccessContext context, ManualSalesOrderDraftModels.LineCommand command) {
@@ -479,10 +487,15 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
 
     private static String nullSafe(String value) { return value == null ? "" : value; }
 
-    private static ClientRow clientRow(CustomerAccountDetails value) {
+    private ClientRow clientRow(CurrentAccessContext context, CustomerAccountDetails value, String currency) {
+        String tenantId = tenant(context).toString();
+        String workspaceId = workspace(context).toString();
+        var terms = customerTerms.findTerms(tenantId, workspaceId, value.id())
+                .orElseThrow(() -> new IllegalStateException("Customer commercial terms are not configured"));
+        var credit = creditExposure.find(tenantId, workspaceId, value.id(), currency == null ? "PEN" : currency);
         return new ClientRow(UUID.fromString(value.id()), value.code(), value.businessName(), value.commercialName(),
-                value.taxIdentifierType(), value.taxIdentifierValue(), value.status(), value.paymentCondition(),
-                value.creditLimit(), value.currentCommercialExposure(), value.availableCredit());
+                value.taxIdentifierType(), value.taxIdentifierValue(), value.status(), terms.code(),
+                credit.creditLimit(), credit.used(), credit.availableCredit());
     }
 
     private static AddressRow addressRow(CustomerAddressReference reference) {

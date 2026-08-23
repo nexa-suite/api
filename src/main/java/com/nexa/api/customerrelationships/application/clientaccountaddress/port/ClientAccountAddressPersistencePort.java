@@ -13,6 +13,11 @@ public interface ClientAccountAddressPersistencePort {
 
     Optional<ClientAccountAddress> find(String tenantId, String workspaceId, String clientAccountId, String addressId);
 
+    default Optional<ClientAccountAddress> findActiveForUpdate(
+            String tenantId, String workspaceId, String clientAccountId, String addressId) {
+        return find(tenantId, workspaceId, clientAccountId, addressId).filter(ClientAccountAddress::active);
+    }
+
     void insert(ClientAccountAddress address, long nowEpochMillis);
 
     int update(String tenantId, String workspaceId, String clientAccountId, String addressId,

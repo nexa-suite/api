@@ -65,9 +65,8 @@ public class ClientAccountAddressService implements ClientAccountAddressUseCase 
     public ClientAccountAddressView setDefault(CurrentAccessContext context, String clientAccountId,
                                                String addressId, long expectedVersion) {
         String accountId = scopedAccount(context, clientAccountId, true);
-        if (persistence.find(scope(context), workspace(context), accountId, addressId).isEmpty()) {
-            throw new ApiResourceNotFoundException("client-account-address");
-        }
+        persistence.findActiveForUpdate(scope(context), workspace(context), accountId, addressId)
+                .orElseThrow(() -> new ApiResourceNotFoundException("client-account-address"));
         if (persistence.setDefault(scope(context), workspace(context), accountId, addressId, expectedVersion, now()) == 0) {
             throw new CustomerRelationshipConflictException();
         }

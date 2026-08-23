@@ -4,13 +4,13 @@ import com.nexa.api.sales.application.port.out.ClientAccountCommercialPort;
 import com.nexa.api.sales.domain.model.commercial.PaymentTerms;
 import com.nexa.api.sales.domain.model.credit.CreditProfile;
 import com.nexa.api.sales.domain.model.credit.CreditStatus;
+import com.nexa.api.catalogmanagement.application.publicapi.CustomerTermsQuery;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountDetails;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.payments.application.publicapi.CreditExposureQuery;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
 import java.util.Optional;
 
 /** ACL adapter: only commercial facts cross from Client Account into Sales. */
@@ -18,10 +18,13 @@ import java.util.Optional;
 @Profile("!test")
 public class ClientAccountCommercialAclAdapter implements ClientAccountCommercialPort {
     private final CustomerAccountQuery customers;
+    private final CustomerTermsQuery terms;
     private final CreditExposureQuery credit;
 
-    public ClientAccountCommercialAclAdapter(CustomerAccountQuery customers, CreditExposureQuery credit) {
+    public ClientAccountCommercialAclAdapter(
+            CustomerAccountQuery customers, CustomerTermsQuery terms, CreditExposureQuery credit) {
         this.customers = customers;
+        this.terms = terms;
         this.credit = credit;
     }
 
@@ -38,21 +41,12 @@ public class ClientAccountCommercialAclAdapter implements ClientAccountCommercia
     }
 
     private ClientAccountCommercialProfile profile(String tenantId, String workspaceId, CustomerAccountDetails customer) {
-        BigDecimal limit = value(customer.creditLimit());
-        BigDecimal used = credit.find(tenantId, workspaceId, customer.id(), customer.creditCurrency()).used();
+        var customerTerms = terms.findTerms(tenantId, workspaceId, customer.id())
+                .orElseThrow(() -> new IllegalStateException("Customer commercial terms are not configured"));
+        var exposure = credit.find(tenantId, workspaceId, customer.id(), "PEN");
         return new ClientAccountCommercialProfile(customer.id(), customer.businessName(), customer.commercialName(),
-                customer.taxIdentifierValue(), new CreditProfile(limit, used, CreditStatus.AVAILABLE),
-                paymentTerms(customer.paymentCondition()), true);
+                customer.taxIdentifierValue(), new CreditProfile(exposure.creditLimit(), exposure.used(), CreditStatus.AVAILABLE),
+                new PaymentTerms(customerTerms.code(), customerTerms.description(), customerTerms.dueDays(),
+                        customerTerms.creditAllowed()), true);
     }
-
-    private static PaymentTerms paymentTerms(String condition) {
-        String code = condition == null || condition.isBlank() ? "CASH" : condition.trim();
-        boolean credit = code.toUpperCase(java.util.Locale.ROOT).contains("CREDIT")
-                || code.toUpperCase(java.util.Locale.ROOT).matches(".*NET[-_ ]?\\d+.*");
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+)").matcher(code);
-        int dueDays = matcher.find() ? Integer.parseInt(matcher.group(1)) : 0;
-        return new PaymentTerms(code, code, credit ? dueDays : 0, credit);
-    }
-
-    private static BigDecimal value(BigDecimal value) { return value == null ? BigDecimal.ZERO : value; }
 }

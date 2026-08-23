@@ -69,13 +69,10 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
                 String.class, tenantId, workspaceId, purchaseRequestId);
         if ("CREDIT_LINE".equalsIgnoreCase(paymentOption)) {
             AmountRow amount = amount(purchaseRequestId);
-            var customer = customers.findActiveDetails(tenantId.toString(), workspaceId.toString(), clientAccountId.toString())
+            customers.findReference(tenantId.toString(), workspaceId.toString(), clientAccountId.toString())
                     .orElseThrow(() -> new IllegalStateException("Active client account is required for credit commitment"));
-            if (!amount.currency().equalsIgnoreCase(customer.creditCurrency())) {
-                throw new IllegalStateException("Client credit account is not configured for purchase currency");
-            }
             creditReservations.reserve(tenantId, workspaceId, clientAccountId, purchaseRequestId,
-                    amount.amount(), amount.currency(), customer.creditLimit(), now);
+                    amount.amount(), amount.currency(), now);
         }
     }
 

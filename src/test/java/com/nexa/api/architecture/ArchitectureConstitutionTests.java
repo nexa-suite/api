@@ -1,6 +1,9 @@
 package com.nexa.api.architecture;
 
 import com.nexa.api.NexaApiApplication;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountDetails;
+import com.nexa.api.catalogmanagement.application.publicapi.CustomerTermsQuery;
+import com.nexa.api.payments.application.publicapi.CreditExposureQuery;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -100,6 +103,20 @@ class ArchitectureConstitutionTests {
     }
 
     @Test
+    void customerRelationshipSnapshotExcludesCommercialTermsAndCreditAuthority() {
+        assertThat(java.util.Arrays.stream(CustomerAccountDetails.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).toList())
+                .containsExactly("id", "code", "businessName", "commercialName", "taxIdentifierType",
+                        "taxIdentifierValue", "segment", "status")
+                .doesNotContain("paymentCondition", "creditLimit", "creditCurrency",
+                        "currentCommercialExposure", "availableCredit");
+        assertThat(CustomerTermsQuery.class.getPackageName())
+                .isEqualTo("com.nexa.api.catalogmanagement.application.publicapi");
+        assertThat(CreditExposureQuery.class.getPackageName())
+                .isEqualTo("com.nexa.api.payments.application.publicapi");
+    }
+
+    @Test
     void domainDoesNotDependOnOuterLayers() { domainDoesNotDependOnOuterLayers.check(CLASSES); }
     private static final ArchRule domainDoesNotDependOnOuterLayers = noClasses()
             .that().resideInAnyPackage("..domain..").and().doNotHaveSimpleName("package-info")
@@ -147,7 +164,8 @@ class ArchitectureConstitutionTests {
         owners.put("Sales Commitment", Set.of("com.nexa.api.sales"));
         owners.put("Inventory Availability", Set.of("com.nexa.api.warehouse"));
         owners.put("Fulfillment & Delivery", Set.of("com.nexa.api.logistics"));
-        owners.put("Credit & Receivables", Set.of("com.nexa.api.sales.domain.model.credit"));
+        owners.put("Credit & Receivables", Set.of("com.nexa.api.payments.application.publicapi",
+                "com.nexa.api.payments.domain.model.credit"));
         owners.put("Payments", Set.of("com.nexa.api.payments"));
         owners.put("Business Documents", Set.of("com.nexa.api.invoicing"));
         owners.put("Notifications", Set.of("com.nexa.api.notifications"));
