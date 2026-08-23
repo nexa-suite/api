@@ -28,7 +28,7 @@ import java.util.UUID;
 /** JDBC authority for public resumable onboarding drafts. */
 @Repository
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
-public final class JdbcOrganizationRegistrationDraftAdapter implements OrganizationRegistrationDraftPort {
+public class JdbcOrganizationRegistrationDraftAdapter implements OrganizationRegistrationDraftPort {
     private static final Set<String> SECRET_KEYS = Set.of("password", "passwordhash", "token", "resumetoken", "secret", "clientsecret");
     private static final Set<String> FORBIDDEN_COMMERCIAL_KEYS = Set.of("billing", "subscription", "entitlement", "paymentprovider");
     private static final Set<String> PLANS = Set.of("Starter", "Standard", "Professional", "Enterprise");
