@@ -14,7 +14,7 @@ import com.nexa.api.sales.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderAggregatePersistencePort;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersistencePort;
 import com.nexa.api.sales.application.port.CommercialCommitmentPort;
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerAccountId;
 import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.sales.domain.model.salesorder.ApprovedPurchaseRequestSnapshot;
@@ -127,7 +127,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		String currency = requestLines.getFirst().currency();
 		List<SalesOrderLine> lines = requestLines.stream().map(line -> new SalesOrderLine(line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(), line.unit(), line.price(), line.currency(), line.quantity().multiply(line.price()), line.skuId(), line.familyId(), line.skuCode(), line.familyCode())).toList();
 		BigDecimal total = lines.stream().map(line -> line.quantity().multiply(line.unitPriceAmount())).reduce(BigDecimal.ZERO, BigDecimal::add);
-		return Optional.of(new ApprovedPurchaseRequestSnapshot(new TenantId(tenant), new WorkspaceId(workspace), new ClientAccountId(pr.clientAccountId()),
+		return Optional.of(new ApprovedPurchaseRequestSnapshot(new TenantId(tenant), new WorkspaceId(workspace), new CustomerAccountId(pr.clientAccountId()),
 				new BuyerMembershipId(uuid(pr.buyerMembershipId())), new PurchaseRequestId(purchaseRequestId), lines,
 				PurchaseRequestPriority.from(pr.priority()), pr.requestedDeliveryDate(), pr.deliverySnapshot(), PaymentOption.from(pr.paymentOption()), pr.notes(), currency, total));
 	}
@@ -250,7 +250,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	}
 	private SalesOrder aggregate(SalesOrderView view) {
 		List<SalesOrderLine> lines = view.lines().stream().map(line -> new SalesOrderLine(line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), parseUuid(line.skuId()), parseUuid(line.familyId()), line.skuCode(), line.familyCode())).toList();
-        return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new ClientAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), new PurchaseRequestId(view.sourcePurchaseRequestId()), new MembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
+        return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new CustomerAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), new PurchaseRequestId(view.sourcePurchaseRequestId()), new MembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
 	}
 	private long nextSequence(UUID tenant, UUID workspace, int year) {
 		jdbc.update("insert into sales.sales_order_sequence (tenant_id,workspace_id,order_year,next_value) values (?,?,?,1) on conflict do nothing", tenant, workspace, year);

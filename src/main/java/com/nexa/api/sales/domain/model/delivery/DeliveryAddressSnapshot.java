@@ -1,7 +1,7 @@
 package com.nexa.api.sales.domain.model.delivery;
 
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
-import com.nexa.api.sales.domain.model.address.Address;
+import com.nexa.api.customerrelationships.contract.Address;
 
 import java.util.Objects;
 

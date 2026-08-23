@@ -1,6 +1,6 @@
 package com.nexa.api.sales.infrastructure;
 
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.sales.application.salesorder.export.port.SalesOrderSummaryExportUseCase;
 import com.nexa.api.sales.application.salesorder.export.port.SalesOrderSummaryProjectionPort;
 import com.nexa.api.sales.application.salesorder.export.port.SalesOrderSummaryRenderer;
@@ -30,7 +30,7 @@ public class SalesOrderSummaryExportRuntimeConfiguration {
 
 	@Bean
 	SalesOrderSummaryExportUseCase salesOrderSummaryExportUseCase(SalesOrderSummaryProjectionPort projection,
-			ClientAccountPersistencePort accounts, SalesOrderSummaryRendererStrategy renderers) {
+			CustomerAccountQuery accounts, SalesOrderSummaryRendererStrategy renderers) {
 		return new SalesOrderSummaryExportService(projection, accounts, renderers);
 	}
 }

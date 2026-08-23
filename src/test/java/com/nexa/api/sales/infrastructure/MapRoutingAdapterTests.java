@@ -55,7 +55,7 @@ class MapRoutingAdapterTests {
                 "PREFERRED_OPERATIONAL", "OPERATIONAL", 10, true, java.time.Instant.EPOCH,
                 new BigDecimal("-12.0400"), new BigDecimal("-77.0300"));
         var address = new DeliveryAddressSnapshot("address", "Main",
-                new com.nexa.api.sales.domain.model.address.Address("STREET", "Av. Lima 123", "Gate 4", "PE",
+                new com.nexa.api.customerrelationships.contract.Address("STREET", "Av. Lima 123", "Gate 4", "PE",
                         "15", "1501", "150101", null, null, "STREET", "Lima", "123", null, null,
                         null, null, new BigDecimal("-12.0500"), new BigDecimal("-77.0400"), null, "MAP_PIN"), true);
 

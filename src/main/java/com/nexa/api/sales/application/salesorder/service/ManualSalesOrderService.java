@@ -6,7 +6,7 @@ import com.nexa.api.sales.application.salesorder.model.ManualSalesOrderView;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderPersistencePort;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderUseCase;
 import com.nexa.api.sales.application.workflow.SalesSnapshotAssembler;
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerAccountId;
 import com.nexa.api.sales.domain.model.salesorder.ManualSalesOrder;
 import com.nexa.api.sales.domain.model.salesorder.SalesOrderId;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
@@ -55,7 +55,7 @@ public class ManualSalesOrderService implements ManualSalesOrderUseCase {
         var identity = persistence.nextIdentity(tenant, workspace);
         var order = ManualSalesOrder.create(identity.id(), identity.number(),
                 new TenantId(context.tenantId().value()), new WorkspaceId(context.workspaceId().value()),
-                new ClientAccountId(assembled.snapshot().commercial().clientAccountId()),
+                new CustomerAccountId(assembled.snapshot().commercial().clientAccountId()),
                 new MembershipId(context.membershipId().value()), assembled.lines(), assembled.priority(),
                 assembled.snapshot(), java.time.Instant.ofEpochMilli(System.currentTimeMillis()));
         return persistence.save(order, actor, idempotencyKey, requestHash, System.currentTimeMillis());

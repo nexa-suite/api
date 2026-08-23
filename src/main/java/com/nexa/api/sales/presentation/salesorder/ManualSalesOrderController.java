@@ -6,7 +6,7 @@ import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderUseCase;
 import com.nexa.api.sales.presentation.SalesHttpHeaders;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
-import com.nexa.api.sales.presentation.request.DeliveryAddressRequest;
+import com.nexa.api.customerrelationships.presentation.contract.DeliveryAddressRequest;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.FutureOrPresent;

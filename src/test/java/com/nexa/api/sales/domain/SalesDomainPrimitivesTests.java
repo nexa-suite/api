@@ -1,6 +1,7 @@
 package com.nexa.api.sales.domain;
 
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerAccountId;
+import com.nexa.api.customerrelationships.contract.CustomerRelationshipInvariantViolation;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestStatus;
 import com.nexa.api.sales.domain.model.salesorder.SalesOrderId;
@@ -19,14 +20,14 @@ class SalesDomainPrimitivesTests {
 	void identifiersNormalizeWithoutLosingTypeIdentity() {
 		assertThat(new PurchaseRequestId(" pr-001 ").value()).isEqualTo("PR-001");
 		assertThat(new SalesOrderId("so-001").toString()).isEqualTo("SO-001");
-		assertThat(new ClientAccountId(" cli-001 ")).isEqualTo(new ClientAccountId("CLI-001"));
+		assertThat(new CustomerAccountId(" cli-001 ")).isEqualTo(new CustomerAccountId("CLI-001"));
 	}
 
 	@Test
 	void identifiersRejectMissingUnsafeAndOversizedValues() {
 		assertThatThrownBy(() -> new PurchaseRequestId(null)).isInstanceOf(SalesInvariantViolation.class);
 		assertThatThrownBy(() -> new SalesOrderId(" ")).isInstanceOf(SalesOrderInvariantViolation.class);
-		assertThatThrownBy(() -> new ClientAccountId("CLI_001")).isInstanceOf(SalesInvariantViolation.class);
+		assertThatThrownBy(() -> new CustomerAccountId("CLI_001")).isInstanceOf(CustomerRelationshipInvariantViolation.class);
 		assertThatThrownBy(() -> new PurchaseRequestId("A".repeat(65))).isInstanceOf(SalesInvariantViolation.class);
 	}
 

@@ -54,7 +54,7 @@ class GoogleMapsHttpBoundaryAdapterTest {
                 new BigDecimal("-12.0400"), new BigDecimal("-77.0300"));
         var address = new com.nexa.api.sales.domain.model.delivery.DeliveryAddressSnapshot(
                 "address", "Pueblo Libre",
-                new com.nexa.api.sales.domain.model.address.Address(
+                new com.nexa.api.customerrelationships.contract.Address(
                         "AVENUE", "Av. Sucre 1992", null, "PE", "15", "1501", "150101",
                         null, null, "AVENUE", "Av. Sucre", "1992", null, null, null, null,
                         new BigDecimal("-12.0500"), new BigDecimal("-77.0400"), null, "MAP_PIN"), true);

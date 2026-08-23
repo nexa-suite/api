@@ -1,12 +1,7 @@
 package com.nexa.api.sales.infrastructure;
 
-import com.nexa.api.sales.application.clientaccountaddress.port.ClientAccountAddressPersistencePort;
-import com.nexa.api.sales.application.clientaccountaddress.port.ClientAccountAddressUseCase;
-import com.nexa.api.sales.application.clientaccountaddress.service.ClientAccountAddressService;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountUseCase;
-import com.nexa.api.sales.application.clientaccount.service.ClientAccountService;
-import com.nexa.api.sales.application.port.out.ClientAccountAddressPort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAddressQuery;
 import com.nexa.api.sales.application.port.out.ClientAccountCommercialPort;
 import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.port.out.WarehouseReferencePort;
@@ -35,14 +30,11 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile("!test")
 public class SalesRuntimeConfiguration {
-	@Bean ClientAccountUseCase clientAccountUseCase(ClientAccountPersistencePort port) { return new ClientAccountService(port); }
-	@Bean ClientAccountAddressUseCase clientAccountAddressUseCase(ClientAccountAddressPersistencePort persistence,
-			ClientAccountCommercialPort accounts) { return new ClientAccountAddressService(persistence, accounts); }
 	@Bean PeruGeographyUseCase peruGeographyUseCase(PeruGeographyPersistencePort persistence) {
 		return new PeruGeographyService(persistence);
 	}
 	@Bean SalesSnapshotAssembler salesSnapshotAssembler(ClientAccountCommercialPort accounts,
-			ClientAccountAddressPort addresses, WarehouseReferencePort warehouses, PeruGeographyPersistencePort geography,
+			CustomerAddressQuery addresses, WarehouseReferencePort warehouses, PeruGeographyPersistencePort geography,
 			MapRoutingPort maps, CatalogItemSnapshotLookupPort catalog,
 			com.nexa.api.sales.application.purchaserequest.port.SellableSkuSnapshotLookupPort sellableSkus) {
 		return new SalesSnapshotAssembler(accounts, addresses, warehouses, geography, maps, catalog, sellableSkus);
@@ -54,9 +46,9 @@ public class SalesRuntimeConfiguration {
 		return new ManualSalesOrderDraftService(drafts, manualOrders, orders);
 	}
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
-			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, ClientAccountPersistencePort accounts,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 			ChangeEventPersistencePort changeFeed, com.nexa.api.sales.application.port.CommercialCommitmentPort commitments) {
 		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments);
 	}
-	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, ClientAccountPersistencePort accounts) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence); }
+	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, CustomerAccountQuery accounts) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence); }
 }

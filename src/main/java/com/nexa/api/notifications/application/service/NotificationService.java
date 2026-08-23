@@ -9,8 +9,8 @@ import com.nexa.api.notifications.application.port.in.NotificationProjectionPort
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
-import com.nexa.api.sales.application.clientaccount.model.ClientAccountView;
-import com.nexa.api.sales.application.clientaccount.port.ClientAccountPersistencePort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
@@ -22,10 +22,10 @@ import java.util.Objects;
 public final class NotificationService implements NotificationUseCase, NotificationProjectionPort {
 	private final NotificationInboxPersistencePort inbox;
 	private final NotificationPreferencePersistencePort preferences;
-	private final ClientAccountPersistencePort accounts;
+	private final CustomerAccountQuery accounts;
 
 	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
-			ClientAccountPersistencePort accounts) {
+			CustomerAccountQuery accounts) {
 		this.inbox = Objects.requireNonNull(inbox, "Notification inbox is required");
 		this.preferences = Objects.requireNonNull(preferences, "Notification preferences are required");
 		this.accounts = Objects.requireNonNull(accounts, "Client accounts are required");
@@ -98,8 +98,8 @@ public final class NotificationService implements NotificationUseCase, Notificat
 		String workspace = context.workspaceId().toString();
 		String client = null;
 		if (context.hasRole(MembershipRole.BUYER)) {
-			client = accounts.findForBuyer(tenant, workspace, context.membershipId().toString())
-					.map(ClientAccountView::id).orElseThrow(() -> new ApiResourceNotFoundException("client-account"));
+			client = accounts.findBuyerReference(tenant, workspace, context.membershipId().toString())
+					.map(CustomerAccountReference::id).orElseThrow(() -> new ApiResourceNotFoundException("client-account"));
 		}
 		context.requirePermission(PermissionKey.NOTIFICATION_READ);
 		return new Scope(tenant, workspace, context.membershipId().toString(), client);

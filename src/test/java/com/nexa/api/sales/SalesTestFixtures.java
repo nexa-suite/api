@@ -1,14 +1,15 @@
 package com.nexa.api.sales;
 
-import com.nexa.api.sales.application.port.out.ClientAccountAddressPort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAddressQuery;
+import com.nexa.api.customerrelationships.contract.CustomerAddressReference;
 import com.nexa.api.sales.application.port.out.ClientAccountCommercialPort;
 import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.port.out.WarehouseReferencePort;
 import com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
 import com.nexa.api.sales.application.reference.port.PeruGeographyPersistencePort;
 import com.nexa.api.sales.application.workflow.SalesSnapshotAssembler;
-import com.nexa.api.sales.domain.model.address.Address;
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountAddress;
+import com.nexa.api.customerrelationships.contract.Address;
+import com.nexa.api.customerrelationships.domain.model.clientaccount.ClientAccountAddress;
 import com.nexa.api.sales.domain.model.commercial.PaymentTerms;
 import com.nexa.api.sales.domain.model.credit.CreditProfile;
 import com.nexa.api.sales.domain.model.credit.CreditStatus;
@@ -98,15 +99,15 @@ public final class SalesTestFixtures {
                 return Optional.of(commercialProfile());
             }
         };
-        ClientAccountAddressPort addresses = new ClientAccountAddressPort() {
-            @Override public Optional<ClientAccountAddress> find(String tenant, String workspace, String account, String addressId) {
-                return ACCOUNT.equals(account) && ADDRESS.toString().equals(addressId) ? Optional.of(savedAddress(true, 2)) : Optional.empty();
+        CustomerAddressQuery addresses = new CustomerAddressQuery() {
+            @Override public Optional<CustomerAddressReference> findReference(String tenant, String workspace, String account, String addressId) {
+                return ACCOUNT.equals(account) && ADDRESS.toString().equals(addressId) ? Optional.of(addressReference()) : Optional.empty();
             }
-            @Override public Optional<ClientAccountAddress> findForBuyer(String tenant, String workspace, String membership, String addressId) {
-                return ADDRESS.toString().equals(addressId) ? Optional.of(savedAddress(true, 2)) : Optional.empty();
+            @Override public Optional<CustomerAddressReference> findBuyerReference(String tenant, String workspace, String membership, String addressId) {
+                return ADDRESS.toString().equals(addressId) ? Optional.of(addressReference()) : Optional.empty();
             }
-            @Override public Optional<ClientAccountAddress> findDefaultForBuyer(String tenant, String workspace, String membership) {
-                return Optional.of(savedAddress(true, 2));
+            @Override public Optional<CustomerAddressReference> findDefaultBuyerReference(String tenant, String workspace, String membership) {
+                return Optional.of(addressReference());
             }
         };
         WarehouseReferencePort warehouses = new WarehouseReferencePort() {
@@ -130,5 +131,9 @@ public final class SalesTestFixtures {
         MapRoutingPort maps = request -> new com.nexa.api.sales.domain.model.delivery.RouteSnapshot("TEST", "TEST-ROUTE",
                 request.warehouse().name(), request.address().label(), 1000, 300, "nexa://test-route");
         return new SalesSnapshotAssembler(accounts, addresses, warehouses, geography, maps, catalog);
+    }
+
+    private static CustomerAddressReference addressReference() {
+        return new CustomerAddressReference(ADDRESS.toString(), "Main", address(), true);
     }
 }

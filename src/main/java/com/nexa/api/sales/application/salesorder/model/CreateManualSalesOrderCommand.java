@@ -1,6 +1,6 @@
 package com.nexa.api.sales.application.salesorder.model;
 
-import com.nexa.api.sales.domain.model.address.Address;
+import com.nexa.api.customerrelationships.contract.Address;
 import com.nexa.api.sales.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority;
 

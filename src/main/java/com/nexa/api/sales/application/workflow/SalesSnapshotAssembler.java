@@ -1,13 +1,13 @@
 package com.nexa.api.sales.application.workflow;
 
-import com.nexa.api.sales.application.port.out.ClientAccountAddressPort;
+import com.nexa.api.customerrelationships.application.publicapi.CustomerAddressQuery;
+import com.nexa.api.customerrelationships.contract.CustomerAddressReference;
 import com.nexa.api.sales.application.port.out.ClientAccountCommercialPort;
 import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.port.out.WarehouseReferencePort;
 import com.nexa.api.sales.application.reference.port.PeruGeographyPersistencePort;
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
-import com.nexa.api.sales.domain.model.address.Address;
-import com.nexa.api.sales.domain.model.clientaccount.ClientAccountAddress;
+import com.nexa.api.customerrelationships.contract.Address;
 import com.nexa.api.sales.domain.model.commercial.CommercialSnapshot;
 import com.nexa.api.sales.domain.model.delivery.DeliveryAddressSnapshot;
 import com.nexa.api.sales.domain.model.delivery.DeliverySnapshot;
@@ -41,21 +41,21 @@ import java.util.UUID;
  */
 public final class SalesSnapshotAssembler {
     private final ClientAccountCommercialPort commercial;
-    private final ClientAccountAddressPort addresses;
+    private final CustomerAddressQuery addresses;
     private final WarehouseReferencePort warehouses;
     private final PeruGeographyPersistencePort geography;
     private final MapRoutingPort maps;
     private final com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort catalog;
     private final com.nexa.api.sales.application.purchaserequest.port.SellableSkuSnapshotLookupPort sellableSkus;
 
-    public SalesSnapshotAssembler(ClientAccountCommercialPort commercial, ClientAccountAddressPort addresses,
+    public SalesSnapshotAssembler(ClientAccountCommercialPort commercial, CustomerAddressQuery addresses,
                                   WarehouseReferencePort warehouses, PeruGeographyPersistencePort geography,
                                   MapRoutingPort maps,
                                   com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort catalog) {
         this(commercial, addresses, warehouses, geography, maps, catalog, null);
     }
 
-    public SalesSnapshotAssembler(ClientAccountCommercialPort commercial, ClientAccountAddressPort addresses,
+    public SalesSnapshotAssembler(ClientAccountCommercialPort commercial, CustomerAddressQuery addresses,
                                   WarehouseReferencePort warehouses, PeruGeographyPersistencePort geography,
                                   MapRoutingPort maps,
                                   com.nexa.api.sales.application.purchaserequest.port.CatalogItemSnapshotLookupPort catalog,
@@ -132,7 +132,7 @@ public final class SalesSnapshotAssembler {
 
     private DeliveryAddressSnapshot resolveAddress(CurrentAccessContext context, String accountId, String addressId,
                                                   Address manualAddress) {
-        ClientAccountAddress address;
+        CustomerAddressReference address;
         if (manualAddress != null) {
             validateGeography(manualAddress);
             String id = addressId == null || addressId.isBlank() ? "MANUAL-ADDRESS" : addressId.trim();
@@ -140,18 +140,18 @@ public final class SalesSnapshotAssembler {
         }
         if (addressId != null && !addressId.isBlank()) {
             address = context.hasRole(MembershipRole.BUYER)
-                    ? addresses.findForBuyer(scope(context), workspace(context), context.membershipId().toString(), addressId)
+                    ? addresses.findBuyerReference(scope(context), workspace(context), context.membershipId().toString(), addressId)
                     .orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("client-account-address"))
-                    : addresses.find(scope(context), workspace(context), accountId, addressId)
+                    : addresses.findReference(scope(context), workspace(context), accountId, addressId)
                     .orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("client-account-address"));
         } else if (context.hasRole(MembershipRole.BUYER)) {
-            address = addresses.findDefaultForBuyer(scope(context), workspace(context), context.membershipId().toString())
+            address = addresses.findDefaultBuyerReference(scope(context), workspace(context), context.membershipId().toString())
                     .orElseThrow(() -> new com.nexa.api.sales.application.exception.SalesResourceNotFoundException("client-account-address"));
         } else {
             throw new com.nexa.api.sales.domain.exception.SalesInvariantViolation("Delivery address is required");
         }
         validateGeography(address.address());
-        return new DeliveryAddressSnapshot(address.id().toString(), address.label(), address.address(), address.defaultAddress());
+        return new DeliveryAddressSnapshot(address.id(), address.label(), address.address(), address.defaultAddress());
     }
 
     private void validateGeography(Address address) {

@@ -6,7 +6,7 @@ import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.sales.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.sales.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
-import com.nexa.api.sales.domain.model.address.Address;
+import com.nexa.api.customerrelationships.contract.Address;
 import com.nexa.api.sales.domain.model.delivery.DeliveryAddressSnapshot;
 import com.nexa.api.sales.domain.model.delivery.RouteSnapshot;
 import com.nexa.api.sales.domain.model.delivery.WarehouseSnapshot;

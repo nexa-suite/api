@@ -5,7 +5,7 @@ import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.sales.application.salesorder.port.ManualSalesOrderDraftPersistencePort;
-import com.nexa.api.sales.domain.model.address.Address;
+import com.nexa.api.customerrelationships.contract.Address;
 import com.nexa.api.sales.domain.model.delivery.DeliveryAddressSnapshot;
 import com.nexa.api.sales.domain.model.delivery.RouteSnapshot;
 import com.nexa.api.sales.domain.model.delivery.WarehouseSnapshot;
