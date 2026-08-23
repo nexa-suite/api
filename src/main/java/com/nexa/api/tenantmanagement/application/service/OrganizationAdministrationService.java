@@ -214,7 +214,6 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 		} catch (UnsupportedOperationException exception) {
 			throw new com.nexa.api.tenantmanagement.application.exception.RoleDefinitionPersistenceUnavailableException();
 		}
-		authorizationVersions.bump(context.tenantId(), context.workspaceId());
 		port.appendMembershipEvent("ROLE_DEFINITION_ASSIGNMENT_CHANGED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(),
 				String.join(",", current.roleDefinitionIds()), current.status(), String.join(",", roleDefinitionIds), current.status(), correlationId);
 		audit(context, "ROLE_DEFINITION_ASSIGNMENT_CHANGED", current.id(), correlationId, java.util.Map.of("beforeRoleDefinitionIds", current.roleDefinitionIds(), "afterRoleDefinitionIds", roleDefinitionIds));

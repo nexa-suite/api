@@ -24,12 +24,14 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
 
     @Override
     public Optional<RegistrationSnapshot> findForUpdate(UUID registrationId) {
-        return jdbc.query("select id,legal_name,display_name,business_identifier,operation_category,workspace_name,workspace_slug,founder_email,founder_display_name,terms_version,status_token_hash,reference_plan,status,created_at from tenant_management.organization_registration where id=? for update",
+        return jdbc.query("select id,legal_name,display_name,business_identifier,operation_category,workspace_name,workspace_slug,founder_email,founder_display_name,terms_version,status_token_hash,reference_plan,status,created_at,tenant_id,workspace_id,activated_founder_user_id from tenant_management.organization_registration where id=? for update",
                 (rs, row) -> new RegistrationSnapshot(rs.getObject("id", UUID.class), rs.getString("legal_name"), rs.getString("display_name"),
                         rs.getString("business_identifier"), rs.getString("operation_category"), rs.getString("workspace_name"),
                         rs.getString("workspace_slug"), rs.getString("founder_email"), rs.getString("founder_display_name"),
                         rs.getString("terms_version"), rs.getString("status_token_hash"),
-                        rs.getString("reference_plan"), rs.getString("status"), rs.getTimestamp("created_at").toInstant()), registrationId)
+                        rs.getString("reference_plan"), rs.getString("status"), rs.getTimestamp("created_at").toInstant(),
+                        rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class),
+                        rs.getObject("activated_founder_user_id", UUID.class)), registrationId)
                 .stream().findFirst();
     }
 
@@ -70,9 +72,9 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
     }
 
     @Override
-    public void markActivated(UUID registrationId, UUID tenantId, UUID workspaceId, Instant now) {
-        int changed = jdbc.update("update tenant_management.organization_registration set status='ACTIVE',tenant_id=?,workspace_id=?,updated_at=?,version=version+1 where id=? and status='PENDING_ACTIVATION'",
-                tenantId, workspaceId, timestamp(now), registrationId);
+    public void markActivated(UUID registrationId, UUID tenantId, UUID workspaceId, UUID founderUserId, Instant now) {
+        int changed = jdbc.update("update tenant_management.organization_registration set status='ACTIVE',tenant_id=?,workspace_id=?,activated_founder_user_id=?,updated_at=?,version=version+1 where id=? and status='PENDING_ACTIVATION'",
+                tenantId, workspaceId, founderUserId, timestamp(now), registrationId);
         if (changed != 1) throw new ApiResourceNotFoundException("pending organization registration");
     }
 

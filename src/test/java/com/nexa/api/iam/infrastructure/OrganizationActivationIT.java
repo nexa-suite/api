@@ -22,6 +22,10 @@ class OrganizationActivationIT extends NexaWorkflowIntegrationSupport {
         var activated = mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
                         .header("X-Nexa-System-Operator", "integration-system-operator-token-0123456789-abcdefghijklmnopqrstuvwxyz"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE")).andReturn();
+        var retried = mockMvc.perform(post("/api/v1/internal/organization-registrations/" + id + "/activation")
+                        .header("X-Nexa-System-Operator", "integration-system-operator-token-0123456789-abcdefghijklmnopqrstuvwxyz"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE")).andReturn();
+        assertThat(retried.getResponse().getContentAsString()).isEqualTo(activated.getResponse().getContentAsString());
         String tenantId = json(activated).get("tenantId").asText();
         String workspaceId = json(activated).get("workspaceId").asText();
         var roles = jdbc.queryForList("select upper(r.code) from tenant_management.membership_role_definition a join tenant_management.role_definition r on r.id=a.role_id join tenant_management.workspace_membership m on m.id=a.membership_id where m.user_id=? order by r.code", String.class,
@@ -35,5 +39,9 @@ class OrganizationActivationIT extends NexaWorkflowIntegrationSupport {
                 .containsEntry("display_name", "Integration Cold Chain")
                 .containsEntry("business_identifier", "IT-" + slug)
                 .containsEntry("operation_category", "b2bColdChainDistributor");
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.tenant where id=?", Integer.class,
+                java.util.UUID.fromString(tenantId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from iam.security_notification_outbox where notification_type='PASSWORD_RESET' and recipient=?", Integer.class,
+                email)).isEqualTo(1);
     }
 }

@@ -46,7 +46,15 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 		replaceCanonicalRoleDefinitions(uuid(tenantId), membershipId, roles);
 	}
 	@Override public int updateWorkspace(String tenantId,String workspaceId,String name,String slug,String status,long version){ return jdbc.update("update tenant_management.workspace set name=?,slug=?,status=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and id=? and version=?",name,slug,status,uuid(tenantId),uuid(workspaceId),version); }
-	@Override public int updateWorkspaceStatus(String tenantId,String workspaceId,String status,long version){ return jdbc.update("update tenant_management.workspace set status=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and id=? and version=?",status,uuid(tenantId),uuid(workspaceId),version); }
+	@Override @Transactional public int updateWorkspaceStatus(String tenantId,String workspaceId,String status,long version){
+		int updated = jdbc.update("update tenant_management.workspace set status=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and id=? and version=?",status,uuid(tenantId),uuid(workspaceId),version);
+		if (updated == 1 && "SUSPENDED".equals(status)) {
+			jdbc.query("select tenant_management.bump_authorization_membership(m.id) from tenant_management.workspace_membership m where m.workspace_id=?",
+					(rs, row) -> rs.getObject(1), uuid(workspaceId));
+			jdbc.update("update iam.refresh_session session set revoked_at=current_timestamp,version=session.version+1 where session.membership_id in (select id from tenant_management.workspace_membership where workspace_id=?) and session.revoked_at is null", uuid(workspaceId));
+		}
+		return updated;
+	}
 	@Override public void lockTenant(String tenantId){ jdbc.queryForObject("select id from tenant_management.tenant where id=? for update", java.util.UUID.class, uuid(tenantId)); }
 	@Override public int activeAdministrativeWorkspaceCount(String tenantId){ return jdbc.queryForObject("select count(*) from tenant_management.workspace w where w.tenant_id=? and w.status='ACTIVE' and exists (select 1 from tenant_management.workspace_membership m where m.workspace_id=w.id and m.status='ACTIVE' and exists (select 1 from tenant_management.membership_role_definition a join tenant_management.role_definition rd on rd.id=a.role_id where a.membership_id=m.id and rd.code='tenant_admin' and rd.status='ACTIVE'))", Integer.class, uuid(tenantId)); }
 	@Override public int activeOwnerCount(String workspaceId){ return jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m where m.workspace_id=? and m.status='ACTIVE' and exists (select 1 from tenant_management.membership_role_definition a join tenant_management.role_definition rd on rd.id=a.role_id where a.membership_id=m.id and rd.code='company_owner' and rd.status='ACTIVE')",Integer.class,uuid(workspaceId)); }
@@ -57,7 +65,6 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 		int updated = jdbc.update("update tenant_management.workspace_membership m set updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.membership_type='INTERNAL' and m.version=? and " + TENANT_ADMIN_GUARD, uuid(tenantId),uuid(membershipId),version,roles.contains("TENANT_ADMIN"));
 		if (updated == 0) return 0;
 		replaceCanonicalRoleDefinitions(uuid(tenantId), uuid(membershipId), roles);
-		bumpAuthorizationVersion(uuid(membershipId), uuid(tenantId));
 		return updated;
 	}
 	@Override @Transactional public int updateRoleDefinitionAssignments(String tenantId, String membershipId, Set<String> roleDefinitionIds, long version) {
@@ -70,12 +77,16 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 			jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) select m.id,w.tenant_id,m.workspace_id,?,current_timestamp from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id where m.id=? and w.tenant_id=?",
 					uuid(roleDefinitionId), uuid(membershipId), uuid(tenantId));
 		}
-		bumpAuthorizationVersion(uuid(membershipId), uuid(tenantId));
 		return updated;
 	}
 	@Override @Transactional public int updateStatus(String tenantId,String membershipId,String status,long version){
 		lockMembershipWorkspace(tenantId, membershipId);
-		return jdbc.update("update tenant_management.workspace_membership m set status=?,updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.version=? and " + TENANT_ADMIN_GUARD,status,uuid(tenantId),uuid(membershipId),version,!"DISABLED".equals(status));
+		int updated = jdbc.update("update tenant_management.workspace_membership m set status=?,updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.version=? and " + TENANT_ADMIN_GUARD,status,uuid(tenantId),uuid(membershipId),version,!"DISABLED".equals(status));
+		if (updated == 1 && "DISABLED".equals(status)) {
+			jdbc.queryForObject("select tenant_management.bump_authorization_membership(?)", Object.class, uuid(membershipId));
+			jdbc.update("update iam.refresh_session set revoked_at=current_timestamp,version=version+1 where membership_id=? and revoked_at is null", uuid(membershipId));
+		}
+		return updated;
 	}
 	private void lockMembershipWorkspace(String tenantId,String membershipId){ jdbc.queryForObject("select w.id from tenant_management.workspace w join tenant_management.workspace_membership m on m.workspace_id=w.id where w.tenant_id=? and m.id=? for update",java.util.UUID.class,uuid(tenantId),uuid(membershipId)); }
 	@Override public void appendMembershipEvent(String type,String tenantId,String workspaceId,String targetMembershipId,String actorMembershipId,String beforeRole,String beforeStatus,String afterRole,String afterStatus,String correlationId){ jdbc.update("insert into tenant_management.membership_admin_event (id,event_type,tenant_id,workspace_id,target_membership_id,actor_membership_id,before_role,before_status,after_role,after_status,correlation_id,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,current_timestamp)",java.util.UUID.randomUUID(),type,uuid(tenantId),uuid(workspaceId),uuid(targetMembershipId),uuid(actorMembershipId),beforeRole,beforeStatus,afterRole,afterStatus,correlationId == null ? "unknown" : correlationId); }
@@ -93,9 +104,6 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 		if (array == null) return Set.of();
 		Object value = array.getArray();
 		return value instanceof String[] values ? new LinkedHashSet<>(Arrays.asList(values)) : Set.of();
-	}
-	private void bumpAuthorizationVersion(java.util.UUID membershipId, java.util.UUID tenantId) {
-		jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) select m.id,w.tenant_id,m.workspace_id,1,current_timestamp from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id where m.id=? and w.tenant_id=? on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=current_timestamp", membershipId, tenantId);
 	}
 	private void replaceCanonicalRoleDefinitions(java.util.UUID tenantId, java.util.UUID membershipId, Set<String> roles) {
 		jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", membershipId);
