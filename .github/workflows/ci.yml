@@ -43,6 +43,14 @@ jobs:
           NEXA_CLAMAV_HOST: 127.0.0.1
           NEXA_CLAMAV_PORT: "3310"
         run: ./mvnw clean verify -Dnexa.integration.enabled=true -Dspring.datasource.hikari.maximum-pool-size=32
+      - name: Verify OpenAPI compatibility against base snapshot
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          python3 .github/scripts/test_check_openapi_compatibility.py
+          python3 .github/scripts/check-openapi-compatibility.py
       - name: Stop external integration adapters
         if: ${{ always() }}
         run: docker rm -f nexa-ci-clamav nexa-ci-stripe-mock || true

@@ -166,6 +166,9 @@
 			<plugin>
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
+					<systemPropertyVariables>
+						<nexa.api.version>${project.version}</nexa.api.version>
+					</systemPropertyVariables>
 					<includes>
 						<include>**/*Test.java</include>
 						<include>**/*Tests.java</include>

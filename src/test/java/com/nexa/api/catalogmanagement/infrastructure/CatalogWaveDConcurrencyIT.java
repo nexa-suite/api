@@ -128,9 +128,9 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         assertThat(results).allSatisfy(result -> assertThat(result.failure())
                 .as("concurrent promotion transition failure")
                 .isNull());
-        assertThat(results.stream().map(HttpResult::status).toList()).containsExactlyInAnyOrder(200, 409);
-        HttpResult conflict = results.stream().filter(result -> result.status() == 409).findFirst().orElseThrow();
-        assertThat(JSON.readTree(conflict.body()).get("code").asText()).isEqualTo("CONCURRENCY_CONFLICT");
+        assertThat(results.stream().map(HttpResult::status).toList()).containsExactlyInAnyOrder(200, 412);
+        HttpResult conflict = results.stream().filter(result -> result.status() == 412).findFirst().orElseThrow();
+        assertThat(JSON.readTree(conflict.body()).get("code").asText()).isEqualTo("PRECONDITION_FAILED");
         assertThat(jdbc.queryForObject("select status from catalog_management.promotion where id=?", String.class, promotion))
                 .isEqualTo("ACTIVE");
         assertThat(jdbc.queryForObject("select version from catalog_management.promotion where id=?", Long.class, promotion))

@@ -82,6 +82,8 @@ public final class ApiProblemDetailFactory {
 			case CONCURRENCY_CONFLICT -> "Concurrency conflict";
 			case INVALID_TRANSITION -> "Invalid transition";
 			case PRECONDITION_REQUIRED -> "Precondition required";
+			case PRECONDITION_FAILED -> "Precondition failed";
+			case DATA_INTEGRITY_CONFLICT -> "Data integrity conflict";
 			case CLIENT_ACCOUNT_NOT_FOUND -> "Client account not found";
 			case CLIENT_ACCOUNT_CODE_CONFLICT -> "Client account code conflict";
 			case CLIENT_ACCOUNT_TAX_ID_CONFLICT -> "Client account tax identifier conflict";
@@ -171,7 +173,8 @@ public final class ApiProblemDetailFactory {
 				AUTHENTICATION_THROTTLED, REFRESH_SESSION_INVALID -> "AUTHENTICATION";
 			case FORBIDDEN, WORKSPACE_ACCESS_DENIED, SURFACE_ACCESS_DENIED, PERMISSION_DENIED,
 				ORIGIN_NOT_ALLOWED, SYSTEM_OPERATOR_REQUIRED -> "AUTHORIZATION";
-			case CONCURRENCY_CONFLICT -> "CONCURRENCY";
+			case CONCURRENCY_CONFLICT, PRECONDITION_FAILED -> "CONCURRENCY";
+			case DATA_INTEGRITY_CONFLICT -> "BUSINESS_CONFLICT";
 			case PRECONDITION_REQUIRED -> "PRECONDITION";
 			case RESET_RATE_LIMITED, PUBLIC_CONTACT_RATE_LIMITED -> "RATE_LIMIT";
 			case EXTERNAL_TEMPORARY_FAILURE, EXTERNAL_TIMEOUT -> "EXTERNAL";

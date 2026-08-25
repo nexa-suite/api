@@ -21,6 +21,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.OptimisticLockingFailureException;
+
+import java.sql.SQLException;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -81,6 +86,25 @@ class GlobalExceptionHandlerTests {
 	}
 
 	@Test
+	void normalizesOptimisticLockingAndDatabaseFailures() throws Exception {
+		mockMvc.perform(get("/optimistic").header("If-Match", "\"1\""))
+				.andExpect(status().isPreconditionFailed())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.code").value("PRECONDITION_FAILED"))
+				.andExpect(jsonPath("$.detail").value("Resource changed by another request"));
+		mockMvc.perform(get("/integrity"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("DATA_INTEGRITY_CONFLICT"))
+				.andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("23505"))));
+		mockMvc.perform(get("/serialization"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("CONCURRENCY_CONFLICT"));
+		mockMvc.perform(get("/deadlock"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("CONCURRENCY_CONFLICT"));
+	}
+
+	@Test
 	void handlesControllerMethodValidationAsBadRequest() throws Exception {
 		mockMvc.perform(get("/validated-query").param("value", "invalid"))
 				.andExpect(status().isBadRequest())
@@ -116,6 +140,29 @@ class GlobalExceptionHandlerTests {
 		void technicalFailure() {
 			throw new TechnicalFailureException(TechnicalFailureException.Kind.EXTERNAL_TIMEOUT,
 					"provider detail must not reach the client", null, "provider-request-id");
+		}
+
+		@GetMapping("/optimistic")
+		void optimistic() {
+			throw new OptimisticLockingFailureException("internal version");
+		}
+
+		@GetMapping("/integrity")
+		void integrity() {
+			throw new DataIntegrityViolationException("internal database detail",
+					new SQLException("internal constraint detail", "23505"));
+		}
+
+		@GetMapping("/serialization")
+		void serialization() {
+			throw new DataAccessResourceFailureException("internal serialization detail",
+					new SQLException("internal serialization failure", "40001"));
+		}
+
+		@GetMapping("/deadlock")
+		void deadlock() {
+			throw new DataAccessResourceFailureException("internal deadlock detail",
+					new SQLException("internal deadlock detected", "40P01"));
 		}
 
 		@GetMapping("/validated-query")
