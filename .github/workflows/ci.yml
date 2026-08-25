@@ -49,6 +49,7 @@ jobs:
           OPENAPI_BASE_REF: origin/${{ github.base_ref }}
         run: |
           git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          python3 .github/scripts/test_check_openapi_compatibility.py
           python3 .github/scripts/check-openapi-compatibility.py
       - name: Stop external integration adapters
         if: ${{ always() }}

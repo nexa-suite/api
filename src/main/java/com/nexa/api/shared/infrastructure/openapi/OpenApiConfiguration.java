@@ -96,6 +96,9 @@ public class OpenApiConfiguration {
 		ApiResponses responses = operation.getResponses() == null ? new ApiResponses() : operation.getResponses();
 		operation.setResponses(responses);
 		statuses.forEach((status, description) -> {
+			if ("428".equals(status) && !requiresPrecondition(operation)) {
+				return;
+			}
 			if (!responses.containsKey(status)) {
 				ApiResponse response = new ApiResponse().description(description)
 						.content(new io.swagger.v3.oas.models.media.Content()
@@ -107,6 +110,12 @@ public class OpenApiConfiguration {
 				responses.addApiResponse(status, response);
 			}
 		});
+	}
+
+	private static boolean requiresPrecondition(Operation operation) {
+		return operation.getParameters() != null && operation.getParameters().stream()
+				.anyMatch(parameter -> "header".equalsIgnoreCase(parameter.getIn())
+						&& "If-Match".equalsIgnoreCase(parameter.getName()));
 	}
 
 	private static MediaType problemMediaType() {

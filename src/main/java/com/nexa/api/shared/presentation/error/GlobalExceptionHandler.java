@@ -321,7 +321,7 @@ public final class GlobalExceptionHandler {
 			default -> dataIntegrityCode(sqlState(exception));
 		};
 		String detail = code == ApiErrorCode.REGISTRATION_SLUG_CONFLICT
-				? "Organization workspace slug is already registered" : "Sales resource conflicts with existing data";
+				? "Organization workspace slug is already registered" : "Resource conflicts with existing data";
 		HttpStatus status = "23514".equals(sqlState(exception)) || "23502".equals(sqlState(exception))
 				? HttpStatus.BAD_REQUEST : HttpStatus.CONFLICT;
 		return response(status, code, detail, request);

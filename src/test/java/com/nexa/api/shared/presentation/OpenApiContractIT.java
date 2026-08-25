@@ -42,9 +42,14 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(problem.get("properties").has("retryable")).isTrue();
         assertThat(problem.get("required").toString()).contains("code", "correlationId", "category", "retryable");
         var paymentIntent = document.get("paths").get("/api/v1/receivables/{receivableId}/payment-intents").get("post");
-        for (String status : new String[] {"400", "401", "403", "404", "409", "412", "428", "429", "500", "502", "503", "504"}) {
+        for (String status : new String[] {"400", "401", "403", "404", "409", "412", "429", "500", "502", "503", "504"}) {
             assertThat(paymentIntent.get("responses").has(status)).as("technical response %s", status).isTrue();
         }
+        assertThat(paymentIntent.get("responses").has("428")).isFalse();
+        var preconditioned = document.get("paths")
+                .get("/api/v1/tenant-management/organization-registration-drafts/{registrationId}/steps/{step}")
+                .get("put");
+        assertThat(preconditioned.get("responses").has("428")).isTrue();
         assertThat(paymentIntent.get("responses").get("503").get("content").get("application/problem+json")
                 .get("schema").get("$ref").asText()).isEqualTo("#/components/schemas/NexaProblemDetail");
 
