@@ -83,7 +83,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .header("Idempotency-Key", "ss-policy-stale-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(policyBody))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
 
         WarehouseLocation destination = warehouse(token, "WH-SS-D-" + suffix, "Safety stock destination");
         String destinationZone = zone(token, destination.warehouseId(), "Z-SS-D-" + suffix, "Ambient");
@@ -156,7 +156,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .header("Authorization", "Bearer " + token)
                         .header("If-Match", lotEtag).header("Idempotency-Key", "tr-stale-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON).content(body.replace("\"4\"", "\"1\"")))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
     }
 
     private WarehouseLocation warehouse(String token, String code, String name) throws Exception {
