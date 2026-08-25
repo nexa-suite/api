@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -58,7 +59,12 @@ import com.nexa.api.logistics.application.LogisticsOperationsService;
 import com.nexa.api.logistics.domain.dispatchorder.DispatchTransitionViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogConcurrencyException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogConflictException;
 import com.nexa.api.catalogmanagement.application.exception.CatalogIdempotencyKeyRequiredException;
@@ -161,12 +167,12 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(ConcurrencyConflictException.class)
 	public ResponseEntity<ProblemDetail> handleConcurrency(ConcurrencyConflictException exception, HttpServletRequest request) {
-		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request);
+		return staleOrConflict(ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request);
 	}
 
 	@ExceptionHandler(CatalogConcurrencyException.class)
 	public ResponseEntity<ProblemDetail> handleCatalogConcurrency(CatalogConcurrencyException exception, HttpServletRequest request) {
-		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Catalog resource changed by another request", request);
+		return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Catalog resource changed by another request", request);
 	}
 
 	@ExceptionHandler(CatalogPreconditionRequiredException.class)
@@ -300,19 +306,48 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(DataIntegrityViolationException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
 		LOGGER.warn("Data integrity constraint rejected request {}", request.getRequestURI(), exception.getMostSpecificCause());
-		String message = exception.getMostSpecificCause() == null ? "" : String.valueOf(exception.getMostSpecificCause().getMessage()).toLowerCase(java.util.Locale.ROOT);
-		ApiErrorCode code = message.contains("ex_catalog_price_no_overlap") || message.contains("ex_sku_price_no_overlap") ? ApiErrorCode.CATALOG_PRICE_OVERLAP
-				: message.contains("uq_catalog_category_slug") || message.contains("uq_catalog_brand_slug") || message.contains("uq_catalog_product_") || message.contains("uq_catalog_promotion_slug") ? ApiErrorCode.CATALOG_CONFLICT
-				: message.contains("uq_organization_registration_slug") ? ApiErrorCode.REGISTRATION_SLUG_CONFLICT
-				: message.contains("uq_workspace_tenant_slug") ? ApiErrorCode.WORKSPACE_SLUG_CONFLICT
-				: message.contains("uq_organization_invitation_active_email") ? ApiErrorCode.INVITATION_CONFLICT
-				: message.contains("uq_custom_field_definition_key") ? ApiErrorCode.CUSTOM_FIELD_CONFLICT
-				: message.contains("code") ? ApiErrorCode.CLIENT_ACCOUNT_CODE_CONFLICT
-				: message.contains("tax") ? ApiErrorCode.CLIENT_ACCOUNT_TAX_ID_CONFLICT
-				: message.contains("membership") ? ApiErrorCode.BUYER_MEMBERSHIP_ALREADY_ASSIGNED : ApiErrorCode.INVALID_REQUEST;
+		String constraint = constraintName(exception);
+		ApiErrorCode code = switch (constraint) {
+			case "ex_catalog_price_no_overlap", "ex_sku_price_no_overlap" -> ApiErrorCode.CATALOG_PRICE_OVERLAP;
+			case "uq_catalog_category_slug", "uq_catalog_brand_slug", "uq_catalog_product_item_id",
+					"uq_catalog_product_code", "uq_catalog_product_slug", "uq_catalog_promotion_slug" -> ApiErrorCode.CATALOG_CONFLICT;
+			case "uq_client_account_tenant_code" -> ApiErrorCode.CLIENT_ACCOUNT_CODE_CONFLICT;
+			case "uq_client_account_tenant_tax" -> ApiErrorCode.CLIENT_ACCOUNT_TAX_ID_CONFLICT;
+			case "uq_client_account_buyer_membership" -> ApiErrorCode.BUYER_MEMBERSHIP_ALREADY_ASSIGNED;
+			case "uq_organization_registration_slug" -> ApiErrorCode.REGISTRATION_SLUG_CONFLICT;
+			case "uq_workspace_tenant_slug" -> ApiErrorCode.WORKSPACE_SLUG_CONFLICT;
+			case "uq_organization_invitation_active_email" -> ApiErrorCode.INVITATION_CONFLICT;
+			case "uq_custom_field_definition_key" -> ApiErrorCode.CUSTOM_FIELD_CONFLICT;
+			default -> dataIntegrityCode(sqlState(exception));
+		};
 		String detail = code == ApiErrorCode.REGISTRATION_SLUG_CONFLICT
 				? "Organization workspace slug is already registered" : "Sales resource conflicts with existing data";
-		return response(HttpStatus.CONFLICT, code, detail, request);
+		HttpStatus status = "23514".equals(sqlState(exception)) || "23502".equals(sqlState(exception))
+				? HttpStatus.BAD_REQUEST : HttpStatus.CONFLICT;
+		return response(status, code, detail, request);
+	}
+
+	@ExceptionHandler({ObjectOptimisticLockingFailureException.class, OptimisticLockingFailureException.class})
+	public ResponseEntity<ProblemDetail> handleOptimisticLocking(RuntimeException exception, HttpServletRequest request) {
+		HttpStatus status = request.getHeader("If-Match") == null ? HttpStatus.CONFLICT : HttpStatus.PRECONDITION_FAILED;
+		ApiErrorCode code = status == HttpStatus.PRECONDITION_FAILED ? ApiErrorCode.PRECONDITION_FAILED : ApiErrorCode.CONCURRENCY_CONFLICT;
+		return response(status, code, "Resource changed by another request", request);
+	}
+
+	@ExceptionHandler({CannotAcquireLockException.class, PessimisticLockingFailureException.class})
+	public ResponseEntity<ProblemDetail> handlePessimisticLocking(RuntimeException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT,
+				"Resource could not be locked for this request", request);
+	}
+
+	@ExceptionHandler(DataAccessException.class)
+	public ResponseEntity<ProblemDetail> handleDataAccess(DataAccessException exception, HttpServletRequest request) {
+		String state = sqlState(exception);
+		if ("40001".equals(state) || "40P01".equals(state)) {
+			return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT,
+					"Resource could not be committed because it was concurrently modified", request);
+		}
+		return handleUnexpected(exception, request);
 	}
 	@ExceptionHandler(InvalidDataAccessApiUsageException.class)
 	public ResponseEntity<ProblemDetail> handleInvalidDataAccessUsage(InvalidDataAccessApiUsageException exception, HttpServletRequest request) {
@@ -328,7 +363,7 @@ public final class GlobalExceptionHandler {
 	}
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
-	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Resource changed by another request", request); }
+	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Resource changed by another request", request); }
 	@ExceptionHandler(CustomerRelationshipConflictException.class)
 	public ResponseEntity<ProblemDetail> handleCustomerRelationshipConflict(CustomerRelationshipConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Customer relationship changed by another request", request); }
 	@ExceptionHandler(CustomerRelationshipPreconditionRequiredException.class)
@@ -341,7 +376,7 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.INVALID_REQUEST, "Customer relationship request is invalid", request);
 	}
 	@ExceptionHandler(PurchaseRequestDraftConcurrencyException.class)
-	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.CONCURRENCY_CONFLICT, "Purchase request draft version is stale", request); }
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Purchase request draft version is stale", request); }
 	@ExceptionHandler(PurchaseRequestDraftInvariantException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftInvariant(PurchaseRequestDraftInvariantException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Purchase request draft is not ready to submit", request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
@@ -367,12 +402,18 @@ public final class GlobalExceptionHandler {
 		@ExceptionHandler(WarehouseOperationsService.WarehouseException.class)
 		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationsService.WarehouseException exception, HttpServletRequest request) {
 			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+			if (!exception.notFound() && "CONCURRENCY_CONFLICT".equals(exception.code()) && request.getHeader("If-Match") != null) {
+				return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Warehouse resource changed by another request", request);
+			}
 			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
 		}
 		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)
 		public ResponseEntity<ProblemDetail> handleLogistics(LogisticsOperationsService.LogisticsException exception, HttpServletRequest request) {
 			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+			if (!exception.notFound() && "CONCURRENCY_CONFLICT".equals(exception.code()) && request.getHeader("If-Match") != null) {
+				return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Logistics resource changed by another request", request);
+			}
 			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) {
 				case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "IDEMPOTENCY_PAYLOAD_CONFLICT", "DISPATCH_ALREADY_EXISTS", "INVALID_TRANSITION", "RESERVATION_NOT_READY" -> HttpStatus.CONFLICT;
 				case "FORBIDDEN" -> HttpStatus.FORBIDDEN;
@@ -392,7 +433,7 @@ public final class GlobalExceptionHandler {
 		ApiProblemDetailFactory.addValidationErrors(problem, exception.getBindingResult().getFieldErrors().stream()
 				.map(error -> Map.of("field", error.getField(), "message", "Invalid value"))
 				.toList());
-		return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+		return ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
 	}
 
 	@ExceptionHandler(ConstraintViolationException.class)
@@ -401,7 +442,7 @@ public final class GlobalExceptionHandler {
 		ApiProblemDetailFactory.addValidationErrors(problem, exception.getConstraintViolations().stream()
 				.map(error -> Map.of("field", error.getPropertyPath().toString(), "message", "Invalid value"))
 				.toList());
-		return ResponseEntity.badRequest().body(problem);
+		return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
 	}
 
 	@ExceptionHandler(HandlerMethodValidationException.class)
@@ -415,7 +456,7 @@ public final class GlobalExceptionHandler {
 		ApiProblemDetailFactory.addValidationErrors(problem, exception.getBindingResult().getFieldErrors().stream()
 				.map(error -> Map.of("field", error.getField(), "message", "Invalid value"))
 				.toList());
-		return ResponseEntity.badRequest().body(problem);
+		return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
 	}
 
 	@ExceptionHandler(com.nexa.api.shared.application.error.ApiResourceNotFoundException.class)
@@ -471,10 +512,6 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(Exception.class)
 	public ResponseEntity<ProblemDetail> handleUnexpected(Exception exception, HttpServletRequest request) {
-		if ("REGISTRATION_SLUG_CONFLICT".equals(exception.getMessage())) {
-			return response(HttpStatus.CONFLICT, ApiErrorCode.REGISTRATION_SLUG_CONFLICT,
-					"Organization workspace slug is already registered", request);
-		}
 		LOGGER.error("Unexpected API exception correlationId={}", ApiProblemDetailFactory.correlationId(request), exception);
 		return response(HttpStatus.INTERNAL_SERVER_ERROR, ApiErrorCode.INTERNAL_ERROR, "Internal server error", request);
 	}
@@ -484,7 +521,50 @@ public final class GlobalExceptionHandler {
 	}
 
 	private static ResponseEntity<ProblemDetail> response(HttpStatus status, ApiErrorCode code, String detail, HttpServletRequest request) {
-		return ResponseEntity.status(status).body(problem(status, code, detail, request));
+		ResponseEntity.BodyBuilder builder = ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON);
+		if (code == ApiErrorCode.AUTHENTICATION_THROTTLED || code == ApiErrorCode.RESET_RATE_LIMITED
+				|| code == ApiErrorCode.PUBLIC_CONTACT_RATE_LIMITED || status == HttpStatus.TOO_MANY_REQUESTS) {
+			builder.header("Retry-After", "60");
+		}
+		return builder.body(problem(status, code, detail, request));
+	}
+
+	private static ResponseEntity<ProblemDetail> staleOrConflict(ApiErrorCode conflictCode, String detail, HttpServletRequest request) {
+		return request.getHeader("If-Match") == null
+				? response(HttpStatus.CONFLICT, conflictCode, detail, request)
+				: response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, detail, request);
+	}
+
+	private static ApiErrorCode dataIntegrityCode(String sqlState) {
+		return switch (sqlState) {
+			case "23514", "23502" -> ApiErrorCode.INVALID_REQUEST;
+			case "23505", "23503" -> ApiErrorCode.DATA_INTEGRITY_CONFLICT;
+			default -> ApiErrorCode.DATA_INTEGRITY_CONFLICT;
+		};
+	}
+
+	private static String sqlState(Throwable exception) {
+		for (Throwable current = exception; current != null; current = current.getCause()) {
+			if (current instanceof java.sql.SQLException sqlException && sqlException.getSQLState() != null) {
+				return sqlException.getSQLState();
+			}
+		}
+		return "";
+	}
+
+	private static String constraintName(Throwable exception) {
+		for (Throwable current = exception; current != null; current = current.getCause()) {
+			try {
+				Object serverError = current.getClass().getMethod("getServerErrorMessage").invoke(current);
+				if (serverError != null) {
+					Object value = serverError.getClass().getMethod("getConstraint").invoke(serverError);
+					if (value instanceof String name) return name;
+				}
+			} catch (ReflectiveOperationException ignored) {
+				// Driver-specific metadata is optional; SQLSTATE remains authoritative.
+			}
+		}
+		return "";
 	}
 
 	private static String detail(ApiErrorCode code) {
