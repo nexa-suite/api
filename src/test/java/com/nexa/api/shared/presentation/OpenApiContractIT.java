@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.util.HashSet;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,7 +42,7 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(problem.get("properties").has("retryable")).isTrue();
         assertThat(problem.get("required").toString()).contains("code", "correlationId", "category", "retryable");
         var paymentIntent = document.get("paths").get("/api/v1/receivables/{receivableId}/payment-intents").get("post");
-        for (String status : new String[] {"400", "401", "403", "404", "409", "412", "429", "500", "502", "503", "504"}) {
+        for (String status : new String[] {"400", "401", "403", "404", "409", "412", "428", "429", "500", "502", "503", "504"}) {
             assertThat(paymentIntent.get("responses").has(status)).as("technical response %s", status).isTrue();
         }
         assertThat(paymentIntent.get("responses").get("503").get("content").get("application/problem+json")
@@ -58,5 +60,29 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
                         .doesNotMatch(".*_\\d+$");
             }
         }));
+
+        var committed = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(Files.readString(Path.of("docs/openapi/openapi.json")));
+        assertThat(canonical(document)).as("runtime OpenAPI must equal committed canonical snapshot")
+                .isEqualTo(canonical(committed));
+    }
+
+    private static String canonical(tools.jackson.databind.JsonNode value) {
+        if (value.isObject()) {
+            return "{" + value.properties().stream().sorted(java.util.Map.Entry.comparingByKey())
+                    .map(entry -> "\"" + entry.getKey().replace("\\", "\\\\").replace("\"", "\\\"")
+                            + "\":" + canonical(entry.getValue()))
+                    .collect(java.util.stream.Collectors.joining(",")) + "}";
+        }
+        if (value.isArray()) {
+            var values = new java.util.ArrayList<String>();
+            value.forEach(item -> values.add(canonical(item)));
+            values.sort(java.util.Comparator.naturalOrder());
+            return "[" + String.join(",", values) + "]";
+        }
+        if (value.isNumber()) {
+            return value.decimalValue().stripTrailingZeros().toPlainString();
+        }
+        return value.toString();
     }
 }

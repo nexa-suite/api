@@ -4,12 +4,14 @@ import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.media.BooleanSchema;
+import io.swagger.v3.oas.models.media.ArraySchema;
 import io.swagger.v3.oas.models.media.IntegerSchema;
 import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.ObjectSchema;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.media.StringSchema;
 import io.swagger.v3.oas.models.responses.ApiResponse;
+import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityScheme;
@@ -17,6 +19,9 @@ import org.springdoc.core.customizers.GlobalOpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.info.BuildProperties;
 
 import java.util.List;
 import java.util.Map;
@@ -25,9 +30,12 @@ import java.util.Map;
 @Profile("local")
 public class OpenApiConfiguration {
 	@Bean
-	OpenAPI nexaOpenAPI() {
+	OpenAPI nexaOpenAPI(ObjectProvider<BuildProperties> buildProperties,
+			@Value("${spring.application.version:unknown}") String configuredVersion) {
+		BuildProperties packagedBuild = buildProperties.getIfAvailable();
+		String version = packagedBuild == null ? configuredVersion : packagedBuild.getVersion();
 		return new OpenAPI()
-				.info(new Info().title("Nexa API").version("0.9.0").description(
+				.info(new Info().title("Nexa API").version(version).description(
 						"Local API contract for secured identity, tenant/workspace administration, Catalog reads and "
 								+ "Sales Client Accounts and Purchase Requests. Bearer authentication revalidates the "
 								+ "persistent session; refresh and sign-out require the surface refresh cookie and Origin policy. "
@@ -55,6 +63,7 @@ public class OpenApiConfiguration {
 					Map.entry("404", "Resource not found"),
 					Map.entry("409", "Concurrency or conflict error"),
 					Map.entry("412", "Precondition failed"),
+					Map.entry("428", "Precondition required"),
 					Map.entry("429", "Rate limit exceeded"),
 					Map.entry("500", "Unexpected server error"),
 					Map.entry("502", "External technical dependency failed"),
@@ -78,7 +87,7 @@ public class OpenApiConfiguration {
 		schema.addProperty("category", new StringSchema());
 		schema.addProperty("retryable", new BooleanSchema());
 		schema.addProperty("traceId", new StringSchema());
-		schema.addProperty("errors", new Schema<>().type("array").items(new ObjectSchema()));
+		schema.addProperty("errors", new ArraySchema().items(new ObjectSchema()));
 		schema.setRequired(List.of("code", "correlationId", "category", "retryable"));
 		return schema;
 	}
@@ -88,10 +97,14 @@ public class OpenApiConfiguration {
 		operation.setResponses(responses);
 		statuses.forEach((status, description) -> {
 			if (!responses.containsKey(status)) {
-				responses.addApiResponse(status, new ApiResponse().description(description)
+				ApiResponse response = new ApiResponse().description(description)
 						.content(new io.swagger.v3.oas.models.media.Content()
 								.addMediaType("application/problem+json", problemMediaType())
-								.addMediaType("application/json", problemMediaType())));
+								.addMediaType("application/json", problemMediaType()));
+				if ("429".equals(status)) {
+					response.addHeaderObject("Retry-After", new Header().description("Seconds before retrying").schema(new IntegerSchema().format("int32")));
+				}
+				responses.addApiResponse(status, response);
 			}
 		});
 	}
