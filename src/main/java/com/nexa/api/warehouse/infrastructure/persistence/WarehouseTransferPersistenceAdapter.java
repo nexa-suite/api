@@ -53,15 +53,15 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             predicate.append(" and destination_warehouse_id=?");
             args.add(uuid(destinationWarehouseId));
         }
-        String from = " from warehouse.inventory_transfer" + predicate;
+        String from = " from warehouse.inventory_transfer";
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
         pageArgs.add(page * size);
         List<WarehouseOperationsService.TransferSummary> items = jdbc.query(
-                transferSelect() + from + " order by created_at desc,id desc limit ? offset ?",
+                transferSelect() + predicate + " order by created_at desc,id desc limit ? offset ?",
                 (rs, row) -> transfer(rs), pageArgs.toArray());
         return new WarehouseOperationsService.Page<>(items, page, size,
-                count("select count(*)" + from, args.toArray()));
+                count("select count(*)" + from + predicate, args.toArray()));
     }
 
     @Override
