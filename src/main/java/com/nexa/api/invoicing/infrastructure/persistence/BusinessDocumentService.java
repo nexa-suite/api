@@ -283,10 +283,29 @@ public class BusinessDocumentService implements BusinessDocumentPort {
 
     @Scheduled(fixedDelayString = "${nexa.documents.worker-delay-ms:3000}")
     public void processPendingGenerationRequests() {
-        jdbc.update("update business_documents.document_generation_request set status='PENDING',processing_started_at=null,lease_until=null,claim_token=null,next_attempt_at=current_timestamp where status='PROCESSING' and (lease_until is null or lease_until <= current_timestamp)");
+        recoverStaleGenerationRequests();
         List<ScopedWork> work = jdbc.query("select id,tenant_id,workspace_id from business_documents.document_generation_request where status in ('PENDING','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp and requested_at <= current_timestamp order by requested_at,id limit 10",
                 (rs, n) -> new ScopedWork(rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
         for (ScopedWork item : work) withScope(item, () -> processOne(item));
+    }
+
+    private void recoverStaleGenerationRequests() {
+        List<ScopedWork> stale = jdbc.query("select id,tenant_id,workspace_id from business_documents.document_generation_request where status='PROCESSING' and (lease_until is null or lease_until <= current_timestamp) order by requested_at,id limit 100",
+                (rs, n) -> new ScopedWork(rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
+        for (ScopedWork item : stale) withScope(item, () -> inTransaction(() -> {
+            jdbc.update("""
+                    update business_documents.business_document document
+                    set status='REQUESTED',failure_code=null,failure_detail=null,updated_at=current_timestamp
+                    where document.tenant_id=? and document.workspace_id=? and document.status='GENERATING'
+                      and document.id=(select request.document_id
+                                       from business_documents.document_generation_request request
+                                       where request.id=? and request.tenant_id=? and request.workspace_id=?
+                                         and request.status='PROCESSING'
+                                         and (request.lease_until is null or request.lease_until <= current_timestamp))
+                    """, item.tenantId(), item.workspaceId(), item.id(), item.tenantId(), item.workspaceId());
+            jdbc.update("update business_documents.document_generation_request set status='PENDING',processing_started_at=null,lease_until=null,claim_token=null,next_attempt_at=current_timestamp where id=? and tenant_id=? and workspace_id=? and status='PROCESSING' and (lease_until is null or lease_until <= current_timestamp)",
+                    item.id(), item.tenantId(), item.workspaceId());
+        }));
     }
 
     private void processOne(ScopedWork work) {
