@@ -36,7 +36,7 @@ release/vX.Y.Z
     ↓
 main
     ↓
-annotated tag
+annotated + signed + locally verified tag
     ↓
 GitHub Release
     ↓
@@ -72,4 +72,4 @@ Never add secrets or uncontrolled exception details. Report vulnerabilities thro
 
 ## Release process
 
-Follow [RELEASE_POLICY.md](./RELEASE_POLICY.md). Releases require clean evidence, an annotated tag, a published GitHub Release and a back-merge.
+Follow [RELEASE_POLICY.md](./RELEASE_POLICY.md). From v0.14.0 onward, releases require an annotated signed tag, local `git verify-tag` success, GitHub `Verified` status, a published GitHub Release and a back-merge.
