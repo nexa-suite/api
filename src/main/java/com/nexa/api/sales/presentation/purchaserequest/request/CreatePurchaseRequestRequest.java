@@ -3,7 +3,6 @@ package com.nexa.api.sales.presentation.purchaserequest.request;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.FutureOrPresent;
 import jakarta.validation.constraints.Size;
-import jakarta.validation.constraints.Size;
 
 import java.time.LocalDate;
 import java.util.List;

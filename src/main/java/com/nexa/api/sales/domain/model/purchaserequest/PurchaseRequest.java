@@ -64,6 +64,8 @@ public final class PurchaseRequest {
 	public void approve(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.APPROVED); reviewNote = note == null ? null : note.trim(); }
 	public void reject(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.REJECTED); reviewNote = note == null ? null : note.trim(); }
 	public void convertToOrder() { transition(PurchaseRequestStatus.APPROVED, PurchaseRequestStatus.CONVERTED_TO_ORDER); }
+	public void expire() { if (status == PurchaseRequestStatus.CONVERTED_TO_ORDER || status == PurchaseRequestStatus.REJECTED || status == PurchaseRequestStatus.CANCELLED || status == PurchaseRequestStatus.WITHDRAWN || status == PurchaseRequestStatus.EXPIRED) throw new SalesInvariantViolation("Purchase request cannot be expired"); status = PurchaseRequestStatus.EXPIRED; }
+	public void withdraw() { if (status == PurchaseRequestStatus.CONVERTED_TO_ORDER || status == PurchaseRequestStatus.REJECTED || status == PurchaseRequestStatus.CANCELLED || status == PurchaseRequestStatus.EXPIRED || status == PurchaseRequestStatus.WITHDRAWN) throw new SalesInvariantViolation("Purchase request cannot be withdrawn"); status = PurchaseRequestStatus.WITHDRAWN; }
 	public void cancel() { if (status != PurchaseRequestStatus.DRAFT && status != PurchaseRequestStatus.SUBMITTED && status != PurchaseRequestStatus.NEEDS_ADJUSTMENT) throw new SalesInvariantViolation("Purchase request cannot be cancelled"); status = PurchaseRequestStatus.CANCELLED; }
 	public PurchaseRequestId id() { return id; }
 	public String clientAccountId() { return clientAccountId; }

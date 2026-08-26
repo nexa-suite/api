@@ -3,6 +3,31 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.14.0] - 2026-08-25
+
+Commercial and Inventory Core release for the Nexa API. This release completes
+the additive commercial commitment, direct order, authoritative availability,
+credit reservation and terminal-lifecycle foundation without introducing a new
+bounded context or downstream fulfillment semantics.
+
+### Added
+
+- Added direct internal Sales Order creation with `DIRECT_ORDER` origin and no synthetic Purchase Request.
+- Added atomic commercial commitment and inventory backing orchestration with deterministic multi-warehouse coverage and safety-stock protection.
+- Added PREPAID and IMMEDIATE payment policy handling, payment-gated confirmation, credit reservations and durable idempotency payload conflict detection.
+- Added PostgreSQL migration `V89__commercial_inventory_core.sql` with tenant/workspace RLS for inventory backing and compatibility-preserving legacy Sales Order origin metadata.
+
+### Changed
+
+- Added immutable commercial pricing and origin snapshots to commitment and Sales Order projections.
+- Added absolute Purchase Request expiry materialization and release behavior using an injected UTC clock.
+- Added v0.14 OpenAPI, migration, concurrency, idempotency and transaction-boundary coverage.
+
+### Validation
+
+- Fresh and upgrade PostgreSQL/Flyway validation passes through migrations `V89` and `V90`.
+- Full release validation and signed release evidence are recorded at release time.
+
 ## [0.13.0] - 2026-08-25
 
 Backend Foundation Closure release for the Nexa API. This release closes technical

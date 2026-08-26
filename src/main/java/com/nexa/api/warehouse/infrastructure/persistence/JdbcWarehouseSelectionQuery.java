@@ -64,28 +64,47 @@ public class JdbcWarehouseSelectionQuery implements WarehouseSelectionQuery {
     public Map<UUID, BigDecimal> availability(UUID tenantId, UUID workspaceId, List<UUID> skuIds) {
         if (skuIds == null || skuIds.isEmpty()) return Map.of();
         List<UUID> ids = skuIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
-        String placeholders = ids.stream().map(ignored -> "?").collect(java.util.stream.Collectors.joining(","));
-        List<Object> parameters = new ArrayList<>(List.of(tenantId, workspaceId));
-        parameters.addAll(ids);
-        Map<UUID, BigDecimal> result = new LinkedHashMap<>();
-        jdbc.query("select sku_id,coalesce(sum(stock_quantity-reserved_quantity),0) from warehouse.inventory_lot "
-                        + "where tenant_id=? and workspace_id=? and status='AVAILABLE' and expiration_date>=current_date "
-                        + "and sku_id in (" + placeholders + ") group by sku_id",
-                rs -> { while (rs.next()) result.put(rs.getObject(1, UUID.class), rs.getBigDecimal(2)); return null; },
-                parameters.toArray());
-        return Map.copyOf(result);
+        return available(tenantId, workspaceId, null, ids);
     }
 
     private Map<UUID, BigDecimal> availabilityAt(
-            UUID tenantId, UUID workspaceId, UUID warehouseId, List<UUID> skuIds) {
+        UUID tenantId, UUID workspaceId, UUID warehouseId, List<UUID> skuIds) {
         if (skuIds.isEmpty()) return Map.of();
+        return available(tenantId, workspaceId, warehouseId, skuIds);
+    }
+
+    private Map<UUID, BigDecimal> available(UUID tenantId, UUID workspaceId, UUID warehouseId, List<UUID> skuIds) {
         String placeholders = skuIds.stream().map(ignored -> "?").collect(java.util.stream.Collectors.joining(","));
-        List<Object> parameters = new ArrayList<>(List.of(tenantId, workspaceId, warehouseId));
+        String warehousePredicate = warehouseId == null ? "" : " and l.warehouse_id=?";
+        List<Object> parameters = new ArrayList<>(List.of(tenantId, workspaceId));
+        if (warehouseId != null) parameters.add(warehouseId);
         parameters.addAll(skuIds);
+        parameters.add(tenantId);
+        parameters.add(workspaceId);
+        parameters.addAll(skuIds);
+        parameters.add(tenantId);
+        parameters.add(workspaceId);
         Map<UUID, BigDecimal> result = new LinkedHashMap<>();
-        jdbc.query("select sku_id,coalesce(sum(stock_quantity-reserved_quantity),0) from warehouse.inventory_lot "
-                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and status='AVAILABLE' "
-                        + "and expiration_date>=current_date and sku_id in (" + placeholders + ") group by sku_id",
+        jdbc.query("with eligible as (select l.sku_id,l.warehouse_id,coalesce(sum(l.stock_quantity-l.reserved_quantity),0) available "
+                        + "from warehouse.inventory_lot l join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
+                        + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
+                        + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
+                        + "where l.tenant_id=? and l.workspace_id=?" + warehousePredicate
+                        + " and l.status='AVAILABLE' and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity "
+                        + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
+                        + "and coalesce(service.service_status,'OPERATIONAL')='OPERATIONAL' and l.sku_id in (" + placeholders + ") "
+                        + "group by l.sku_id,l.warehouse_id), active_backing as ("
+                        + "select line.sku_id,position.warehouse_id,coalesce(sum(position.quantity),0) amount "
+                        + "from warehouse.inventory_backing_position position "
+                        + "join warehouse.inventory_backing_line line on line.tenant_id=position.tenant_id and line.workspace_id=position.workspace_id and line.id=position.backing_line_id "
+                        + "join warehouse.inventory_backing backing on backing.tenant_id=line.tenant_id and backing.workspace_id=line.workspace_id and backing.id=line.backing_id "
+                        + "where position.tenant_id=? and position.workspace_id=? and backing.status='BACKED' and line.sku_id in (" + placeholders + ") "
+                        + "group by line.sku_id,position.warehouse_id), capacity as ("
+                        + "select eligible.sku_id,greatest(eligible.available-coalesce(safety.quantity,0)-coalesce(active_backing.amount,0),0) amount "
+                        + "from eligible left join warehouse.safety_stock_policy safety on safety.tenant_id=? and safety.workspace_id=? "
+                        + "and safety.warehouse_id=eligible.warehouse_id and safety.sku_id=eligible.sku_id "
+                        + "left join active_backing on active_backing.sku_id=eligible.sku_id and active_backing.warehouse_id=eligible.warehouse_id) "
+                        + "select sku_id,coalesce(sum(amount),0) from capacity group by sku_id",
                 rs -> { while (rs.next()) result.put(rs.getObject(1, UUID.class), rs.getBigDecimal(2)); return null; },
                 parameters.toArray());
         return result;

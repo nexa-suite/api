@@ -21,8 +21,12 @@ public class PurchaseRequestEventPersistenceAdapter implements PurchaseRequestEv
 	}
 	@Override public void appendCanonical(String eventType, String purchaseRequestId, String tenantId, String workspaceId,
 			String correlationId, UUID causationId, Map<String, Object> payload, long epoch) {
-		CanonicalOutbox.append(jdbc, eventType, "PurchaseRequest", uuid(purchaseRequestId), uuid(tenantId), uuid(workspaceId),
-				Instant.ofEpochMilli(epoch), correlationId, causationId, "1.0", payload);
+		appendCanonical(eventType, purchaseRequestId, tenantId, workspaceId, correlationId, causationId, null, payload, epoch);
+	}
+	@Override public void appendCanonical(String eventType, String purchaseRequestId, String tenantId, String workspaceId,
+			String correlationId, UUID causationId, String occurrenceKey, Map<String, Object> payload, long epoch) {
+			CanonicalOutbox.append(jdbc, eventType, "PurchaseRequest", uuid(purchaseRequestId), uuid(tenantId), uuid(workspaceId),
+					Instant.ofEpochMilli(epoch), correlationId, causationId, "1.0", occurrenceKey, payload);
 	}
 	private static UUID uuid(String value) { return UUID.fromString(value); }
 }

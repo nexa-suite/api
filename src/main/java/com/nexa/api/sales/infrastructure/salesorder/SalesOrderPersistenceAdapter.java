@@ -4,6 +4,8 @@ import com.nexa.api.sales.application.exception.PurchaseRequestTransitionExcepti
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
+import com.nexa.api.sales.application.exception.CommercialBusinessException;
+import com.nexa.api.sales.application.exception.PurchaseRequestExpiredException;
 import com.nexa.api.sales.application.model.SalesPage;
 import com.nexa.api.sales.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.sales.application.salesorder.model.SalesOrderEventView;
@@ -16,6 +18,8 @@ import com.nexa.api.sales.application.salesorder.port.SalesOrderConversionPersis
 import com.nexa.api.sales.application.port.CommercialCommitmentPort;
 import com.nexa.api.customerrelationships.contract.CustomerAccountId;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
+import com.nexa.api.payments.application.publicapi.ReceivableCommands;
 import com.nexa.api.sales.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.sales.domain.model.salesorder.ApprovedPurchaseRequestSnapshot;
@@ -39,12 +43,14 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.Clock;
 import java.time.Year;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.Map;
+import tools.jackson.databind.ObjectMapper;
 
 @Repository
 @Profile("!test")
@@ -53,13 +59,44 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	private final ChangeEventPersistencePort changeFeed;
 	private final CommercialCommitmentPort commitments;
 	private final CustomerAccountQuery customers;
+	private final PaymentConfirmationQuery paymentConfirmations;
+	private final ReceivableCommands receivables;
+	private final Clock clock;
+	private final ObjectMapper objectMapper;
 
+	@org.springframework.beans.factory.annotation.Autowired
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
-			CommercialCommitmentPort commitments, CustomerAccountQuery customers) {
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
+			ReceivableCommands receivables, Clock clock, ObjectMapper objectMapper) {
 		this.jdbc = jdbc;
 		this.changeFeed = changeFeed;
 		this.commitments = commitments;
 		this.customers = customers;
+		this.paymentConfirmations = paymentConfirmations;
+		this.receivables = receivables;
+		this.clock = clock == null ? Clock.systemUTC() : clock;
+		this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+	}
+
+	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
+			ReceivableCommands receivables, Clock clock) {
+		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, receivables, clock, new ObjectMapper());
+	}
+
+	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations, Clock clock) {
+		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, null, clock);
+	}
+
+	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers) {
+		this(jdbc, changeFeed, commitments, customers, null, null, Clock.systemUTC());
+	}
+
+	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, Clock clock) {
+		this(jdbc, changeFeed, commitments, customers, null, null, clock);
 	}
 
 	@Override
@@ -73,9 +110,28 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 			long expectedVersion, long nowEpochMillis) {
 		if (aggregate.version() != expectedVersion) throw new SalesConcurrencyConflictException();
 		UUID orderId = uuid(aggregate.id().value()), tenant = aggregate.tenantId().value(), workspace = aggregate.workspaceId().value(), actor = uuid(actorMembershipId);
+		if ("confirm".equals(action) && aggregate.paymentOption() == PaymentOption.PREPAID
+				&& (paymentConfirmations == null || !paymentConfirmations.isConfirmed(tenant, workspace, orderId))) {
+			throw new CommercialBusinessException("PAYMENT_REQUIRED");
+		}
 		int changed = jdbc.update("update sales.sales_order set status=?,rejection_reason=?,confirmed_at=?,rejected_at=?,cancelled_at=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='PENDING' and version=?",
 				aggregate.status().name(), aggregate.rejectionReason(), aggregate.confirmedAt() == null ? null : timestamp(aggregate.confirmedAt()), aggregate.rejectedAt() == null ? null : timestamp(aggregate.rejectedAt()), aggregate.cancelledAt() == null ? null : timestamp(aggregate.cancelledAt()), timestamp(nowEpochMillis), tenant, workspace, orderId, expectedVersion);
 		if (changed != 1) throw new SalesConcurrencyConflictException();
+		if ("confirm".equals(action) && aggregate.paymentOption() == PaymentOption.CREDIT_LINE && receivables != null) {
+			receivables.postForSalesOrder(tenant, workspace, orderId, uuid(aggregate.clientAccountId().value()),
+					aggregate.totalSnapshot(), aggregate.currency(), Instant.ofEpochMilli(nowEpochMillis));
+		}
+		if (commitments != null) {
+			UUID commercialCommitment = jdbc.query("select commercial_commitment_id from sales.sales_order where tenant_id=? and workspace_id=? and id=?",
+					(org.springframework.jdbc.core.ResultSetExtractor<UUID>) rs -> rs.next() ? rs.getObject(1, UUID.class) : null,
+					tenant, workspace, orderId);
+			if ("confirm".equals(action) && commercialCommitment != null) {
+				String origin = jdbc.queryForObject("select origin_type from sales.sales_order where tenant_id=? and workspace_id=? and id=?", String.class, tenant, workspace, orderId);
+				if ("DIRECT_ORDER".equals(origin)) commitments.confirmDirectOrder(tenant, workspace, commercialCommitment, orderId);
+			} else if (("cancel".equals(action) || "reject".equals(action)) && commercialCommitment != null) {
+				commitments.releaseForSalesOrder(tenant, workspace, orderId, "SALES_ORDER_" + aggregate.status().name());
+			}
+		}
 		jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,from_status,to_status,reason,occurred_at) values (?,?,?,?,?,'ORDER_STATUS_CHANGED','PENDING',?,?,?)",
 				UUID.randomUUID(), orderId, tenant, workspace, actor, aggregate.status().name(), reason, timestamp(nowEpochMillis));
 		String eventType = switch (action) {
@@ -104,14 +160,19 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	public Optional<SalesOrderView> findByIdempotency(String tenantId, String workspaceId, String actorMembershipId,
 			String idempotencyKey, String requestHash) {
 		lockConversionIdempotency(tenantId, workspaceId, actorMembershipId, idempotencyKey);
-		return jdbc.query("select resource_id,request_hash from sales.idempotency_record where tenant_id=? and workspace_id=? and actor_membership_id=? and operation='purchase-request-order-conversion' and idempotency_key=?",
+		return jdbc.query("select record.resource_id,record.request_hash,coalesce(response.response_json,record.response_json) "
+				+ "from sales.idempotency_record record left join sales.idempotency_response response "
+				+ "on response.tenant_id=record.tenant_id and response.workspace_id=record.workspace_id "
+				+ "and response.actor_membership_id=record.actor_membership_id and response.operation=record.operation "
+				+ "and response.idempotency_key=record.idempotency_key "
+				+ "where record.tenant_id=? and record.workspace_id=? and record.actor_membership_id=? and record.operation='purchase-request-order-conversion' and record.idempotency_key=?",
 			rs -> {
 				if (!rs.next()) return Optional.empty();
 				String stored = rs.getString(2);
 				if (stored != null && !stored.isBlank() && !stored.equalsIgnoreCase(requestHash)) {
 					throw new SalesIdempotencyPayloadConflictException();
 				}
-				return find(tenantId, workspaceId, null, rs.getObject(1).toString());
+				return replaySnapshot(rs.getString(3), tenantId, workspaceId, rs.getObject(1).toString());
 			}, uuid(tenantId), uuid(workspaceId), uuid(actorMembershipId), idempotencyKey);
 	}
 
@@ -119,11 +180,21 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	public Optional<ApprovedPurchaseRequestSnapshot> loadApprovedSnapshot(String tenantId, String workspaceId,
 			String purchaseRequestId, long expectedVersion) {
 		UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), request = uuid(purchaseRequestId);
-		PurchaseRequestRow pr = jdbc.query("select client_account_id,buyer_membership_id,status,version,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments from sales.purchase_request where tenant_id=? and workspace_id=? and id=? for update",
-				rs -> rs.next() ? new PurchaseRequestRow(rs.getObject(1).toString(), rs.getObject(2).toString(), rs.getString(3), rs.getLong(4), rs.getString(5), rs.getObject(6, java.time.LocalDate.class), rs.getString(7), rs.getString(8), rs.getString(9)) : null,
+		PurchaseRequestRow pr = jdbc.query("select client_account_id,buyer_membership_id,status,version,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments,expires_at from sales.purchase_request where tenant_id=? and workspace_id=? and id=? for update",
+				rs -> rs.next() ? new PurchaseRequestRow(rs.getObject(1).toString(), rs.getObject(2).toString(), rs.getString(3), rs.getLong(4), rs.getString(5), rs.getObject(6, java.time.LocalDate.class), rs.getString(7), rs.getString(8), rs.getString(9), rs.getTimestamp(10) == null ? null : rs.getTimestamp(10).toInstant()) : null,
 				tenant, workspace, request);
 		if (pr == null) throw new SalesResourceNotFoundException("purchase-request");
 		if ("CONVERTED_TO_ORDER".equals(pr.status())) return Optional.empty();
+		if ("EXPIRED".equals(pr.status()) || (pr.expiresAt() != null && !clock.instant().isBefore(pr.expiresAt()))) {
+            if (!"EXPIRED".equals(pr.status())) {
+                int expired = jdbc.update("update sales.purchase_request set status='EXPIRED',review_note=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='APPROVED' and version=?",
+                        "Business expiry", Timestamp.from(clock.instant()), tenant, workspace, request, pr.version());
+                if (expired == 1) commitments.releaseForPurchaseRequest(tenant, workspace, request, "EXPIRED");
+            } else {
+                commitments.releaseForPurchaseRequest(tenant, workspace, request, "EXPIRED");
+            }
+			throw new PurchaseRequestExpiredException();
+		}
 		if (!"APPROVED".equals(pr.status()) || pr.version() != expectedVersion) throw new SalesConcurrencyConflictException();
 		List<PurchaseRequestLineRow> requestLines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot from sales.purchase_request_line where purchase_request_id=? order by created_at,id",
 				(rs, row) -> new PurchaseRequestLineRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getString(5), rs.getBigDecimal(6), rs.getString(7), rs.getObject(8, UUID.class), rs.getObject(9, UUID.class), rs.getString(10), rs.getString(11)), request);
@@ -163,8 +234,12 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 			String idempotencyKey, String note, long nowEpochMillis, String requestHash) {
 		UUID orderId = uuid(aggregate.id().value()), tenant = aggregate.tenantId().value(), workspace = aggregate.workspaceId().value();
 		UUID request = uuid(aggregate.sourcePurchaseRequestId().value()), actor = uuid(actorMembershipId);
-		jdbc.update("insert into sales.sales_order (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,buyer_membership_id,source_purchase_request_id,priority,requested_delivery_date,delivery_snapshot,payment_option,notes,currency,total_amount,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?,0)",
-				orderId, tenant, workspace, aggregate.number().value(), uuid(aggregate.clientAccountId().value()), actor, aggregate.buyerMembershipId().value(), request, aggregate.priority().name(), aggregate.requestedDeliveryDate(), aggregate.deliverySnapshot(), aggregate.paymentOption() == null ? null : aggregate.paymentOption().name(), aggregate.notes(), aggregate.currency(), aggregate.totalSnapshot(), timestamp(nowEpochMillis), timestamp(nowEpochMillis));
+		UUID commitmentId = jdbc.query("select id from sales.commercial_commitment where tenant_id=? and workspace_id=? and purchase_request_id=? and status='ACTIVE' for update",
+				(org.springframework.jdbc.core.ResultSetExtractor<UUID>) rs -> rs.next() ? rs.getObject(1, UUID.class) : null,
+				tenant, workspace, request);
+		if (commitmentId == null) throw new CommercialBusinessException("PURCHASE_REQUEST_NOT_CONFIRMABLE");
+		jdbc.update("insert into sales.sales_order (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,buyer_membership_id,source_purchase_request_id,priority,requested_delivery_date,delivery_snapshot,payment_option,notes,currency,total_amount,status,created_at,updated_at,version,commercial_commitment_id,origin_type) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?,0,?,'PURCHASE_REQUEST')",
+				orderId, tenant, workspace, aggregate.number().value(), uuid(aggregate.clientAccountId().value()), actor, aggregate.buyerMembershipId().value(), request, aggregate.priority().name(), aggregate.requestedDeliveryDate(), aggregate.deliverySnapshot(), aggregate.paymentOption() == null ? null : aggregate.paymentOption().name(), aggregate.notes(), aggregate.currency(), aggregate.totalSnapshot(), timestamp(nowEpochMillis), timestamp(nowEpochMillis), commitmentId);
 		for (SalesOrderLine line : aggregate.lines()) jdbc.update("insert into sales.sales_order_line (id,sales_order_id,catalog_item_id,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 				UUID.randomUUID(), orderId, line.catalogItemId(), line.sellableSkuId(), line.productFamilyId(), line.skuCodeSnapshot(), line.productFamilyCodeSnapshot(), line.itemNameSnapshot(), line.presentationSnapshot(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), timestamp(nowEpochMillis));
 		if (jdbc.update("update sales.purchase_request set status='CONVERTED_TO_ORDER',updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='APPROVED' and version=?",
@@ -176,6 +251,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 				UUID.randomUUID(), orderId, tenant, workspace, actor, note, timestamp(nowEpochMillis));
 		changeFeed.append(tenant.toString(), workspace.toString(), aggregate.clientAccountId().value(), "purchase_request", request.toString(), "sales.purchase-request.converted", "CONVERTED_TO_ORDER", nowEpochMillis, true);
 		changeFeed.append(tenant.toString(), workspace.toString(), aggregate.clientAccountId().value(), "sales_order", orderId.toString(), "sales.sales-order.created", "PENDING", nowEpochMillis, true);
+		SalesOrderView created = find(tenant.toString(), workspace.toString(), null, orderId.toString()).orElseThrow();
 		int inserted = jdbc.update("insert into sales.idempotency_record (id,tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,resource_id,response_version,request_hash,created_at) values (?,?,?,?,?,?,?,?,?,?) on conflict (tenant_id,workspace_id,actor_membership_id,operation,idempotency_key) do nothing",
 				UUID.randomUUID(), tenant, workspace, actor, "purchase-request-order-conversion", idempotencyKey, orderId, 0, requestHash, timestamp(nowEpochMillis));
 		if (inserted != 1) {
@@ -185,7 +261,12 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 			}
 			return findIdempotent(tenant.toString(), workspace.toString(), actor.toString(), idempotencyKey).orElseThrow();
 		}
-		return find(tenant.toString(), workspace.toString(), null, orderId.toString()).orElseThrow();
+		try {
+			insertResponseSnapshot(tenant, workspace, actor, idempotencyKey, objectMapper.writeValueAsString(created), nowEpochMillis);
+		} catch (Exception exception) {
+			throw new IllegalStateException("Sales Order idempotency snapshot could not be serialized", exception);
+		}
+		return created;
 	}
 
 	@Override
@@ -256,8 +337,23 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	}
 
 	private Optional<SalesOrderView> findIdempotent(String tenant, String workspace, String actor, String key) {
-		return jdbc.query("select resource_id from sales.idempotency_record where tenant_id=? and workspace_id=? and actor_membership_id=? and operation='purchase-request-order-conversion' and idempotency_key=?",
-				rs -> rs.next() ? find(tenant, workspace, null, rs.getObject(1).toString()) : Optional.empty(), uuid(tenant), uuid(workspace), uuid(actor), key);
+		return jdbc.query("select record.resource_id,coalesce(response.response_json,record.response_json) "
+				+ "from sales.idempotency_record record left join sales.idempotency_response response "
+				+ "on response.tenant_id=record.tenant_id and response.workspace_id=record.workspace_id "
+				+ "and response.actor_membership_id=record.actor_membership_id and response.operation=record.operation "
+				+ "and response.idempotency_key=record.idempotency_key "
+				+ "where record.tenant_id=? and record.workspace_id=? and record.actor_membership_id=? and record.operation='purchase-request-order-conversion' and record.idempotency_key=?",
+				rs -> rs.next() ? replaySnapshot(rs.getString(2), tenant, workspace, rs.getObject(1).toString()) : Optional.empty(),
+				uuid(tenant), uuid(workspace), uuid(actor), key);
+	}
+	private Optional<SalesOrderView> replaySnapshot(String json, String tenant, String workspace, String resourceId) {
+		if (json == null || json.isBlank()) return find(tenant, workspace, null, resourceId);
+		try { return Optional.of(objectMapper.readValue(json, SalesOrderView.class)); }
+		catch (Exception exception) { throw new IllegalStateException("Sales Order idempotency snapshot is invalid", exception); }
+	}
+	private void insertResponseSnapshot(UUID tenant, UUID workspace, UUID actor, String key, String json, long epoch) {
+		jdbc.update("insert into sales.idempotency_response (tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,response_json,created_at) values (?,?,?,?,?,?,?) on conflict (tenant_id,workspace_id,actor_membership_id,operation,idempotency_key) do nothing",
+				tenant, workspace, actor, "purchase-request-order-conversion", key, json, timestamp(epoch));
 	}
 	private void lockConversionIdempotency(String tenant, String workspace, String actor, String key) {
 		jdbc.query("select pg_advisory_xact_lock(hashtext(?))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
@@ -265,7 +361,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	}
 	private SalesOrder aggregate(SalesOrderView view) {
 		List<SalesOrderLine> lines = view.lines().stream().map(line -> new SalesOrderLine(line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), parseUuid(line.skuId()), parseUuid(line.familyId()), line.skuCode(), line.familyCode())).toList();
-        return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new CustomerAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), new PurchaseRequestId(view.sourcePurchaseRequestId()), new MembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
+		return SalesOrder.rehydrate(new SalesOrderId(view.id()), new SalesOrderNumber(view.number()), new TenantId(view.tenantId()), new WorkspaceId(view.workspaceId()), new CustomerAccountId(view.clientAccountId()), new BuyerMembershipId(uuid(view.buyerMembershipId())), view.sourcePurchaseRequestId() == null ? null : new PurchaseRequestId(view.sourcePurchaseRequestId()), new MembershipId(uuid(view.createdByMembershipId())), lines, view.priority(), view.requestedDeliveryDate(), view.deliverySnapshot(), view.paymentOption(), view.notes(), view.currency(), view.total(), view.createdAt(), SalesOrderStatus.valueOf(view.status()), view.confirmedAt(), view.rejectedAt(), view.cancelledAt(), view.rejectionReason(), view.version());
 	}
 	private long nextSequence(UUID tenant, UUID workspace, int year) {
 		jdbc.update("insert into sales.sales_order_sequence (tenant_id,workspace_id,order_year,next_value) values (?,?,?,1) on conflict do nothing", tenant, workspace, year);
@@ -274,13 +370,13 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		return value;
 	}
 	private String orderFromSql() { return " from sales.sales_order o"; }
-	private String orderSql() { return "select o.id,o.number,o.tenant_id,o.workspace_id,o.client_account_id,o.created_by_membership_id,o.buyer_membership_id,o.source_purchase_request_id,o.priority,o.requested_delivery_date,o.delivery_snapshot,o.payment_option,o.notes,o.currency,o.total_amount,o.status,o.created_at,o.updated_at,o.confirmed_at,o.rejected_at,o.cancelled_at,o.rejection_reason,o.version" + orderFromSql(); }
-	private SalesOrderView summary(ResultSet rs) throws java.sql.SQLException { return new SalesOrderView(rs.getObject(1).toString(), rs.getString(2), rs.getObject(3).toString(), rs.getObject(4).toString(), rs.getObject(5).toString(), rs.getObject(6).toString(), rs.getObject(7).toString(), stringUuid(rs.getObject(8)), com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority.from(rs.getString(9)), rs.getObject(10, java.time.LocalDate.class), rs.getString(11), com.nexa.api.sales.domain.model.purchaserequest.PaymentOption.from(rs.getString(12)), rs.getString(13), rs.getString(14), rs.getBigDecimal(15), rs.getString(16), rs.getTimestamp(17).toInstant(), rs.getTimestamp(18).toInstant(), rs.getTimestamp(19) == null ? null : rs.getTimestamp(19).toInstant(), rs.getTimestamp(20) == null ? null : rs.getTimestamp(20).toInstant(), rs.getTimestamp(21) == null ? null : rs.getTimestamp(21).toInstant(), rs.getString(22), rs.getLong(23), List.of()); }
+	private String orderSql() { return "select o.id,o.number,o.tenant_id,o.workspace_id,o.client_account_id,o.created_by_membership_id,o.buyer_membership_id,o.source_purchase_request_id,o.priority,o.requested_delivery_date,o.delivery_snapshot,o.payment_option,o.notes,o.currency,o.total_amount,o.status,o.created_at,o.updated_at,o.confirmed_at,o.rejected_at,o.cancelled_at,o.rejection_reason,o.version,o.commercial_commitment_id,o.origin_type" + orderFromSql(); }
+	private SalesOrderView summary(ResultSet rs) throws java.sql.SQLException { return new SalesOrderView(rs.getObject(1).toString(), rs.getString(2), rs.getObject(3).toString(), rs.getObject(4).toString(), rs.getObject(5).toString(), rs.getObject(6).toString(), rs.getObject(7).toString(), stringUuid(rs.getObject(8)), com.nexa.api.sales.domain.model.purchaserequest.PurchaseRequestPriority.from(rs.getString(9)), rs.getObject(10, java.time.LocalDate.class), rs.getString(11), com.nexa.api.sales.domain.model.purchaserequest.PaymentOption.from(rs.getString(12)), rs.getString(13), rs.getString(14), rs.getBigDecimal(15), rs.getString(16), rs.getTimestamp(17).toInstant(), rs.getTimestamp(18).toInstant(), rs.getTimestamp(19) == null ? null : rs.getTimestamp(19).toInstant(), rs.getTimestamp(20) == null ? null : rs.getTimestamp(20).toInstant(), rs.getTimestamp(21) == null ? null : rs.getTimestamp(21).toInstant(), rs.getString(22), rs.getLong(23), List.of(), rs.getString(25), stringUuid(rs.getObject(24))); }
 	private Optional<SalesOrderView> optionalDetail(ResultSet rs) throws java.sql.SQLException { return rs.next() ? Optional.of(detail(rs)) : Optional.empty(); }
-	private SalesOrderView detail(ResultSet rs) throws java.sql.SQLException { SalesOrderView summary = summary(rs); List<SalesOrderLineView> lines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot from sales.sales_order_line where sales_order_id=? order by created_at,id", (line, row) -> new SalesOrderLineView(line.getString(1), line.getString(2), line.getString(3), line.getBigDecimal(4), line.getString(5), line.getBigDecimal(6), line.getString(7), line.getBigDecimal(8), stringUuid(line.getObject(9)), stringUuid(line.getObject(10)), line.getString(11), line.getString(12)), uuid(summary.id())); return new SalesOrderView(summary.id(), summary.number(), summary.tenantId(), summary.workspaceId(), summary.clientAccountId(), summary.createdByMembershipId(), summary.buyerMembershipId(), summary.sourcePurchaseRequestId(), summary.priority(), summary.requestedDeliveryDate(), summary.deliverySnapshot(), summary.paymentOption(), summary.notes(), summary.currency(), summary.total(), summary.status(), summary.createdAt(), summary.updatedAt(), summary.confirmedAt(), summary.rejectedAt(), summary.cancelledAt(), summary.rejectionReason(), summary.version(), lines); }
+	private SalesOrderView detail(ResultSet rs) throws java.sql.SQLException { SalesOrderView summary = summary(rs); List<SalesOrderLineView> lines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot from sales.sales_order_line where sales_order_id=? order by created_at,id", (line, row) -> new SalesOrderLineView(line.getString(1), line.getString(2), line.getString(3), line.getBigDecimal(4), line.getString(5), line.getBigDecimal(6), line.getString(7), line.getBigDecimal(8), stringUuid(line.getObject(9)), stringUuid(line.getObject(10)), line.getString(11), line.getString(12)), uuid(summary.id())); return new SalesOrderView(summary.id(), summary.number(), summary.tenantId(), summary.workspaceId(), summary.clientAccountId(), summary.createdByMembershipId(), summary.buyerMembershipId(), summary.sourcePurchaseRequestId(), summary.priority(), summary.requestedDeliveryDate(), summary.deliverySnapshot(), summary.paymentOption(), summary.notes(), summary.currency(), summary.total(), summary.status(), summary.createdAt(), summary.updatedAt(), summary.confirmedAt(), summary.rejectedAt(), summary.cancelledAt(), summary.rejectionReason(), summary.version(), lines, summary.originType(), summary.commercialCommitmentId()); }
 	private FulfillmentCandidateView candidate(ResultSet rs) throws java.sql.SQLException { String id = rs.getObject(1).toString(); List<FulfillmentCandidateView.Line> lines = jdbc.query("select catalog_item_id,item_name_snapshot,quantity,unit from sales.sales_order_line where sales_order_id=? order by created_at,id", (line, row) -> new FulfillmentCandidateView.Line(line.getString(1), line.getString(2), line.getBigDecimal(3), line.getString(4)), uuid(id)); return new FulfillmentCandidateView(id, rs.getString(2), rs.getObject(3).toString(), "AWAITING_INVENTORY_RESERVATION", lines); }
 	private record PurchaseRequestRow(String clientAccountId, String buyerMembershipId, String status, long version, String priority,
-			java.time.LocalDate requestedDeliveryDate, String deliverySnapshot, String paymentOption, String notes) { }
+			java.time.LocalDate requestedDeliveryDate, String deliverySnapshot, String paymentOption, String notes, Instant expiresAt) { }
 	private record PurchaseRequestLineRow(String catalogItemId, String itemName, String presentation, BigDecimal quantity,
 			String unit, BigDecimal price, String currency, UUID skuId, UUID familyId, String skuCode, String familyCode) { }
 	private static UUID parseUuid(String value) { return value == null || value.isBlank() ? null : UUID.fromString(value); }

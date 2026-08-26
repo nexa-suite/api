@@ -43,15 +43,19 @@ public final class SalesOrderCommandController {
 
 	@PostMapping("/api/v1/sales-orders/{id}/confirmations")
 	public ResponseEntity<SalesOrderResponse> confirm(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
-			@RequestHeader(name = "If-Match", required = false) String ifMatch) { return transition(context, id, "confirm", null, ifMatch); }
+			@RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) { return transition(context, id, "confirm", null, ifMatch, idempotencyKey); }
 	@PostMapping("/api/v1/sales-orders/{id}/rejections")
 	public ResponseEntity<SalesOrderResponse> reject(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
-			@RequestHeader(name = "If-Match", required = false) String ifMatch, @Valid @RequestBody RejectSalesOrderRequest request) { return transition(context, id, "reject", request.reason(), ifMatch); }
+			@RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+			@Valid @RequestBody RejectSalesOrderRequest request) { return transition(context, id, "reject", request.reason(), ifMatch, idempotencyKey); }
 	@PostMapping("/api/v1/sales-orders/{id}/cancellations")
 	public ResponseEntity<SalesOrderResponse> cancel(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
-			@RequestHeader(name = "If-Match", required = false) String ifMatch) { return transition(context, id, "cancel", null, ifMatch); }
-	private ResponseEntity<SalesOrderResponse> transition(CurrentAccessContext context, String id, String action, String reason, String ifMatch) {
-		var value = sales.transition(context, id, action, reason, SalesHttpHeaders.requireVersion(ifMatch));
+			@RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) { return transition(context, id, "cancel", null, ifMatch, idempotencyKey); }
+	private ResponseEntity<SalesOrderResponse> transition(CurrentAccessContext context, String id, String action, String reason, String ifMatch, String idempotencyKey) {
+		var value = sales.transition(context, id, action, reason, SalesHttpHeaders.requireVersion(ifMatch), idempotencyKey);
 		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.response(value));
 	}
 }

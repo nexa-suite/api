@@ -92,7 +92,12 @@ public final class ApiProblemDetailFactory {
 				case PURCHASE_REQUEST_TRANSITION_INVALID -> "Purchase request transition invalid";
 				case PURCHASE_REQUEST_ALREADY_CONVERTED -> "Purchase request already converted";
 			case PURCHASE_REQUEST_LINE_INVALID -> "Purchase request line invalid";
-				case PURCHASE_REQUEST_CLIENT_SCOPE_INVALID -> "Purchase request client scope invalid";
+					case PURCHASE_REQUEST_CLIENT_SCOPE_INVALID -> "Purchase request client scope invalid";
+					case PURCHASE_REQUEST_EXPIRED -> "Purchase request expired";
+					case PURCHASE_REQUEST_NOT_CONFIRMABLE -> "Purchase request is not confirmable";
+					case COMMERCIAL_POLICY_CHANGED -> "Commercial policy changed";
+					case INSUFFICIENT_CREDIT -> "Insufficient credit";
+					case PAYMENT_REQUIRED -> "Payment required";
 				case IDEMPOTENCY_KEY_REQUIRED -> "Idempotency key required";
 				case IDEMPOTENCY_PAYLOAD_CONFLICT -> "Idempotency payload conflict";
 				case SALES_ORDER_NOT_FOUND -> "Sales order not found";
@@ -106,7 +111,8 @@ public final class ApiProblemDetailFactory {
 				case INVENTORY_LOT_NOT_FOUND -> "Inventory lot not found";
 				case INVENTORY_LOT_NOT_ALLOCATABLE -> "Inventory lot is not allocatable";
 				case INVENTORY_UNIT_MISMATCH -> "Inventory unit mismatch";
-				case INSUFFICIENT_AVAILABLE_STOCK -> "Insufficient available stock";
+					case INSUFFICIENT_AVAILABLE_STOCK -> "Insufficient available stock";
+					case INSUFFICIENT_SELLABLE_AVAILABILITY -> "Insufficient sellable availability";
 				case INVENTORY_SAFETY_STOCK_NOT_FOUND -> "Safety stock policy not found";
 				case INVENTORY_SAFETY_STOCK_PROTECTED -> "Safety stock is protected";
 				case INVENTORY_TRANSFER_NOT_FOUND -> "Inventory transfer not found";

@@ -15,6 +15,10 @@ public interface SalesOrderUseCase {
 	SalesPage<SalesOrderView> list(CurrentAccessContext context, SalesOrderFilter filter);
 	SalesOrderView detail(CurrentAccessContext context, String id);
 	SalesOrderView transition(CurrentAccessContext context, String id, String action, String reason, long expectedVersion);
+	default SalesOrderView transition(CurrentAccessContext context, String id, String action, String reason,
+			long expectedVersion, String idempotencyKey) {
+		return transition(context, id, action, reason, expectedVersion);
+	}
 	List<SalesOrderEventView> events(CurrentAccessContext context, String id);
 	SalesPage<FulfillmentCandidateView> fulfillmentCandidates(CurrentAccessContext context, SalesOrderFilter filter);
 }

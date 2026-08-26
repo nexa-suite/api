@@ -15,7 +15,7 @@ import java.util.List;
 
 @Component
 public class PurchaseRequestHttpMapper {
-	public PurchaseRequestDetailResponse detail(PurchaseRequestView view) { return new PurchaseRequestDetailResponse(view.id(), view.code(), view.clientAccountId(), view.buyerMembershipId(), view.status(), view.priority(), view.requestedDeliveryDate(), view.deliveryProfileSnapshot(), view.paymentOption(), view.comment(), view.reviewNote(), view.lines().stream().map(this::line).toList(), view.version()); }
+	public PurchaseRequestDetailResponse detail(PurchaseRequestView view) { return new PurchaseRequestDetailResponse(view.id(), view.code(), view.clientAccountId(), view.buyerMembershipId(), view.status(), view.priority(), view.requestedDeliveryDate(), view.deliveryProfileSnapshot(), view.paymentOption(), view.comment(), view.reviewNote(), view.lines().stream().map(this::line).toList(), view.version(), view.expiresAt()); }
 	public PurchaseRequestSummaryResponse summary(PurchaseRequestView view) { return new PurchaseRequestSummaryResponse(view.id(), view.code(), view.clientAccountId(), view.status(), view.priority(), view.requestedDeliveryDate(), view.lines().size(), view.version()); }
 	public PurchaseRequestPageResponse page(SalesPage<PurchaseRequestView> page) { return new PurchaseRequestPageResponse(page.items().stream().map(this::summary).toList(), page.page(), page.size(), page.total()); }
 	public com.nexa.api.sales.presentation.purchaserequest.response.PurchaseRequestEventResponse event(PurchaseRequestEventView value) {
