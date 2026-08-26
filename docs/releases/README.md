@@ -2,8 +2,9 @@
 
 Release notes are scoped to the API repository and do not imply complete Nexa domain or migration parity.
 
-| Published release | Summary |
+| Release | Summary |
 |---|---|
+| [v0.15.0](./v0.15.0.md) | Fulfillment and Financial Completion |
 | [v0.14.0](./v0.14.0.md) | Commercial and Inventory Core |
 | [v0.13.0](./v0.13.0.md) | Backend Foundation Closure and release hardening |
 | [v0.12.0](./v0.12.0.md) | Tenant onboarding draft persistence foundation |
@@ -24,4 +25,4 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 | [UNRELEASED HISTORICAL CANDIDATE: v0.7.0](./v0.7.0.md) | Consolidated into later published work; no tag or GitHub Release |
 | [UNRELEASED DRAFT: v0.8.1 candidate](./v0.8.1.md) | Development material retained for historical context; no published tag or GitHub Release |
 
-Current release is `0.14.0`. This release closes the commercial and inventory core scope; it does not imply complete Nexa V1 product acceptance. Fulfillment, dispatch, delivery, settlement, accounting, IoT, BI and mobile remain outside this release.
+Current implementation version is `0.15.0`. Publication still requires the repository release policy, signed release evidence and the Docker-backed integration/security gates; this note does not claim a published GitHub Release.
