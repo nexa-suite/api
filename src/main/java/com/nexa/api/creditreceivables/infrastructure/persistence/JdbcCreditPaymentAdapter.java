@@ -18,7 +18,7 @@ import java.util.UUID;
 /** Credit-line settlement implementation kept inside BC-07. */
 @Repository
 @Profile("!test")
-public final class JdbcCreditPaymentAdapter implements CreditPaymentCommands {
+public class JdbcCreditPaymentAdapter implements CreditPaymentCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
 
@@ -44,7 +44,11 @@ public final class JdbcCreditPaymentAdapter implements CreditPaymentCommands {
             return new Result(credit.id(), existing.id(), credit.exposure(), existing.status());
         }
         CreditAccount aggregate = CreditAccount.rehydrate(credit.id().toString(), credit.limit(), credit.exposure(), credit.reserved());
-        aggregate.reserve(request.amount());
+        try {
+            aggregate.reserve(request.amount());
+        } catch (IllegalArgumentException exception) {
+            throw error("INSUFFICIENT_CREDIT");
+        }
         UUID reservationId = UUID.randomUUID();
         int inserted = jdbc.update("insert into payments.credit_reservation(id,tenant_id,workspace_id,credit_account_id,receivable_id,payment_id,amount,status,idempotency_key,created_at) values (?,?,?,?,?,?,?,'RESERVED',?,?)",
                 reservationId, request.tenantId(), request.workspaceId(), credit.id(), request.receivableId(), request.paymentId(),

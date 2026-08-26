@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 /** Inventory-owned FEFO allocation and physical stock responsibility. */
 @Repository
 @Profile("!test")
-public final class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCommands {
+public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
 

@@ -26,7 +26,7 @@ import java.util.UUID;
 /** SQL adapter for the BC-06 fulfillment aggregate and quantity ledger. */
 @Repository
 @Profile("!test")
-public final class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePort {
+public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePort {
     private final JdbcTemplate jdbc;
     private final Clock clock;
 

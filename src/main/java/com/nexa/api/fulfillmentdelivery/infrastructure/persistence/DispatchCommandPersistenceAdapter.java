@@ -77,6 +77,9 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                 "READY_FOR_OPERATIONS", source.destinationSnapshot(), card.clientCode(), card.clientName(),
                 card.deliveryArea(), card.priority(), source.temperatureMin(), source.temperatureMax(),
                 source.temperatureUnit(), source.temperatureStatus(), timestamp(now), timestamp(now));
+        jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,dispatch_order_id,status,destination_snapshot,created_at,updated_at,version) " +
+                        "values (?,?,?,?,?,?,?,?,0)",
+                id, tenant, workspace, id, "PLANNED", source.destinationSnapshot(), timestamp(now), timestamp(now));
         appendEvent(tenant, workspace, id, "logistics.dispatch.created", null, "READY_FOR_OPERATIONS", actor,
                 false, null, now, source.clientAccountId());
         saveIdempotency(tenant, workspace, "dispatch-create", key, requestHash, id, now);
@@ -279,6 +282,9 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         warehouseFulfillment.releaseReservation(tenantId, workspaceId, row.reservationId().toString(), actorMembershipId,
                 id.toString(), reason, Instant.ofEpochMilli(now));
         updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.cancelled", true, reason);
+        if (jdbc.update("update logistics.delivery set status='CANCELLED',updated_at=?,version=version+1 " +
+                        "where tenant_id=? and workspace_id=? and id=? and status not in ('DELIVERED','CANCELLED')",
+                timestamp(now), tenant, workspace, id) != 1) throw error("CONCURRENCY_CONFLICT", false);
         saveIdempotency(tenant, workspace, "dispatch-cancel", key, requestHash, id, now);
         return detailView(tenantId, workspaceId, null, dispatchId);
     }
@@ -347,6 +353,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         }
         updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.delivery.partially-completed", true,
                 "Delivery partially completed");
+        updateDeliveryStatus(tenant, workspace, id, "IN_TRANSIT", "PARTIAL", null, now);
         appendEvent(tenant, workspace, id, "logistics.delivery.continuation-created", row.status(), "PARTIAL", actor,
                 true, "Continuation delivery required", now, row.clientAccountId());
         CanonicalOutbox.append(jdbc, "DELIVERY_PARTIALLY_COMPLETED", "DispatchOrder", id, tenant, workspace,
@@ -390,6 +397,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                 DeliveryAttemptStatus.FINAL, null, effectiveCompletedAt, finalLines.stream()
                 .map(line -> new DeliveryAttemptLine(line.catalogItemId(), line.quantity(), line.unit())).toList());
         updateStatus(tenant, workspace, row, aggregate, now, actor, "logistics.dispatch.delivered", true, null);
+        updateDeliveryStatus(tenant, workspace, id, "IN_TRANSIT", "DELIVERED", effectiveCompletedAt, now);
         insertAttempt(tenant, workspace, attempt, notes, now);
         jdbc.update("insert into logistics.proof_of_delivery(id,tenant_id,workspace_id,dispatch_order_id,receiver_name," +
                         "completed_at,notes,photo_evidence_declared,signature_evidence_declared,status,created_at) " +
@@ -532,6 +540,9 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                         "where tenant_id=? and workspace_id=? and id=? and version=?", aggregate.status().name(),
                 membership, display, vehicle, route, timestamp(now), tenant, workspace, row.id(), row.version());
         if (changed != 1) throw error("CONCURRENCY_CONFLICT", false);
+        if (jdbc.update("update logistics.delivery set status='ASSIGNED',updated_at=?,version=version+1 " +
+                        "where tenant_id=? and workspace_id=? and id=? and status in ('PLANNED','ASSIGNED')",
+                timestamp(now), tenant, workspace, row.id()) != 1) throw error("CONCURRENCY_CONFLICT", false);
         appendEvent(tenant, workspace, row.id(), eventType, row.status(), aggregate.status().name(), actor,
                 buyerVisible, reason, now, row.clientAccountId());
     }
@@ -544,6 +555,9 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                         "and id=? and version=?", aggregate.status().name(), timestamp(start), timestamp(end),
                 eta == null ? null : timestamp(eta), timestamp(now), tenant, workspace, row.id(), row.version());
         if (changed != 1) throw error("CONCURRENCY_CONFLICT", false);
+        if (jdbc.update("update logistics.delivery set status='DISPATCHED',scheduled_at=?,updated_at=?,version=version+1 " +
+                        "where tenant_id=? and workspace_id=? and id=? and status in ('PLANNED','ASSIGNED','DISPATCHED','IN_TRANSIT')",
+                timestamp(start), timestamp(now), tenant, workspace, row.id()) != 1) throw error("CONCURRENCY_CONFLICT", false);
         appendEvent(tenant, workspace, row.id(), eventType, row.status(), aggregate.status().name(), actor,
                 buyerVisible, reason, now, row.clientAccountId());
     }
@@ -552,6 +566,17 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         if (jdbc.update("update logistics.dispatch_order set updated_at=?,version=version+1 " +
                         "where tenant_id=? and workspace_id=? and id=? and version=?", timestamp(now), tenant,
                 workspace, row.id(), row.version()) != 1) throw error("CONCURRENCY_CONFLICT", false);
+    }
+
+    private void updateDeliveryStatus(UUID tenant, UUID workspace, UUID deliveryId, String expectedStatus,
+                                      String nextStatus, Instant deliveredAt, long now) {
+        String deliveredAtSql = deliveredAt == null ? "null" : "?";
+        String sql = "update logistics.delivery set status=?,delivered_at=" + deliveredAtSql + ",updated_at=?,version=version+1 " +
+                "where tenant_id=? and workspace_id=? and id=? and status=?";
+        int changed = deliveredAt == null
+                ? jdbc.update(sql, nextStatus, timestamp(now), tenant, workspace, deliveryId, expectedStatus)
+                : jdbc.update(sql, nextStatus, timestamp(deliveredAt), timestamp(now), tenant, workspace, deliveryId, expectedStatus);
+        if (changed != 1) throw error("CONCURRENCY_CONFLICT", false);
     }
 
     private static void requireVersion(DispatchRow row, long version) {

@@ -19,7 +19,7 @@ import java.util.UUID;
 /** Immutable financial correction, receivable effect and obligation projection. */
 @Repository
 @Profile("!test")
-public final class JdbcFinancialAdjustmentAdapter implements FinancialAdjustmentCommands {
+public class JdbcFinancialAdjustmentAdapter implements FinancialAdjustmentCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
 

@@ -22,7 +22,7 @@ import java.util.UUID;
 /** BC-07 application boundary for post-payment obligation corrections. */
 @Service
 @Profile("!test")
-public final class FinancialAdjustmentApplicationService {
+public class FinancialAdjustmentApplicationService {
     private static final Set<String> POST_PAYMENT_SOURCES = Set.of("SALES_ORDER_CANCELLATION", "SALES_ORDER_REDUCTION");
 
     private final FinancialAdjustmentCommands commands;

@@ -40,7 +40,7 @@ import java.util.UUID;
 /** SQL adapter for delivery attempts, quantity outcomes, POD and cold-chain evidence. */
 @Repository
 @Profile("!test")
-public final class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
+public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     private final JdbcTemplate jdbc;
     private final ColdChainPolicyQuery coldChain;
     private final ObjectMapper mapper;

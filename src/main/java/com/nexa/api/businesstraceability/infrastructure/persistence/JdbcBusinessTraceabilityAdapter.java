@@ -20,7 +20,7 @@ import java.util.UUID;
 @Repository
 @Profile("!test")
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
-public final class JdbcBusinessTraceabilityAdapter implements BusinessTraceabilityCommands {
+public class JdbcBusinessTraceabilityAdapter implements BusinessTraceabilityCommands {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
 
@@ -36,7 +36,7 @@ public final class JdbcBusinessTraceabilityAdapter implements BusinessTraceabili
                 + "|" + request.eventType() + "|" + request.subjectType() + "|"
                 + request.subjectId() + "|" + request.occurrenceKey()).getBytes(StandardCharsets.UTF_8));
         try {
-            jdbc.update("insert into audit.event(id,tenant_id,workspace_id,actor_membership_id,actor_work_area,event_type,subject_type,subject_id,correlation_id,safe_metadata,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?) on conflict (id) do nothing",
+            jdbc.update("insert into audit.event(id,tenant_id,workspace_id,actor_membership_id,actor_work_area,event_type,subject_type,subject_id,correlation_id,safe_metadata,occurred_at) values (?,?,?,?,?,?,?,?,?,?::jsonb,?) on conflict (id) do nothing",
                     auditId, request.tenantId(), request.workspaceId(), request.actorMembershipId(),
                     bounded(request.actorWorkArea(), 32), bounded(request.eventType(), 120),
                     bounded(request.subjectType(), 120), request.subjectId(),

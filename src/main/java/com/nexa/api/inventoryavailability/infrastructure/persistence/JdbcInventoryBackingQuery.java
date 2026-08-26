@@ -12,7 +12,7 @@ import java.util.UUID;
 /** JDBC projection for the inventory-owned commercial backing. */
 @Repository
 @Profile("!test")
-public final class JdbcInventoryBackingQuery implements InventoryBackingQuery {
+public class JdbcInventoryBackingQuery implements InventoryBackingQuery {
     private final JdbcTemplate jdbc;
 
     public JdbcInventoryBackingQuery(JdbcTemplate jdbc) { this.jdbc = jdbc; }

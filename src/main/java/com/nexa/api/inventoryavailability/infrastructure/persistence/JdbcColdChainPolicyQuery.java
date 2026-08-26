@@ -11,7 +11,7 @@ import java.util.UUID;
 /** Reads the zone policy attached to the lots in a physical allocation. */
 @Repository
 @Profile("!test")
-public final class JdbcColdChainPolicyQuery implements ColdChainPolicyQuery {
+public class JdbcColdChainPolicyQuery implements ColdChainPolicyQuery {
     private final JdbcTemplate jdbc;
 
     public JdbcColdChainPolicyQuery(JdbcTemplate jdbc) { this.jdbc = jdbc; }

@@ -19,7 +19,7 @@ import java.util.UUID;
 /** Sales-owned snapshot and status adapter for the fulfillment boundary. */
 @Repository
 @Profile("!test")
-public final class SalesOrderFulfillmentPersistenceAdapter
+public class SalesOrderFulfillmentPersistenceAdapter
         implements SalesOrderFulfillmentQuery, SalesOrderFulfillmentCommands {
     private final JdbcTemplate jdbc;
 

@@ -10,7 +10,7 @@ import java.util.UUID;
 /** Read-only BC-09 evidence availability projection. */
 @Repository
 @Profile("!test")
-public final class JdbcBusinessEvidenceQuery implements BusinessEvidenceQuery {
+public class JdbcBusinessEvidenceQuery implements BusinessEvidenceQuery {
     private final JdbcTemplate jdbc;
 
     public JdbcBusinessEvidenceQuery(JdbcTemplate jdbc) {

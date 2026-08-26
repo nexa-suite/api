@@ -42,7 +42,7 @@ import java.util.UUID;
  */
 @Service
 @Profile("!test")
-public final class FulfillmentLifecycleService {
+public class FulfillmentLifecycleService {
     private final SalesOrderFulfillmentQuery salesOrders;
     private final SalesOrderFulfillmentCommands salesOrderCommands;
     private final InventoryBackingQuery inventoryBackings;

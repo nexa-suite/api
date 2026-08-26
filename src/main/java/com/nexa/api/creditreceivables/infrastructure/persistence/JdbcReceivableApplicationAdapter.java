@@ -20,7 +20,7 @@ import java.util.UUID;
 /** Atomic receivable application owned by BC-07. */
 @Repository
 @Profile("!test")
-public final class JdbcReceivableApplicationAdapter implements ReceivableApplicationCommands {
+public class JdbcReceivableApplicationAdapter implements ReceivableApplicationCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
 

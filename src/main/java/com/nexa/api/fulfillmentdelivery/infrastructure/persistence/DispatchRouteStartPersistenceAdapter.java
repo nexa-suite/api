@@ -59,6 +59,10 @@ public class DispatchRouteStartPersistenceAdapter extends DispatchJdbcSupport im
                 aggregate.status().name(), timestamp(nowEpochMillis), tenant, workspace, dispatchId,
                 expectedStatus.name(), expectedVersion);
         if (changed != 1) throw error("CONCURRENCY_CONFLICT", false);
+        int deliveryChanged = jdbc.update("update logistics.delivery set status='IN_TRANSIT',dispatched_at=coalesce(dispatched_at,?)," +
+                        "updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='DISPATCHED'",
+                timestamp(nowEpochMillis), timestamp(nowEpochMillis), tenant, workspace, dispatchId);
+        if (deliveryChanged != 1) throw error("CONCURRENCY_CONFLICT", false);
         appendEvent(tenant, workspace, dispatchId, "logistics.dispatch.route-started", expectedStatus.name(),
                 aggregate.status().name(), actor, true, null, nowEpochMillis, row.clientAccountId());
         saveIdempotency(tenant, workspace, "dispatch-route-start", idempotencyKey, requestHash,

@@ -351,6 +351,7 @@ CREATE TABLE logistics.picking_discrepancy (
         REFERENCES logistics.fulfillment_line (tenant_id, workspace_id, id),
     CONSTRAINT fk_picking_discrepancy_result FOREIGN KEY (tenant_id, workspace_id, picking_result_id)
         REFERENCES logistics.picking_result (tenant_id, workspace_id, id),
+    CONSTRAINT uq_picking_discrepancy_scope_id UNIQUE (tenant_id, workspace_id, id),
     CONSTRAINT ck_picking_discrepancy_kind CHECK (kind IN ('SHORT','DAMAGED','WRONG_LOT','OTHER','SHORTAGE','DAMAGE','EXCESS')),
     CONSTRAINT ck_picking_discrepancy_quantity CHECK (quantity > 0)
 );
@@ -625,6 +626,7 @@ CREATE TABLE logistics.temperature_evidence (
         REFERENCES tenant_management.workspace (tenant_id, id),
     CONSTRAINT fk_temperature_evidence_delivery FOREIGN KEY (tenant_id, workspace_id, delivery_id)
         REFERENCES logistics.delivery (tenant_id, workspace_id, id),
+    CONSTRAINT uq_temperature_evidence_scope_id UNIQUE (tenant_id, workspace_id, id),
     CONSTRAINT ck_temperature_evidence_status CHECK (status IN ('WITHIN_RANGE','OUT_OF_RANGE','UNKNOWN')),
     CONSTRAINT ck_temperature_evidence_value CHECK (value IS NULL OR value > -1000 AND value < 1000)
 );
@@ -675,6 +677,7 @@ WHERE delivery_id IS NULL;
 ALTER TABLE logistics.proof_of_delivery
     ADD CONSTRAINT fk_pod_delivery_v15 FOREIGN KEY (tenant_id, workspace_id, delivery_id)
         REFERENCES logistics.delivery (tenant_id, workspace_id, id),
+    ADD CONSTRAINT uq_pod_scope_id_v15 UNIQUE (tenant_id, workspace_id, id),
     ADD CONSTRAINT ck_pod_parent_v15 CHECK (dispatch_order_id IS NOT NULL OR delivery_id IS NOT NULL);
 
 CREATE UNIQUE INDEX uq_pod_delivery_v15

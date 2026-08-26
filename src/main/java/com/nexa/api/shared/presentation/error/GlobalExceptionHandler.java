@@ -348,8 +348,9 @@ public final class GlobalExceptionHandler {
 		}
 		HttpStatus status = switch (exception.code()) {
 			case "CREDIT_ACCOUNT_NOT_FOUND", "RECEIVABLE_NOT_FOUND", "ADJUSTMENT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-			case "INSUFFICIENT_CREDIT", "IDEMPOTENCY_PAYLOAD_CONFLICT", "RECEIVABLE_APPLICATION_CONFLICT",
+			case "IDEMPOTENCY_PAYLOAD_CONFLICT", "RECEIVABLE_APPLICATION_CONFLICT",
 					"DATA_INTEGRITY_CONFLICT" -> HttpStatus.CONFLICT;
+			case "INSUFFICIENT_CREDIT" -> HttpStatus.BAD_REQUEST;
 			default -> HttpStatus.BAD_REQUEST;
 		};
 		return response(status, code, "Credit and receivables operation could not be completed", request);
