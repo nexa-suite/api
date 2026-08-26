@@ -3,6 +3,36 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.13.0] - 2026-08-25
+
+Backend Foundation Closure release for the Nexa API. This release closes technical
+foundation contracts and does not introduce new V1 product semantics or bounded contexts.
+
+### Added
+
+- Added canonical outbox identity, occurrence keys, durable worker retry and non-destructive published-payload retention.
+- Added lease expiry recovery and claim-token fencing for security notifications, document generation and payment reconciliation workers.
+- Added durable payment reconciliation retry idempotency with request-hash conflict detection and provider-status-aware refund outcomes.
+- Added PostgreSQL migrations `V87` and `V88` for claim fencing, reconciliation state support, RLS and durable retry idempotency.
+- Added RLS scope classification, worker contract documentation and OpenAPI compatibility checks.
+
+### Changed
+
+- Strengthened external-provider transaction boundaries, retry limits, keyset pagination and technical error HTTP mapping.
+- Updated CI security, CodeQL and supply-chain workflows to run for release branches.
+- Bumped project version and canonical OpenAPI snapshot to `0.13.0`.
+
+### Fixed
+
+- Prevented stale worker claims from being finalized by a prior worker and removed reconciliation worker starvation across workspaces.
+- Preserved durable retry results and rejected payload reuse under the same idempotency key.
+
+### Validation
+
+- Clean Maven test suite: 408 tests passed, 0 failures, 0 errors; 106 profile-dependent skips.
+- Fresh and upgrade PostgreSQL/Flyway validation passed through migration `V88`.
+- Docker build-time verification, OpenAPI compatibility, architecture, RLS and security/load CI gates passed.
+
 ## [0.12.0] - 2026-08-23
 
 Tenant onboarding draft persistence and visual convergence backend alignment.
