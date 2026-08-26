@@ -5,7 +5,7 @@ import org.springframework.modulith.test.ApplicationModuleTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@ApplicationModuleTest(mode = ApplicationModuleTest.BootstrapMode.STANDALONE, module = "iam")
+@ApplicationModuleTest(mode = ApplicationModuleTest.BootstrapMode.STANDALONE, module = "BC-01-tenant-access-governance")
 class IamModuleBootstrapTests {
     @Test
     void moduleContextBootstraps() { assertThat(true).isTrue(); }

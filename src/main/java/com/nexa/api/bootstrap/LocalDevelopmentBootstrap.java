@@ -1,7 +1,7 @@
 package com.nexa.api.bootstrap;
 
-import com.nexa.api.sales.infrastructure.seed.ClientAccountSeedLoader;
-import com.nexa.api.sales.infrastructure.seed.ClientAccountSeedRecord;
+import com.nexa.api.salescommitment.infrastructure.seed.ClientAccountSeedLoader;
+import com.nexa.api.salescommitment.infrastructure.seed.ClientAccountSeedRecord;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;

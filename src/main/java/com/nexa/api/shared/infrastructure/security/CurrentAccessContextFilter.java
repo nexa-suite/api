@@ -1,14 +1,14 @@
 package com.nexa.api.shared.infrastructure.security;
 
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessRequest;
-import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
-import com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase;
-import com.nexa.api.iam.domain.model.session.SessionId;
-import com.nexa.api.tenantmanagement.domain.model.access.Surface;
-import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ValidateAccessSessionUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -93,8 +93,8 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		}
 
 		try {
-			accessSession.validate(new SessionId(sessionIdClaim), new com.nexa.api.iam.domain.model.useraccount.UserAccountId(jwt.getSubject()),
-					com.nexa.api.iam.domain.model.access.ClientSurface.valueOf(surface.name()), authorizationVersionClaim);
+			accessSession.validate(new SessionId(sessionIdClaim), new com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId(jwt.getSubject()),
+					com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface.valueOf(surface.name()), authorizationVersionClaim);
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			accessTokenInvalidEntryPoint.commence(request, response,

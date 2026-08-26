@@ -2,7 +2,7 @@ package com.nexa.api.payments.presentation;
 
 import com.nexa.api.payments.application.model.PaymentModels;
 import com.nexa.api.payments.application.service.PaymentServiceFacade;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -24,7 +24,7 @@ import java.util.UUID;
 @Hidden
 @RequestMapping("/api/v1")
 public final class StripeBrowserTestController {
-    private static final String ACCESS = "com.nexa.api.tenantmanagement.application.model.CurrentAccessContext";
+    private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final PaymentServiceFacade service;
 
     public StripeBrowserTestController(PaymentServiceFacade service) { this.service = service; }

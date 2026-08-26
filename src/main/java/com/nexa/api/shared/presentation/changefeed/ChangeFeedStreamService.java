@@ -1,23 +1,23 @@
 package com.nexa.api.shared.presentation.changefeed;
 
-import com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase;
-import com.nexa.api.iam.domain.model.access.ClientSurface;
-import com.nexa.api.iam.domain.model.session.SessionId;
-import com.nexa.api.iam.domain.model.useraccount.UserAccountId;
-import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
-import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ValidateAccessSessionUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.changefeed.ChangeEventAudience;
 import com.nexa.api.shared.application.changefeed.ChangeEventView;
 import com.nexa.api.shared.application.changefeed.ChangeFeedCapacityException;
 import com.nexa.api.shared.application.changefeed.ChangeFeedConnectionRegistry;
 import com.nexa.api.shared.application.changefeed.ChangeFeedQueryPort;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessRequest;
-import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
-import com.nexa.api.tenantmanagement.domain.model.access.Surface;
-import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -107,22 +107,22 @@ public final class ChangeFeedStreamService implements AutoCloseable {
             default -> { }
         }
         if (!result.contains(ChangeEventAudience.OWNER)) {
-            if (allowsAny(context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.SALES_DASHBOARD_READ, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.SALES_PURCHASE_REQUEST_READ, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.SALES_ORDER_READ, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.CLIENT_READ)) result.add(ChangeEventAudience.SALES);
-            if (allowsAny(context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.WAREHOUSE_READ, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.INVENTORY_READ)) result.add(ChangeEventAudience.WAREHOUSE);
-            if (allowsAny(context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.LOGISTICS_READ, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.DISPATCH_READ)) result.add(ChangeEventAudience.LOGISTICS);
-            if (context.allows(com.nexa.api.tenantmanagement.domain.model.access.PermissionKey.BUYER_ORDER_READ)) result.add(ChangeEventAudience.BUYER);
+            if (allowsAny(context, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.SALES_DASHBOARD_READ, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.SALES_PURCHASE_REQUEST_READ, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.SALES_ORDER_READ, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.CLIENT_READ)) result.add(ChangeEventAudience.SALES);
+            if (allowsAny(context, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.WAREHOUSE_READ, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.INVENTORY_READ)) result.add(ChangeEventAudience.WAREHOUSE);
+            if (allowsAny(context, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.LOGISTICS_READ, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.DISPATCH_READ)) result.add(ChangeEventAudience.LOGISTICS);
+            if (context.allows(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey.BUYER_ORDER_READ)) result.add(ChangeEventAudience.BUYER);
         }
         return Set.copyOf(result);
     }
-    private static boolean allowsAny(CurrentAccessContext context, com.nexa.api.tenantmanagement.domain.model.access.PermissionKey... permissions) { return java.util.Arrays.stream(permissions).anyMatch(context::allows); }
+    private static boolean allowsAny(CurrentAccessContext context, com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey... permissions) { return java.util.Arrays.stream(permissions).anyMatch(context::allows); }
     private CurrentAccessContext verify(Jwt jwt, CurrentAccessContext expected) {
         Surface surface = Surface.valueOf(required(jwt, "surface").toUpperCase(Locale.ROOT));
         accessSession.validate(new SessionId(required(jwt, "sid")), new UserAccountId(jwt.getSubject()), ClientSurface.valueOf(surface.name()), requiredLong(jwt, "authorization_version"));
         CurrentAccessContext resolved = accessContext.resolve(new CurrentAccessRequest(new UserId(jwt.getSubject()), new TenantId(required(jwt, "tenant_id")), new WorkspaceId(required(jwt, "workspace_id")), surface));
-        if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.roleCodes().equals(expected.roleCodes()) || !resolved.roleDefinitionIds().equals(expected.roleDefinitionIds()) || !resolved.tenantId().equals(expected.tenantId()) || !resolved.workspaceId().equals(expected.workspaceId()) || !resolved.surface().equals(expected.surface()) || resolved.authorizationVersion() != requiredLong(jwt, "authorization_version")) throw new com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation("Change feed access context changed");
+        if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.roleCodes().equals(expected.roleCodes()) || !resolved.roleDefinitionIds().equals(expected.roleDefinitionIds()) || !resolved.tenantId().equals(expected.tenantId()) || !resolved.workspaceId().equals(expected.workspaceId()) || !resolved.surface().equals(expected.surface()) || resolved.authorizationVersion() != requiredLong(jwt, "authorization_version")) throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation("Change feed access context changed");
         return resolved;
     }
-    private String clientAccount(CurrentAccessContext context) { return context.hasRole(com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole.BUYER) ? accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString()).map(CustomerAccountReference::id).orElseThrow() : null; }
+    private String clientAccount(CurrentAccessContext context) { return context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole.BUYER) ? accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString()).map(CustomerAccountReference::id).orElseThrow() : null; }
     private static String required(Jwt jwt, String name) { String value = jwt.getClaimAsString(name); if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing JWT claim " + name); return value; }
     private static long requiredLong(Jwt jwt, String name) { Object raw = jwt.getClaims().get(name); try { long value = raw instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(raw)); if (value < 0) throw new NumberFormatException(); return value; } catch (RuntimeException exception) { throw new IllegalArgumentException("Missing or invalid JWT claim " + name, exception); } }
     private static long parseLastEventId(String value) { if (value == null || value.isBlank()) return 0; try { long parsed = Long.parseLong(value); if (parsed < 0) throw new NumberFormatException(); return parsed; } catch (NumberFormatException exception) { throw new IllegalArgumentException("Last-Event-ID is invalid"); } }

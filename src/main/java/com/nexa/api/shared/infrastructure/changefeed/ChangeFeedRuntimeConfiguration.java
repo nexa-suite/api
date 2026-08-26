@@ -1,10 +1,10 @@
 package com.nexa.api.shared.infrastructure.changefeed;
 
-import com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase;
-import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ValidateAccessSessionUseCase;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.changefeed.ChangeFeedQueryPort;
 import com.nexa.api.shared.presentation.changefeed.ChangeFeedStreamService;
-import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;

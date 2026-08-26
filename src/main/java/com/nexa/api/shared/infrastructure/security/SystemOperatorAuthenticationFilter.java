@@ -1,6 +1,6 @@
 package com.nexa.api.shared.infrastructure.security;
 
-import com.nexa.api.iam.application.model.SystemOperatorContext;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.SystemOperatorContext;
 import com.nexa.api.shared.application.port.out.SecurityAuditPort;
 import com.nexa.api.shared.presentation.error.ApiErrorCode;
 import com.nexa.api.shared.presentation.error.ApiProblemDetailFactory;

@@ -1,6 +1,6 @@
 package com.nexa.api.shared.infrastructure.events;
 
-import com.nexa.api.tenantmanagement.application.port.out.TenantEventContextQueryPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantEventContextQueryPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;

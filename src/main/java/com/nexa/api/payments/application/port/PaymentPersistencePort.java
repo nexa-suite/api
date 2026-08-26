@@ -1,7 +1,7 @@
 package com.nexa.api.payments.application.port;
 
 import com.nexa.api.payments.application.model.PaymentModels;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.time.Instant;
 import java.util.UUID;

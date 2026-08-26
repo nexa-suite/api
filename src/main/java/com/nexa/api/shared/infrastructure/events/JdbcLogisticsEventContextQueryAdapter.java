@@ -1,6 +1,6 @@
 package com.nexa.api.shared.infrastructure.events;
 
-import com.nexa.api.logistics.application.port.out.LogisticsEventContextQueryPort;
+import com.nexa.api.fulfillmentdelivery.application.port.out.LogisticsEventContextQueryPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;

@@ -1,6 +1,6 @@
 package com.nexa.api.shared.presentation.changefeed;
 
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
@@ -21,7 +21,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Tag(name = "Change Feed")
 @SecurityRequirement(name = "bearerAuth")
 public final class ChangeFeedController {
-	private static final String ACCESS_CONTEXT_ATTRIBUTE = "com.nexa.api.tenantmanagement.application.model.CurrentAccessContext";
+	private static final String ACCESS_CONTEXT_ATTRIBUTE = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
 	private final ChangeFeedStreamService streams;
 	public ChangeFeedController(ChangeFeedStreamService streams) { this.streams = streams; }
 
