@@ -75,9 +75,9 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
         UUID id = uuid(order.id().value());
         String snapshot = json(order.snapshot());
         jdbc.update("insert into sales.sales_order (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,"
-                        + "buyer_membership_id,source_purchase_request_id,order_source,priority,requested_delivery_date,delivery_snapshot,"
+                        + "buyer_membership_id,source_purchase_request_id,order_source,origin_type,priority,requested_delivery_date,delivery_snapshot,"
                         + "payment_option,notes,currency,total_amount,status,created_at,updated_at,version,delivery_address_snapshot,route_snapshot,"
-                        + "warehouse_selection_snapshot,commercial_snapshot) values (?,?,?,?,?,?,?,null,'MANUAL',?,?,?,?,?,?,?,'PENDING',?,?,0,?::jsonb,?::jsonb,?::jsonb,?::jsonb)",
+                        + "warehouse_selection_snapshot,commercial_snapshot) values (?,?,?,?,?,?,?,null,'MANUAL','MANUAL',?,?,?,?,?,?,?,'PENDING',?,?,0,?::jsonb,?::jsonb,?::jsonb,?::jsonb)",
                 id, order.tenantId().value(), order.workspaceId().value(), order.number().value(), uuid(order.clientAccountId().value()),
                 uuid(actorMembershipId), uuid(actorMembershipId), order.priority().name(), order.requestedDeliveryDate(), snapshot,
                 order.snapshot().payment().option().name(), order.snapshot().notes(), order.snapshot().payment().currency(), order.total(),

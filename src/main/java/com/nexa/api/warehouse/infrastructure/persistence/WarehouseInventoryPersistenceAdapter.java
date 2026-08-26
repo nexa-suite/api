@@ -271,29 +271,39 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         List<String> normalized = ids.stream().map(id -> bounded(id, "catalogItemId", 64)).distinct().toList();
         String placeholders = normalized.stream().map(id -> "?").collect(Collectors.joining(","));
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context))); args.addAll(normalized);
-        List<AvailabilityQuantities> rows = jdbc.query("select l.catalog_item_id,l.warehouse_id,"
+        List<AvailabilityQuantities> rows = jdbc.query("with active_backing as ("
+                        + "select line.tenant_id,line.workspace_id,line.catalog_item_id,position.warehouse_id,coalesce(sum(position.quantity),0) active_quantity "
+                        + "from warehouse.inventory_backing_position position "
+                        + "join warehouse.inventory_backing_line line on line.tenant_id=position.tenant_id and line.workspace_id=position.workspace_id and line.id=position.backing_line_id "
+                        + "join warehouse.inventory_backing backing on backing.tenant_id=line.tenant_id and backing.workspace_id=line.workspace_id and backing.id=line.backing_id "
+                        + "where backing.status='BACKED' group by line.tenant_id,line.workspace_id,line.catalog_item_id,position.warehouse_id) "
+                        + "select l.catalog_item_id,l.warehouse_id,"
                         + "coalesce(sum(l.stock_quantity),0) physical_quantity,"
                         + "coalesce(sum(case when l.status='AVAILABLE' and l.expiration_date>current_date "
                         + "and l.stock_quantity>l.reserved_quantity and w.status='ACTIVE' and z.status='ACTIVE' "
-                        + "and z.zone_type<>'QUARANTINE' then l.stock_quantity-l.reserved_quantity else 0 end),0) eligible_quantity,"
-                        + "coalesce(max(ss.quantity),0) safety_stock "
+                        + "and z.zone_type<>'QUARANTINE' and coalesce(service.service_status,'OPERATIONAL')='OPERATIONAL' "
+                        + "then l.stock_quantity-l.reserved_quantity else 0 end),0) eligible_quantity,"
+                        + "coalesce(max(ss.quantity),0) safety_stock,coalesce(max(active_backing.active_quantity),0) active_backing_quantity "
                         + "from warehouse.inventory_lot l "
                         + "join warehouse.warehouse w on w.id=l.warehouse_id and w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id "
                         + "join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
+                        + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
                         + "left join warehouse.safety_stock_policy ss on ss.tenant_id=l.tenant_id and ss.workspace_id=l.workspace_id "
                         + "and ss.warehouse_id=l.warehouse_id and ss.sku_id=l.sku_id "
+                        + "left join active_backing on active_backing.tenant_id=l.tenant_id and active_backing.workspace_id=l.workspace_id "
+                        + "and active_backing.catalog_item_id=l.catalog_item_id and active_backing.warehouse_id=l.warehouse_id "
                         + "where l.tenant_id=? and l.workspace_id=? and l.catalog_item_id in (" + placeholders + ") "
                         + "group by l.catalog_item_id,l.warehouse_id",
                 (rs, row) -> new AvailabilityQuantities(rs.getString("catalog_item_id"),
                         rs.getBigDecimal("physical_quantity"), rs.getBigDecimal("eligible_quantity"),
-                        rs.getBigDecimal("safety_stock")), args.toArray());
+                        rs.getBigDecimal("safety_stock"), rs.getBigDecimal("active_backing_quantity")), args.toArray());
         Map<String, BigDecimal> physical = new java.util.HashMap<>();
         Map<String, BigDecimal> safety = new java.util.HashMap<>();
         Map<String, BigDecimal> sellable = new java.util.HashMap<>();
         for (AvailabilityQuantities row : rows) {
             physical.merge(row.catalogItemId(), row.physicalQuantity(), BigDecimal::add);
             safety.merge(row.catalogItemId(), row.safetyStock(), BigDecimal::add);
-            sellable.merge(row.catalogItemId(), row.eligibleQuantity().subtract(row.safetyStock()).max(BigDecimal.ZERO), BigDecimal::add);
+            sellable.merge(row.catalogItemId(), row.eligibleQuantity().subtract(row.safetyStock()).subtract(row.activeBackingQuantity()).max(BigDecimal.ZERO), BigDecimal::add);
         }
         Instant asOf = Instant.now();
         return normalized.stream().map(id -> new WarehouseOperationsService.Availability(id,
@@ -310,5 +320,6 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private record AvailabilityQuantities(String catalogItemId, BigDecimal physicalQuantity,
-                                          BigDecimal eligibleQuantity, BigDecimal safetyStock) { }
+                                          BigDecimal eligibleQuantity, BigDecimal safetyStock,
+                                          BigDecimal activeBackingQuantity) { }
 }

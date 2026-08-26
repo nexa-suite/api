@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Real HTTP workflow fixture shared by TASK-008 and TASK-010 integration gates. */
 public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegrationSupport {
     protected PurchaseRequestResource createApprovedPurchaseRequest() throws Exception {
+        ensureCommercialInventory();
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
                         .header("Authorization", "Bearer " + buyer)
@@ -33,6 +34,32 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .header("If-Match", inReview.getResponse().getHeader("ETag")))
                 .andExpect(status().isOk()).andReturn();
         return new PurchaseRequestResource(requestId, approved.getResponse().getHeader("ETag"), sales);
+    }
+
+    /** Seeds real sellable inventory for v0.14 commercial backing scenarios. */
+    protected void ensureCommercialInventory() throws Exception {
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        MvcResult createdWarehouse = mockMvc.perform(post("/api/v1/warehouses")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"WH-COM-" + suffix + "\",\"name\":\"Commercial core warehouse\",\"address\":\"Lima\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String warehouseId = json(createdWarehouse).get("id").asText();
+        MvcResult createdZone = mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"Z-COM-" + suffix + "\",\"name\":\"Commercial core zone\",\"type\":\"AMBIENT\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String zoneId = json(createdZone).get("id").asText();
+        mockMvc.perform(post("/api/v1/inventory/inbound-receipts")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("Idempotency-Key", "commercial-inbound-" + suffix)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId
+                                + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"B-COM-" + suffix
+                                + "\",\"expirationDate\":\"2099-01-01\",\"quantity\":100,\"unit\":\"UNIT\"}"))
+                .andExpect(status().isCreated());
     }
 
     protected SalesOrderResource convert(PurchaseRequestResource request, String key) throws Exception {
@@ -73,7 +100,7 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                 .andExpect(status().isCreated()).andReturn();
         String zoneId = json(createdZone).get("id").asText();
         mockMvc.perform(post("/api/v1/inventory/inbound-receipts").header("Authorization", "Bearer " + warehouse).header("Idempotency-Key", "inbound-" + suffix)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"B-" + suffix + "\",\"expirationDate\":\"2099-01-01\",\"quantity\":20,\"unit\":\"UNIT\",\"temperatureReading\":-18}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"B-" + suffix + "\",\"expirationDate\":\"2098-01-01\",\"quantity\":20,\"unit\":\"UNIT\",\"temperatureReading\":-18}"))
                 .andExpect(status().isCreated());
         MvcResult reservation = mockMvc.perform(post("/api/v1/fulfillment-candidates/" + pending.id() + "/inventory-reservations")
                         .header("Authorization", "Bearer " + warehouse).header("If-Match", confirmed.getResponse().getHeader("ETag"))

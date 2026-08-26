@@ -25,7 +25,7 @@ public record ApprovedPurchaseRequestSnapshot(TenantId tenantId, WorkspaceId wor
 	}
 	public ApprovedPurchaseRequestSnapshot {
 		tenantId = Objects.requireNonNull(tenantId); workspaceId = Objects.requireNonNull(workspaceId); clientAccountId = Objects.requireNonNull(clientAccountId);
-		buyerMembershipId = Objects.requireNonNull(buyerMembershipId); purchaseRequestId = Objects.requireNonNull(purchaseRequestId); lines = List.copyOf(lines);
+		buyerMembershipId = Objects.requireNonNull(buyerMembershipId); lines = List.copyOf(lines);
 		priority = priority == null ? PurchaseRequestPriority.NORMAL : priority;
 		currency = Objects.requireNonNull(currency).trim().toUpperCase(java.util.Locale.ROOT); totalSnapshot = Objects.requireNonNull(totalSnapshot);
 		if (lines.isEmpty() || totalSnapshot.signum() < 0 || !currency.matches("[A-Z]{3}")) throw new SalesOrderInvariantViolation("Approved purchase request snapshot is incomplete");
