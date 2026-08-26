@@ -41,7 +41,9 @@ class SalesDomainPrimitivesTests {
 			PurchaseRequestStatus.APPROVED,
 			PurchaseRequestStatus.REJECTED,
 			PurchaseRequestStatus.CANCELLED,
-			PurchaseRequestStatus.CONVERTED_TO_ORDER);
+			PurchaseRequestStatus.CONVERTED_TO_ORDER,
+			PurchaseRequestStatus.EXPIRED,
+			PurchaseRequestStatus.WITHDRAWN);
 		assertThat(SalesOrderStatus.values()).containsExactly(
 			SalesOrderStatus.PENDING,
 			SalesOrderStatus.CONFIRMED,

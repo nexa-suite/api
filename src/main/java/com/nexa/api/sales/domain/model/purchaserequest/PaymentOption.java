@@ -10,7 +10,9 @@ public enum PaymentOption {
 	BANK_TRANSFER,
 	CARD_STRIPE,
 	CASH,
-	CASH_ON_DELIVERY;
+	CASH_ON_DELIVERY,
+	PREPAID,
+	IMMEDIATE;
 
 	public static PaymentOption from(String value) {
 		if (value == null || value.isBlank()) return null;

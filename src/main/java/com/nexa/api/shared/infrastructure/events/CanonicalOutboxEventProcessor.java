@@ -7,6 +7,7 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
 import com.nexa.api.payments.application.port.PaymentPort;
 import com.nexa.api.sales.application.port.out.SalesEventContextQueryPort;
+import com.nexa.api.sales.application.exception.CommercialBusinessException;
 import com.nexa.api.sales.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.shared.events.PaymentEventContextQueryPort;
 import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
@@ -239,7 +240,15 @@ public final class CanonicalOutboxEventProcessor {
                 .orElseThrow(() -> new IllegalStateException("Purchase request context is unavailable"))
                 .version());
         CurrentAccessContext context = actor(event);
-        salesOrders.convert(context, requestId.toString(), version, "outbox-conversion-" + event.eventId(), "Automatic conversion after purchase request approval");
+        try {
+            salesOrders.convert(context, requestId.toString(), version, "outbox-conversion-" + event.eventId(), "Automatic conversion after purchase request approval");
+        } catch (CommercialBusinessException exception) {
+            if ("PURCHASE_REQUEST_EXPIRED".equals(exception.code())) {
+                LOG.info("Purchase request expired before automatic conversion; publishing approval event as terminal no-op requestId={}", requestId);
+                return;
+            }
+            throw exception;
+        }
     }
 
     private void reserveConfirmed(EventRow event, Map<String, Object> payload) {

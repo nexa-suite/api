@@ -146,12 +146,13 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 	}
 
 	private String requestSql() {
-		return "select r.id,r.code,r.client_account_id,r.buyer_membership_id,r.status,r.priority,r.requested_delivery_date,r.delivery_profile_snapshot,r.payment_option,r.comments,r.review_note,r.version from sales.purchase_request r";
+		return "select r.id,r.code,r.client_account_id,r.buyer_membership_id,r.status,r.priority,r.requested_delivery_date,r.delivery_profile_snapshot,r.payment_option,r.comments,r.review_note,r.version,r.expires_at from sales.purchase_request r";
 	}
 
 	private PurchaseRequestView parent(java.sql.ResultSet rs) throws java.sql.SQLException {
 		return new PurchaseRequestView(rs.getObject(1).toString(), rs.getString(2), rs.getObject(3).toString(), rs.getObject(4).toString(),
-				rs.getString(5), rs.getString(6), rs.getObject(7, LocalDate.class), rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), List.of(), rs.getLong(12));
+					rs.getString(5), rs.getString(6), rs.getObject(7, LocalDate.class), rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), List.of(), rs.getLong(12),
+					rs.getTimestamp(13) == null ? null : rs.getTimestamp(13).toInstant());
 	}
 
 	private PurchaseRequestView request(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -173,7 +174,7 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 
 	private static PurchaseRequestView withLines(PurchaseRequestView parent, List<PurchaseRequestLineView> lines) {
 		return new PurchaseRequestView(parent.id(), parent.code(), parent.clientAccountId(), parent.buyerMembershipId(), parent.status(), parent.priority(),
-				parent.requestedDeliveryDate(), parent.deliveryProfileSnapshot(), parent.paymentOption(), parent.comment(), parent.reviewNote(), lines, parent.version());
+				parent.requestedDeliveryDate(), parent.deliveryProfileSnapshot(), parent.paymentOption(), parent.comment(), parent.reviewNote(), lines, parent.version(), parent.expiresAt());
 	}
 	private Optional<PurchaseRequestView> optionalRequest(java.sql.ResultSet rs) throws java.sql.SQLException { return rs.next() ? Optional.of(request(rs)) : Optional.empty(); }
 	private static UUID uuid(String value) { return UUID.fromString(value); }

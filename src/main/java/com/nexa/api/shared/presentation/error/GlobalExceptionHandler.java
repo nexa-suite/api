@@ -48,6 +48,7 @@ import com.nexa.api.customerrelationships.application.exception.CustomerRelation
 import com.nexa.api.customerrelationships.application.exception.CustomerRelationshipPreconditionRequiredException;
 import com.nexa.api.customerrelationships.contract.CustomerRelationshipInvariantViolation;
 import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
+import com.nexa.api.sales.application.exception.CommercialBusinessException;
 import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
@@ -304,6 +305,28 @@ public final class GlobalExceptionHandler {
 		LOGGER.warn("Sales invariant rejected request {}: {}", request.getRequestURI(), exception.getMessage());
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.PURCHASE_REQUEST_LINE_INVALID, "Sales request is invalid", request);
 	}
+	@ExceptionHandler(CommercialBusinessException.class)
+	public ResponseEntity<ProblemDetail> handleCommercialBusiness(CommercialBusinessException exception, HttpServletRequest request) {
+		ApiErrorCode code = switch (exception.code()) {
+			case "PURCHASE_REQUEST_EXPIRED" -> ApiErrorCode.PURCHASE_REQUEST_EXPIRED;
+			case "PURCHASE_REQUEST_NOT_CONFIRMABLE" -> ApiErrorCode.PURCHASE_REQUEST_NOT_CONFIRMABLE;
+			case "COMMERCIAL_POLICY_CHANGED" -> ApiErrorCode.COMMERCIAL_POLICY_CHANGED;
+			case "INSUFFICIENT_CREDIT" -> ApiErrorCode.INSUFFICIENT_CREDIT;
+			case "PAYMENT_REQUIRED" -> ApiErrorCode.PAYMENT_REQUIRED;
+			case "CLIENT_ACCOUNT_NOT_FOUND" -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
+			case "IDEMPOTENCY_KEY_REQUIRED" -> ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED;
+			case "VALIDATION_ERROR" -> ApiErrorCode.VALIDATION_ERROR;
+			default -> ApiErrorCode.INVALID_REQUEST;
+		};
+		HttpStatus status = switch (code) {
+			case INSUFFICIENT_CREDIT, PURCHASE_REQUEST_EXPIRED, PURCHASE_REQUEST_NOT_CONFIRMABLE,
+				COMMERCIAL_POLICY_CHANGED -> HttpStatus.CONFLICT;
+			case CLIENT_ACCOUNT_NOT_FOUND -> HttpStatus.NOT_FOUND;
+			case IDEMPOTENCY_KEY_REQUIRED, VALIDATION_ERROR, PAYMENT_REQUIRED -> HttpStatus.BAD_REQUEST;
+			default -> HttpStatus.BAD_REQUEST;
+		};
+		return response(status, code, "Commercial operation could not be completed", request);
+	}
 	@ExceptionHandler(DataIntegrityViolationException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
 		LOGGER.warn("Data integrity constraint rejected request {}", request.getRequestURI(), exception.getMostSpecificCause());
@@ -406,7 +429,7 @@ public final class GlobalExceptionHandler {
 			if (!exception.notFound() && "CONCURRENCY_CONFLICT".equals(exception.code()) && request.getHeader("If-Match") != null) {
 				return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Warehouse resource changed by another request", request);
 			}
-			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INSUFFICIENT_AVAILABLE_STOCK", "INSUFFICIENT_SELLABLE_AVAILABILITY", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
 		}
 		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)

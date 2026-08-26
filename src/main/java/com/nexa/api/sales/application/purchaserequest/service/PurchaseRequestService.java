@@ -6,6 +6,7 @@ import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
+import com.nexa.api.sales.application.exception.PurchaseRequestExpiredException;
 import com.nexa.api.sales.application.model.SalesPage;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestFilter;
 import com.nexa.api.sales.application.purchaserequest.model.PurchaseRequestLineView;
@@ -38,9 +39,16 @@ import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import com.nexa.api.tenantmanagement.domain.model.access.Permission;
 import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -54,6 +62,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	private final CustomerAccountQuery accounts;
 	private final ChangeEventPersistencePort changeFeed;
 	private final CommercialCommitmentPort commitments;
+	private final Clock clock;
+	private final ObjectMapper objectMapper;
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts) {
@@ -69,6 +79,18 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments) {
+		this(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, Clock.systemUTC());
+	}
+
+	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
+			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments, Clock clock) {
+		this(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, new ObjectMapper());
+	}
+
+	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
+			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments, Clock clock, ObjectMapper objectMapper) {
 		this.persistence = persistence;
 		this.events = events;
 		this.idempotency = idempotency;
@@ -76,6 +98,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		this.accounts = accounts;
 		this.changeFeed = changeFeed;
 		this.commitments = commitments;
+		this.clock = clock == null ? Clock.systemUTC() : clock;
+		this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
 	}
 
 	@Override
@@ -217,20 +241,38 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	}
 
 	@Override
-	@Transactional
+	@Transactional(noRollbackFor = PurchaseRequestExpiredException.class)
 	public PurchaseRequestView transition(CurrentAccessContext context, String id, String action, String reviewNote,
 			long version, String idempotencyKey) {
 		String normalized = action == null ? "" : action.trim().toLowerCase(Locale.ROOT);
 		PurchaseRequestView current = detail(context, id);
+		String idempotencyOperation = null;
+		String commandHash = null;
 		if ("submit".equals(normalized)) {
 			if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
 			requireIdempotencyKey(idempotencyKey);
+			idempotencyOperation = "purchase-request-submission";
+			commandHash = requestHash(current);
+			idempotency.lock(scope(context), workspace(context), context.membershipId().toString(),
+					idempotencyOperation, idempotencyKey);
 			var prior = idempotency.find(scope(context), workspace(context), context.membershipId().toString(),
-					"purchase-request-submission", idempotencyKey);
-			if (prior.isPresent()) return detail(context, prior.get().resourceId());
+					idempotencyOperation, idempotencyKey, commandHash);
+			if (prior.isPresent()) return replay(prior.get(), context);
+		} else if ("withdraw".equals(normalized)) {
+			if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
 		} else {
 			internal(context, Permission.SALES_WRITE);
 		}
+		if (idempotencyOperation == null && idempotencyKey != null && !idempotencyKey.isBlank()) {
+			requireIdempotencyKey(idempotencyKey);
+			idempotencyOperation = "purchase-request-transition";
+			commandHash = transitionHash(current, normalized, reviewNote);
+			idempotency.lock(scope(context), workspace(context), context.membershipId().toString(), idempotencyOperation, idempotencyKey);
+			var prior = idempotency.find(scope(context), workspace(context), context.membershipId().toString(),
+					idempotencyOperation, idempotencyKey, commandHash);
+			if (prior.isPresent()) return replay(prior.get(), context);
+		}
+		materializeExpiryIfDue(context, current, normalized, version);
 		PurchaseRequest aggregate = rehydrate(current);
 		String target = switch (normalized) {
 			case "submit" -> { aggregate.submit(); yield PurchaseRequestStatus.SUBMITTED.name(); }
@@ -239,6 +281,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			case "approve" -> { aggregate.approve(reviewNote); yield PurchaseRequestStatus.APPROVED.name(); }
 			case "reject" -> { aggregate.reject(reviewNote); yield PurchaseRequestStatus.REJECTED.name(); }
 			case "cancel" -> { aggregate.cancel(); yield PurchaseRequestStatus.CANCELLED.name(); }
+			case "withdraw" -> { aggregate.withdraw(); yield PurchaseRequestStatus.WITHDRAWN.name(); }
 			default -> throw new PurchaseRequestTransitionException();
 		};
 		int changed = persistence.transition(scope(context), workspace(context), buyerAccount(context), id,
@@ -246,7 +289,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		if (changed == 0) throw new SalesConcurrencyConflictException();
 		if ("submit".equals(normalized) && commitments != null) {
 			commitments.activateForPurchaseRequest(UUID.fromString(scope(context)), UUID.fromString(workspace(context)), UUID.fromString(id));
-		} else if (("reject".equals(normalized) || "cancel".equals(normalized)) && commitments != null) {
+		} else if (("reject".equals(normalized) || "cancel".equals(normalized) || "withdraw".equals(normalized)
+				|| "request-adjustment".equals(normalized)) && commitments != null) {
 			commitments.releaseForPurchaseRequest(UUID.fromString(scope(context)), UUID.fromString(workspace(context)), UUID.fromString(id), target);
 		}
 		PurchaseRequestView result = detail(context, id);
@@ -254,16 +298,17 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 				target, current.status(), target, now());
 		if ("submit".equals(normalized)) {
 			events.appendCanonical("PURCHASE_REQUEST_SUBMITTED", id, scope(context), workspace(context),
-				"purchase-request-" + id, null, java.util.Map.of("purchaseRequestId", UUID.fromString(id), "status", target), now());
+				"purchase-request-" + id, null, "v" + result.version(), java.util.Map.of("purchaseRequestId", UUID.fromString(id), "status", target), now());
 		} else if ("approve".equals(normalized)) {
 			events.appendCanonical("PURCHASE_REQUEST_APPROVED", id, scope(context), workspace(context),
-				"purchase-request-" + id, null, java.util.Map.of("purchaseRequestId", UUID.fromString(id), "purchaseRequestVersion", result.version()), now());
+				"purchase-request-" + id, null, "v" + result.version(), java.util.Map.of("purchaseRequestId", UUID.fromString(id), "purchaseRequestVersion", result.version()), now());
 		}
-		appendChange(context, result, eventType(normalized), target);
-		if ("submit".equals(normalized)) {
+	appendChange(context, result, eventType(normalized), target);
+	if (idempotencyOperation != null) {
 			idempotency.save(scope(context), workspace(context), context.membershipId().toString(),
-					"purchase-request-submission", idempotencyKey, id, result.version(), UUID.randomUUID(), now());
-		}
+					idempotencyOperation, idempotencyKey, id, result.version(), UUID.randomUUID(), now(), commandHash,
+					serialize(result));
+	}
 		return result;
 	}
 
@@ -321,6 +366,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			case "approve" -> "sales.purchase-request.approved";
 			case "reject" -> "sales.purchase-request.rejected";
 			case "cancel" -> "sales.purchase-request.cancelled";
+			case "withdraw" -> "sales.purchase-request.withdrawn";
 			default -> "sales.purchase-request.updated";
 		};
 	}
@@ -335,5 +381,59 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	}
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }
 	private static String workspace(CurrentAccessContext context) { return context.workspaceId().toString(); }
-	private static long now() { return System.currentTimeMillis(); }
+	private long now() { return clock.millis(); }
+
+	private void materializeExpiryIfDue(CurrentAccessContext context, PurchaseRequestView current, String action, long version) {
+		if (current.expiresAt() == null || current.status().equals("DRAFT") || current.status().equals("EXPIRED")
+				|| current.status().equals("REJECTED") || current.status().equals("CANCELLED")
+				|| current.status().equals("WITHDRAWN") || current.status().equals("CONVERTED_TO_ORDER")) return;
+		if (clock.instant().isBefore(current.expiresAt())) return;
+		int changed = persistence.transition(scope(context), workspace(context), buyerAccount(context), current.id(),
+				current.status(), PurchaseRequestStatus.EXPIRED.name(), "Business expiry", context.membershipId().toString(), version);
+		if (changed == 1) {
+			if (commitments != null) commitments.releaseForPurchaseRequest(UUID.fromString(scope(context)), UUID.fromString(workspace(context)), UUID.fromString(current.id()), "EXPIRED");
+			events.append(UUID.randomUUID(), current.id(), scope(context), workspace(context), context.membershipId().toString(),
+					"EXPIRED", current.status(), PurchaseRequestStatus.EXPIRED.name(), now());
+		}
+		throw new PurchaseRequestExpiredException();
+	}
+
+	private PurchaseRequestView replay(IdempotencyPersistencePort.IdempotencyResult prior, CurrentAccessContext context) {
+		if (prior.responseJson() != null && !prior.responseJson().isBlank()) {
+			try { return objectMapper.readValue(prior.responseJson(), PurchaseRequestView.class); }
+			catch (Exception exception) { throw new IllegalStateException("Purchase Request idempotency snapshot is invalid", exception); }
+		}
+		return detail(context, prior.resourceId());
+	}
+
+	private String serialize(PurchaseRequestView value) {
+		try { return objectMapper.writeValueAsString(value); }
+		catch (Exception exception) { throw new IllegalStateException("Purchase Request idempotency snapshot could not be serialized", exception); }
+	}
+
+	private static String requestHash(PurchaseRequestView view) {
+		String canonical = view.id() + "|"
+				+ value(view.priority()) + "|" + value(view.requestedDeliveryDate()) + "|"
+				+ value(view.deliveryProfileSnapshot()) + "|" + value(view.paymentOption()) + "|"
+				+ value(view.comment()) + "|" + value(view.reviewNote()) + "|"
+				+ view.lines().stream().map(line -> line.id() + ":" + line.catalogItemId() + ":" + line.quantity() + ":"
+						+ line.unit() + ":" + value(line.unitPriceAmount()) + ":" + value(line.unitPriceCurrency()) + ":" + value(line.notes()))
+				.collect(java.util.stream.Collectors.joining(","));
+		try {
+			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8)));
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 is required", exception);
+		}
+	}
+
+	private static String transitionHash(PurchaseRequestView view, String action, String reviewNote) {
+		String canonical = action + "|" + value(reviewNote) + "|" + requestHash(view);
+		try {
+			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8)));
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 is required", exception);
+		}
+	}
+
+	private static String value(Object value) { return value == null ? "" : value.toString(); }
 }

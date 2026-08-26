@@ -1,5 +1,6 @@
 package com.nexa.api.sales.infrastructure;
 
+import com.nexa.api.catalogmanagement.application.publicapi.SellableSkuQuery;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerrelationships.application.publicapi.CustomerAddressQuery;
 import com.nexa.api.sales.application.port.out.ClientAccountCommercialPort;
@@ -7,6 +8,8 @@ import com.nexa.api.sales.application.port.out.MapRoutingPort;
 import com.nexa.api.sales.application.port.out.WarehouseReferencePort;
 import com.nexa.api.sales.application.purchaserequest.port.*;
 import com.nexa.api.sales.application.purchaserequest.service.PurchaseRequestService;
+import com.nexa.api.sales.application.directorder.port.DirectOrderUseCase;
+import com.nexa.api.sales.application.directorder.service.DirectOrderService;
 import com.nexa.api.sales.application.reference.port.PeruGeographyPersistencePort;
 import com.nexa.api.sales.application.reference.port.PeruGeographyUseCase;
 import com.nexa.api.sales.application.reference.service.PeruGeographyService;
@@ -26,6 +29,9 @@ import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import tools.jackson.databind.ObjectMapper;
+
+import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
 @Profile("!test")
@@ -47,8 +53,14 @@ public class SalesRuntimeConfiguration {
 	}
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
-			ChangeEventPersistencePort changeFeed, com.nexa.api.sales.application.port.CommercialCommitmentPort commitments) {
-		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments);
+				ChangeEventPersistencePort changeFeed, com.nexa.api.sales.application.port.CommercialCommitmentPort commitments,
+				Clock clock, ObjectMapper objectMapper) {
+		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, objectMapper);
 	}
-	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, CustomerAccountQuery accounts) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence); }
+	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, CustomerAccountQuery accounts, IdempotencyPersistencePort idempotency, ObjectMapper objectMapper) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence, idempotency, objectMapper); }
+	@Bean DirectOrderUseCase directOrderUseCase(com.nexa.api.sales.application.port.CommercialCommitmentPort commitments,
+			SalesOrderPersistencePort orders, Clock clock, IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
+			SellableSkuQuery sellableSkus) {
+		return new DirectOrderService(commitments, orders, clock, idempotency, objectMapper, sellableSkus);
+	}
 }
