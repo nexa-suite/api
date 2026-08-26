@@ -8,6 +8,7 @@ import com.nexa.api.iam.application.exception.IamSecurityException;
 import com.nexa.api.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -471,6 +472,11 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(com.nexa.api.payments.application.exception.PaymentOperationInProgressException.class)
 	public ResponseEntity<ProblemDetail> handlePaymentOperationInProgress(com.nexa.api.payments.application.exception.PaymentOperationInProgressException exception, HttpServletRequest request) {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "A payment operation is already in progress for this receivable", request);
+	}
+
+	@ExceptionHandler(PaymentIdempotencyPayloadConflictException.class)
+	public ResponseEntity<ProblemDetail> handlePaymentIdempotencyPayload(PaymentIdempotencyPayloadConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payment reconciliation request", request);
 	}
 
 	@ExceptionHandler(IllegalArgumentException.class)

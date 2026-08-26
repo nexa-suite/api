@@ -22,6 +22,7 @@ import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.warehouse.application.WarehouseOperationsService;
 import com.nexa.api.warehouse.application.port.out.WarehouseEventContextQueryPort;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +70,8 @@ public final class CanonicalOutboxEventProcessor {
     private final PaymentPort payments;
     private final TechnicalMetrics metrics;
     private final TransactionTemplate transactionTemplate;
+    private final int outboxRetentionDays;
+    private final int outboxRetentionBatchSize;
 
     public CanonicalOutboxEventProcessor(JdbcTemplate jdbc, ObjectMapper mapper,
                                          @Qualifier("notificationProjectionPort") NotificationProjectionPort notifications,
@@ -84,7 +87,9 @@ public final class CanonicalOutboxEventProcessor {
                                          BusinessDocumentPort documents,
                                          PaymentPort payments,
                                          ObjectProvider<TechnicalMetrics> metrics,
-                                         PlatformTransactionManager transactionManager) {
+                                         PlatformTransactionManager transactionManager,
+                                         @Value("${nexa.integration.outbox-retention-days:90}") int outboxRetentionDays,
+                                         @Value("${nexa.integration.outbox-retention-batch-size:500}") int outboxRetentionBatchSize) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.notifications = notifications;
@@ -101,6 +106,8 @@ public final class CanonicalOutboxEventProcessor {
         this.payments = payments;
         this.metrics = metrics == null ? null : metrics.getIfAvailable();
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.outboxRetentionDays = requirePositive(outboxRetentionDays, "outbox retention days");
+        this.outboxRetentionBatchSize = requirePositive(outboxRetentionBatchSize, "outbox retention batch size");
         registerGauges();
     }
 
@@ -142,6 +149,29 @@ public final class CanonicalOutboxEventProcessor {
                 RlsRequestScope.clear();
             }
         }
+    }
+
+    /** Redacts old published payloads without deleting occurrence identity or inbox deduplication history. */
+    @Scheduled(fixedDelayString = "${nexa.integration.outbox-retention-delay-ms:3600000}",
+            initialDelayString = "${nexa.integration.outbox-retention-initial-delay-ms:3600000}")
+    public void retainPublishedPayloads() {
+        int redacted = jdbc.update("""
+                with candidates as (
+                    select event_id
+                    from integration.outbox_event
+                    where status='PUBLISHED'
+                      and processed_at is not null
+                      and processed_at < current_timestamp - (? * interval '1 day')
+                      and payload <> '{}'::jsonb
+                    order by processed_at,event_id
+                    limit ?
+                )
+                update integration.outbox_event event
+                   set payload='{}'::jsonb
+                  from candidates
+                 where event.event_id=candidates.event_id
+                """, outboxRetentionDays, outboxRetentionBatchSize);
+        if (redacted > 0) LOG.info("Canonical outbox retention redacted {} published payloads", redacted);
     }
 
     private void processOne(EventRow event, UUID claimToken) {
@@ -190,6 +220,11 @@ public final class CanonicalOutboxEventProcessor {
         } catch (RuntimeException exception) {
             return 0;
         }
+    }
+
+    private static int requirePositive(int value, String name) {
+        if (value < 1) throw new IllegalArgumentException(name + " must be positive");
+        return value;
     }
 
     private TechnicalMetrics.TimerSample start(String operation) { return metrics == null ? null : metrics.start("outbox", operation); }

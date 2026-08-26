@@ -1,6 +1,7 @@
 package com.nexa.api.payments.infrastructure.persistence;
 
 import com.nexa.api.payments.application.exception.PaymentOperationInProgressException;
+import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import com.nexa.api.payments.application.model.PaymentModels;
 import com.nexa.api.payments.application.port.PaymentPersistencePort;
 import com.nexa.api.payments.application.port.StripePaymentProvider;
@@ -28,6 +29,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -51,6 +54,8 @@ import javax.crypto.spec.SecretKeySpec;
 @Profile("!test")
 @Component
 public class PaymentService implements PaymentPersistencePort {
+    private static final Logger LOGGER = LoggerFactory.getLogger(PaymentService.class);
+    private static final int MAX_RECONCILIATION_ATTEMPTS = 10;
     private final JdbcTemplate jdbc;
     private final StripePaymentProvider stripe;
     private final String publishableKey;
@@ -174,35 +179,173 @@ public class PaymentService implements PaymentPersistencePort {
         return new PaymentModels.Page<>(values, safePage, safeSize, total == null ? 0 : total);
     }
 
-    @Transactional
     public PaymentModels.ReconciliationCaseView retryReconciliationCase(CurrentAccessContext context, UUID caseId,
                                                                           String operatorNote, String idempotencyKey) {
         context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
         requireKey(idempotencyKey);
+        String normalizedNote = truncate(operatorNote);
+        String requestHash = reconciliationRetryHash(context, caseId, normalizedNote);
+        ReconciliationRetryClaim claim = transactionTemplate.execute(status ->
+                prepareReconciliationRefund(context, caseId, normalizedNote, idempotencyKey, requestHash));
+        if (claim.storedResult() != null) {
+            if (claim.failureKind() != null) throw replayTechnicalFailure(claim.failureKind());
+            return claim.storedResult();
+        }
+        if (claim.work() == null) return reconciliationCase(context, caseId);
+        executeReconciliationRefund(claim.work(), true);
+        return retryResultOrCurrent(context, caseId, idempotencyKey, requestHash);
+    }
+
+    private ReconciliationRetryClaim prepareReconciliationRefund(CurrentAccessContext context, UUID caseId,
+                                                                  String operatorNote, String idempotencyKey, String requestHash) {
         lockIdempotencyKey(context, "reconciliation:" + caseId + ":" + idempotencyKey);
         ReconciliationCaseRow row = jdbc.query(reconciliationCaseSql() + " where c.tenant_id=? and c.workspace_id=? and c.id=? for update",
                 (rs, n) -> reconciliationCaseRow(rs), tenant(context), workspace(context), caseId)
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Reconciliation case not found"));
-        if ("REFUNDED".equals(row.state()) || "RESOLVED".equals(row.state())) return reconciliationCase(context, caseId);
+        RetryIdempotencyRow prior = jdbc.query("select request_hash,result_status,result_json,failure_kind from payments.reconciliation_refund_idempotency where tenant_id=? and workspace_id=? and case_id=? and actor_membership_id=? and idempotency_key=? for update",
+                (rs, n) -> new RetryIdempotencyRow(rs.getString("request_hash"), rs.getString("result_status"), rs.getString("result_json"), rs.getString("failure_kind")),
+                tenant(context), workspace(context), caseId, context.membershipId().value(), idempotencyKey)
+                .stream().findFirst().orElse(null);
+        if (prior != null) {
+            if (!requestHash.equalsIgnoreCase(prior.requestHash())) throw new PaymentIdempotencyPayloadConflictException();
+            if (prior.resultJson() != null) {
+                return new ReconciliationRetryClaim(null, decodeRetryResult(prior.resultJson()), prior.failureKind());
+            }
+            if ("REFUND_PROCESSING".equals(row.state()) && row.leaseUntil() != null && row.leaseUntil().isAfter(Instant.now())) {
+                return new ReconciliationRetryClaim(null, null, null);
+            }
+            jdbc.update("delete from payments.reconciliation_refund_idempotency where tenant_id=? and workspace_id=? and case_id=? and actor_membership_id=? and idempotency_key=? and result_json is null",
+                    tenant(context), workspace(context), caseId, context.membershipId().value(), idempotencyKey);
+        }
+        if ("REFUNDED".equals(row.state()) || "RESOLVED".equals(row.state())) return new ReconciliationRetryClaim(null, null, null);
+        if (row.attemptCount() >= MAX_RECONCILIATION_ATTEMPTS) {
+            throw new IllegalArgumentException("Refund retry limit reached; operator override is required");
+        }
+        jdbc.update("insert into payments.reconciliation_refund_idempotency(tenant_id,workspace_id,case_id,actor_membership_id,idempotency_key,request_hash,created_at) values (?,?,?,?,?,?,current_timestamp)",
+                tenant(context), workspace(context), caseId, context.membershipId().value(), idempotencyKey, requestHash);
         PaymentRow payment = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=? for update",
                 (rs, n) -> paymentRow(rs), tenant(context), workspace(context), row.paymentId())
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Reconciliation payment not found"));
-        int attempt = row.attemptCount() + 1;
-        jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PENDING',attempt_count=?,operator_note=?,last_error=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
-                attempt, truncate(operatorNote), tenant(context), workspace(context), caseId);
+        UUID claimToken = UUID.randomUUID();
+        int claimed = jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PROCESSING',attempt_count=?,operator_note=?,last_error=null,lease_until=current_timestamp + interval '10 minutes',claim_token=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and (state in ('RECONCILIATION_REQUIRED','REFUND_PENDING','REFUND_FAILED') or (state='REFUND_PROCESSING' and (lease_until is null or lease_until <= current_timestamp))) and attempt_count < ?",
+                row.attemptCount() + 1, operatorNote, claimToken, tenant(context), workspace(context), caseId, MAX_RECONCILIATION_ATTEMPTS);
+        if (claimed != 1) return new ReconciliationRetryClaim(null, null, null);
+        return new ReconciliationRetryClaim(new ReconciliationRefundWork(caseId, tenant(context), workspace(context), payment.id(), payment.providerId(),
+                payment.amount(), payment.currency(), claimToken, context.membershipId().value(), idempotencyKey, requestHash), null, null);
+    }
+
+    /** Provider I/O is outside the database transaction; the stable case key makes retries safe. */
+    private void executeReconciliationRefund(ReconciliationRefundWork work, boolean propagateFailure) {
+        StripePaymentProvider.Refund refund;
         try {
-            if (payment.providerId() == null || payment.providerId().isBlank()) throw new IllegalStateException("Captured payment has no provider reference");
-            StripePaymentProvider.Refund refund = stripe.refundPayment(payment.providerId(), minor(payment.amount(), payment.currency()), payment.currency(), "nexa-reconciliation-refund-" + caseId + "-" + attempt);
-            if (refund == null || refund.providerRefundId() == null || refund.providerRefundId().isBlank()) throw new IllegalStateException("Payment provider returned no refund reference");
-            jdbc.update("update payments.payment_reconciliation_case set state='REFUNDED',provider_refund_id=?,updated_at=current_timestamp,resolved_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
-                    refund.providerRefundId(), tenant(context), workspace(context), caseId);
-            jdbc.update("update payments.payment set status='REFUNDED',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='SUCCEEDED'",
-                    tenant(context), workspace(context), payment.id());
+            if (work.providerId() == null || work.providerId().isBlank()) {
+                throw new IllegalStateException("Captured payment has no provider reference");
+            }
+            refund = stripe.refundPayment(work.providerId(), minor(work.amount(), work.currency()),
+                    work.currency(), reconciliationRefundKey(work.caseId()));
         } catch (RuntimeException exception) {
-            jdbc.update("update payments.payment_reconciliation_case set state='REFUND_FAILED',last_error=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
-                    truncate(exception.getMessage()), tenant(context), workspace(context), caseId);
+            handleReconciliationFailure(work, technicalRefundFailure(exception), propagateFailure);
+            return;
+        }
+        if (refund == null || refund.providerRefundId() == null || refund.providerRefundId().isBlank()
+                || refund.status() == null || refund.status().isBlank()) {
+            handleReconciliationFailure(work, technicalRefundFailure(new IllegalStateException("Payment provider returned an incomplete refund")), propagateFailure);
+            return;
+        }
+        String providerStatus = refund.status().trim().toLowerCase(Locale.ROOT);
+        if (!"succeeded".equals(providerStatus)) {
+            boolean pending = "pending".equals(providerStatus);
+            TechnicalFailureException failure = pending ? null : new TechnicalFailureException(
+                    TechnicalFailureException.Kind.EXTERNAL_TEMPORARY_FAILURE,
+                    "Stripe refund did not succeed: " + providerStatus);
+            try {
+                transactionTemplate.executeWithoutResult(status -> recordProviderRefundOutcome(work, refund, pending));
+            } catch (ReconciliationClaimLostException ignored) {
+                LOGGER.warn("Payment reconciliation claim lost before provider outcome was recorded caseId={}", work.caseId());
+                return;
+            }
+            if (failure != null && propagateFailure) throw failure;
+            if (failure != null) LOGGER.warn("Payment reconciliation refund failed caseId={} providerStatus={}", work.caseId(), providerStatus);
+            return;
+        }
+        try {
+            transactionTemplate.executeWithoutResult(status -> finalizeReconciliationRefund(work, refund.providerRefundId()));
+        } catch (ReconciliationClaimLostException ignored) {
+            LOGGER.warn("Payment reconciliation claim lost after provider success caseId={}", work.caseId());
+        } catch (RuntimeException exception) {
+            handleReconciliationFailure(work, technicalRefundFailure(exception), propagateFailure);
+        }
+    }
+
+    private void finalizeReconciliationRefund(ReconciliationRefundWork work, String providerRefundId) {
+        int finalized = jdbc.update("update payments.payment_reconciliation_case set state='REFUNDED',provider_refund_id=?,lease_until=null,claim_token=null,updated_at=current_timestamp,resolved_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and state='REFUND_PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                providerRefundId, work.tenantId(), work.workspaceId(), work.caseId(), work.claimToken());
+        if (finalized != 1) throw new ReconciliationClaimLostException();
+        jdbc.update("update payments.payment set status='REFUNDED',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='SUCCEEDED'",
+                work.tenantId(), work.workspaceId(), work.paymentId());
+        saveRetryResult(work, reconciliationCase(work.tenantId(), work.workspaceId(), work.caseId()), "SUCCESS", null);
+    }
+
+    private void recordProviderRefundOutcome(ReconciliationRefundWork work, StripePaymentProvider.Refund refund, boolean pending) {
+        String state = pending ? "REFUND_PENDING" : "REFUND_FAILED";
+        String detail = pending ? "Provider refund is pending" : "Provider refund status: " + refund.status();
+        int updated = jdbc.update("update payments.payment_reconciliation_case set state=?,provider_refund_id=?,last_error=?,lease_until=null,claim_token=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and state='REFUND_PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                state, refund.providerRefundId(), detail, work.tenantId(), work.workspaceId(), work.caseId(), work.claimToken());
+        if (updated != 1) throw new ReconciliationClaimLostException();
+        saveRetryResult(work, reconciliationCase(work.tenantId(), work.workspaceId(), work.caseId()), pending ? "SUCCESS" : "FAILURE",
+                pending ? null : TechnicalFailureException.Kind.EXTERNAL_TEMPORARY_FAILURE);
+    }
+
+    private void handleReconciliationFailure(ReconciliationRefundWork work, TechnicalFailureException failure, boolean propagateFailure) {
+        try {
+            transactionTemplate.executeWithoutResult(status -> failReconciliationRefund(work, failure));
+        } catch (ReconciliationClaimLostException ignored) {
+            LOGGER.warn("Payment reconciliation claim lost while recording failure caseId={}", work.caseId());
+            return;
+        }
+        if (propagateFailure) throw failure;
+        LOGGER.warn("Payment reconciliation refund failed caseId={}", work.caseId(), failure);
+    }
+
+    private void failReconciliationRefund(ReconciliationRefundWork work, TechnicalFailureException exception) {
+        int failed = jdbc.update("update payments.payment_reconciliation_case set state='REFUND_FAILED',last_error=?,lease_until=null,claim_token=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and state='REFUND_PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                truncate(exception.getMessage()), work.tenantId(), work.workspaceId(), work.caseId(), work.claimToken());
+        if (failed != 1) throw new ReconciliationClaimLostException();
+        saveRetryResult(work, reconciliationCase(work.tenantId(), work.workspaceId(), work.caseId()), "FAILURE", exception.kind());
+    }
+
+    private void saveRetryResult(ReconciliationRefundWork work, PaymentModels.ReconciliationCaseView result,
+                                 String resultStatus, TechnicalFailureException.Kind failureKind) {
+        if (work.idempotencyKey() == null) return;
+        jdbc.update("update payments.reconciliation_refund_idempotency set result_status=?,result_json=?::jsonb,failure_kind=?,completed_at=current_timestamp where tenant_id=? and workspace_id=? and case_id=? and actor_membership_id=? and idempotency_key=? and request_hash=? and result_json is null",
+                resultStatus, json(result), failureKind == null ? null : failureKind.name(), work.tenantId(), work.workspaceId(), work.caseId(),
+                work.actorMembershipId(), work.idempotencyKey(), work.requestHash());
+    }
+
+    private PaymentModels.ReconciliationCaseView retryResultOrCurrent(CurrentAccessContext context, UUID caseId,
+                                                                       String idempotencyKey, String requestHash) {
+        RetryIdempotencyRow result = jdbc.query("select result_status,result_json,failure_kind,request_hash from payments.reconciliation_refund_idempotency where tenant_id=? and workspace_id=? and case_id=? and actor_membership_id=? and idempotency_key=?",
+                (rs, n) -> new RetryIdempotencyRow(rs.getString("request_hash"), rs.getString("result_status"), rs.getString("result_json"), rs.getString("failure_kind")),
+                tenant(context), workspace(context), caseId, context.membershipId().value(), idempotencyKey).stream().findFirst().orElse(null);
+        if (result != null && !requestHash.equalsIgnoreCase(result.requestHash())) throw new PaymentIdempotencyPayloadConflictException();
+        if (result != null && result.resultJson() != null) {
+            if (result.failureKind() != null) throw replayTechnicalFailure(result.failureKind());
+            return decodeRetryResult(result.resultJson());
         }
         return reconciliationCase(context, caseId);
+    }
+
+    private TechnicalFailureException technicalRefundFailure(RuntimeException exception) {
+        return exception instanceof TechnicalFailureException technical ? technical
+                : new TechnicalFailureException(TechnicalFailureException.Kind.EXTERNAL_TEMPORARY_FAILURE,
+                "Payment provider refund failed", exception);
+    }
+
+    private TechnicalFailureException replayTechnicalFailure(String failureKind) {
+        TechnicalFailureException.Kind kind;
+        try { kind = TechnicalFailureException.Kind.valueOf(failureKind); }
+        catch (IllegalArgumentException ignored) { kind = TechnicalFailureException.Kind.EXTERNAL_TEMPORARY_FAILURE; }
+        return new TechnicalFailureException(kind, "Payment reconciliation refund previously failed");
     }
 
     @Transactional(readOnly = true)
@@ -506,6 +649,53 @@ public class PaymentService implements PaymentPersistencePort {
         if (!Boolean.TRUE.equals(owner)) throw new InboxClaimLostException();
     }
 
+    @Scheduled(fixedDelayString = "${nexa.payments.reconciliation-worker-delay-ms:5000}")
+    public void processPendingReconciliationCases() {
+        UUID lastTenant = null;
+        UUID lastWorkspace = null;
+        while (true) {
+            List<WorkspaceScope> scopes = lastTenant == null
+                    ? jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id limit 100",
+                    (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)))
+                    : jdbc.query("select tenant_id,id from tenant_management.workspace where (tenant_id,id) > (?,?) order by tenant_id,id limit 100",
+                    (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)), lastTenant, lastWorkspace);
+            if (scopes.isEmpty()) break;
+            for (WorkspaceScope scope : scopes) {
+                RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
+                try {
+                    jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PENDING',lease_until=null,claim_token=null,last_error=coalesce(last_error,'Stale refund claim recovered'),updated_at=current_timestamp where tenant_id=? and workspace_id=? and state='REFUND_PROCESSING' and (lease_until is null or lease_until <= current_timestamp)",
+                            scope.tenantId(), scope.workspaceId());
+                    List<ReconciliationCandidate> candidates = jdbc.query("""
+                            select c.id,c.payment_id,p.provider_payment_intent_id,p.amount,p.currency,c.attempt_count
+                            from payments.payment_reconciliation_case c
+                            join payments.payment p on p.tenant_id=c.tenant_id and p.workspace_id=c.workspace_id and p.id=c.payment_id
+                            where c.tenant_id=? and c.workspace_id=? and c.state='REFUND_PENDING'
+                              and c.attempt_count < ?
+                            order by c.updated_at,c.id
+                            limit 10
+                            """, (rs, n) -> new ReconciliationCandidate(rs.getObject("id", UUID.class), rs.getObject("payment_id", UUID.class),
+                            rs.getString("provider_payment_intent_id"), rs.getBigDecimal("amount"), rs.getString("currency"), rs.getInt("attempt_count")),
+                            scope.tenantId(), scope.workspaceId(), MAX_RECONCILIATION_ATTEMPTS);
+                    for (ReconciliationCandidate candidate : candidates) {
+                        UUID claimToken = UUID.randomUUID();
+                        int claimed = jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PROCESSING',attempt_count=attempt_count+1,lease_until=current_timestamp + interval '10 minutes',claim_token=?,last_error=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and state='REFUND_PENDING' and attempt_count < ? and (lease_until is null or lease_until <= current_timestamp)",
+                                claimToken, scope.tenantId(), scope.workspaceId(), candidate.caseId(), MAX_RECONCILIATION_ATTEMPTS);
+                        if (claimed != 1) continue;
+                        executeReconciliationRefund(new ReconciliationRefundWork(candidate.caseId(), scope.tenantId(), scope.workspaceId(),
+                                candidate.paymentId(), candidate.providerId(), candidate.amount(), candidate.currency(), claimToken, null, null, null), false);
+                    }
+                } catch (RuntimeException exception) {
+                    LOGGER.error("Payment reconciliation worker failed tenantId={} workspaceId={}", scope.tenantId(), scope.workspaceId(), exception);
+                } finally {
+                    RlsRequestScope.clear();
+                }
+            }
+            WorkspaceScope last = scopes.get(scopes.size() - 1);
+            lastTenant = last.tenantId();
+            lastWorkspace = last.workspaceId();
+        }
+    }
+
     private void applySucceededPaymentForStoredContext(PaymentRow payment, String eventKey) {
         ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=? for update", (rs, n) -> receivableRow(rs), payment.tenantId(), payment.workspaceId(), payment.receivableId()).stream().findFirst().orElseThrow();
         if (!receivable.currency().equalsIgnoreCase(payment.currency())) throw new IllegalArgumentException("Payment currency does not match receivable");
@@ -533,28 +723,22 @@ public class PaymentService implements PaymentPersistencePort {
         int inserted = jdbc.update("insert into payments.payment_reconciliation_case(id,tenant_id,workspace_id,payment_id,receivable_id,allocation_status,state,created_at,updated_at) values (?,?,?,?,?,'UNALLOCATED','RECONCILIATION_REQUIRED',current_timestamp,current_timestamp) on conflict (tenant_id,workspace_id,payment_id) do nothing",
                 caseId, payment.tenantId(), payment.workspaceId(), payment.id(), receivable.id());
         if (inserted == 0) return;
-        try {
-            if (payment.providerId() == null || payment.providerId().isBlank()) throw new IllegalStateException("Captured payment has no provider reference");
-            StripePaymentProvider.Refund refund = stripe.refundPayment(payment.providerId(), minor(payment.amount(), payment.currency()), payment.currency(), "nexa-reconciliation-refund-" + payment.id());
-            if (refund == null || refund.providerRefundId() == null || refund.providerRefundId().isBlank()) throw new IllegalStateException("Payment provider returned no refund reference");
-            jdbc.update("update payments.payment_reconciliation_case set state='REFUNDED',provider_refund_id=?,attempt_count=1,updated_at=current_timestamp,resolved_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
-                    refund.providerRefundId(), payment.tenantId(), payment.workspaceId(), caseId);
-            jdbc.update("update payments.payment set status='REFUNDED',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='SUCCEEDED'",
-                    payment.tenantId(), payment.workspaceId(), payment.id());
-        } catch (RuntimeException exception) {
-            jdbc.update("update payments.payment_reconciliation_case set state='REFUND_FAILED',attempt_count=1,last_error=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
-                    truncate(exception.getMessage()), payment.tenantId(), payment.workspaceId(), caseId);
-        }
+        jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PENDING',updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and state='RECONCILIATION_REQUIRED'",
+                payment.tenantId(), payment.workspaceId(), caseId);
     }
 
     private PaymentModels.ReconciliationCaseView reconciliationCase(CurrentAccessContext context, UUID caseId) {
+        return reconciliationCase(tenant(context), workspace(context), caseId);
+    }
+
+    private PaymentModels.ReconciliationCaseView reconciliationCase(UUID tenantId, UUID workspaceId, UUID caseId) {
         return jdbc.query(reconciliationCaseSql() + " where c.tenant_id=? and c.workspace_id=? and c.id=?",
-                (rs, n) -> reconciliationCaseView(rs), tenant(context), workspace(context), caseId)
+                (rs, n) -> reconciliationCaseView(rs), tenantId, workspaceId, caseId)
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Reconciliation case not found"));
     }
 
     private static String reconciliationCaseSql() {
-        return "select c.id,c.payment_id,c.receivable_id,c.sales_order_id,c.allocation_status,c.state,c.provider_refund_id,c.attempt_count,c.last_error,c.operator_note,c.created_at,c.updated_at,c.resolved_at from payments.payment_reconciliation_case c";
+        return "select c.id,c.payment_id,c.receivable_id,c.sales_order_id,c.allocation_status,c.state,c.provider_refund_id,c.attempt_count,c.last_error,c.operator_note,c.created_at,c.updated_at,c.resolved_at,c.lease_until from payments.payment_reconciliation_case c";
     }
 
     private static PaymentModels.ReconciliationCaseView reconciliationCaseView(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -567,7 +751,12 @@ public class PaymentService implements PaymentPersistencePort {
 
     private static ReconciliationCaseRow reconciliationCaseRow(java.sql.ResultSet rs) throws java.sql.SQLException {
         return new ReconciliationCaseRow(rs.getObject("id", UUID.class), rs.getObject("payment_id", UUID.class), rs.getObject("receivable_id", UUID.class),
-                rs.getString("state"), rs.getInt("attempt_count"));
+                rs.getString("state"), rs.getInt("attempt_count"), rs.getTimestamp("lease_until") == null ? null : rs.getTimestamp("lease_until").toInstant());
+    }
+
+    private PaymentModels.ReconciliationCaseView decodeRetryResult(String raw) {
+        try { return objectMapper.readValue(raw, PaymentModels.ReconciliationCaseView.class); }
+        catch (Exception exception) { throw new IllegalStateException("Stored payment reconciliation result is invalid", exception); }
     }
 
     private void applySucceededPayment(CurrentAccessContext context, UUID paymentId, UUID receivableId, BigDecimal amount, String currency, String eventKey) {
@@ -596,7 +785,7 @@ public class PaymentService implements PaymentPersistencePort {
     }
 
     private void outbox(PaymentRow payment, String eventType, Map<String, Object> payload) { CanonicalOutbox.append(jdbc, eventType, "Payment", payment.id(), tenant(payment), workspace(payment), Instant.now(), "payment-" + payment.id(), null, "1.0", payload); }
-    private String json(Map<?, ?> payload) { try { return objectMapper.writeValueAsString(payload); } catch (Exception exception) { throw new IllegalStateException("Payment JSON serialization failed", exception); } }
+    private String json(Object payload) { try { return objectMapper.writeValueAsString(payload); } catch (Exception exception) { throw new IllegalStateException("Payment JSON serialization failed", exception); } }
 
     private PaymentModels.ReceivableView receivableView(ReceivableRow row) {
         Receivable aggregate = receivableAggregate(row);
@@ -869,13 +1058,18 @@ public class PaymentService implements PaymentPersistencePort {
     private static String normalizeReconciliationState(String value) {
         if (value == null || value.isBlank()) return null;
         String normalized = value.trim().toUpperCase(Locale.ROOT);
-        if (!Set.of("RECONCILIATION_REQUIRED", "REFUND_PENDING", "REFUNDED", "REFUND_FAILED", "RESOLVED").contains(normalized)) {
+        if (!Set.of("RECONCILIATION_REQUIRED", "REFUND_PENDING", "REFUND_PROCESSING", "REFUNDED", "REFUND_FAILED", "RESOLVED").contains(normalized)) {
             throw new IllegalArgumentException("Reconciliation state filter is invalid");
         }
         return normalized;
     }
     private static final java.util.Set<String> SetOfOpen = java.util.Set.of("OPEN", "PARTIALLY_PAID", "OVERDUE");
     private static final java.util.Set<String> SetOfZeroDecimalCurrencies = java.util.Set.of("JPY", "KRW", "CLP");
+    private static String reconciliationRefundKey(UUID caseId) { return "nexa-reconciliation-refund-" + caseId; }
+    private static String reconciliationRetryHash(CurrentAccessContext context, UUID caseId, String operatorNote) {
+        return sha256("reconciliation-refund-v1|" + tenant(context) + "|" + workspace(context) + "|"
+                + context.membershipId().value() + "|" + caseId + "|" + operatorNote);
+    }
 
     private record ReceivableRow(UUID id, UUID clientAccountId, String subjectType, UUID subjectId, String number, String currency, BigDecimal amount, BigDecimal amountPaid, String status, Instant dueAt, long version) { }
     private record CreditRow(UUID id, BigDecimal limit, BigDecimal exposure, BigDecimal reserved) { }
@@ -887,9 +1081,17 @@ public class PaymentService implements PaymentPersistencePort {
     private record ConfirmationClaim(PaymentRow payment, ReceivableRow receivable) { }
     private enum InboxOutcome { PROCESSED, IGNORED }
     private record WebhookWork(String eventId, UUID tenantId, UUID workspaceId) { }
+    private record WorkspaceScope(UUID tenantId, UUID workspaceId) { }
+    private record ReconciliationCandidate(UUID caseId, UUID paymentId, String providerId, BigDecimal amount, String currency, int attemptCount) { }
+    private record ReconciliationRefundWork(UUID caseId, UUID tenantId, UUID workspaceId, UUID paymentId,
+                                            String providerId, BigDecimal amount, String currency, UUID claimToken,
+                                            UUID actorMembershipId, String idempotencyKey, String requestHash) { }
+    private record ReconciliationRetryClaim(ReconciliationRefundWork work, PaymentModels.ReconciliationCaseView storedResult,
+                                            String failureKind) { }
+    private record RetryIdempotencyRow(String requestHash, String resultStatus, String resultJson, String failureKind) { }
     private record CreditReservationLink(UUID id, UUID creditAccountId, BigDecimal amount) { }
     private record PaymentViewRow(PaymentRow payment, String method) { }
-    private record ReconciliationCaseRow(UUID id, UUID paymentId, UUID receivableId, String state, int attemptCount) { }
+    private record ReconciliationCaseRow(UUID id, UUID paymentId, UUID receivableId, String state, int attemptCount, Instant leaseUntil) { }
     private record AuthoritativeSubject(UUID clientAccountId, BigDecimal amount, String currency, String status) { }
     private record PaymentRow(UUID id, UUID receivableId, String status, BigDecimal amount, String currency, String clientSecret, String providerId, Instant createdAt, Instant completedAt, UUID clientAccountId, UUID tenantId, UUID workspaceId) {
         private PaymentRow(UUID id, UUID receivableId, String status, BigDecimal amount, String currency, String clientSecret, String providerId, Instant createdAt, Instant completedAt, UUID clientAccountId) { this(id, receivableId, status, amount, currency, clientSecret, providerId, createdAt, completedAt, clientAccountId, null, null); }
@@ -897,5 +1099,9 @@ public class PaymentService implements PaymentPersistencePort {
 
     private static final class InboxClaimLostException extends RuntimeException {
         private InboxClaimLostException() { super("Stripe inbox claim is no longer owned by this worker"); }
+    }
+
+    private static final class ReconciliationClaimLostException extends RuntimeException {
+        private ReconciliationClaimLostException() { super("Payment reconciliation claim is no longer owned by this worker"); }
     }
 }

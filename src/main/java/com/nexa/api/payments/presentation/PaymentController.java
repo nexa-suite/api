@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -104,11 +105,15 @@ public final class PaymentController {
 
     @PostMapping("/payments/reconciliation-cases/{caseId}/refund-retries")
     @Operation(operationId = "retryPaymentReconciliationRefund")
-    public PaymentModels.ReconciliationCaseView retryReconciliationCase(@RequestAttribute(ACCESS) CurrentAccessContext context,
+    public ResponseEntity<PaymentModels.ReconciliationCaseView> retryReconciliationCase(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                                                          @PathVariable UUID caseId,
                                                                          @Parameter(required = true) @RequestHeader("Idempotency-Key") String idempotencyKey,
                                                                          @RequestBody(required = false) ReconciliationRetryRequest request) {
-        return service.retryReconciliationCase(context, caseId, request == null ? null : request.operatorNote(), idempotencyKey);
+        PaymentModels.ReconciliationCaseView value = service.retryReconciliationCase(context, caseId,
+                request == null ? null : request.operatorNote(), idempotencyKey);
+        HttpStatus status = "REFUND_PENDING".equals(value.state()) || "REFUND_PROCESSING".equals(value.state())
+                ? HttpStatus.ACCEPTED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(value);
     }
 
     @PostMapping("/payments/{paymentId}/bank-transfer/approve")

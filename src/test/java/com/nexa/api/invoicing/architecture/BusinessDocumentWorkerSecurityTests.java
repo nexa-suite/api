@@ -19,6 +19,8 @@ class BusinessDocumentWorkerSecurityTests {
 
         assertThat(source).contains("upload_claim_token", "upload_lease_until", "claim_token=?", "lease_until > current_timestamp");
         assertThat(source).contains("assertGenerationClaim(request, claimToken)", "completeGeneration(request, claimToken, key, stored)");
+        assertThat(source).contains("set status='REQUESTED',failure_code=null,failure_detail=null",
+                "recoverStaleGenerationRequests", "lease_until is null or lease_until <= current_timestamp");
         assertThat(source).contains("where tenant_id=? and workspace_id=? and id=? and lifecycle_status='SCANNING'");
         assertThat(source).contains("set lifecycle_status='DELETED',claim_token=null,lease_until=null,upload_claim_token=null,upload_lease_until=null");
         assertThat(source).contains("select tenant_id,id as workspace_id from tenant_management.workspace", "RlsRequestScope.current()");

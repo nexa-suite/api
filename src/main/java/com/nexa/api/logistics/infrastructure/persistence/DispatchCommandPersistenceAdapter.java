@@ -306,7 +306,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         appendEvent(tenant, workspace, id, "logistics.delivery.attempt-failed", row.status(), row.status(), actor,
                 true, "Delivery attempt failed", now, row.clientAccountId());
         CanonicalOutbox.append(jdbc, "DELIVERY_FAILED", "DispatchOrder", id, tenant, workspace,
-                Instant.ofEpochMilli(now), "delivery-attempt-" + attempt.id(), null, "1.0", Map.of(
+                Instant.ofEpochMilli(now), "delivery-attempt-" + attempt.id(), null, "1.0", attempt.id().toString(), Map.of(
                         "deliveryId", id, "attemptId", attempt.id(), "status", "FAILED"));
         saveIdempotency(tenant, workspace, "delivery-attempt-failed", key, requestHash, id, now);
         return detailView(tenantId, workspaceId, null, dispatchId);
@@ -350,10 +350,10 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         appendEvent(tenant, workspace, id, "logistics.delivery.continuation-created", row.status(), "PARTIAL", actor,
                 true, "Continuation delivery required", now, row.clientAccountId());
         CanonicalOutbox.append(jdbc, "DELIVERY_PARTIALLY_COMPLETED", "DispatchOrder", id, tenant, workspace,
-                Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", Map.of(
+                Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", attempt.id().toString(), Map.of(
                         "deliveryId", id, "attemptId", attempt.id(), "status", "PARTIAL", "continuationDeliveryId", continuationId));
         CanonicalOutbox.append(jdbc, "CONTINUATION_REQUIRED", "ContinuationDelivery", continuationId, tenant, workspace,
-                Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", Map.of(
+                Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", continuationId.toString(), Map.of(
                         "continuationDeliveryId", continuationId, "sourceDeliveryId", id, "salesOrderId", row.salesOrderId(),
                         "status", "OPEN"));
         saveIdempotency(tenant, workspace, "delivery-partial", key, requestHash, id, now);
