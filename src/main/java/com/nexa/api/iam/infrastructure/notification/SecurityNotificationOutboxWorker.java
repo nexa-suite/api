@@ -27,7 +27,8 @@ public final class SecurityNotificationOutboxWorker {
 
     @Scheduled(fixedDelayString = "${nexa.security.notification-outbox.poll-delay:PT5S}")
     public void deliverPending() {
-        jdbc.update("update iam.security_notification_outbox set status='PENDING',processing_started_at=null,locked_by=null,next_attempt_at=current_timestamp,version=version+1 where status='PROCESSING' and processing_started_at < current_timestamp - interval '10 minutes'");
+        jdbc.update("update iam.security_notification_outbox set status='PENDING',processing_started_at=null,lease_until=null,claim_token=null,locked_by=null,next_attempt_at=current_timestamp,version=version+1 where status='PROCESSING' and (lease_until is null or lease_until <= current_timestamp)");
+        UUID claimToken = UUID.randomUUID();
         List<Row> rows = jdbc.query("""
                 with claimed as (
                     select id from iam.security_notification_outbox
@@ -36,34 +37,35 @@ public final class SecurityNotificationOutboxWorker {
                     for update skip locked limit 20
                 )
                 update iam.security_notification_outbox o
-                set status='PROCESSING', processing_started_at=current_timestamp, locked_by=?, version=version+1
+                set status='PROCESSING', processing_started_at=current_timestamp, lease_until=current_timestamp + interval '10 minutes', claim_token=?, locked_by=?, version=version+1
                 from claimed c where o.id=c.id
-                    returning o.id,o.notification_type,o.recipient,o.surface,o.payload_ciphertext,o.payload_key_version,o.attempt_count
-                """, (rs, row) -> new Row(rs.getObject("id", UUID.class), rs.getString("notification_type"), rs.getString("recipient"), rs.getString("surface"), rs.getString("payload_ciphertext"), rs.getString("payload_key_version"), rs.getInt("attempt_count")), workerId);
+                    returning o.id,o.notification_type,o.recipient,o.surface,o.payload_ciphertext,o.payload_key_version,o.delivery_key,o.attempt_count
+                """, (rs, row) -> new Row(rs.getObject("id", UUID.class), rs.getString("notification_type"), rs.getString("recipient"), rs.getString("surface"), rs.getString("payload_ciphertext"), rs.getString("payload_key_version"), rs.getString("delivery_key"), rs.getInt("attempt_count"), claimToken), claimToken, workerId);
         for (Row row : rows) {
             try {
                 String payload = outbox.decrypt(row.payload(), row.keyVersion());
                 if ("PASSWORD_RESET".equals(row.type())) {
                     String token = payload.substring(payload.indexOf("token=") + 6, payload.indexOf('\n'));
                     String expires = payload.substring(payload.indexOf("expiresAt=") + 10);
-                    delivery.sendReset(row.recipient(), row.surface(), token, Instant.parse(expires));
+                    delivery.sendReset(row.recipient(), row.surface(), token, Instant.parse(expires), row.deliveryKey());
                 } else if ("PASSWORD_CHANGED".equals(row.type())) {
-                    delivery.sendPasswordChanged(row.recipient(), row.surface());
+                    delivery.sendPasswordChanged(row.recipient(), row.surface(), row.deliveryKey());
                 } else if ("ORGANIZATION_INVITATION".equals(row.type())) {
                     String displayName = payload.substring(payload.indexOf("displayName=") + 12, payload.indexOf('\n'));
                     String token = payload.substring(payload.indexOf("token=") + 6, payload.indexOf('\n', payload.indexOf("token=")));
                     String expires = payload.substring(payload.indexOf("expiresAt=") + 10);
-                    delivery.sendInvitation(row.recipient(), displayName, token, Instant.parse(expires));
+                    delivery.sendInvitation(row.recipient(), displayName, token, Instant.parse(expires), row.deliveryKey());
                 } else throw new IllegalStateException("Unknown security notification type");
-				jdbc.update("update iam.security_notification_outbox set status='SENT',payload_ciphertext='',processing_started_at=null,locked_by=null,sent_at=current_timestamp,attempt_count=attempt_count+1,version=version+1 where id=? and status='PROCESSING' and locked_by=?", row.id(), workerId);
+					jdbc.update("update iam.security_notification_outbox set status='SENT',payload_ciphertext='',processing_started_at=null,lease_until=null,claim_token=null,locked_by=null,sent_at=current_timestamp,attempt_count=attempt_count+1,version=version+1 where id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp", row.id(), row.claimToken());
             } catch (RuntimeException exception) {
                 int attempts = row.attempts() + 1;
                 String status = attempts >= maxAttempts ? "DEAD_LETTER" : "PENDING";
-					jdbc.update("update iam.security_notification_outbox set status=?,payload_ciphertext=case when ?='DEAD_LETTER' then '' else payload_ciphertext end,processing_started_at=null,locked_by=null,attempt_count=?,next_attempt_at=current_timestamp + (? * interval '30 seconds'),last_error_code=?,version=version+1 where id=? and status='PROCESSING' and locked_by=?",
-						status, status, attempts, attempts, exception.getClass().getSimpleName(), row.id(), workerId);
+					jdbc.update("update iam.security_notification_outbox set status=?,payload_ciphertext=case when ?='DEAD_LETTER' then '' else payload_ciphertext end,processing_started_at=null,lease_until=null,claim_token=null,locked_by=null,attempt_count=?,next_attempt_at=current_timestamp + (? * interval '30 seconds'),last_error_code=?,version=version+1 where id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
+						status, status, attempts, attempts, exception.getClass().getSimpleName(), row.id(), row.claimToken());
             }
         }
     }
 
-    private record Row(UUID id, String type, String recipient, String surface, String payload, String keyVersion, int attempts) {}
+    private record Row(UUID id, String type, String recipient, String surface, String payload, String keyVersion,
+                       String deliveryKey, int attempts, UUID claimToken) {}
 }

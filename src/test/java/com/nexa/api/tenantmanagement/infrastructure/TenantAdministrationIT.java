@@ -54,7 +54,7 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         assertThat(organizationAudit).contains("oldValues", "newValues", "ICISA Test", "ICISA Administration", "IT-ADMIN");
         mockMvc.perform(patch("/api/v1/organization").header("Authorization", "Bearer " + owner).header("If-Match", etag)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"legalName\":\"ICISA Test\",\"displayName\":\"Stale\",\"businessIdentifier\":\"IT-ADMIN\",\"operationCategory\":\"B2B_COLD_CHAIN_DISTRIBUTOR\"}"))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
 
         mockMvc.perform(get("/api/v1/settings/regional").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/settings/units").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
@@ -245,7 +245,7 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                 Integer.class, UUID.fromString(membershipId))).isGreaterThanOrEqualTo(1);
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/suspensions").header("Authorization", "Bearer " + owner).header("If-Match", version))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
 
         MvcResult suspended = mockMvc.perform(get("/api/v1/workspace-memberships/" + membershipId).header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();

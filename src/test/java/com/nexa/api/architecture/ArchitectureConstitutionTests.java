@@ -120,13 +120,13 @@ class ArchitectureConstitutionTests {
     void domainDoesNotDependOnOuterLayers() { domainDoesNotDependOnOuterLayers.check(CLASSES); }
     private static final ArchRule domainDoesNotDependOnOuterLayers = noClasses()
             .that().resideInAnyPackage("..domain..").and().doNotHaveSimpleName("package-info")
-            .should().dependOnClassesThat().resideInAnyPackage("..application..", "..infrastructure..", "..presentation..", "org.springframework..", "jakarta..", "com.fasterxml..", "tools.jackson..");
+            .should().dependOnClassesThat().resideInAnyPackage("..application..", "..infrastructure..", "..presentation..", "org.springframework..", "jakarta..", "com.fasterxml..", "tools.jackson..", "org.hibernate..", "java.sql..", "org.postgresql..");
 
     @Test
     void applicationDoesNotDependOnPresentationOrJdbc() { applicationDoesNotDependOnPresentationOrJdbc.check(CLASSES); }
     private static final ArchRule applicationDoesNotDependOnPresentationOrJdbc = noClasses()
             .that().resideInAnyPackage("..application..")
-            .should().dependOnClassesThat().resideInAnyPackage("..presentation..", "org.springframework.jdbc..", "java.sql..");
+            .should().dependOnClassesThat().resideInAnyPackage("..presentation..", "org.springframework.jdbc..", "java.sql..", "jakarta.persistence..", "org.hibernate..", "org.postgresql..");
 
     @Test
     void presentationDoesNotDependDirectlyOnPersistenceAdapters() { presentationDoesNotDependDirectlyOnPersistenceAdapters.check(CLASSES); }

@@ -1,6 +1,7 @@
 spring:
   application:
     name: nexa-api
+    version: ${NEXA_API_VERSION:${nexa.api.version:unknown}}
   autoconfigure:
     exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
   mail:

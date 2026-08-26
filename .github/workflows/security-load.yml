@@ -2,7 +2,7 @@ name: API Security and Load
 
 on:
   push:
-    branches: [main, develop, "feature/**", "integration/**"]
+    branches: [main, develop, "feature/**", "release/**", "integration/**"]
   pull_request:
     branches: [main, develop]
   workflow_dispatch:

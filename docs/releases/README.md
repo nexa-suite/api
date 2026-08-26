@@ -4,6 +4,8 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 
 | Published release | Summary |
 |---|---|
+| [v0.13.0](./v0.13.0.md) | Backend Foundation Closure and release hardening |
+| [v0.12.0](./v0.12.0.md) | Tenant onboarding draft persistence foundation |
 | [v0.11.0](./v0.11.0.md) | PRE-V1 Architecture & Governance Foundation API baseline |
 | [v0.10.0](./v0.10.0.md) | Functional convergence continuation API baseline |
 | [v0.9.0](./v0.9.0.md) | Operations stabilization and public contact request foundation |
@@ -21,4 +23,4 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 | [UNRELEASED HISTORICAL CANDIDATE: v0.7.0](./v0.7.0.md) | Consolidated into later published work; no tag or GitHub Release |
 | [UNRELEASED DRAFT: v0.8.1 candidate](./v0.8.1.md) | Development material retained for historical context; no published tag or GitHub Release |
 
-Current release is `0.11.0`. Catalog remains shared local reference data; tenant-specific assortment and pricing remain future bounded-context work.
+Current release is `0.13.0`. This release closes technical foundation scope; it does not imply complete Nexa V1 product acceptance. Catalog remains shared local reference data; tenant-specific assortment and pricing remain future bounded-context work.

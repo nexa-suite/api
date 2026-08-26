@@ -1,6 +1,6 @@
 # Security notification outbox
 
-The security notification outbox is at-least-once. A worker claims a bounded batch with PostgreSQL `FOR UPDATE SKIP LOCKED`, marks each row `PROCESSING`, and delivers it outside the claim query. Retries use controlled backoff and end in `DEAD_LETTER`; `delivery_key` remains stable and reset links are single-use, so an uncertain SMTP result can only produce a safe duplicate notification.
+The security notification outbox is at-least-once. A worker claims a bounded batch with PostgreSQL `FOR UPDATE SKIP LOCKED`, marks each row `PROCESSING`, and delivers it outside the claim query. Every claim has a lease and a per-claim fencing token; stale completion cannot mark a newer claim as sent. Retries use controlled backoff and end in `DEAD_LETTER`; `delivery_key` remains stable and is sent as `X-Nexa-Delivery-Key` at the SMTP boundary. Reset links are single-use, so an uncertain SMTP result can only produce a safe duplicate notification.
 
 Payloads use AES-GCM. `NEXA_NOTIFICATION_OUTBOX_KEY` and `NEXA_NOTIFICATION_OUTBOX_KEY_VERSION` identify the current key. During rotation, configure `NEXA_NOTIFICATION_OUTBOX_PREVIOUS_KEYS` as comma-separated `version=secret` entries until all rows using the old version reach terminal retention. Keys are supplied only through deployment configuration; they are never stored in Git or logged. Local development must use a test-only key, while production rotation must retain previous keys for the configured delivery and retention window.
 

@@ -3,8 +3,8 @@ package com.nexa.api.iam.infrastructure.notification;
 import com.nexa.api.iam.application.port.out.PasswordResetDeliveryPort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -36,30 +36,50 @@ public final class SmtpPasswordResetDeliveryAdapter implements PasswordResetDeli
 
     @Override
     public void sendReset(String email, String surface, String token, Instant expiresAt) {
+        sendReset(email, surface, token, expiresAt, null);
+    }
+
+    @Override
+    public void sendReset(String email, String surface, String token, Instant expiresAt, String deliveryKey) {
         if (host.isBlank() && !required) return;
         String base = "PORTAL".equalsIgnoreCase(surface) ? portalUrl : platformUrl;
         send(email, "Nexa password reset", "Use this link to reset your Nexa password: " + base + "?token=" + token
-                + "\n\nThis link expires at " + expiresAt + ".");
+                + "\n\nThis link expires at " + expiresAt + ".", deliveryKey);
     }
 
     @Override
     public void sendPasswordChanged(String email, String surface) {
+        sendPasswordChanged(email, surface, null);
+    }
+
+    @Override
+    public void sendPasswordChanged(String email, String surface, String deliveryKey) {
         if (host.isBlank() && !required) return;
-        send(email, "Nexa password changed", "Your Nexa password was changed. If you did not request this change, contact your administrator.");
+        send(email, "Nexa password changed", "Your Nexa password was changed. If you did not request this change, contact your administrator.", deliveryKey);
     }
 
     @Override
     public void sendInvitation(String email, String displayName, String token, Instant expiresAt) {
+        sendInvitation(email, displayName, token, expiresAt, null);
+    }
+
+    @Override
+    public void sendInvitation(String email, String displayName, String token, Instant expiresAt, String deliveryKey) {
         if (host.isBlank() && !required) return;
         String invitationUrl = platformUrl.replace("/reset-password", "/accept-invitation") + "?token=" + token;
         send(email, "Nexa workspace invitation", "Hello " + displayName + ",\n\nAccept your Nexa workspace invitation: " + invitationUrl
-                + "\n\nThis invitation expires at " + expiresAt + ".");
+                + "\n\nThis invitation expires at " + expiresAt + ".", deliveryKey);
     }
 
-    private void send(String recipient, String subject, String body) {
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(from); message.setTo(recipient); message.setSubject(subject); message.setText(body);
-        try { sender.send(message); }
-        catch (RuntimeException exception) { throw new IllegalStateException("Password notification delivery failed", exception); }
+    private void send(String recipient, String subject, String body, String deliveryKey) {
+        try {
+            var message = sender.createMimeMessage();
+            var helper = new MimeMessageHelper(message, false);
+            helper.setFrom(from); helper.setTo(recipient); helper.setSubject(subject); helper.setText(body);
+            if (deliveryKey != null && !deliveryKey.isBlank()) message.setHeader("X-Nexa-Delivery-Key", deliveryKey);
+            sender.send(message);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Password notification delivery failed", exception);
+        }
     }
 }

@@ -55,14 +55,20 @@ class ModernPostgresMigrationTests {
 				"version", "created_at", "updated_at");
 			assertThat(columns(connection, "catalog_management", "sellable_sku")).contains("variant_id");
 			assertThat(tables(connection, "business_documents")).containsExactlyInAnyOrder("object_storage_object", "business_document", "document_generation_request", "evidence_object");
-			assertThat(tables(connection, "payments")).containsExactlyInAnyOrder("credit_account", "receivable", "payment", "payment_attempt", "payment_reconciliation_case", "receivable_allocation", "credit_reservation", "stripe_event_inbox", "payment_event");
+			assertThat(tables(connection, "payments")).containsExactlyInAnyOrder("credit_account", "receivable", "payment", "payment_attempt", "payment_reconciliation_case", "reconciliation_refund_idempotency", "receivable_allocation", "credit_reservation", "stripe_event_inbox", "payment_event");
 			assertThat(tables(connection, "reference_data")).containsExactlyInAnyOrder("department", "province", "district", "road_type");
 			assertThat(tables(connection, "notifications")).containsExactly("inbox_item");
 			assertThat(tables(connection, "audit")).containsExactly("event");
 			assertThat(columns(connection, "integration", "outbox_event"))
-			.contains("processing_started_at", "lease_until", "claim_token");
+				.contains("processing_started_at", "lease_until", "claim_token");
+			assertThat(columns(connection, "iam", "security_notification_outbox"))
+				.contains("processing_started_at", "lease_until", "claim_token", "delivery_key");
 			assertThat(columns(connection, "payments", "stripe_event_inbox"))
-			.contains("processing_started_at", "lease_until", "claim_token");
+				.contains("processing_started_at", "lease_until", "claim_token");
+			assertThat(columns(connection, "payments", "payment_reconciliation_case"))
+				.contains("lease_until", "claim_token");
+			assertThat(columns(connection, "payments", "reconciliation_refund_idempotency"))
+				.containsExactlyInAnyOrder("tenant_id", "workspace_id", "case_id", "actor_membership_id", "idempotency_key", "request_hash", "result_status", "result_json", "failure_kind", "created_at", "completed_at");
 			assertThat(columns(connection, "business_documents", "document_generation_request"))
 			.contains("processing_started_at", "lease_until", "claim_token");
 			assertThat(columns(connection, "business_documents", "evidence_object"))
@@ -204,7 +210,7 @@ class ModernPostgresMigrationTests {
 		Set<String> expectedTables = Set.of(
 				"business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
 				"notifications.inbox_item",
-				"payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.receivable", "payments.receivable_allocation",
+				"payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.reconciliation_refund_idempotency", "payments.receivable", "payments.receivable_allocation",
 				"warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation",
 				"logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line",
 				"warehouse.safety_stock_policy", "warehouse.inventory_transfer",

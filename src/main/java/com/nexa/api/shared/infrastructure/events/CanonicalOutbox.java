@@ -18,8 +18,21 @@ public final class CanonicalOutbox {
     public static UUID append(JdbcTemplate jdbc, String eventType, String aggregateType, UUID aggregateId,
                               UUID tenantId, UUID workspaceId, Instant occurredAt, String correlationId,
                               UUID causationId, String schemaVersion, Map<String, Object> payload) {
-        UUID eventId = UUID.nameUUIDFromBytes((eventType + ":" + aggregateType + ":" + aggregateId)
-                .getBytes(StandardCharsets.UTF_8));
+        return append(jdbc, eventType, aggregateType, aggregateId, tenantId, workspaceId, occurredAt,
+                correlationId, causationId, schemaVersion, null, payload);
+    }
+
+    /**
+     * Persists a canonical event. The optional occurrence key is required when
+     * the same event type may happen more than once for one aggregate. The old
+     * overload intentionally keeps its historical identity for immutable
+     * replay compatibility.
+     */
+    public static UUID append(JdbcTemplate jdbc, String eventType, String aggregateType, UUID aggregateId,
+                              UUID tenantId, UUID workspaceId, Instant occurredAt, String correlationId,
+                              UUID causationId, String schemaVersion, String occurrenceKey,
+                              Map<String, Object> payload) {
+        UUID eventId = eventId(eventType, aggregateType, aggregateId, occurrenceKey);
         try {
             jdbc.update("insert into integration.outbox_event(event_id,event_type,aggregate_type,aggregate_id,tenant_id,workspace_id,occurred_at,correlation_id,causation_id,schema_version,payload) "
                             + "values (?,?,?,?,?,?,?,?,?,?,?::jsonb) on conflict (event_id) do nothing",
@@ -30,6 +43,12 @@ public final class CanonicalOutbox {
         } catch (Exception exception) {
             throw new IllegalStateException("Canonical outbox event could not be persisted", exception);
         }
+    }
+
+    static UUID eventId(String eventType, String aggregateType, UUID aggregateId, String occurrenceKey) {
+        String identity = eventType + ":" + aggregateType + ":" + aggregateId
+                + (occurrenceKey == null || occurrenceKey.isBlank() ? "" : ":" + occurrenceKey.strip());
+        return UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8));
     }
 
     private static String bounded(String value, String fallback) {

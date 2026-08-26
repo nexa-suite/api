@@ -87,7 +87,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                         .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
                         .header("Idempotency-Key", "failed-attempt-competing-" + dispatch.id())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
     }
 
     @Test void partialDeliveryClosesTheDeliveryWithContinuationAndBuyerSafeProjection() throws Exception {
@@ -144,7 +144,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                         .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", originalEtag)
                         .header("Idempotency-Key", "partial-delivery-competing-" + dispatch.id())
                         .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
     }
 
     @Test void temperatureExcursionCreatesIncidentAndBuyerSeesOnlyMappedReview() throws Exception {
@@ -181,7 +181,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                             .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", dispatch.etag()).header("Idempotency-Key", "route-concurrent-other")
                             .contentType(MediaType.APPLICATION_JSON).content("{}"))
                     .andReturn();
-            assertThat(competing.getResponse().getStatus()).isEqualTo(409);
+            assertThat(competing.getResponse().getStatus()).isEqualTo(412);
         } finally {
             executor.shutdownNow();
         }
@@ -231,7 +231,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "stale-etag-" + dispatch.id())
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andReturn();
-        assertThat(stale.getResponse().getStatus()).isEqualTo(409);
+        assertThat(stale.getResponse().getStatus()).isEqualTo(412);
         mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/preparation-starts")
                         .header("Authorization", "Bearer " + dispatch.logisticsToken())
                         .header("Idempotency-Key", "missing-etag-" + dispatch.id())

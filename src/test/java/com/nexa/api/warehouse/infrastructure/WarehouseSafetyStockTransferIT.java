@@ -83,7 +83,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .header("Idempotency-Key", "ss-policy-stale-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(policyBody))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
 
         WarehouseLocation destination = warehouse(token, "WH-SS-D-" + suffix, "Safety stock destination");
         String destinationZone = zone(token, destination.warehouseId(), "Z-SS-D-" + suffix, "Ambient");
@@ -156,7 +156,63 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .header("Authorization", "Bearer " + token)
                         .header("If-Match", lotEtag).header("Idempotency-Key", "tr-stale-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON).content(body.replace("\"4\"", "\"1\"")))
-                .andExpect(status().isConflict());
+                .andExpect(status().isPreconditionFailed());
+    }
+
+    @Test
+    void inventoryTransferListingExecutesWithEmptyResultMultipleRowsAndPagination() throws Exception {
+        String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String suffix = suffix();
+        WarehouseLocation source = warehouse(token, "WH-LIST-" + suffix, "Transfer listing source");
+        String sourceZone = zone(token, source.warehouseId(), "Z-LIST-" + suffix, "Ambient");
+        WarehouseLocation destination = warehouse(token, "WH-LIST-D-" + suffix, "Transfer listing destination");
+        String destinationZone = zone(token, destination.warehouseId(), "Z-LIST-D-" + suffix, "Ambient");
+
+        mockMvc.perform(get("/api/v1/inventory/transfers")
+                        .header("Authorization", "Bearer " + token)
+                        .param("sourceWarehouseId", UUID.randomUUID().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.total").value(0));
+
+        MvcResult firstReceipt = receive(token, source, "B-LIST-1-" + suffix, "10", "list-receipt-1-" + suffix);
+        MvcResult secondReceipt = receive(token, source, "B-LIST-2-" + suffix, "10", "list-receipt-2-" + suffix);
+        MvcResult firstTransfer = createTransfer(token, source, sourceZone, destination, destinationZone, firstReceipt,
+                "list-transfer-1-" + suffix);
+        MvcResult secondTransfer = createTransfer(token, source, sourceZone, destination, destinationZone, secondReceipt,
+                "list-transfer-2-" + suffix);
+        String firstTransferId = json(firstTransfer).get("id").asText();
+        String secondTransferId = json(secondTransfer).get("id").asText();
+        String newestTransferId = jdbc.queryForObject("select id::text from warehouse.inventory_transfer where tenant_id=? and workspace_id=?"
+                        + " order by created_at desc,id desc limit 1", String.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+
+        MvcResult firstPage = mockMvc.perform(get("/api/v1/inventory/transfers")
+                        .header("Authorization", "Bearer " + token)
+                        .param("sourceWarehouseId", source.warehouseId())
+                        .param("page", "0").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.total").value(2))
+                .andReturn();
+        assertThat(json(firstPage).get("items").get(0).get("id").asText()).isEqualTo(newestTransferId);
+
+        MvcResult secondPage = mockMvc.perform(get("/api/v1/inventory/transfers")
+                        .header("Authorization", "Bearer " + token)
+                        .param("sourceWarehouseId", source.warehouseId())
+                        .param("page", "1").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.total").value(2))
+                .andReturn();
+        String secondPageId = json(secondPage).get("items").get(0).get("id").asText();
+        assertThat(secondPageId).isNotEqualTo(newestTransferId);
+        assertThat(java.util.Set.of(firstTransferId, secondTransferId)).containsExactlyInAnyOrder(newestTransferId, secondPageId);
     }
 
     private WarehouseLocation warehouse(String token, String code, String name) throws Exception {
@@ -187,6 +243,23 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                                 + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"" + batch
                                 + "\",\"expirationDate\":\"2099-01-01\",\"quantity\":\"" + quantity
                                 + "\",\"unit\":\"UNIT\"}"))
+                .andExpect(status().isCreated()).andReturn();
+    }
+
+    private MvcResult createTransfer(String token, WarehouseLocation source, String sourceZone,
+                                     WarehouseLocation destination, String destinationZone, MvcResult receipt,
+                                     String key) throws Exception {
+        String lotId = json(receipt).get("id").asText();
+        String body = "{\"sourceLotId\":\"" + lotId + "\",\"sourceWarehouseId\":\""
+                + source.warehouseId() + "\",\"sourceZoneId\":\"" + sourceZone
+                + "\",\"destinationWarehouseId\":\"" + destination.warehouseId()
+                + "\",\"destinationZoneId\":\"" + destinationZone
+                + "\",\"quantity\":\"4\",\"unit\":\"UNIT\",\"reason\":\"Verify transfer listing\"}";
+        return mockMvc.perform(post("/api/v1/inventory/transfers")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", receipt.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andReturn();
     }
 
