@@ -4,7 +4,18 @@
 
 Nexa repositories version independently using Semantic Versioning. While a repository remains pre-1.0, minor versions may contain approved evolution and patch versions contain compatible fixes or documentation changes. A version applies only to the repository that publishes it.
 
-Every release requires an annotated Git tag, CHANGELOG entry, versioned release notes and a GitHub Release. Published tags are immutable: do not retag, modify a published version or force push.
+Every release requires an annotated and signed Git tag, CHANGELOG entry, versioned release notes and a GitHub Release. From v0.14.0 onward, the tag signature must pass local verification and GitHub verification before publication. Published tags are immutable: do not retag, modify a published version or force push.
+
+## Tag signing
+
+Release tags from v0.14.0 onward MUST be:
+
+- annotated
+- signed with the repository maintainer's registered GPG or SSH signing key
+- verified locally with `git verify-tag <version>`
+- shown as `Verified` by GitHub after push
+
+The private signing key remains outside the repository. Do not publish a release tag when local or GitHub verification fails; correct signing configuration first. Existing unsigned tags are historical and immutable.
 
 ## GitFlow
 
@@ -17,7 +28,7 @@ release/vX.Y.Z
     ↓
 main
     ↓
-annotated tag
+annotated signed tag
     ↓
 GitHub Release
     ↓
@@ -38,7 +49,9 @@ back-merge to develop
 - [ ] Version updated.
 - [ ] Release branch created.
 - [ ] `main` merged with `--no-ff`.
-- [ ] Annotated tag created.
+- [ ] Annotated signed tag created.
+- [ ] `git verify-tag <version>` passed locally.
+- [ ] GitHub tag verification passed.
 - [ ] GitHub Release published.
 - [ ] `develop` back-merged.
 
