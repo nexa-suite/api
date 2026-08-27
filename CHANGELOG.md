@@ -26,8 +26,12 @@ legacy storage names remain documented compatibility projections.
 
 ### Validation
 
-- Local Maven compile, focused domain tests, architecture tests and whitespace validation pass.
-- PostgreSQL/Testcontainers migration, RLS, OpenAPI runtime and full release gates require the configured Docker/runtime environment and must be run before publication.
+- Local `clean verify`: 436 tests passed, 0 failures, 0 errors and 0 skips,
+  including explicit MinIO/S3-compatible storage coverage.
+- PostgreSQL/Testcontainers migrations through `V91`, runtime OpenAPI `0.15.0`
+  with 259 paths, RLS/security probes and Docker runtime readiness passed.
+- PR #40 passed API CI/PostgreSQL, OpenAPI compatibility, CodeQL, Security/Load,
+  container and supply-chain checks before merge to `develop`.
 
 ## [0.14.0] - 2026-08-25
 
