@@ -3,6 +3,36 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.15.0] - 2026-08-26
+
+Fulfillment & Financial Completion implementation wave for the Nexa API.
+Ownership is aligned with the eleven canonical Blueprint bounded contexts;
+legacy storage names remain documented compatibility projections.
+
+### Added
+
+- Added Inventory Availability physical allocation with FEFO lot selection, safety-stock protection, release/reconciliation and dispatch consumption.
+- Added Fulfillment & Delivery lifecycle commands for picking, packing, staging, readiness, handover, delivery attempts, partial/final outcomes, POD sealing and temperature evidence.
+- Added append-only picking discrepancy resolution, continuation delivery facts, financial adjustments, ledger entries, receivable applications and refund/credit obligations.
+- Added BC-11 Business Traceability writes on the existing `audit.event` and `integration.outbox_event` backbone, including `BusinessFactTraced.v1`.
+- Added additive PostgreSQL migration `V91__fulfillment_financial_completion.sql` with tenant/workspace RLS, optimistic-concurrency columns and command idempotency.
+- Added canonical per-context documentation under `docs/architecture/bounded-contexts/`.
+
+### Changed
+
+- Refactored Java module roots to the exact canonical BC names: Tenant Access Governance, Customer Buyer Relationships, Catalog Commercial Policy, Sales Commitment, Inventory Availability, Fulfillment Delivery, Credit Receivables, Payments, Business Documents, Notifications and Business Traceability.
+- Added ETag/If-Match enforcement to the v0.15 fulfillment and delivery write surface while preserving v0.14 contracts.
+- Bumped Maven and runtime contract version to `0.15.0`.
+
+### Validation
+
+- Local `clean verify`: 436 tests passed, 0 failures, 0 errors and 0 skips,
+  including explicit MinIO/S3-compatible storage coverage.
+- PostgreSQL/Testcontainers migrations through `V91`, runtime OpenAPI `0.15.0`
+  with 259 paths, RLS/security probes and Docker runtime readiness passed.
+- PR #40 passed API CI/PostgreSQL, OpenAPI compatibility, CodeQL, Security/Load,
+  container and supply-chain checks before merge to `develop`.
+
 ## [0.14.0] - 2026-08-25
 
 Commercial and Inventory Core release for the Nexa API. This release completes

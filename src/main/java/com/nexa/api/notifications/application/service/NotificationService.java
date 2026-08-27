@@ -9,12 +9,12 @@ import com.nexa.api.notifications.application.port.in.NotificationProjectionPort
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
-import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
-import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantmanagement.domain.model.access.PermissionKey;
-import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
 
 import java.util.Locale;
 import java.util.Objects;

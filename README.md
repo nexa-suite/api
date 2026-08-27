@@ -16,7 +16,7 @@
 
 ## Overview
 
-Spring Boot modular monolith. API owns identity, tenant/workspace access, Catalog, commercial, Warehouse and Logistics contracts. Business Documents, storage/evidence and Payments/Stripe technical foundations are present in this runtime and database baseline; that presence does not claim accepted Product capability, provider/fiscal completion or complete end-to-end business semantics.
+Spring Boot modular monolith. The API implements the eleven Blueprint business bounded contexts through canonical module roots. Legacy PostgreSQL schema names and released HTTP/Java names remain compatibility storage/contracts where required; they do not redefine ownership. The v0.15.0 wave completes the fulfillment, delivery-outcome and financial-adjustment foundations without turning Nexa into a generic ecommerce API.
 
 ## Related repositories
 
@@ -32,7 +32,10 @@ The organization profile owns the full public ecosystem map. This repository lin
 - Identity sessions, refresh rotation and membership verification.
 - Tenant-scoped Catalog and pricing read contracts.
 - Client Accounts, Purchase Requests and Sales Orders.
-- Inventory, FEFO reservations, dispatch and delivery tracking.
+- Inventory Availability physical allocation with FEFO, safety-stock and lot controls.
+- Fulfillment & Delivery lifecycle, picking discrepancies, dispatch handover, delivery attempts, POD and temperature evidence.
+- Credit & Receivables applications, financial adjustments, ledger entries and refund/credit obligations; Payments remains provider/reconciliation authority.
+- Business Traceability through the existing append-only audit/outbox backbone.
 - Problem Details, idempotency, optimistic concurrency and Flyway-managed PostgreSQL schemas.
 - Business Document rendering/storage/evidence and Payments/Stripe technical foundations, with Product acceptance boundaries kept explicit.
 - Local OpenAPI for contract inspection.
@@ -42,6 +45,8 @@ Development evidence is not published product evidence. API remains business aut
 ## Architecture
 
 Presentation, Application, Domain and Infrastructure remain separate. Domain code stays framework-free. Catalog seed loading belongs to Infrastructure; seed data is not a persistence entity.
+
+The canonical context map and per-context ownership notes are in [bounded-context-module-map.md](./docs/architecture/bounded-context-module-map.md) and [bounded-contexts/](./docs/architecture/bounded-contexts/). `bootstrap` and `shared` are technical composition modules, not bounded contexts.
 
 ## Technology Stack
 
@@ -82,6 +87,7 @@ The integration gate requires Docker/Testcontainers and the repository's configu
 - [OpenAPI instructions](./docs/openapi/README.md)
 - [Authentication contract](./docs/security/authentication.md)
 - [Release notes](./docs/releases/)
+- [Canonical bounded contexts](./docs/architecture/bounded-context-module-map.md)
 - [Changelog](./CHANGELOG.md)
 
 

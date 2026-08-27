@@ -1,7 +1,7 @@
 package com.nexa.api.shared.infrastructure.security;
 
-import com.nexa.api.iam.infrastructure.jwt.JwtAuthenticationTokenIssuer;
-import com.nexa.api.iam.infrastructure.jwt.RsaKeyMaterial;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.jwt.JwtAuthenticationTokenIssuer;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.jwt.RsaKeyMaterial;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;

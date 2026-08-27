@@ -1,27 +1,27 @@
 package com.nexa.api.shared.infrastructure.events;
 
-import com.nexa.api.invoicing.application.port.BusinessDocumentPort;
-import com.nexa.api.logistics.application.LogisticsOperationsService;
-import com.nexa.api.logistics.application.port.out.LogisticsEventContextQueryPort;
+import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
+import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
+import com.nexa.api.fulfillmentdelivery.application.port.out.LogisticsEventContextQueryPort;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
 import com.nexa.api.payments.application.port.PaymentPort;
-import com.nexa.api.sales.application.port.out.SalesEventContextQueryPort;
-import com.nexa.api.sales.application.exception.CommercialBusinessException;
-import com.nexa.api.sales.application.salesorder.port.SalesOrderUseCase;
+import com.nexa.api.salescommitment.application.port.out.SalesEventContextQueryPort;
+import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
+import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.shared.events.PaymentEventContextQueryPort;
 import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessRequest;
-import com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
-import com.nexa.api.tenantmanagement.application.port.out.TenantEventContextQueryPort;
-import com.nexa.api.tenantmanagement.domain.model.access.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantEventContextQueryPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
 import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
-import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.warehouse.application.WarehouseOperationsService;
-import com.nexa.api.warehouse.application.port.out.WarehouseEventContextQueryPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
+import com.nexa.api.inventoryavailability.application.port.out.WarehouseEventContextQueryPort;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
@@ -253,16 +253,20 @@ public final class CanonicalOutboxEventProcessor {
 
     private void reserveConfirmed(EventRow event, Map<String, Object> payload) {
         UUID orderId = uuid(payload.getOrDefault("salesOrderId", event.aggregateId()));
+        // v0.15 canonical orders reserve through BC-05 commercial backing and
+        // physical allocation. The legacy outbox reservation must not create a
+        // second reservation for the same Sales Order.
+        SalesEventContextQueryPort.SalesOrderSnapshot snapshot = salesContext
+                .findSalesOrder(event.tenantId(), event.workspaceId(), orderId)
+                .orElseThrow(() -> new IllegalStateException("Sales order context is unavailable"));
+        if (snapshot.commercialCommitmentId() != null) return;
         // A confirmed order may already have been reserved and consumed by a
         // synchronous warehouse/logistics operation while this outbox event
         // was waiting. Any reservation for the order therefore makes this
         // event replay-safe; checking only active rows could create a second
         // reservation after route start.
         if (warehouseContext.findReservationForSalesOrder(event.tenantId(), event.workspaceId(), orderId).isPresent()) return;
-        long version = number(payload.get("salesOrderVersion"), salesContext
-                .findSalesOrder(event.tenantId(), event.workspaceId(), orderId)
-                .orElseThrow(() -> new IllegalStateException("Sales order context is unavailable"))
-                .version());
+        long version = number(payload.get("salesOrderVersion"), snapshot.version());
         warehouse.reserve(actor(event), orderId.toString(), version, "outbox-reservation-" + event.eventId(), event.correlationId());
     }
 

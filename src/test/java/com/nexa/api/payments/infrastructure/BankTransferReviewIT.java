@@ -112,4 +112,42 @@ class BankTransferReviewIT extends PaymentIntegrationSupport {
         assertThat(jdbc.queryForObject("select review_reason from payments.payment where id=?", String.class, UUID.fromString(paymentId)))
                 .isEqualTo("Reference could not be reconciled");
     }
+
+    @Test
+    void bankTransferCreateRejectsIdempotencyPayloadConflictForReferenceOrProof() throws Exception {
+        OpenReceivable receivable = createOpenReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String key = "bank-transfer-payload-conflict-" + uuid();
+        mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reference\":\"BT-FIRST-" + uuid() + "\"}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reference\":\"BT-SECOND-" + uuid() + "\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void bankTransferReviewRejectsSameKeyWithDifferentActionOrReason() throws Exception {
+        OpenReceivable receivable = createOpenReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        MvcResult created = mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", "bank-review-conflict-create-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reference\":\"BT-REVIEW-CONFLICT-" + uuid() + "\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String paymentId = json(created).get("id").asText();
+        String reviewKey = "bank-review-conflict-" + uuid();
+
+        mockMvc.perform(post("/api/v1/payments/" + paymentId + "/bank-transfer/approve")
+                        .header("Authorization", "Bearer " + owner).header("Idempotency-Key", reviewKey))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/payments/" + paymentId + "/bank-transfer/reject")
+                        .header("Authorization", "Bearer " + owner).header("Idempotency-Key", reviewKey)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Different review payload\"}"))
+                .andExpect(status().isConflict());
+    }
 }

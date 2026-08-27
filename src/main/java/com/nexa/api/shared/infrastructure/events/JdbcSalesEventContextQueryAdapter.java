@@ -1,6 +1,6 @@
 package com.nexa.api.shared.infrastructure.events;
 
-import com.nexa.api.sales.application.port.out.SalesEventContextQueryPort;
+import com.nexa.api.salescommitment.application.port.out.SalesEventContextQueryPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -33,21 +33,23 @@ public class JdbcSalesEventContextQueryAdapter implements SalesEventContextQuery
 
     @Override
     public Optional<SalesOrderSnapshot> findSalesOrder(UUID tenantId, UUID workspaceId, UUID salesOrderId) {
-        return jdbc.query("select id,client_account_id,version from sales.sales_order "
+        return jdbc.query("select id,client_account_id,version,commercial_commitment_id from sales.sales_order "
                         + "where tenant_id=? and workspace_id=? and id=?",
                 rs -> rs.next()
                         ? Optional.of(new SalesOrderSnapshot(rs.getObject("id", UUID.class),
-                        rs.getObject("client_account_id", UUID.class), rs.getLong("version")))
+                        rs.getObject("client_account_id", UUID.class), rs.getLong("version"),
+                        rs.getObject("commercial_commitment_id", UUID.class)))
                         : Optional.empty(), tenantId, workspaceId, salesOrderId);
     }
 
     @Override
     public Optional<SalesOrderSnapshot> findSalesOrderBySourcePurchaseRequest(UUID tenantId, UUID workspaceId,
                                                                                 UUID purchaseRequestId) {
-        List<SalesOrderSnapshot> matches = jdbc.query("select id,client_account_id,version from sales.sales_order "
+        List<SalesOrderSnapshot> matches = jdbc.query("select id,client_account_id,version,commercial_commitment_id from sales.sales_order "
                         + "where tenant_id=? and workspace_id=? and source_purchase_request_id=?",
                 (rs, row) -> new SalesOrderSnapshot(rs.getObject("id", UUID.class),
-                        rs.getObject("client_account_id", UUID.class), rs.getLong("version")),
+                        rs.getObject("client_account_id", UUID.class), rs.getLong("version"),
+                        rs.getObject("commercial_commitment_id", UUID.class)),
                 tenantId, workspaceId, purchaseRequestId);
         return uniqueOrEmpty(matches, "sales order source purchase request");
     }

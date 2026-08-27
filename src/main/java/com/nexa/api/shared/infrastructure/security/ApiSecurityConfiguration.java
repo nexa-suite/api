@@ -129,8 +129,8 @@ public class ApiSecurityConfiguration {
 	@Bean
 	@org.springframework.context.annotation.Profile("!test")
 	CurrentAccessContextFilter currentAccessContextFilter(
-			com.nexa.api.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase accessContext,
-			com.nexa.api.iam.application.port.in.ValidateAccessSessionUseCase accessSession,
+			com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase accessContext,
+			com.nexa.api.tenantaccessgovernance.iam.application.port.in.ValidateAccessSessionUseCase accessSession,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessTokenInvalidEntryPoint accessTokenInvalidEntryPoint,
 			AccessContextInvalidHandler accessContextInvalidHandler) {
 		return new CurrentAccessContextFilter(accessContext, accessSession, authenticationEntryPoint,
