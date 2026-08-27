@@ -115,6 +115,25 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                 .andExpect(status().isForbidden());
     }
 
+    @Test void nativeSignOutRevokesTheSessionWithoutEmittingBrowserCookies() throws Exception {
+        var login = mockMvc.perform(post("/api/v1/authentication/sign-in")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signInPayload()))
+                .andExpect(status().isOk())
+                .andReturn();
+        String accessToken = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(login.getResponse().getContentAsString()).get("accessToken").asText();
+
+        mockMvc.perform(post("/api/v1/authentication/sign-out")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .header("X-Nexa-Client", "NATIVE"))
+                .andExpect(status().isNoContent())
+                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+        mockMvc.perform(get("/api/v1/session").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized());
+    }
+
     @Test void signInSessionAndSignOutUseRealSessionLifecycle() throws Exception {
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isOk());

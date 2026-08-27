@@ -84,7 +84,7 @@ public class JpaSessionAdapter implements SessionPort {
 	@Override
 	@Transactional(readOnly = true)
 	public Optional<SessionRecord> findByRefreshToken(String refreshToken) {
-		return sessions.findByTokenHash(sha256(refreshToken)).flatMap(entity -> toRecord(entity, null, refreshToken, null, null));
+		return sessions.findByTokenHash(sha256(refreshToken)).flatMap(entity -> toRefreshRecord(entity, refreshToken));
 	}
 
 	@Override
@@ -159,6 +159,33 @@ public class JpaSessionAdapter implements SessionPort {
 			Instant expires = accessExpiresAt == null ? issued.plus(accessTokenTtl) : accessExpiresAt;
 			var tokens = new IssuedAuthenticationTokens(accessToken == null ? "persisted-access-token" : accessToken,
 					refreshToken == null ? "persisted-refresh-token" : refreshToken, issued, expires, entity.getExpiresAt());
+			return Optional.of(new SessionRecord(session, subject, tokens));
+		} catch (RuntimeException exception) {
+			return Optional.empty();
+		}
+	}
+
+	/**
+	 * Refresh-token lookup must preserve reuse detection even after the bound
+	 * membership loses its active policy. The refresh service performs the active
+	 * policy lookup only after this record has passed the revoked/expired checks.
+	 */
+	private Optional<SessionRecord> toRefreshRecord(RefreshSessionJpaEntity entity, String refreshToken) {
+		try {
+			UserAccountJpaEntity user = users.findById(entity.getUserId()).orElse(null);
+			if (user == null) return Optional.empty();
+			ClientSurface surface = ClientSurface.valueOf(entity.getSurface());
+			AccessPolicy refreshPolicy = new AccessPolicy(surface, Set.of("SESSION_REFRESH"), Set.of(),
+					null, null, null, null, entity.getMembershipId().toString(),
+					user.getDisplayName(), user.getPreferredLanguage());
+			AuthenticationSubject subject = new AuthenticationSubject(new UserAccountId(entity.getUserId().toString()),
+					new EmailAddress(user.getEmail()), surface, refreshPolicy);
+			AuthenticationSession session = AuthenticationSession.start(new SessionId(entity.getId().toString()),
+					subject.userAccountId(), surface, new RefreshTokenFamilyId(entity.getFamilyId().toString()),
+					entity.getCreatedAt(), entity.getExpiresAt());
+			if (entity.getRevokedAt() != null) session.revoke(entity.getRevokedAt());
+			IssuedAuthenticationTokens tokens = new IssuedAuthenticationTokens(refreshToken,
+					refreshToken, entity.getCreatedAt(), entity.getCreatedAt().plus(accessTokenTtl), entity.getExpiresAt());
 			return Optional.of(new SessionRecord(session, subject, tokens));
 		} catch (RuntimeException exception) {
 			return Optional.empty();
