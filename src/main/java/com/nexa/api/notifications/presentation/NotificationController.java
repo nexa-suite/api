@@ -4,7 +4,7 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.presentation.request.NotificationPreferencesRequest;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Notifications")
 @SecurityRequirement(name = "bearerAuth")
 public final class NotificationController {
-	private static final String ACCESS_CONTEXT = "com.nexa.api.tenantmanagement.application.model.CurrentAccessContext";
+	private static final String ACCESS_CONTEXT = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
 	private final NotificationUseCase notifications;
 
 	public NotificationController(NotificationUseCase notifications) { this.notifications = notifications; }

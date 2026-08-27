@@ -1,6 +1,6 @@
 # AS-IS RLS scope classification
 
-Status: accepted for API v0.14.0 commercial and inventory core. This is the current API schema registry. Blueprint TARGET table names are not substituted for the AS-IS Flyway inventory.
+Status: API v0.15.0 implementation registry; runtime certification remains a PostgreSQL gate. This is the current API schema registry. Blueprint TARGET table names are not substituted for the AS-IS Flyway inventory.
 
 The executable inventory is `ModernPostgresMigrationTests.assertTenantWorkspaceRls(...)` plus the schema/table assertions in `flywayCreatesOnlyTheModernIdentityAndTenantSchemasWithRequiredTables`. A table is not considered protected merely because a repository adds a tenant predicate.
 
@@ -9,11 +9,11 @@ The executable inventory is `ModernPostgresMigrationTests.assertTenantWorkspaceR
 Forced PostgreSQL policies with both `USING` and `WITH CHECK` exist for the high-risk business tables listed below. Every listed table has direct `tenant_id` and `workspace_id` columns and is checked by fresh-migration tests and the non-owner runtime isolation test.
 
 - `sales`: `client_account`, `client_account_address`, `client_account_membership`, `commercial_commitment`, `commercial_commitment_line`, `manual_sales_order_draft`, `manual_sales_order_draft_idempotency`, `manual_sales_order_draft_line`, `purchase_request`, `purchase_request_event`, `idempotency_record`, `idempotency_response`, `purchase_request_draft`, `purchase_request_draft_destination`, `purchase_request_draft_idempotency`, `purchase_request_draft_line`, `purchase_request_draft_route`, `purchase_request_draft_warehouse_selection`, `sales_order`, `sales_order_event`.
-- `payments`: `credit_account`, `credit_reservation`, `payment`, `payment_attempt`, `payment_event`, `payment_reconciliation_case`, `reconciliation_refund_idempotency`, `receivable`, `receivable_allocation`.
+- `payments`: `credit_account`, `credit_reservation`, `payment`, `payment_attempt`, `payment_event`, `payment_reconciliation_case`, `reconciliation_refund_idempotency`, `receivable`, `receivable_allocation`, `financial_adjustment`, `financial_ledger_entry`, `refund_credit_obligation`, `receivable_application`.
 - `business_documents`: `business_document`, `evidence_object`, `object_storage_object`.
 - `notifications`: `inbox_item`.
-- `warehouse`: `warehouse`, `storage_zone`, `inventory_lot`, `stock_movement`, `inventory_event`, `inventory_reservation`, `command_idempotency`, `warehouse_service_configuration`, `selection_snapshot`, `inventory_lot_disposition`, `inventory_temperature_evaluation`, `safety_stock_policy`, `inventory_transfer`, `inventory_backing`, `inventory_backing_line`, `inventory_backing_position`.
-- `logistics`: `dispatch_number_counter`, `dispatch_order`, `dispatch_event`, `command_idempotency`, `proof_of_delivery`, `temperature_reading`, `delivery_incident`, `operational_handoff_note`, `delivery_attempt`, `delivery_attempt_line`, `continuation_delivery`, `continuation_delivery_line`.
+- `warehouse`: `warehouse`, `storage_zone`, `inventory_lot`, `stock_movement`, `inventory_event`, `inventory_reservation`, `command_idempotency`, `warehouse_service_configuration`, `selection_snapshot`, `inventory_lot_disposition`, `inventory_temperature_evaluation`, `safety_stock_policy`, `inventory_transfer`, `inventory_backing`, `inventory_backing_line`, `inventory_backing_position`, `physical_allocation`, `physical_allocation_line`, `physical_allocation_event`, `physical_allocation_command_idempotency`.
+- `logistics`: `dispatch_number_counter`, `dispatch_order`, `dispatch_event`, `command_idempotency`, `proof_of_delivery`, `temperature_reading`, `delivery_incident`, `operational_handoff_note`, `delivery_attempt`, `delivery_attempt_line`, `continuation_delivery`, `continuation_delivery_line`, `fulfillment`, `fulfillment_line`, `fulfillment_command_idempotency`, `fulfillment_event`, `picking_result`, `picking_result_line`, `picking_discrepancy`, `picking_discrepancy_resolution`, `delivery`, `delivery_command_idempotency`, `delivery_assignment`, `delivery_quantity_outcome`, `delivery_event`, `temperature_evidence`, `temperature_excursion`, `proof_of_delivery_addendum`.
 
 `TENANT_SCOPED_RLS` is the database enforcement category. `WORKSPACE_SCOPED_RLS` is the effective policy shape: a tenant is never visible without its workspace binding. The policy is fail-closed when either setting is absent or mismatched.
 
@@ -26,7 +26,7 @@ The following current tables carry tenant/workspace ownership but are not in the
 - `catalog_management` tenant catalog/pricing/promotion tables — current catalog ownership/query boundary is preserved; no new shared-versus-tenant interpretation is invented in v0.14.
 - child tables such as reservation lines, allocation lines, draft lines, and document request rows — parent scope and composite foreign keys are the current AS-IS boundary; workers reconstruct parent scope before mutation.
 
-These exceptions are the v0.14 registry for the existing AS-IS schema. Closing them requires a separate additive policy and worker-scope design; it must not be inferred from Blueprint TARGET models.
+These exceptions are the retained v0.14 AS-IS boundary inside the v0.15 schema. Closing them requires a separate additive policy and worker-scope design; it must not be inferred from Blueprint TARGET models.
 
 ## TENANT_SYSTEM_QUEUE
 
@@ -55,4 +55,4 @@ No current API table is silently unclassified. Tables added by a future Flyway m
 
 ## Runtime proof
 
-`RlsRuntimeDatabaseIsolationIT` verifies missing scope, wrong tenant, wrong workspace, guessed foreign UUID, pooled-connection cleanup, and stale claim fencing with the least-privilege runtime login. `ModernPostgresMigrationTests` verifies the forced-policy inventory, `USING`, `WITH CHECK`, lease columns, and fresh PostgreSQL 18 construction.
+`RlsRuntimeDatabaseIsolationIT` verifies missing scope, wrong tenant, wrong workspace, guessed foreign UUID, pooled-connection cleanup, and stale claim fencing with the least-privilege runtime login when PostgreSQL is available. `ModernPostgresMigrationTests` verifies the v0.15 forced-policy inventory, `USING`, `WITH CHECK`, lease columns, financial snapshots, and fresh PostgreSQL 18 construction. V91 temporarily removes `FORCE` only for its owner-controlled transactional compatibility backfill, then restores it before commit; this requires real PostgreSQL execution for certification.

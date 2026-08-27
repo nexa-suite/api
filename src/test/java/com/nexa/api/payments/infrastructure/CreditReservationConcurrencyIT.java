@@ -20,6 +20,7 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
     void simultaneousCreditPaymentsCannotExceedAvailableLimit() throws Exception {
         OpenReceivable firstReceivable = createOpenReceivable();
         OpenReceivable secondReceivable = createOpenReceivable();
+        ensureBuyerCreditAccount(firstReceivable.currency());
         CreditAccountState originalAccount = jdbc.query("select credit_limit,credit_exposure,reserved_exposure,status from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
                         (rs, n) -> new CreditAccountState(rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getString(4)),
                         tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency())
@@ -52,6 +53,17 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
     private MvcResult creditPayment(String buyer, java.util.UUID receivableId, String key) throws Exception {
         return mockMvc.perform(post("/api/v1/receivables/" + receivableId + "/credit-line-payments")
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", key)).andReturn();
+    }
+
+    private void ensureBuyerCreditAccount(String currency) {
+        jdbc.update("insert into payments.credit_account "
+                        + "(id,tenant_id,workspace_id,client_account_id,currency,credit_limit,credit_exposure,reserved_exposure,status,version,created_at,updated_at) "
+                        + "select md5(c.id::text || ':' || ?)::uuid,c.tenant_id,c.workspace_id,c.id,?,c.credit_limit,0,0,"
+                        + "case when c.status='ACTIVE' then 'ACTIVE' else 'SUSPENDED' end,0,current_timestamp,current_timestamp "
+                        + "from sales.client_account c "
+                        + "where c.tenant_id=? and c.workspace_id=? and c.id=? "
+                        + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
+                currency, currency, tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()));
     }
 
     private record CreditAccountState(BigDecimal limit, BigDecimal exposure, BigDecimal reserved, String status) { }

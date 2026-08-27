@@ -1,10 +1,10 @@
 package com.nexa.api.payments.domain;
 
-import com.nexa.api.payments.domain.model.credit.CreditAccount;
+import com.nexa.api.creditreceivables.domain.model.credit.CreditAccount;
 import com.nexa.api.payments.domain.model.payment.Payment;
 import com.nexa.api.payments.domain.model.payment.PaymentStatus;
-import com.nexa.api.payments.domain.model.receivable.Receivable;
-import com.nexa.api.payments.domain.model.receivable.ReceivableStatus;
+import com.nexa.api.creditreceivables.domain.model.receivable.Receivable;
+import com.nexa.api.creditreceivables.domain.model.receivable.ReceivableStatus;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

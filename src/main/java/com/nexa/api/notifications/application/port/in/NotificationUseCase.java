@@ -2,7 +2,7 @@ package com.nexa.api.notifications.application.port.in;
 
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPage;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 public interface NotificationUseCase {
 	NotificationPage inbox(CurrentAccessContext context, boolean unreadOnly, int limit);

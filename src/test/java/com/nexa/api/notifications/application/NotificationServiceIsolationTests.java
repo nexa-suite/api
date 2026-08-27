@@ -4,13 +4,13 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.service.NotificationService;
-import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountReference;
-import com.nexa.api.customerrelationships.application.publicapi.CustomerAccountQuery;
-import com.nexa.api.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

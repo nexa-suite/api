@@ -1,11 +1,11 @@
 package com.nexa.api.shared.presentation.error;
 
-import com.nexa.api.iam.application.exception.InvalidCredentialsException;
-import com.nexa.api.iam.application.exception.InvalidRefreshTokenException;
-import com.nexa.api.iam.application.exception.SessionNotFoundException;
-import com.nexa.api.iam.application.exception.AuthenticationThrottledException;
-import com.nexa.api.iam.application.exception.IamSecurityException;
-import com.nexa.api.iam.application.exception.OrganizationRegistrationDraftException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidCredentialsException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidRefreshTokenException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.SessionNotFoundException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.AuthenticationThrottledException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurityException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
@@ -29,37 +29,39 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.security.access.AccessDeniedException;
-import com.nexa.api.tenantmanagement.domain.model.administration.OrganizationAdministrationInvariantViolation;
-import com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
-import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationConflictException;
-import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyConflictException;
-import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyRequiredException;
-import com.nexa.api.tenantmanagement.application.service.OrganizationInvitationService.InvitationInvalidException;
-import com.nexa.api.tenantmanagement.application.service.TenantConfigurationService.CustomFieldConflictException;
-import com.nexa.api.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
-import com.nexa.api.sales.application.exception.IdempotencyKeyRequiredException;
-import com.nexa.api.sales.application.exception.PurchaseRequestTransitionException;
-import com.nexa.api.sales.application.exception.PurchaseRequestAlreadyConvertedException;
-import com.nexa.api.sales.application.exception.PurchaseRequestDraftConcurrencyException;
-import com.nexa.api.sales.application.exception.PurchaseRequestDraftInvariantException;
-import com.nexa.api.sales.application.exception.PurchaseRequestDraftPreconditionRequiredException;
-import com.nexa.api.sales.application.exception.SalesConcurrencyConflictException;
-import com.nexa.api.customerrelationships.application.exception.CustomerRelationshipConflictException;
-import com.nexa.api.customerrelationships.application.exception.CustomerRelationshipPreconditionRequiredException;
-import com.nexa.api.customerrelationships.contract.CustomerRelationshipInvariantViolation;
-import com.nexa.api.sales.application.exception.SalesIdempotencyPayloadConflictException;
-import com.nexa.api.sales.application.exception.CommercialBusinessException;
-import com.nexa.api.sales.application.exception.SalesPreconditionRequiredException;
-import com.nexa.api.sales.application.exception.SalesResourceNotFoundException;
-import com.nexa.api.sales.domain.exception.SalesInvariantViolation;
-import com.nexa.api.sales.domain.model.salesorder.SalesOrderInvariantViolation;
-import com.nexa.api.sales.application.exception.SalesOrderRejectionReasonRequiredException;
-import com.nexa.api.sales.application.exception.SalesOrderTransitionException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.administration.OrganizationAdministrationInvariantViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationInvalidException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.TenantConfigurationService.CustomFieldConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
+import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestTransitionException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestAlreadyConvertedException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftInvariantException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftPreconditionRequiredException;
+import com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException;
+import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipConflictException;
+import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipPreconditionRequiredException;
+import com.nexa.api.customerbuyerrelationships.contract.CustomerRelationshipInvariantViolation;
+import com.nexa.api.salescommitment.application.exception.SalesIdempotencyPayloadConflictException;
+import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
+import com.nexa.api.salescommitment.application.exception.SalesPreconditionRequiredException;
+import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
+import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderInvariantViolation;
+import com.nexa.api.salescommitment.application.exception.SalesOrderRejectionReasonRequiredException;
+import com.nexa.api.salescommitment.application.exception.SalesOrderTransitionException;
 import com.nexa.api.shared.application.changefeed.ChangeFeedCapacityException;
-import com.nexa.api.warehouse.application.WarehouseOperationsService;
-import com.nexa.api.logistics.application.LogisticsOperationsService;
-import com.nexa.api.logistics.domain.dispatchorder.DispatchTransitionViolation;
-import com.nexa.api.tenantmanagement.domain.model.access.AccessPolicyViolation;
+import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
+import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
+import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
+import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
+import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchTransitionViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
@@ -67,13 +69,13 @@ import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
-import com.nexa.api.catalogmanagement.application.exception.CatalogConcurrencyException;
-import com.nexa.api.catalogmanagement.application.exception.CatalogConflictException;
-import com.nexa.api.catalogmanagement.application.exception.CatalogIdempotencyKeyRequiredException;
-import com.nexa.api.catalogmanagement.application.exception.CatalogPreconditionRequiredException;
-import com.nexa.api.catalogmanagement.application.exception.CatalogResourceNotFoundException;
-import com.nexa.api.tenantmanagement.application.service.RoleDefinitionService;
-import com.nexa.api.tenantmanagement.application.exception.RoleDefinitionPersistenceUnavailableException;
+import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogConcurrencyException;
+import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogConflictException;
+import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogIdempotencyKeyRequiredException;
+import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogPreconditionRequiredException;
+import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.RoleDefinitionService;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionPersistenceUnavailableException;
 
 import java.util.List;
 import java.util.Map;
@@ -247,12 +249,12 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.CONFLICT, code, "Organization membership policy prevents this change", request);
 	}
 
-	@ExceptionHandler(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException.class)
-	public ResponseEntity<ProblemDetail> handleOrganizationIdempotency(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationIdempotency(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException exception, HttpServletRequest request) {
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request);
 	}
-	@ExceptionHandler(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException.class)
-	public ResponseEntity<ProblemDetail> handleOrganizationIdempotencyPayload(com.nexa.api.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationIdempotencyPayload(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException exception, HttpServletRequest request) {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different workspace", request);
 	}
 	@ExceptionHandler(AccessPolicyViolation.class)
@@ -314,6 +316,9 @@ public final class GlobalExceptionHandler {
 			case "INSUFFICIENT_CREDIT" -> ApiErrorCode.INSUFFICIENT_CREDIT;
 			case "PAYMENT_REQUIRED" -> ApiErrorCode.PAYMENT_REQUIRED;
 			case "CLIENT_ACCOUNT_NOT_FOUND" -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
+			case "SALES_ORDER_NOT_FOUND" -> ApiErrorCode.SALES_ORDER_NOT_FOUND;
+			case "SALES_ORDER_TRANSITION_INVALID" -> ApiErrorCode.SALES_ORDER_TRANSITION_INVALID;
+			case "SALES_ORDER_CONCURRENCY_CONFLICT" -> ApiErrorCode.SALES_ORDER_CONCURRENCY_CONFLICT;
 			case "IDEMPOTENCY_KEY_REQUIRED" -> ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED;
 			case "VALIDATION_ERROR" -> ApiErrorCode.VALIDATION_ERROR;
 			default -> ApiErrorCode.INVALID_REQUEST;
@@ -321,11 +326,34 @@ public final class GlobalExceptionHandler {
 		HttpStatus status = switch (code) {
 			case INSUFFICIENT_CREDIT, PURCHASE_REQUEST_EXPIRED, PURCHASE_REQUEST_NOT_CONFIRMABLE,
 				COMMERCIAL_POLICY_CHANGED -> HttpStatus.CONFLICT;
-			case CLIENT_ACCOUNT_NOT_FOUND -> HttpStatus.NOT_FOUND;
+			case CLIENT_ACCOUNT_NOT_FOUND, SALES_ORDER_NOT_FOUND -> HttpStatus.NOT_FOUND;
+			case SALES_ORDER_TRANSITION_INVALID, SALES_ORDER_CONCURRENCY_CONFLICT -> HttpStatus.CONFLICT;
 			case IDEMPOTENCY_KEY_REQUIRED, VALIDATION_ERROR, PAYMENT_REQUIRED -> HttpStatus.BAD_REQUEST;
 			default -> HttpStatus.BAD_REQUEST;
 		};
 		return response(status, code, "Commercial operation could not be completed", request);
+	}
+
+	@ExceptionHandler(CreditReceivableOperationException.class)
+	public ResponseEntity<ProblemDetail> handleCreditReceivable(CreditReceivableOperationException exception, HttpServletRequest request) {
+		ApiErrorCode code;
+		try { code = ApiErrorCode.valueOf(exception.code()); }
+		catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+		if (exception.notFound()) return response(HttpStatus.NOT_FOUND, code, "Credit or receivable resource not found", request);
+		if ("PRECONDITION_REQUIRED".equals(exception.code())) {
+			return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
+		}
+		if ("CONCURRENCY_CONFLICT".equals(exception.code())) {
+			return staleOrConflict(ApiErrorCode.CONCURRENCY_CONFLICT, "Credit or receivable resource changed by another request", request);
+		}
+		HttpStatus status = switch (exception.code()) {
+			case "CREDIT_ACCOUNT_NOT_FOUND", "RECEIVABLE_NOT_FOUND", "ADJUSTMENT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+			case "IDEMPOTENCY_PAYLOAD_CONFLICT", "RECEIVABLE_APPLICATION_CONFLICT",
+					"DATA_INTEGRITY_CONFLICT" -> HttpStatus.CONFLICT;
+			case "INSUFFICIENT_CREDIT" -> HttpStatus.BAD_REQUEST;
+			default -> HttpStatus.BAD_REQUEST;
+		};
+		return response(status, code, "Credit and receivables operation could not be completed", request);
 	}
 	@ExceptionHandler(DataIntegrityViolationException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConstraint(DataIntegrityViolationException exception, HttpServletRequest request) {
@@ -449,6 +477,28 @@ public final class GlobalExceptionHandler {
 		@ExceptionHandler(DispatchTransitionViolation.class)
 		public ResponseEntity<ProblemDetail> handleDispatchTransition(DispatchTransitionViolation exception, HttpServletRequest request) {
 			return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Logistics transition is not allowed", request);
+		}
+		@ExceptionHandler(FulfillmentOperationException.class)
+		public ResponseEntity<ProblemDetail> handleFulfillment(FulfillmentOperationException exception, HttpServletRequest request) {
+			ApiErrorCode code;
+			try { code = ApiErrorCode.valueOf(exception.code()); }
+			catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+			if (exception.notFound()) {
+				return response(HttpStatus.NOT_FOUND, code, "Fulfillment resource not found", request);
+			}
+			if ("CONCURRENCY_CONFLICT".equals(exception.code()) || exception.code().contains("CONCURRENCY")) {
+				return staleOrConflict(ApiErrorCode.CONCURRENCY_CONFLICT, "Fulfillment resource changed by another request", request);
+			}
+			HttpStatus status = switch (exception.code()) {
+				case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED;
+				case "FORBIDDEN" -> HttpStatus.FORBIDDEN;
+				case "IDEMPOTENCY_PAYLOAD_CONFLICT", "FULFILLMENT_ALREADY_EXISTS", "DELIVERY_TRANSITION_INVALID",
+						"FULFILLMENT_TRANSITION_INVALID", "DELIVERY_NOT_ATTEMPTABLE", "POD_NOT_CAPTURED",
+						"FULFILLMENT_SHORTAGE_NOT_OPEN", "FULFILLMENT_PICKING_REQUIRED", "FULFILLMENT_NOT_STAGED",
+						"POD_REQUIRES_FINAL_DELIVERY", "DELIVERY_NOT_ACTIVE" -> HttpStatus.CONFLICT;
+				default -> HttpStatus.BAD_REQUEST;
+			};
+			return response(status, code, "Fulfillment operation could not be completed", request);
 		}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)

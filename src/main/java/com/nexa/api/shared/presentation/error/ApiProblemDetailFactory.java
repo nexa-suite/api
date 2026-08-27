@@ -160,9 +160,10 @@ public final class ApiProblemDetailFactory {
 			case EXTERNAL_TIMEOUT -> "External service timed out";
 			case TECHNICAL_CAPABILITY_UNAVAILABLE -> "Technical capability unavailable";
 			case STORAGE_UNAVAILABLE -> "Storage unavailable";
-			case SCANNER_UNAVAILABLE -> "Malware scanner unavailable";
-			case INTERNAL_ERROR -> "Internal server error";
-		};
+				case SCANNER_UNAVAILABLE -> "Malware scanner unavailable";
+				case INTERNAL_ERROR -> "Internal server error";
+				default -> "Fulfillment or delivery operation rejected";
+			};
 	}
 
 	private static boolean retryable(ApiErrorCode code) {
