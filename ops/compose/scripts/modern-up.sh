@@ -14,6 +14,11 @@ set -a
 . "$env_file"
 set +a
 
+compose_profile_args=""
+case ",${NEXA_MODERN_SPRING_PROFILE:-}," in
+	*,observability,*) compose_profile_args="--profile observability" ;;
+esac
+
 docker compose --env-file "$env_file" -f "$compose_file" up -d modern-postgres
 ready=0
 for _ in $(seq 1 60); do
@@ -34,12 +39,12 @@ SELECT set_config('nexa.runtime_database_password', :'runtime_password', false) 
 DO $do$
 BEGIN
 	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_runtime') THEN
-	    EXECUTE format('CREATE ROLE nexa_runtime LOGIN PASSWORD %L', current_setting('nexa.runtime_database_password'));
+	    EXECUTE format('CREATE ROLE nexa_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', current_setting('nexa.runtime_database_password'));
 	ELSE
-	    EXECUTE format('ALTER ROLE nexa_runtime LOGIN PASSWORD %L', current_setting('nexa.runtime_database_password'));
+	    EXECUTE format('ALTER ROLE nexa_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', current_setting('nexa.runtime_database_password'));
 	    END IF;
 END
 $do$;
 SQL
 
-exec docker compose --env-file "$env_file" -f "$compose_file" up --build -d
+exec docker compose --env-file "$env_file" -f "$compose_file" $compose_profile_args up --build -d

@@ -30,6 +30,8 @@ server:
   forward-headers-strategy: framework
 
 nexa:
+  database:
+    require-least-privilege-runtime: ${NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME:false}
   clamav:
     mode: ${NEXA_CLAMAV_MODE:deterministic-local}
     host: ${NEXA_CLAMAV_HOST:}

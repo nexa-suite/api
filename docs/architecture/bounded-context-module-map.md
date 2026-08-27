@@ -1,6 +1,6 @@
 # Nexa canonical bounded-context map
 
-Status: canonical for API v0.15.0.  The `BC-*` identifiers and names below
+Status: canonical for API v0.16.0.  The `BC-*` identifiers and names below
 match the Blueprint directories exactly.
 
 Nexa has exactly eleven business bounded contexts.  `bootstrap` and `shared`
@@ -38,7 +38,7 @@ Important boundaries:
 - `shared` may provide framework/error primitives and transport composition;
   it must not become a business aggregate owner.
 
-All v0.15 source changes must name the canonical context in its module root,
+All v0.16 source changes must name the canonical context in its module root,
 package documentation, public contract and test owner.  Existing HTTP paths,
 SQL schemas and released Java names may remain as compatibility aliases when
 changing them would break v0.14 contracts; the alias is documented here and
