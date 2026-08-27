@@ -114,7 +114,7 @@ public final class CanonicalOutboxEventProcessor {
 
     @Scheduled(fixedDelayString = "${nexa.integration.outbox-delay-ms:1000}")
     public void processBatch() {
-        jdbc.update("update integration.outbox_event set status='PENDING',next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where status='PROCESSING' and lease_until <= current_timestamp");
+        jdbc.update("update integration.outbox_event set status=case when attempt_count >= 20 then 'DEAD_LETTER' else 'PENDING' end,next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where status='PROCESSING' and lease_until <= current_timestamp");
         List<EventRow> rows = jdbc.query("select event_id,event_type,aggregate_type,aggregate_id,tenant_id,workspace_id,occurred_at,correlation_id,causation_id,schema_version,payload::text,attempt_count from integration.outbox_event where status in ('PENDING','FAILED') and next_attempt_at <= current_timestamp and attempt_count < 20 order by created_at,event_id limit 20", (rs, n) -> new EventRow(
                 rs.getObject("event_id", UUID.class), rs.getString("event_type"), rs.getString("aggregate_type"),
                 rs.getObject("aggregate_id", UUID.class), rs.getObject("tenant_id", UUID.class),

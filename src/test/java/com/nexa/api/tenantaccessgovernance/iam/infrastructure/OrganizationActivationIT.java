@@ -33,6 +33,10 @@ class OrganizationActivationIT extends NexaWorkflowIntegrationSupport {
         assertThat(roles).containsExactly("COMPANY_OWNER", "TENANT_ADMIN");
         assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace where id=? and tenant_id=?", Integer.class,
                 java.util.UUID.fromString(workspaceId), java.util.UUID.fromString(tenantId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership where workspace_id=? and user_id='11111111-1111-4111-8111-111111111111'::uuid and membership_type='SYSTEM_WORKFLOW' and status='ACTIVE'", Integer.class,
+                java.util.UUID.fromString(workspaceId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.membership_role_definition where membership_id=(select id from tenant_management.workspace_membership where workspace_id=? and user_id='11111111-1111-4111-8111-111111111111'::uuid)", Integer.class,
+                java.util.UUID.fromString(workspaceId))).isEqualTo(1);
         var organization = jdbc.queryForMap("select legal_name,display_name,business_identifier,operation_category from tenant_management.organization_settings where tenant_id=?",
                 java.util.UUID.fromString(tenantId));
         assertThat(organization).containsEntry("legal_name", "Integration Cold Chain")
