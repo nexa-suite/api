@@ -33,7 +33,7 @@ public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservatio
                 .stream().findFirst().orElse(null);
         if (account == null) return CreditExposureSnapshot.unavailable(currency);
         BigDecimal outstanding = jdbc.queryForObject(
-                "select coalesce(sum(amount-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? "
+                "select coalesce(sum(amount+coalesce(adjustment_total,0)-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? "
                         + "and client_account_id=? and currency=? and status in ('OPEN','PARTIALLY_PAID','OVERDUE')",
                 BigDecimal.class, uuid(tenantId), uuid(workspaceId), uuid(customerAccountId), currency);
         return new CreditExposureSnapshot(currency, account.limit(), account.exposure(), outstanding,

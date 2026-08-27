@@ -56,6 +56,21 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-create", key, requestHash);
         if (replay != null) return replay;
 
+        // Canonical fulfillment and legacy dispatch both mutate stock and can
+        // create a delivery. Serialize on the Sales Order before touching the
+        // reservation so the two paths cannot win the same order concurrently.
+        UUID salesOrderId = jdbc.query("select sales_order_id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and id=?",
+                        (rs, row) -> rs.getObject(1, UUID.class), tenant, workspace, reservation)
+                .stream().findFirst().orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
+        CanonicalOrderRow order = jdbc.query("select id,commercial_commitment_id from sales.sales_order where tenant_id=? and workspace_id=? and id=? for update",
+                        (rs, row) -> new CanonicalOrderRow(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)),
+                        tenant, workspace, salesOrderId).stream().findFirst()
+                .orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
+        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.fulfillment where tenant_id=? and workspace_id=? and sales_order_id=?)",
+                Boolean.class, tenant, workspace, order.id()))) {
+            throw error("CANONICAL_FULFILLMENT_ALREADY_EXISTS", false);
+        }
+
         WarehouseLogisticsFulfillmentPort.DispatchReservationSnapshot source = warehouseFulfillment
                 .loadReservedReservation(tenantId, workspaceId, reservationId, reservationVersion, Instant.ofEpochMilli(now));
         UUID existing = jdbc.query("select id from logistics.dispatch_order " +
@@ -591,6 +606,8 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                     ? TemperatureReadingStatus.WITHIN_RANGE : TemperatureReadingStatus.OUT_OF_RANGE;
         }
     }
+
+    private record CanonicalOrderRow(UUID id, UUID commercialCommitmentId) { }
 
     private record ObligationLine(String catalogItemId, BigDecimal quantity, String unit) { }
 }

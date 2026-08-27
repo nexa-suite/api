@@ -4,6 +4,8 @@ import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -29,10 +31,18 @@ import java.util.stream.Collectors;
 public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
+    private final SalesOrderFulfillmentQuery salesOrders;
 
-    public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability) {
+    @Autowired
+    public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
+                                              SalesOrderFulfillmentQuery salesOrders) {
         this.jdbc = jdbc;
         this.traceability = traceability;
+        this.salesOrders = salesOrders;
+    }
+
+    public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability) {
+        this(jdbc, traceability, null);
     }
 
     @Override
@@ -56,10 +66,24 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
 
+        if (salesOrders == null) throw error("SALES_ORDER_NOT_FOUND", true);
+        SalesOrderFulfillmentQuery.Snapshot order = salesOrders.getForUpdate(
+                request.tenantId(), request.workspaceId(), request.salesOrderId());
+        if (!"CONFIRMED".equals(order.status())) throw error("SALES_ORDER_NOT_CONFIRMED", false);
+        if (!request.commercialCommitmentId().equals(order.commercialCommitmentId())) {
+            throw error("BACKING_LINEAGE_INVALID", false);
+        }
+
         BackingRow backing = lockBacking(request.tenantId(), request.workspaceId(), request.inventoryBackingId());
         if (backing == null) throw error("BACKING_NOT_FOUND", true);
         if (!request.commercialCommitmentId().equals(backing.commitmentId())) throw error("BACKING_LINEAGE_INVALID", false);
         if (!"BACKED".equals(backing.status())) throw error("BACKING_NOT_READY", false);
+        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and sales_order_id=? and status not in ('RELEASED','EXPIRED','CANCELLED'))",
+                Boolean.class, request.tenantId(), request.workspaceId(), request.salesOrderId()))
+                || Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.dispatch_order where tenant_id=? and workspace_id=? and sales_order_id=? and status<>'CANCELLED')",
+                Boolean.class, request.tenantId(), request.workspaceId(), request.salesOrderId()))) {
+            throw error("CANONICAL_FULFILLMENT_CONFLICT", false);
+        }
 
         ExistingAllocation existing = jdbc.query(
                 "select id,status,version from warehouse.physical_allocation where tenant_id=? and workspace_id=? and inventory_backing_id=? for update",
@@ -350,12 +374,22 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     }
 
     private void validateDemand(List<PhysicalAllocationCommands.RequestedLine> requested, List<BackingPosition> positions) {
+        if (requested == null || requested.isEmpty() || positions == null || positions.isEmpty()) {
+            throw error("PHYSICAL_ALLOCATION_EXCEEDS_BACKING", false);
+        }
+        Map<LineKey, BigDecimal> demand = new LinkedHashMap<>();
+        for (PhysicalAllocationCommands.RequestedLine line : requested) {
+            LineKey key = new LineKey(line.skuId(), line.catalogItemId(), line.unit());
+            if (demand.put(key, line.quantity()) != null) throw error("FULFILLMENT_LINE_INVALID", false);
+        }
         Map<LineKey, BigDecimal> backed = positions.stream().collect(Collectors.groupingBy(
                 value -> new LineKey(value.skuId(), value.catalogItemId(), value.unit()),
                 Collectors.mapping(BackingPosition::quantity, Collectors.reducing(BigDecimal.ZERO, BigDecimal::add))));
-        for (PhysicalAllocationCommands.RequestedLine line : requested) {
-            LineKey key = new LineKey(line.skuId(), line.catalogItemId(), line.unit());
-            if (line.quantity().compareTo(backed.getOrDefault(key, BigDecimal.ZERO)) > 0) throw error("PHYSICAL_ALLOCATION_EXCEEDS_BACKING", false);
+        if (!demand.keySet().equals(backed.keySet())) throw error("PHYSICAL_ALLOCATION_EXCEEDS_BACKING", false);
+        for (Map.Entry<LineKey, BigDecimal> entry : demand.entrySet()) {
+            if (entry.getValue().compareTo(backed.get(entry.getKey())) != 0) {
+                throw error("PHYSICAL_ALLOCATION_EXCEEDS_BACKING", false);
+            }
         }
     }
 

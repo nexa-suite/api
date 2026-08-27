@@ -3,6 +3,9 @@ package com.nexa.api.creditreceivables.infrastructure.persistence;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
+import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -14,6 +17,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** Immutable financial correction, receivable effect and obligation projection. */
@@ -22,10 +26,26 @@ import java.util.UUID;
 public class JdbcFinancialAdjustmentAdapter implements FinancialAdjustmentCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
+    private final PaymentConfirmationQuery paymentConfirmations;
+    private final SalesOrderFulfillmentQuery salesOrders;
 
-    public JdbcFinancialAdjustmentAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability) {
+    @Autowired
+    public JdbcFinancialAdjustmentAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
+                                          PaymentConfirmationQuery paymentConfirmations,
+                                          SalesOrderFulfillmentQuery salesOrders) {
         this.jdbc = jdbc;
         this.traceability = traceability;
+        this.paymentConfirmations = paymentConfirmations;
+        this.salesOrders = salesOrders;
+    }
+
+    public JdbcFinancialAdjustmentAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
+                                          PaymentConfirmationQuery paymentConfirmations) {
+        this(jdbc, traceability, paymentConfirmations, null);
+    }
+
+    public JdbcFinancialAdjustmentAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability) {
+        this(jdbc, traceability, null, null);
     }
 
     @Override
@@ -48,6 +68,7 @@ public class JdbcFinancialAdjustmentAdapter implements FinancialAdjustmentComman
             return loadResult(request.tenantId(), request.workspaceId(), existing.id());
         }
         validateKind(request.adjustmentKind(), request.effect());
+        SalesOrderFulfillmentQuery.Snapshot source = lockSource(request);
         ReceivableRow receivable = lockReceivable(request);
         if (!receivable.currency().equalsIgnoreCase(request.currency())) throw error("RECEIVABLE_CURRENCY_MISMATCH");
         if (!"SALES_ORDER".equals(receivable.subjectType()) || request.salesOrderId() == null
@@ -60,8 +81,9 @@ public class JdbcFinancialAdjustmentAdapter implements FinancialAdjustmentComman
         if (request.expectedReceivableVersion() != null && receivable.version() != request.expectedReceivableVersion()) {
             throw error("CONCURRENCY_CONFLICT");
         }
-        BigDecimal delta = "INCREASE".equals(request.effect()) ? request.amount() : request.amount().negate();
         BigDecimal previousAdjustedAmount = receivable.amount().add(receivable.adjustmentTotal());
+        validateSource(request, receivable, previousAdjustedAmount, source);
+        BigDecimal delta = "INCREASE".equals(request.effect()) ? request.amount() : request.amount().negate();
         BigDecimal adjustedAmount = previousAdjustedAmount.add(delta);
         if (adjustedAmount.signum() < 0) throw error("ADJUSTMENT_EXCEEDS_RECEIVABLE");
         Instant now = request.now();
@@ -141,6 +163,41 @@ public class JdbcFinancialAdjustmentAdapter implements FinancialAdjustmentComman
     private void lock(Request request) {
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
                 request.tenantId() + "|" + request.workspaceId() + "|financial-adjustment|" + request.actorMembershipId() + "|" + request.idempotencyKey());
+    }
+
+    private SalesOrderFulfillmentQuery.Snapshot lockSource(Request request) {
+        if (!Set.of("SALES_ORDER_CANCELLATION", "SALES_ORDER_REDUCTION").contains(request.sourceType())) return null;
+        if (request.salesOrderId() == null || salesOrders == null) throw error("ADJUSTMENT_SOURCE_INVALID");
+        return salesOrders.getForUpdate(request.tenantId(), request.workspaceId(), request.salesOrderId());
+    }
+
+    private void validateSource(Request request, ReceivableRow receivable, BigDecimal previousAdjustedAmount,
+                                 SalesOrderFulfillmentQuery.Snapshot source) {
+        if (!Set.of("SALES_ORDER_CANCELLATION", "SALES_ORDER_REDUCTION").contains(request.sourceType())) return;
+        if (source == null || source.currency() == null || !source.currency().equalsIgnoreCase(request.currency())) {
+            throw error("RECEIVABLE_CURRENCY_MISMATCH");
+        }
+        if (paymentConfirmations == null || !paymentConfirmations.hasSuccessfulPayment(
+                request.tenantId(), request.workspaceId(), request.salesOrderId())) {
+            throw error("PAYMENT_REQUIRED");
+        }
+        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from payments.financial_adjustment "
+                        + "where tenant_id=? and workspace_id=? and source_type=? and source_id=? and status='POSTED')",
+                Boolean.class, request.tenantId(), request.workspaceId(), request.sourceType(), request.sourceId()))) {
+            throw error("ADJUSTMENT_ALREADY_POSTED");
+        }
+        if ("SALES_ORDER_CANCELLATION".equals(request.sourceType())) {
+            if (!"CANCELLED".equals(source.status())) throw error("ADJUSTMENT_SOURCE_STATUS_INVALID");
+            if (request.amount().compareTo(previousAdjustedAmount) != 0) throw error("ADJUSTMENT_AMOUNT_INVALID");
+        } else {
+            if (!Set.of("PARTIALLY_FULFILLED", "PARTIALLY_DELIVERED").contains(source.status())) {
+                throw error("ADJUSTMENT_SOURCE_STATUS_INVALID");
+            }
+            if (request.amount().compareTo(previousAdjustedAmount) > 0) throw error("ADJUSTMENT_AMOUNT_INVALID");
+        }
+        if (source.total() != null && request.amount().compareTo(source.total()) > 0) {
+            throw error("ADJUSTMENT_AMOUNT_INVALID");
+        }
     }
 
     private static void validateKind(String kind, String effect) {

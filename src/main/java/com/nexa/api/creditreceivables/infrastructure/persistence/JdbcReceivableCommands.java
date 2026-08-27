@@ -14,7 +14,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
-/** Durable receivable posting owned by Payments; called only after Sales confirmation. */
+/** Durable receivable posting owned by BC-07; called only after Sales confirmation. */
 @Repository
 @Profile("!test")
 public class JdbcReceivableCommands implements ReceivableCommands {

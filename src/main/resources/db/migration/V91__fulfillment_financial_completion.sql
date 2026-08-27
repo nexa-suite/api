@@ -241,6 +241,7 @@ CREATE TABLE logistics.fulfillment_line (
         AND delivered_quantity BETWEEN 0 AND dispatched_quantity
         AND rejected_quantity >= 0 AND cancelled_quantity >= 0
         AND unfulfilled_quantity >= 0 AND unfulfilled_quantity <= allocated_quantity - picked_quantity
+        AND delivered_quantity + rejected_quantity + cancelled_quantity <= dispatched_quantity
         AND delivered_quantity + rejected_quantity + cancelled_quantity + unfulfilled_quantity <= ordered_quantity
     ),
     CONSTRAINT ck_fulfillment_line_text CHECK (length(btrim(catalog_item_id)) BETWEEN 1 AND 64 AND length(btrim(unit)) BETWEEN 1 AND 32)
@@ -1091,7 +1092,10 @@ BEGIN
         'payments.refund_credit_obligation'::regclass,
         'payments.receivable_application'::regclass
     ] LOOP
-        policy_name := replace(target::text, '.', '_') || '_tenant_workspace_scope';
+        -- PostgreSQL identifiers are limited to 63 bytes. Keep the table
+        -- portion inspectable and add a deterministic suffix for uniqueness.
+        policy_name := 'v15_tws_' || left(replace(target::text, '.', '_'), 24)
+            || '_' || substr(md5(target::text), 1, 12);
         EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', target);
         EXECUTE format('ALTER TABLE %s FORCE ROW LEVEL SECURITY', target);
         EXECUTE format('CREATE POLICY %I ON %s USING (tenant_id::text = current_setting(''app.current_tenant_id'', true) AND workspace_id::text = current_setting(''app.current_workspace_id'', true)) WITH CHECK (tenant_id::text = current_setting(''app.current_tenant_id'', true) AND workspace_id::text = current_setting(''app.current_workspace_id'', true))', policy_name, target);

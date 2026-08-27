@@ -25,7 +25,11 @@ public interface SalesEventContextQueryPort {
         }
     }
 
-    record SalesOrderSnapshot(UUID id, UUID clientAccountId, long version) {
+    record SalesOrderSnapshot(UUID id, UUID clientAccountId, long version, UUID commercialCommitmentId) {
+        public SalesOrderSnapshot(UUID id, UUID clientAccountId, long version) {
+            this(id, clientAccountId, version, null);
+        }
+
         public SalesOrderSnapshot {
             if (id == null || clientAccountId == null) throw new IllegalArgumentException("Sales snapshot ids are required");
             if (version < 0) throw new IllegalArgumentException("Sales snapshot version cannot be negative");

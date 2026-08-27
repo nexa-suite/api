@@ -298,8 +298,12 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
         if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
         if ("CANCELLED".equals(delivery.status())) throw error("DELIVERY_NOT_ACTIVE");
+        if (request.lotId() == null) throw error("TEMPERATURE_LOT_REQUIRED");
+        if (!coldChain.lotIsAllocatedToDelivery(request.tenantId(), request.workspaceId(), request.deliveryId(), request.lotId())) {
+            throw error("TEMPERATURE_LOT_LINEAGE_INVALID");
+        }
         String unit = request.unit() == null || request.unit().isBlank() ? "CELSIUS" : request.unit().trim().toUpperCase(java.util.Locale.ROOT);
-        String status = classify(request.tenantId(), request.workspaceId(), request.deliveryId(), request.temperatureCelsius(), unit);
+        String status = classify(request.tenantId(), request.workspaceId(), request.deliveryId(), request.lotId(), request.temperatureCelsius(), unit);
         Instant recordedAt = request.recordedAt() == null ? clock.instant() : request.recordedAt();
         UUID evidenceId = UUID.randomUUID();
         jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,lot_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -405,9 +409,9 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                 tenantId, workspaceId, evidenceId).stream().findFirst().orElseThrow(() -> error("TEMPERATURE_EVIDENCE_NOT_FOUND"));
     }
 
-    private String classify(UUID tenantId, UUID workspaceId, UUID deliveryId, BigDecimal value, String unit) {
+    private String classify(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID lotId, BigDecimal value, String unit) {
         if (!"CELSIUS".equals(unit)) return "UNKNOWN";
-        return coldChain.rangeForDelivery(tenantId, workspaceId, deliveryId)
+        return coldChain.rangeForDeliveryAndLot(tenantId, workspaceId, deliveryId, lotId)
                 .map(range -> value.compareTo(range.minimumCelsius()) >= 0 && value.compareTo(range.maximumCelsius()) <= 0
                         ? "WITHIN_RANGE" : "OUT_OF_RANGE")
                 .orElse("UNKNOWN");

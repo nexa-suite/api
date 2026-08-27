@@ -27,6 +27,9 @@ Important boundaries:
 - BC-07 is not a Payments subdomain.  Its public contracts live under
   `creditreceivables.application.publicapi`; BC-08 may call those contracts
   without importing BC-07 aggregates.
+- BC-09 exposes `BusinessEvidenceQuery` for immutable evidence availability and
+  `BusinessDocumentCommands` for durable payment-receipt generation requests;
+  BC-08 does not write document tables directly.
 - BC-05 owns physical stock responsibility.  BC-06 owns execution and
   delivery outcome.  `Inventory Backing` is not `Physical Allocation`.
 - BC-11 is not Security Audit.  Security events remain in the BC-01 IAM

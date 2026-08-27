@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -53,6 +54,126 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
         assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_backing where commercial_commitment_id=? and status='BACKED'", Integer.class, UUID.fromString(commitmentId))).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where event_type='SALES_ORDER_CONFIRMED' and aggregate_id=?", Integer.class, order)).isEqualTo(1);
         assertThat(json(replay).get("id").asText()).isEqualTo(orderId);
+    }
+
+    @Test
+    void canonicalFulfillmentCarriesPhysicalLotLineageIntoDeliveryTemperatureEvidence() throws Exception {
+        ensureCommercialInventory();
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        MvcResult order = directOrder(sales, "canonical-fulfillment-" + uuid(), directBody("IMMEDIATE", "2"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andReturn();
+        String orderId = json(order).get("id").asText();
+
+        MvcResult allocated = mockMvc.perform(post("/api/v1/sales-orders/" + orderId + "/fulfillments")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", order.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "canonical-start-" + uuid()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("ALLOCATED"))
+                .andReturn();
+        String fulfillmentId = json(allocated).get("id").asText();
+        String fulfillmentEtag = allocated.getResponse().getHeader("ETag");
+        String fulfillmentLineId = json(allocated).get("lines").get(0).get("id").asText();
+        String skuId = json(allocated).get("lines").get(0).get("skuId").asText();
+        UUID lotId = jdbc.queryForObject(
+                "select l.lot_id from warehouse.physical_allocation_line l "
+                        + "join logistics.fulfillment f on f.tenant_id=l.tenant_id and f.workspace_id=l.workspace_id "
+                        + "and f.physical_allocation_id=l.physical_allocation_id where f.id=?",
+                UUID.class, UUID.fromString(fulfillmentId));
+        assertThat(lotId).isNotNull();
+
+        MvcResult picking = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/picking-starts")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-picking-start-" + uuid()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PICKING"))
+                .andReturn();
+        fulfillmentEtag = picking.getResponse().getHeader("ETag");
+
+        MvcResult picked = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/picking-confirmations")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-picking-confirm-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[{\"fulfillmentLineId\":\"" + fulfillmentLineId
+                                + "\",\"skuId\":\"" + skuId + "\",\"quantity\":2,\"unit\":\"UNIT\"}] }"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PICKED"))
+                .andReturn();
+        fulfillmentEtag = picked.getResponse().getHeader("ETag");
+
+        MvcResult packed = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/packing")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-pack-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        fulfillmentEtag = packed.getResponse().getHeader("ETag");
+        MvcResult staged = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/staging")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-stage-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        fulfillmentEtag = staged.getResponse().getHeader("ETag");
+        MvcResult ready = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/ready-for-dispatch")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-ready-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        fulfillmentEtag = ready.getResponse().getHeader("ETag");
+
+        MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/dispatches")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-dispatch-" + uuid()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("HANDED_OVER"))
+                .andReturn();
+        String deliveryId = json(dispatched).get("deliveryId").asText();
+        assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment where sales_order_id=?", Integer.class,
+                UUID.fromString(orderId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery where fulfillment_id=?", Integer.class,
+                UUID.fromString(fulfillmentId))).isEqualTo(1);
+
+        MvcResult delivery = mockMvc.perform(get("/api/v1/deliveries/" + deliveryId)
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk())
+                .andReturn();
+        MvcResult inTransit = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", delivery.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "canonical-transit-" + uuid()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_TRANSIT"))
+                .andReturn();
+
+        MvcResult evidence = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/temperature-evidence")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", inTransit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "canonical-temperature-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lotId\":\"" + lotId + "\",\"temperatureCelsius\":21,\"unit\":\"CELSIUS\",\"source\":\"MANUAL\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lotId").value(lotId.toString()))
+                .andReturn();
+
+        UUID evidenceId = UUID.fromString(json(evidence).get("id").asText());
+        String expectedTemperatureStatus = jdbc.queryForObject(
+                "select case when z.temperature_min is null or z.temperature_max is null then 'UNKNOWN' "
+                        + "when ? between z.temperature_min and z.temperature_max then 'WITHIN_RANGE' "
+                        + "else 'OUT_OF_RANGE' end from logistics.fulfillment f "
+                        + "join warehouse.physical_allocation_line l on l.tenant_id=f.tenant_id and l.workspace_id=f.workspace_id "
+                        + "and l.physical_allocation_id=f.physical_allocation_id and l.lot_id=? "
+                        + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
+                        + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id where f.id=?",
+                String.class, BigDecimal.valueOf(21), lotId, UUID.fromString(fulfillmentId));
+        assertThat(json(evidence).get("status").asText()).isEqualTo(expectedTemperatureStatus);
+        assertThat(jdbc.queryForObject("select lot_id from logistics.temperature_evidence where id=?", UUID.class, evidenceId))
+                .isEqualTo(lotId);
     }
 
     @Test

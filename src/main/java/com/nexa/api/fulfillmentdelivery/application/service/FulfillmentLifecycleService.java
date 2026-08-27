@@ -428,6 +428,7 @@ public class FulfillmentLifecycleService {
         requireKey(idempotencyKey);
         requireVersion(expectedVersion);
         if (command == null || command.temperatureCelsius() == null) throw invalid("TEMPERATURE_REQUIRED");
+        if (command.lotId() == null) throw invalid("TEMPERATURE_LOT_REQUIRED");
         FulfillmentModels.TemperatureView result = deliveries.recordTemperature(new DeliveryPersistencePort.TemperatureRequest(
                 tenant(context), workspace(context), deliveryId, command.lotId(), actor(context), idempotencyKey,
                 hash("temperature-v1|" + deliveryId + "|" + expectedVersion + "|" + temperatureCanonical(command)),
@@ -542,7 +543,7 @@ public class FulfillmentLifecycleService {
     }
 
     private static String operationKey(String prefix, String input) {
-        return prefix + hash(input).substring(0, 120);
+        return prefix + hash(input);
     }
 
     private static String hash(String value) {

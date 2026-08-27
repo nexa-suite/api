@@ -19,6 +19,7 @@ import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
+import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestId;
@@ -40,6 +41,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -61,19 +65,21 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	private final CustomerAccountQuery customers;
 	private final PaymentConfirmationQuery paymentConfirmations;
 	private final ReceivableCommands receivables;
+	private final FinancialAdjustmentCommands financialAdjustments;
 	private final Clock clock;
 	private final ObjectMapper objectMapper;
 
 	@org.springframework.beans.factory.annotation.Autowired
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
 			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
-			ReceivableCommands receivables, Clock clock, ObjectMapper objectMapper) {
+			ReceivableCommands receivables, FinancialAdjustmentCommands financialAdjustments, Clock clock, ObjectMapper objectMapper) {
 		this.jdbc = jdbc;
 		this.changeFeed = changeFeed;
 		this.commitments = commitments;
 		this.customers = customers;
 		this.paymentConfirmations = paymentConfirmations;
 		this.receivables = receivables;
+		this.financialAdjustments = financialAdjustments;
 		this.clock = clock == null ? Clock.systemUTC() : clock;
 		this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
 	}
@@ -81,7 +87,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
 			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
 			ReceivableCommands receivables, Clock clock) {
-		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, receivables, clock, new ObjectMapper());
+		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, receivables, null, clock, new ObjectMapper());
 	}
 
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
@@ -106,16 +112,18 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	}
 
 	@Override
-	public SalesOrderView saveTransition(SalesOrder aggregate, String action, String reason, String actorMembershipId,
-			long expectedVersion, long nowEpochMillis) {
+    public SalesOrderView saveTransition(SalesOrder aggregate, String action, String reason, String actorMembershipId,
+            String actorIdentityId, long expectedVersion, long nowEpochMillis) {
 		if (aggregate.version() != expectedVersion) throw new SalesConcurrencyConflictException();
 		UUID orderId = uuid(aggregate.id().value()), tenant = aggregate.tenantId().value(), workspace = aggregate.workspaceId().value(), actor = uuid(actorMembershipId);
+		String previousStatus = jdbc.queryForObject("select status from sales.sales_order where tenant_id=? and workspace_id=? and id=? for update",
+				String.class, tenant, workspace, orderId);
 		if ("confirm".equals(action) && aggregate.paymentOption() == PaymentOption.PREPAID
 				&& (paymentConfirmations == null || !paymentConfirmations.isConfirmed(tenant, workspace, orderId))) {
 			throw new CommercialBusinessException("PAYMENT_REQUIRED");
 		}
-		int changed = jdbc.update("update sales.sales_order set status=?,rejection_reason=?,confirmed_at=?,rejected_at=?,cancelled_at=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='PENDING' and version=?",
-				aggregate.status().name(), aggregate.rejectionReason(), aggregate.confirmedAt() == null ? null : timestamp(aggregate.confirmedAt()), aggregate.rejectedAt() == null ? null : timestamp(aggregate.rejectedAt()), aggregate.cancelledAt() == null ? null : timestamp(aggregate.cancelledAt()), timestamp(nowEpochMillis), tenant, workspace, orderId, expectedVersion);
+		int changed = jdbc.update("update sales.sales_order set status=?,rejection_reason=?,confirmed_at=?,rejected_at=?,cancelled_at=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status=? and version=?",
+				aggregate.status().name(), aggregate.rejectionReason(), aggregate.confirmedAt() == null ? null : timestamp(aggregate.confirmedAt()), aggregate.rejectedAt() == null ? null : timestamp(aggregate.rejectedAt()), aggregate.cancelledAt() == null ? null : timestamp(aggregate.cancelledAt()), timestamp(nowEpochMillis), tenant, workspace, orderId, previousStatus, expectedVersion);
 		if (changed != 1) throw new SalesConcurrencyConflictException();
 		if ("confirm".equals(action) && aggregate.paymentOption() == PaymentOption.CREDIT_LINE && receivables != null) {
 			receivables.postForSalesOrder(tenant, workspace, orderId, uuid(aggregate.clientAccountId().value()),
@@ -132,8 +140,22 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 				commitments.releaseForSalesOrder(tenant, workspace, orderId, "SALES_ORDER_" + aggregate.status().name());
 			}
 		}
-		jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,from_status,to_status,reason,occurred_at) values (?,?,?,?,?,'ORDER_STATUS_CHANGED','PENDING',?,?,?)",
-				UUID.randomUUID(), orderId, tenant, workspace, actor, aggregate.status().name(), reason, timestamp(nowEpochMillis));
+		if ("cancel".equals(action) && paymentConfirmations != null
+				&& paymentConfirmations.hasSuccessfulPayment(tenant, workspace, orderId)) {
+			if (financialAdjustments == null) throw new IllegalStateException("Financial adjustment boundary is not configured");
+            String adjustmentReason = reason == null || reason.isBlank()
+                    ? "Sales order cancelled after successful payment" : reason.trim();
+            String idempotencyKey = "sales-order-cancellation-" + orderId;
+            financialAdjustments.post(new FinancialAdjustmentCommands.Request(
+                    tenant, workspace, actor, uuid(actorIdentityId), null, orderId, null, orderId,
+					"DECREASE", "DECREASE", aggregate.totalSnapshot(), aggregate.currency(), adjustmentReason,
+					"SALES_ORDER_CANCELLATION", idempotencyKey,
+					sha256(idempotencyKey + "|" + aggregate.totalSnapshot().stripTrailingZeros().toPlainString()
+							+ "|" + aggregate.currency() + "|" + adjustmentReason), "CUSTOMER_CREDIT", null,
+					Instant.ofEpochMilli(nowEpochMillis)));
+		}
+		jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,from_status,to_status,reason,occurred_at) values (?,?,?,?,?,'ORDER_STATUS_CHANGED',?,?,?,?)",
+				UUID.randomUUID(), orderId, tenant, workspace, actor, previousStatus, aggregate.status().name(), reason, timestamp(nowEpochMillis));
 		String eventType = switch (action) {
 			case "confirm" -> "sales.sales-order.confirmed";
 			case "reject" -> "sales.sales-order.rejected";
@@ -384,4 +406,12 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	private static UUID uuid(String value) { return UUID.fromString(value); }
 	private static Timestamp timestamp(long epoch) { return Timestamp.from(Instant.ofEpochMilli(epoch)); }
 	private static Timestamp timestamp(Instant instant) { return Timestamp.from(instant); }
+	private static String sha256(String value) {
+		try {
+			return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+					.digest(value.getBytes(StandardCharsets.UTF_8)));
+		} catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 is required", exception);
+		}
+	}
 }

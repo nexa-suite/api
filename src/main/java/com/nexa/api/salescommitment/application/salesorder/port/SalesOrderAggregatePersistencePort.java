@@ -10,5 +10,6 @@ public interface SalesOrderAggregatePersistencePort {
     Optional<SalesOrder> findForUpdate(String tenantId, String workspaceId, String salesOrderId);
 
     SalesOrderView saveTransition(SalesOrder aggregate, String action, String reason,
-                                  String actorMembershipId, long expectedVersion, long nowEpochMillis);
+                                  String actorMembershipId, String actorIdentityId,
+                                  long expectedVersion, long nowEpochMillis);
 }

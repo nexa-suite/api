@@ -31,4 +31,13 @@ class SalesOrderTests {
 		order.reject();
 		assertThatThrownBy(() -> order.confirm(Instant.now())).isInstanceOf(SalesOrderInvariantViolation.class);
 	}
+	@Test void confirmedOrderCanBeCancelledForPostPaymentSettlement() {
+		var line = new SalesOrderLine("CAT-001", "Frozen item", BigDecimal.ONE, BigDecimal.TEN, "PEN");
+		var snapshot = new ApprovedPurchaseRequestSnapshot(new TenantId(UUID.randomUUID()), new WorkspaceId(UUID.randomUUID()), new CustomerAccountId("CLI-001"), new PurchaseRequestId("PR-001"), List.of(line), BigDecimal.TEN);
+		var order = SalesOrder.fromApprovedSnapshot(snapshot, new SalesOrderId("SO-001"), new SalesOrderNumber("SO-2026-000003"), MembershipId.random(), Instant.EPOCH);
+		order.confirm(Instant.EPOCH.plusSeconds(1));
+		order.cancel(Instant.EPOCH.plusSeconds(2));
+		assertThat(order.status()).isEqualTo(SalesOrderStatus.CANCELLED);
+		assertThat(order.cancelledAt()).isEqualTo(Instant.EPOCH.plusSeconds(2));
+	}
 }

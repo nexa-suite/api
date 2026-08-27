@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Collections;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
@@ -71,6 +73,39 @@ class ArchitectureConstitutionTests {
     }
 
     @Test
+    void committedCanonicalMapIsMachineCheckableAndRejectsObsoleteTopLevelBoundaries() throws IOException {
+        Path mapPath = Path.of("docs/architecture/bounded-context-module-map.md");
+        Pattern row = Pattern.compile("^\\| (BC-\\d{2} .+?) \\| `([a-z]+)`.*\\|.*$");
+        Map<String, String> mappedRoots = Files.readAllLines(mapPath).stream()
+                .map(String::trim)
+                .map(row::matcher)
+                .filter(Matcher::matches)
+                .collect(java.util.stream.Collectors.toMap(match -> match.group(1), match -> match.group(2),
+                        (left, right) -> { throw new AssertionError("duplicate canonical bounded-context row"); },
+                        LinkedHashMap::new));
+
+        Map<String, String> expected = Map.ofEntries(
+                Map.entry("BC-01 Tenant & Access Governance", "tenantaccessgovernance"),
+                Map.entry("BC-02 Customer & Buyer Relationships", "customerbuyerrelationships"),
+                Map.entry("BC-03 Catalog & Commercial Policy", "catalogcommercialpolicy"),
+                Map.entry("BC-04 Sales Commitment", "salescommitment"),
+                Map.entry("BC-05 Inventory Availability", "inventoryavailability"),
+                Map.entry("BC-06 Fulfillment & Delivery", "fulfillmentdelivery"),
+                Map.entry("BC-07 Credit & Receivables", "creditreceivables"),
+                Map.entry("BC-08 Payments", "payments"),
+                Map.entry("BC-09 Business Documents", "businessdocuments"),
+                Map.entry("BC-10 Notifications", "notifications"),
+                Map.entry("BC-11 Business Traceability", "businesstraceability"));
+        assertThat(mappedRoots).containsExactlyInAnyOrderEntriesOf(expected);
+        expected.values().forEach(root -> assertThat(Files.isDirectory(Path.of("src/main/java/com/nexa/api", root)))
+                .as("canonical source root %s", root).isTrue());
+
+        Pattern obsoleteTopLevelPackage = Pattern.compile("package com\\.nexa\\.api\\.(logistics|invoicing|warehouse|audit)(\\.|;)");
+        assertThat(obsoleteTopLevelPackage.matcher(sourcesUnder(Path.of("src/main/java/com/nexa/api"))).find())
+                .as("obsolete ambiguous bounded-context package root reintroduced").isFalse();
+    }
+
+    @Test
     void customerRelationshipAuthorityDoesNotLeakThroughPersistencePorts() {
         assertThat(CLASSES.stream()
                 .filter(type -> type.getSimpleName().equals("ClientAccountPersistenceAdapter")
@@ -97,6 +132,18 @@ class ArchitectureConstitutionTests {
         noClasses().that().resideInAPackage("com.nexa.api.salescommitment..")
                 .should().dependOnClassesThat().resideInAPackage("com.nexa.api.customerbuyerrelationships.presentation..")
                 .check(CLASSES);
+    }
+
+    @Test
+    void paymentsDelegatesCreditReceivableWritesToBc07Contracts() throws IOException {
+        String paymentSources = sourcesUnder(Path.of("src/main/java/com/nexa/api/payments"));
+        assertThat(paymentSources).doesNotContain("insert into payments.receivable", "update payments.credit_account",
+                "insert into payments.credit_account", "update payments.credit_reservation",
+                "insert into payments.credit_reservation", "insert into business_documents.",
+                "update business_documents.", "delete from business_documents.",
+                "from sales.sales_order", "from sales.client_account_membership");
+        assertThat(sourcesUnder(Path.of("src/main/java/com/nexa/api/creditreceivables")))
+                .doesNotContain("stripe.", "StripePaymentProvider", "payment_intent");
     }
 
     @Test

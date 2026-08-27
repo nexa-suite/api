@@ -253,16 +253,20 @@ public final class CanonicalOutboxEventProcessor {
 
     private void reserveConfirmed(EventRow event, Map<String, Object> payload) {
         UUID orderId = uuid(payload.getOrDefault("salesOrderId", event.aggregateId()));
+        // v0.15 canonical orders reserve through BC-05 commercial backing and
+        // physical allocation. The legacy outbox reservation must not create a
+        // second reservation for the same Sales Order.
+        SalesEventContextQueryPort.SalesOrderSnapshot snapshot = salesContext
+                .findSalesOrder(event.tenantId(), event.workspaceId(), orderId)
+                .orElseThrow(() -> new IllegalStateException("Sales order context is unavailable"));
+        if (snapshot.commercialCommitmentId() != null) return;
         // A confirmed order may already have been reserved and consumed by a
         // synchronous warehouse/logistics operation while this outbox event
         // was waiting. Any reservation for the order therefore makes this
         // event replay-safe; checking only active rows could create a second
         // reservation after route start.
         if (warehouseContext.findReservationForSalesOrder(event.tenantId(), event.workspaceId(), orderId).isPresent()) return;
-        long version = number(payload.get("salesOrderVersion"), salesContext
-                .findSalesOrder(event.tenantId(), event.workspaceId(), orderId)
-                .orElseThrow(() -> new IllegalStateException("Sales order context is unavailable"))
-                .version());
+        long version = number(payload.get("salesOrderVersion"), snapshot.version());
         warehouse.reserve(actor(event), orderId.toString(), version, "outbox-reservation-" + event.eventId(), event.correlationId());
     }
 

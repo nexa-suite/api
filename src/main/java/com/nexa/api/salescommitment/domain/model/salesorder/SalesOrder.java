@@ -78,7 +78,13 @@ public final class SalesOrder {
 	/** Compatibility helper; HTTP/application commands always provide an explicit reason. */
 	public void reject() { reject("Rejected by commercial review"); }
 	public void cancel() { cancel(Instant.now()); }
-	public void cancel(Instant at) { requirePending(); cancelledAt = Objects.requireNonNull(at); status = SalesOrderStatus.CANCELLED; }
+	public void cancel(Instant at) {
+		if (status != SalesOrderStatus.PENDING && status != SalesOrderStatus.CONFIRMED) {
+			throw new SalesOrderInvariantViolation("Sales order cancellation is allowed only from PENDING or CONFIRMED");
+		}
+		cancelledAt = Objects.requireNonNull(at);
+		status = SalesOrderStatus.CANCELLED;
+	}
 
 	public SalesOrderId id() { return id; }
 	public SalesOrderNumber number() { return number; }

@@ -8,5 +8,9 @@ import java.util.UUID;
 public interface ColdChainPolicyQuery {
     Optional<Range> rangeForDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId);
 
+    Optional<Range> rangeForDeliveryAndLot(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID lotId);
+
+    boolean lotIsAllocatedToDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID lotId);
+
     record Range(BigDecimal minimumCelsius, BigDecimal maximumCelsius, String unit) { }
 }

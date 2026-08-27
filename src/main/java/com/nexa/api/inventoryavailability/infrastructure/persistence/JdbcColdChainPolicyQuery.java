@@ -18,8 +18,38 @@ public class JdbcColdChainPolicyQuery implements ColdChainPolicyQuery {
 
     @Override
     public Optional<Range> rangeForDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId) {
-        return jdbc.query("select z.temperature_min,z.temperature_max,'CELSIUS' from warehouse.physical_allocation a join warehouse.physical_allocation_line l on l.tenant_id=a.tenant_id and l.workspace_id=a.workspace_id and l.physical_allocation_id=a.id join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id join logistics.fulfillment f on f.tenant_id=a.tenant_id and f.workspace_id=a.workspace_id and f.physical_allocation_id=a.id join logistics.delivery d on d.tenant_id=f.tenant_id and d.workspace_id=f.workspace_id and d.fulfillment_id=f.id where a.tenant_id=? and a.workspace_id=? and d.id=? and z.temperature_min is not null and z.temperature_max is not null order by l.id limit 1",
-                        (rs, row) -> new Range(rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getString(3)),
-                        tenantId, workspaceId, deliveryId).stream().findFirst();
+        var ranges = jdbc.query("select z.temperature_min,z.temperature_max,'CELSIUS' from warehouse.physical_allocation a "
+                        + "join warehouse.physical_allocation_line l on l.tenant_id=a.tenant_id and l.workspace_id=a.workspace_id and l.physical_allocation_id=a.id "
+                        + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
+                        + "join logistics.fulfillment f on f.tenant_id=a.tenant_id and f.workspace_id=a.workspace_id and f.physical_allocation_id=a.id "
+                        + "join logistics.delivery d on d.tenant_id=f.tenant_id and d.workspace_id=f.workspace_id and d.fulfillment_id=f.id "
+                        + "where a.tenant_id=? and a.workspace_id=? and d.id=? and z.temperature_min is not null and z.temperature_max is not null "
+                        + "order by l.id",
+                (rs, row) -> new Range(rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getString(3)),
+                tenantId, workspaceId, deliveryId);
+        if (ranges.isEmpty() || ranges.stream().anyMatch(range -> !range.equals(ranges.get(0)))) return Optional.empty();
+        return Optional.of(ranges.get(0));
+    }
+
+    @Override
+    public Optional<Range> rangeForDeliveryAndLot(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID lotId) {
+        return jdbc.query("select z.temperature_min,z.temperature_max,'CELSIUS' from logistics.delivery d "
+                        + "join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id "
+                        + "join warehouse.physical_allocation a on a.tenant_id=f.tenant_id and a.workspace_id=f.workspace_id and a.id=f.physical_allocation_id "
+                        + "join warehouse.physical_allocation_line l on l.tenant_id=a.tenant_id and l.workspace_id=a.workspace_id and l.physical_allocation_id=a.id and l.lot_id=? "
+                        + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
+                        + "where d.tenant_id=? and d.workspace_id=? and d.id=? and z.temperature_min is not null and z.temperature_max is not null",
+                (rs, row) -> new Range(rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getString(3)),
+                lotId, tenantId, workspaceId, deliveryId).stream().findFirst();
+    }
+
+    @Override
+    public boolean lotIsAllocatedToDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID lotId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.delivery d "
+                        + "join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id "
+                        + "join warehouse.physical_allocation a on a.tenant_id=f.tenant_id and a.workspace_id=f.workspace_id and a.id=f.physical_allocation_id "
+                        + "join warehouse.physical_allocation_line l on l.tenant_id=a.tenant_id and l.workspace_id=a.workspace_id and l.physical_allocation_id=a.id and l.lot_id=? "
+                        + "where d.tenant_id=? and d.workspace_id=? and d.id=?)", Boolean.class,
+                lotId, tenantId, workspaceId, deliveryId));
     }
 }

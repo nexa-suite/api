@@ -68,6 +68,10 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         OrderData order = loadOrder(context, uuid(orderId), true);
         IdempotencyRecord afterLock = idempotent(context, "reservation", key);
         if (afterLock != null) { requireSamePayload(afterLock, hash); return loadReservation(context, uuid(afterLock.resourceId()), false); }
+        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.fulfillment where tenant_id=? and workspace_id=? and sales_order_id=?)",
+                Boolean.class, tenant(context), workspace(context), order.id()))) {
+            throw error("CANONICAL_FULFILLMENT_ALREADY_EXISTS", false);
+        }
         if (!order.status().equals("CONFIRMED")) throw error("FULFILLMENT_CANDIDATE_NOT_ELIGIBLE", false);
         if (order.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
         UUID existing = jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and sales_order_id=? and status in ('PENDING','RESERVED') order by created_at,id limit 1 for update",

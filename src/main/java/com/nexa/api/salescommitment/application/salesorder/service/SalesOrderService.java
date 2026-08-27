@@ -125,7 +125,8 @@ public class SalesOrderService implements SalesOrderUseCase {
 			case "reject" -> aggregate.reject(reason, at);
 			case "cancel" -> aggregate.cancel(at);
 		}
-		SalesOrderView result = aggregatePersistence.saveTransition(aggregate, normalized, reason, context.membershipId().toString(), expectedVersion, at.toEpochMilli());
+        SalesOrderView result = aggregatePersistence.saveTransition(aggregate, normalized, reason,
+                context.membershipId().toString(), context.userId().toString(), expectedVersion, at.toEpochMilli());
 		if (requestHash != null) {
 			idempotency.save(scope(context), workspace(context), context.membershipId().toString(), "sales-order-transition", idempotencyKey,
 						result.id(), result.version(), java.util.UUID.randomUUID(), at.toEpochMilli(), requestHash, serialize(result));

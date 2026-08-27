@@ -1,6 +1,7 @@
 package com.nexa.api.businessdocuments.infrastructure.persistence;
 
 import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentCommands;
 import com.nexa.api.businessdocuments.application.model.BusinessDocumentModels;
 import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections;
 import com.nexa.api.businessdocuments.application.port.ContentScannerPort;
@@ -43,7 +44,7 @@ import java.util.UUID;
 /** Persistence adapter for business documents, storage boundary and bounded generation worker. */
 @Profile("!test")
 @Repository
-public class BusinessDocumentService implements BusinessDocumentPort {
+public class BusinessDocumentService implements BusinessDocumentPort, BusinessDocumentCommands {
     private static final Logger LOGGER = LoggerFactory.getLogger(BusinessDocumentService.class);
     private static final String WORKER_LEASE = "current_timestamp + interval '10 minutes'";
     private final JdbcTemplate jdbc;
@@ -85,6 +86,42 @@ public class BusinessDocumentService implements BusinessDocumentPort {
         jdbc.update("insert into business_documents.document_generation_request (id,tenant_id,workspace_id,requested_by_membership_id,document_id,subject_type,subject_id,document_type,format,status,idempotency_key,request_hash,requested_at) values (?,?,?,?,?,?,?,?,?,'PENDING',?,?,?)", requestId, tenant(context), workspace(context), context.membershipId().value(), documentId, subject.name(), subjectId, type.name(), output.name(), idempotencyKey, requestHash, Timestamp.from(now));
         outbox(context, "BUSINESS_DOCUMENT_GENERATION_REQUESTED", documentId, Map.of("documentId", documentId, "requestId", requestId, "subjectType", subject.name(), "subjectId", subjectId, "documentType", type.name(), "format", output.name()));
         return jdbc.query("select r.id,r.document_id,r.subject_type,r.subject_id,r.document_type,r.format,r.status,r.requested_at,r.completed_at from business_documents.document_generation_request r where r.id=?", (rs, n) -> requestView(rs), requestId).get(0);
+    }
+
+    @Override
+    @Transactional
+    public void enqueuePaymentReceipt(UUID tenantId, UUID workspaceId, UUID paymentId,
+                                      UUID clientAccountId, UUID requestedByMembershipId,
+                                      String eventKey, Instant now) {
+        if (tenantId == null || workspaceId == null || paymentId == null || clientAccountId == null
+                || requestedByMembershipId == null || eventKey == null || eventKey.isBlank()) {
+            throw new IllegalArgumentException("Payment receipt document request is incomplete");
+        }
+        Instant occurredAt = now == null ? Instant.now() : now;
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (rs, n) -> rs.getObject(1),
+                tenantId + "|" + workspaceId + "|payment-receipt-document|" + paymentId);
+        UUID documentId = UUID.randomUUID();
+        UUID requestId = UUID.randomUUID();
+        Integer version = jdbc.queryForObject("select coalesce(max(version),0)+1 from business_documents.business_document "
+                        + "where tenant_id=? and workspace_id=? and subject_type='PAYMENT' and subject_id=? "
+                        + "and document_type='PAYMENT_RECEIPT' and format='PDF'",
+                Integer.class, tenantId, workspaceId, paymentId);
+        int inserted = jdbc.update("insert into business_documents.business_document "
+                        + "(id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,format,created_at,updated_at) "
+                        + "values (?,?,?,?, 'PAYMENT',?,'PAYMENT_RECEIPT',?,'REQUESTED','PDF',?,?) on conflict do nothing",
+                documentId, tenantId, workspaceId, clientAccountId, paymentId, version,
+                Timestamp.from(occurredAt), Timestamp.from(occurredAt));
+        if (inserted == 0) return;
+        jdbc.update("insert into business_documents.document_generation_request "
+                        + "(id,tenant_id,workspace_id,requested_by_membership_id,document_id,subject_type,subject_id,document_type,format,status,idempotency_key,request_hash,requested_at) "
+                        + "values (?,?,?,?,?,?,?,?,?,'PENDING',?,?,?) on conflict do nothing",
+                requestId, tenantId, workspaceId, requestedByMembershipId, documentId, "PAYMENT", paymentId,
+                "PAYMENT_RECEIPT", "PDF", "payment-receipt-" + paymentId, sha256(eventKey), Timestamp.from(occurredAt));
+        CanonicalOutbox.append(jdbc, "BUSINESS_DOCUMENT_GENERATION_REQUESTED", "BusinessDocument", documentId,
+                tenantId, workspaceId, occurredAt, "payment-receipt-" + paymentId, null, "1.0",
+                "payment-receipt-" + paymentId,
+                Map.of("documentId", documentId, "requestId", requestId, "subjectType", "PAYMENT",
+                        "subjectId", paymentId, "documentType", "PAYMENT_RECEIPT", "format", "PDF"));
     }
 
     @Transactional(readOnly = true)
