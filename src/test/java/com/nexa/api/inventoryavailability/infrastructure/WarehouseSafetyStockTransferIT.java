@@ -5,6 +5,7 @@ import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -19,6 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
 
     /** The checkout contains a final, transactional WIP adapter; replace only that unrelated port in this test context. */

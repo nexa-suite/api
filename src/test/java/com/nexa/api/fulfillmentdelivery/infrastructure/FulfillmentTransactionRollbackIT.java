@@ -5,6 +5,7 @@ import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -19,6 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Controlled transaction failure seam after physical allocation planning. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class FulfillmentTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
 
     @MockitoBean
