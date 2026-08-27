@@ -38,7 +38,9 @@ public class OpenApiConfiguration {
 				.info(new Info().title("Nexa API").version(version).description(
 						"Local API contract for secured identity, tenant/workspace administration, Catalog reads and "
 								+ "Sales Client Accounts and Purchase Requests. Bearer authentication revalidates the "
-								+ "persistent session; refresh and sign-out require the surface refresh cookie and Origin policy. "
+								+ "persistent session; browser refresh and sign-out use the surface refresh cookie and Origin policy, "
+								+ "while the explicit NATIVE transport uses a rotated opaque refresh-token header without weakening "
+								+ "the browser Origin boundary. "
 								+ "Sales Order conversion and lifecycle endpoints plus the tenant-scoped persisted change feed are included. "
 						+ "Warehouse and Logistics HTTP workflows are included with FEFO, dispatch lifecycle and Proof of Delivery evidence. "
 						+ "Business Documents, private object storage, invoice drafts, receivables and Stripe-compatible payment intents are included."))
@@ -46,8 +48,11 @@ public class OpenApiConfiguration {
 						.addSecuritySchemes("bearerAuth", new SecurityScheme().type(SecurityScheme.Type.HTTP)
 								.scheme("bearer").bearerFormat("JWT").description("RS256 access token"))
 						.addSecuritySchemes("refreshCookie", new SecurityScheme().type(SecurityScheme.Type.APIKEY)
-								.in(SecurityScheme.In.COOKIE).name("NEXA_PLATFORM_REFRESH")
-								.description("HttpOnly SameSite=Strict refresh cookie; Portal uses NEXA_PORTAL_REFRESH")));
+							.in(SecurityScheme.In.COOKIE).name("NEXA_PLATFORM_REFRESH")
+							.description("HttpOnly SameSite=Strict refresh cookie; Portal uses NEXA_PORTAL_REFRESH"))
+						.addSecuritySchemes("nativeRefreshToken", new SecurityScheme().type(SecurityScheme.Type.APIKEY)
+							.in(SecurityScheme.In.HEADER).name("X-Nexa-Refresh-Token")
+							.description("Rotated opaque token for the explicit NATIVE transport; pair with X-Nexa-Client: NATIVE")));
 	}
 
 	@Bean

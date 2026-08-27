@@ -13,6 +13,8 @@ The application layer is token-format agnostic. JWT signing, opaque-token genera
 
 Refresh-token storage must make `SessionPort.rotateRefreshToken(...)` atomic and retain enough token-family metadata to distinguish a consumed token from an unknown token. It must not store clear refresh tokens in persistent storage; the presented value should be matched through an adapter-owned hash or equivalent protected lookup. Reuse is a family-level security event, not merely a failed login.
 
+The browser transport uses the surface-specific `HttpOnly; Secure; SameSite=Strict` refresh cookie and an allowed `Origin`. A native client may use the same BC-01 session model through the explicit `X-Nexa-Client: NATIVE` transport: it sends no `Origin`, receives the opaque rotated token in `X-Nexa-Refresh-Token`, and presents that header on the existing `/api/v1/authentication/refresh` route together with `X-Nexa-Surface`. The native path does not set a cookie, does not apply to workspace previews or password-reset routes, and keeps the same rotation, reuse detection, revocation and membership revalidation semantics. The refresh-token header is deliberately not part of browser CORS allowlisting.
+
 This task does not change the existing shared Spring Security filter chain or expose authentication routes. Runtime wiring, REST DTOs, JWT policy, tenant/workspace membership checks and database transactions require their own approved contract and validation.
 
 ## Consistency boundary
