@@ -20,11 +20,20 @@ class CookieOriginGuardFilterTests {
         assertRejected("/api/v1/auth/workspace-previews", "https://evil.example");
     }
 
-    @Test
-    void allowsConfiguredOriginAndLeavesBearerApiCommandsCompatible() throws Exception {
-        assertAllowed("/api/v1/authentication/refresh", ALLOWED_ORIGIN);
-        assertAllowed("/api/v1/purchase-requests", null);
-    }
+	@Test
+	void allowsConfiguredOriginAndLeavesBearerApiCommandsCompatible() throws Exception {
+		assertAllowed("/api/v1/authentication/refresh", ALLOWED_ORIGIN);
+		assertAllowed("/api/v1/purchase-requests", null);
+	}
+
+	@Test
+	void allowsNativeTransportOnlyOnSessionRoutesWithoutAnOrigin() throws Exception {
+		assertNativeAllowed("/api/v1/authentication/sign-in");
+		assertNativeAllowed("/api/v1/authentication/refresh");
+		assertNativeAllowed("/api/v1/authentication/sign-out");
+		assertNativeRejected("/api/v1/auth/workspace-previews");
+		assertNativeRejected("/api/v1/authentication/password-resets");
+	}
 
     private static void assertRejected(String path, String origin) throws Exception {
         MockHttpServletRequest request = request("POST", path, origin);
@@ -35,14 +44,34 @@ class CookieOriginGuardFilterTests {
         assertThat(chain.getRequest()).isNull();
     }
 
-    private static void assertAllowed(String path, String origin) throws Exception {
-        MockHttpServletRequest request = request("POST", path, origin);
+	private static void assertAllowed(String path, String origin) throws Exception {
+		MockHttpServletRequest request = request("POST", path, origin);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         filter().doFilter(request, response, chain);
         assertThat(response.getStatus()).isEqualTo(200);
-        assertThat(chain.getRequest()).isSameAs(request);
-    }
+		assertThat(chain.getRequest()).isSameAs(request);
+	}
+
+	private static void assertNativeAllowed(String path) throws Exception {
+		MockHttpServletRequest request = request("POST", path, null);
+		request.addHeader(CookieOriginGuardFilter.NATIVE_CLIENT_HEADER, "NATIVE");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		MockFilterChain chain = new MockFilterChain();
+		filter().doFilter(request, response, chain);
+		assertThat(response.getStatus()).isEqualTo(200);
+		assertThat(chain.getRequest()).isSameAs(request);
+	}
+
+	private static void assertNativeRejected(String path) throws Exception {
+		MockHttpServletRequest request = request("POST", path, null);
+		request.addHeader(CookieOriginGuardFilter.NATIVE_CLIENT_HEADER, "NATIVE");
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		MockFilterChain chain = new MockFilterChain();
+		filter().doFilter(request, response, chain);
+		assertThat(response.getStatus()).isEqualTo(403);
+		assertThat(chain.getRequest()).isNull();
+	}
 
     private static MockHttpServletRequest request(String method, String path, String origin) {
         MockHttpServletRequest request = new MockHttpServletRequest("api", path);

@@ -54,6 +54,8 @@ info:
     status: foundation
 
 nexa:
+  database:
+    require-least-privilege-runtime: ${NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME:true}
   security:
     issuer: ${NEXA_SECURITY_ISSUER:}
     audience: ${NEXA_SECURITY_AUDIENCE:}

@@ -1,7 +1,6 @@
 package com.nexa.api.businessdocuments.infrastructure.storage;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.mock.env.MockEnvironment;
 
@@ -15,10 +14,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 class S3CompatibleObjectStorageIntegrationTests {
     @Test
     void writesReadsAndDeletesAPrivateObjectThroughMinio() throws Exception {
-        Assumptions.assumeTrue(
-                !System.getProperty("nexa.object-storage.endpoint", "").isBlank(),
-                "MinIO endpoint is not configured for the optional object-storage integration test"
-        );
         MockEnvironment environment = new MockEnvironment()
                 .withProperty("nexa.object-storage.endpoint", required("nexa.object-storage.endpoint"))
                 .withProperty("nexa.object-storage.bucket", required("nexa.object-storage.bucket"))

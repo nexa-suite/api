@@ -1,6 +1,6 @@
 # AS-IS RLS scope classification
 
-Status: API v0.15.0 implementation registry; runtime certification remains a PostgreSQL gate. This is the current API schema registry. Blueprint TARGET table names are not substituted for the AS-IS Flyway inventory.
+Status: API v0.16.0 implementation registry; runtime certification remains a PostgreSQL gate. This is the current API schema registry. Blueprint TARGET table names are not substituted for the AS-IS Flyway inventory.
 
 The executable inventory is `ModernPostgresMigrationTests.assertTenantWorkspaceRls(...)` plus the schema/table assertions in `flywayCreatesOnlyTheModernIdentityAndTenantSchemasWithRequiredTables`. A table is not considered protected merely because a repository adds a tenant predicate.
 
@@ -55,4 +55,4 @@ No current API table is silently unclassified. Tables added by a future Flyway m
 
 ## Runtime proof
 
-`RlsRuntimeDatabaseIsolationIT` verifies missing scope, wrong tenant, wrong workspace, guessed foreign UUID, pooled-connection cleanup, and stale claim fencing with the least-privilege runtime login when PostgreSQL is available. `ModernPostgresMigrationTests` verifies the v0.15 forced-policy inventory, `USING`, `WITH CHECK`, lease columns, financial snapshots, and fresh PostgreSQL 18 construction. V91 temporarily removes `FORCE` only for its owner-controlled transactional compatibility backfill, then restores it before commit; this requires real PostgreSQL execution for certification.
+`RlsRuntimeDatabaseIsolationIT` verifies missing scope, wrong tenant, wrong workspace, guessed foreign UUID, pooled-connection cleanup, stale claim fencing, and non-owner/non-BYPASSRLS runtime identity when PostgreSQL is available. `ModernPostgresMigrationTests` verifies the v0.16 forced-policy inventory, `USING`, `WITH CHECK`, lease columns, financial snapshots, and fresh PostgreSQL 18 construction. V91 temporarily removes `FORCE` only for its owner-controlled transactional compatibility backfill, then restores it before commit; this requires real PostgreSQL execution for certification.

@@ -16,7 +16,7 @@
 
 ## Overview
 
-Spring Boot modular monolith. The API implements the eleven Blueprint business bounded contexts through canonical module roots. Legacy PostgreSQL schema names and released HTTP/Java names remain compatibility storage/contracts where required; they do not redefine ownership. The v0.15.0 wave completes the fulfillment, delivery-outcome and financial-adjustment foundations without turning Nexa into a generic ecommerce API.
+Spring Boot modular monolith. The API implements the eleven Blueprint business bounded contexts through canonical module roots. Legacy PostgreSQL schema names and released HTTP/Java names remain compatibility storage/contracts where required; they do not redefine ownership. The v0.16.0 wave closes the Backend V1 implementation boundary, hardens runtime isolation and exposes only the minimal client/native transport readiness required by the existing contracts.
 
 ## Related repositories
 
@@ -30,6 +30,7 @@ The organization profile owns the full public ecosystem map. This repository lin
 ## Implemented API Areas
 
 - Identity sessions, refresh rotation and membership verification.
+- Explicit browser-cookie and native-header refresh transports over the same BC-01 session lifecycle.
 - Tenant-scoped Catalog and pricing read contracts.
 - Client Accounts, Purchase Requests and Sales Orders.
 - Inventory Availability physical allocation with FEFO, safety-stock and lot controls.
@@ -86,6 +87,7 @@ The integration gate requires Docker/Testcontainers and the repository's configu
 
 - [OpenAPI instructions](./docs/openapi/README.md)
 - [Authentication contract](./docs/security/authentication.md)
+- [Runtime database role](./docs/security/runtime-database-role.md)
 - [Release notes](./docs/releases/)
 - [Canonical bounded contexts](./docs/architecture/bounded-context-module-map.md)
 - [Changelog](./CHANGELOG.md)

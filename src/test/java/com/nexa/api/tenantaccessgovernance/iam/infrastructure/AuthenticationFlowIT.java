@@ -86,6 +86,35 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk());
     }
 
+    @Test void nativeAuthenticationUsesExplicitHeaderTransportWithoutWeakeningBrowserOriginRules() throws Exception {
+        var login = mockMvc.perform(post("/api/v1/authentication/sign-in")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signInPayload()))
+                .andExpect(status().isOk())
+                .andReturn();
+        String refreshToken = login.getResponse().getHeader("X-Nexa-Refresh-Token");
+        org.assertj.core.api.Assertions.assertThat(refreshToken).isNotBlank();
+        org.assertj.core.api.Assertions.assertThat(login.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
+
+        var refresh = mockMvc.perform(post("/api/v1/authentication/refresh")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .header("X-Nexa-Surface", "PLATFORM")
+                        .header("X-Nexa-Refresh-Token", refreshToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        org.assertj.core.api.Assertions.assertThat(refresh.getResponse().getHeader("X-Nexa-Refresh-Token"))
+                .isNotBlank()
+                .isNotEqualTo(refreshToken);
+        org.assertj.core.api.Assertions.assertThat(refresh.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
+
+        mockMvc.perform(post("/api/v1/auth/workspace-previews")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workspaceSlug\":\"icisa-test\"}"))
+                .andExpect(status().isForbidden());
+    }
+
     @Test void signInSessionAndSignOutUseRealSessionLifecycle() throws Exception {
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isOk());

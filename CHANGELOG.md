@@ -3,6 +3,29 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.16.0] - 2026-08-27
+
+Backend V1 implementation closure and client/mobile technical readiness for
+the Nexa API. No new Product V1 scope or bounded context is introduced.
+
+### Added
+
+- Added an explicit native authentication transport over the existing BC-01 session lifecycle: `X-Nexa-Client: NATIVE` and rotated opaque `X-Nexa-Refresh-Token` headers, while preserving browser Origin and HttpOnly-cookie controls.
+- Added fail-fast runtime database-role validation for non-owner, non-superuser, non-`BYPASSRLS` application connections and separate Flyway credentials.
+- Added mandatory MinIO coverage to the integration CI gate and restricted the Compose runtime role provisioning flags.
+- Added Compose profile activation for the configured observability stack so local readiness includes the requested telemetry dependencies.
+
+### Changed
+
+- Bumped the Maven/runtime/OpenAPI contract version to `0.16.0`.
+- Documented Backend V1 implementation freeze readiness, native-client transport boundaries and the still-open Production Gate decisions.
+
+### Validation
+
+- Docker-backed PostgreSQL, ClamAV, MinIO and Stripe-compatible integration
+  verification passed locally; final release evidence is recorded in
+  `docs/releases/v0.16.0.md`.
+
 ## [0.15.0] - 2026-08-26
 
 Fulfillment & Financial Completion implementation wave for the Nexa API.

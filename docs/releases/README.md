@@ -4,6 +4,7 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 
 | Release | Summary |
 |---|---|
+| [v0.16.0](./v0.16.0.md) | Backend V1 Closure and Mobile Readiness |
 | [v0.15.0](./v0.15.0.md) | Fulfillment and Financial Completion |
 | [v0.14.0](./v0.14.0.md) | Commercial and Inventory Core |
 | [v0.13.0](./v0.13.0.md) | Backend Foundation Closure and release hardening |
@@ -25,4 +26,4 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 | [UNRELEASED HISTORICAL CANDIDATE: v0.7.0](./v0.7.0.md) | Consolidated into later published work; no tag or GitHub Release |
 | [UNRELEASED DRAFT: v0.8.1 candidate](./v0.8.1.md) | Development material retained for historical context; no published tag or GitHub Release |
 
-Current implementation version is `0.15.0`. Publication still requires the repository release policy, signed release evidence and the Docker-backed integration/security gates; this note does not claim a published GitHub Release.
+Current implementation version is `0.16.0`. Publication still requires the repository release policy, signed release evidence and the Docker-backed integration/security gates; the v0.16.0 note records those results at release time.

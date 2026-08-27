@@ -17,13 +17,16 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.WorkspacePrevie
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.shared.infrastructure.security.CookieOriginGuardFilter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -93,33 +96,45 @@ public class AuthenticationController {
 
 	@PostMapping("/authentication/sign-in")
 	@Operation(summary = "Authenticate a user and establish a refresh session")
-	@ApiResponses({@ApiResponse(responseCode = "200", description = "Authenticated session returned"),
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Authenticated session returned",
+			headers = @Header(name = "X-Nexa-Refresh-Token", description = "Returned only for the explicit native transport")),
 			@ApiResponse(responseCode = "400", description = "Invalid request", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
 			@ApiResponse(responseCode = "401", description = "Authentication failed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
-	public AuthenticationResponse signIn(@Valid @RequestBody SignInRequest request, HttpServletRequest httpRequest,
+	public AuthenticationResponse signIn(@Valid @RequestBody SignInRequest request,
+			@Parameter(description = "Set to NATIVE for the explicit non-browser session transport")
+			@RequestHeader(name = CookieOriginGuardFilter.NATIVE_CLIENT_HEADER, required = false) String clientTransport,
+			HttpServletRequest httpRequest,
 			HttpServletResponse response) {
+		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(httpRequest);
 		AuthenticationResult result = signIn.signIn(new SignInCommand(new LoginIdentifier(request.identifier()), request.password(),
 				request.workspaceSlug(), request.surface(), clientFingerprint(httpRequest)));
-		writeRefreshCookie(response, result.surface(), result.refreshToken(), result.refreshTokenExpiresAt());
+		writeRefreshTransport(response, result, nativeTransport);
 		return AuthenticationResponse.from(result);
 	}
 
 	@PostMapping("/authentication/refresh")
 	@Operation(summary = "Rotate the current surface refresh session")
-	@SecurityRequirement(name = "refreshCookie")
-	@ApiResponses({@ApiResponse(responseCode = "200", description = "Rotated authenticated session returned"),
+	@SecurityRequirements({@SecurityRequirement(name = "refreshCookie"),
+			@SecurityRequirement(name = "nativeRefreshToken")})
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Rotated authenticated session returned",
+			headers = @Header(name = "X-Nexa-Refresh-Token", description = "Returned only for the explicit native transport")),
 			@ApiResponse(responseCode = "401", description = "Refresh session invalid", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
 	public AuthenticationResponse refresh(@Parameter(description = "PLATFORM or PORTAL", required = true)
 			@RequestHeader(name = "X-Nexa-Surface") String surface,
+			@Parameter(description = "Rotated opaque refresh token from the previous native response")
+			@RequestHeader(name = "X-Nexa-Refresh-Token", required = false) String nativeRefreshToken,
 			@CookieValue(name = PLATFORM_COOKIE, required = false) String platformRefresh,
-			@CookieValue(name = PORTAL_COOKIE, required = false) String portalRefresh, HttpServletResponse response) {
+			@CookieValue(name = PORTAL_COOKIE, required = false) String portalRefresh,
+			HttpServletRequest request, HttpServletResponse response) {
+		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(request);
 		ClientSurface requestedSurface = parseSurface(surface);
-		String refreshToken = requestedSurface == ClientSurface.PLATFORM ? platformRefresh : portalRefresh;
+		String refreshToken = nativeTransport ? nativeRefreshToken
+				: requestedSurface == ClientSurface.PLATFORM ? platformRefresh : portalRefresh;
 		if (refreshToken == null || refreshToken.isBlank()) throw new InvalidRefreshTokenException();
 		AuthenticationResult result = refresh.refresh(new RefreshSessionCommand(refreshToken, requestedSurface));
-		writeRefreshCookie(response, result.surface(), result.refreshToken(), result.refreshTokenExpiresAt());
+		writeRefreshTransport(response, result, nativeTransport);
 		return AuthenticationResponse.from(result);
 	}
 
@@ -128,7 +143,9 @@ public class AuthenticationController {
 	@ApiResponses({@ApiResponse(responseCode = "204", description = "Session revoked and cookie cleared"),
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
 	public ResponseEntity<Void> signOut(Authentication authentication,
-			@RequestHeader(name = "X-Nexa-Surface", required = false) String surface, HttpServletResponse response) {
+			@RequestHeader(name = "X-Nexa-Surface", required = false) String surface,
+			HttpServletRequest request, HttpServletResponse response) {
+		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(request);
 		if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {
 			var jwt = jwtAuthentication.getToken();
 			try {
@@ -138,7 +155,7 @@ public class AuthenticationController {
 				// Sign-out remains idempotent; cookie is still cleared.
 			}
 		}
-		if (surface != null && !surface.isBlank()) clearRefreshCookie(response, parseSurface(surface));
+		if (!nativeTransport && surface != null && !surface.isBlank()) clearRefreshCookie(response, parseSurface(surface));
 		return ResponseEntity.noContent().build();
 	}
 
@@ -150,6 +167,14 @@ public class AuthenticationController {
 	public SessionResponse session(@RequestHeader("Authorization") String authorization) {
 		if (!authorization.regionMatches(true, 0, "Bearer ", 0, 7)) throw new IllegalArgumentException("Bearer token is required");
 		return SessionResponse.from(currentSession.currentSession(new CurrentSessionQuery(authorization.substring(7))));
+	}
+
+	private void writeRefreshTransport(HttpServletResponse response, AuthenticationResult result, boolean nativeTransport) {
+		if (nativeTransport) {
+			response.setHeader("X-Nexa-Refresh-Token", result.refreshToken());
+			return;
+		}
+		writeRefreshCookie(response, result.surface(), result.refreshToken(), result.refreshTokenExpiresAt());
 	}
 
 	private void writeRefreshCookie(HttpServletResponse response, ClientSurface surface, String value, java.time.Instant expiresAt) {

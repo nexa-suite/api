@@ -228,9 +228,16 @@ class RlsRuntimeDatabaseIsolationIT {
                        has_schema_privilege(current_user, 'sales', 'USAGE'),
                        has_schema_privilege(current_user, 'sales', 'CREATE'),
                        has_table_privilege(current_user, 'sales.client_account', 'SELECT'),
-                       has_table_privilege(current_user, 'sales.client_account', 'TRUNCATE')
+                       has_table_privilege(current_user, 'sales.client_account', 'TRUNCATE'),
+                       d.datdba = pg_roles.oid,
+                       not exists (select 1 from pg_class owned
+                                    join pg_namespace owned_schema on owned_schema.oid = owned.relnamespace
+                                   where owned.relowner = pg_roles.oid
+                                     and owned.relkind in ('r', 'p', 'v', 'm', 'f')
+                                     and owned_schema.nspname not in ('pg_catalog', 'information_schema'))
                 from pg_roles
-                where rolname = current_user
+                join pg_database d on d.datname = current_database()
+                where pg_roles.rolname = current_user
                 """)) {
             try (ResultSet result = statement.executeQuery()) {
                 assertThat(result.next()).as("runtime role must exist").isTrue();
@@ -243,6 +250,8 @@ class RlsRuntimeDatabaseIsolationIT {
                 assertThat(result.getBoolean(7)).as("runtime role must not create objects in the schema").isFalse();
                 assertThat(result.getBoolean(8)).as("runtime role needs table reads").isTrue();
                 assertThat(result.getBoolean(9)).as("runtime role must not truncate tenant data").isFalse();
+                assertThat(result.getBoolean(10)).as("runtime role must not own the application database").isFalse();
+                assertThat(result.getBoolean(11)).as("runtime role must not own application objects").isTrue();
                 assertThat(result.next()).isFalse();
             }
         }

@@ -28,6 +28,10 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/route-starts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/handoff-notes")).isTrue();
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
+        assertThat(document.at("/components/securitySchemes/nativeRefreshToken/name").asText())
+                .isEqualTo("X-Nexa-Refresh-Token");
+        var refresh = document.get("paths").get("/api/v1/authentication/refresh").get("post");
+        assertThat(refresh.get("security").toString()).contains("refreshCookie", "nativeRefreshToken");
 
         var problem = document.at("/components/schemas/NexaProblemDetail");
         assertThat(problem.isObject()).isTrue();

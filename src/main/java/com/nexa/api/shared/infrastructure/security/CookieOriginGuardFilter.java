@@ -14,7 +14,9 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.util.Set;
 
-final class CookieOriginGuardFilter extends OncePerRequestFilter {
+public final class CookieOriginGuardFilter extends OncePerRequestFilter {
+	public static final String NATIVE_CLIENT_HEADER = "X-Nexa-Client";
+	private static final String NATIVE_CLIENT_VALUE = "NATIVE";
 	private final ObjectMapper objectMapper;
 	private final Set<String> allowedOrigins;
 
@@ -30,7 +32,7 @@ final class CookieOriginGuardFilter extends OncePerRequestFilter {
 				&& (request.getRequestURI().startsWith("/api/v1/authentication/")
 					|| request.getRequestURI().startsWith("/api/v1/auth/"))) {
 			String origin = request.getHeader("Origin");
-			if (origin == null || !allowedOrigins.contains(origin)) {
+			if ((origin == null || !allowedOrigins.contains(origin)) && !isNativeSessionTransport(request)) {
 				var problem = ApiProblemDetailFactory.create(HttpStatus.FORBIDDEN, ApiErrorCode.ORIGIN_NOT_ALLOWED,
 						"Request origin is not allowed", request);
 				response.setStatus(HttpStatus.FORBIDDEN.value());
@@ -40,5 +42,15 @@ final class CookieOriginGuardFilter extends OncePerRequestFilter {
 			}
 		}
 		filterChain.doFilter(request, response);
+	}
+
+	public static boolean isNativeSessionTransport(HttpServletRequest request) {
+		String origin = request.getHeader("Origin");
+		if (origin != null && !origin.isBlank()) return false;
+		if (!NATIVE_CLIENT_VALUE.equalsIgnoreCase(request.getHeader(NATIVE_CLIENT_HEADER))) return false;
+		return switch (request.getRequestURI()) {
+			case "/api/v1/authentication/sign-in", "/api/v1/authentication/refresh", "/api/v1/authentication/sign-out" -> true;
+			default -> false;
+		};
 	}
 }
