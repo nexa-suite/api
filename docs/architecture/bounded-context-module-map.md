@@ -1,6 +1,6 @@
 # Nexa canonical bounded-context map
 
-Status: canonical for API v0.16.0.  The `BC-*` identifiers and names below
+Status: canonical for API v0.16.1.  The `BC-*` identifiers and names below
 match the Blueprint directories exactly.
 
 Nexa has exactly eleven business bounded contexts.  `bootstrap` and `shared`

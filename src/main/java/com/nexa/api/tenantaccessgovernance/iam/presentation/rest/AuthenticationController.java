@@ -18,6 +18,7 @@ import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
 import com.nexa.api.shared.infrastructure.security.CookieOriginGuardFilter;
+import com.nexa.api.shared.infrastructure.observability.SecurityMetrics;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -36,6 +37,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
@@ -73,10 +75,11 @@ public class AuthenticationController {
 	private final WorkspacePreviewUseCase workspacePreview;
 	private final boolean secureCookie;
 	private final Clock clock;
+	private final ObjectProvider<SecurityMetrics> securityMetrics;
 
 	public AuthenticationController(SignInUseCase signIn, RefreshSessionUseCase refresh, SignOutUseCase signOut,
 			CurrentSessionUseCase currentSession, WorkspacePreviewUseCase workspacePreview, @Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie,
-			Environment environment, Clock clock) {
+			Environment environment, Clock clock, ObjectProvider<SecurityMetrics> securityMetrics) {
 		this.signIn = signIn;
 		this.refresh = refresh;
 		this.signOut = signOut;
@@ -85,6 +88,7 @@ public class AuthenticationController {
 		this.secureCookie = environment.acceptsProfiles(Profiles.of("local")) && !configuredSecureCookie
 				? false : true;
 		this.clock = clock;
+		this.securityMetrics = securityMetrics;
 	}
 
 	@PostMapping("/auth/workspace-previews")
@@ -140,7 +144,7 @@ public class AuthenticationController {
 
 	@PostMapping("/authentication/sign-out")
 	@Operation(summary = "Revoke the current session")
-	@ApiResponses({@ApiResponse(responseCode = "204", description = "Session revoked and cookie cleared"),
+	@ApiResponses({@ApiResponse(responseCode = "204", description = "Session revoked; browser cookie cleared when browser transport is used"),
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
 	public ResponseEntity<Void> signOut(Authentication authentication,
 			@RequestHeader(name = "X-Nexa-Surface", required = false) String surface,
@@ -151,8 +155,10 @@ public class AuthenticationController {
 			try {
 				signOut.signOut(new SignOutCommand(new SessionId(required(jwt.getClaimAsString("sid"))),
 						new UserAccountId(required(jwt.getSubject())), parseSurface(required(jwt.getClaimAsString("surface")))));
-			} catch (RuntimeException ignored) {
-				// Sign-out remains idempotent; cookie is still cleared.
+			} catch (RuntimeException exception) {
+				SecurityMetrics metric = securityMetrics.getIfAvailable();
+				if (metric != null) metric.increment("authentication.signout.failure");
+				throw exception;
 			}
 		}
 		if (!nativeTransport && surface != null && !surface.isBlank()) clearRefreshCookie(response, parseSurface(surface));

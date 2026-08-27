@@ -599,7 +599,7 @@ public class PaymentService implements PaymentPersistencePort {
 
     @Scheduled(fixedDelayString = "${nexa.payments.webhook-worker-delay-ms:1000}")
     public void processStripeWebhookInbox() {
-        jdbc.update("update payments.stripe_event_inbox set status='FAILED',failure_detail='Stale processing attempt',next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where status='PROCESSING' and lease_until <= current_timestamp");
+        jdbc.update("update payments.stripe_event_inbox set status=case when attempt_count >= 10 then 'DEAD_LETTER' else 'FAILED' end,failure_detail='Stale processing attempt',next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where status='PROCESSING' and lease_until <= current_timestamp");
         List<WebhookWork> work = jdbc.query("select event_id,tenant_id,workspace_id from payments.stripe_event_inbox where status in ('RECEIVED','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp order by received_at,event_id limit 20", (rs, n) -> new WebhookWork(rs.getString("event_id"), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
         for (WebhookWork item : work) {
             UUID claimToken = UUID.randomUUID();
@@ -620,9 +620,10 @@ public class PaymentService implements PaymentPersistencePort {
                 record(timer, "processed");
                 count("process", "success");
             } catch (RuntimeException exception) {
-                jdbc.update("update payments.stripe_event_inbox set status='FAILED',failure_detail=?,next_attempt_at=current_timestamp + (least(power(2,attempt_count),300) * interval '1 second'),processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=?", truncate(exception.getMessage()), item.eventId(), claimToken);
-                record(timer, "failed");
-                count("process", "failed");
+                int deadLettered = jdbc.update("update payments.stripe_event_inbox set status=case when attempt_count >= 10 then 'DEAD_LETTER' else 'FAILED' end,failure_detail=?,next_attempt_at=case when attempt_count >= 10 then current_timestamp else current_timestamp + (least(power(2,attempt_count),300) * interval '1 second') end,processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=?", truncate(exception.getMessage()), item.eventId(), claimToken);
+                String outcome = deadLettered == 1 && "DEAD_LETTER".equals(jdbc.queryForObject("select status from payments.stripe_event_inbox where event_id=?", String.class, item.eventId())) ? "dead_letter" : "failed";
+                record(timer, outcome);
+                count("process", outcome);
             } finally {
                 RlsRequestScope.clear();
             }
@@ -829,15 +830,17 @@ public class PaymentService implements PaymentPersistencePort {
         lockIdempotencyKey(context, idempotencyKey);
         ReceivableRow receivable = lockedReceivable(context, receivableId);
         ensureBuyerScope(context, receivable.clientAccountId());
-        BigDecimal amount = payableAmount(receivable);
-        if (amount.signum() <= 0 || !SetOfOpen.contains(receivable.status())) throw new IllegalArgumentException("Receivable is not payable");
-
         ExistingPayment existing = existingPayment(context, idempotencyKey);
         if (existing != null) {
-            ensureIdempotentPayment(existing, receivable, PaymentMethod.CARD_STRIPE, amount);
-            return new CardPaymentClaim(existing.payment(), receivable, minor(amount, receivable.currency()),
+            // A successful webhook may have closed the receivable before a client
+            // retries the original request. Replay the durable payment claim
+            // before evaluating whether the receivable is still payable.
+            ensureIdempotentPayment(existing, receivable, PaymentMethod.CARD_STRIPE, existing.payment().amount());
+            return new CardPaymentClaim(existing.payment(), receivable, minor(existing.payment().amount(), existing.payment().currency()),
                     providerIdempotencyKey(context, idempotencyKey), paymentMetadata(context, receivable), idempotencyKey);
         }
+        BigDecimal amount = payableAmount(receivable);
+        if (amount.signum() <= 0 || !SetOfOpen.contains(receivable.status())) throw new IllegalArgumentException("Receivable is not payable");
         ActiveCardPayment active = activeCardPayment(context, receivable.id());
         if (active != null) throw new PaymentOperationInProgressException();
 

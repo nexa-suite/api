@@ -55,10 +55,10 @@ class ModernPostgresUpgradeMigrationTests {
         Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration").load().migrate();
 
-        try (var connection = POSTGRES.createConnection("")) {
+            try (var connection = POSTGRES.createConnection("")) {
             try (var statement = connection.createStatement(); var version = statement.executeQuery("select version from flyway_schema_history order by installed_rank desc limit 1")) {
                 assertThat(version.next()).isTrue();
-				assertThat(version.getString(1)).isEqualTo("91");
+                assertThat(version.getString(1)).isEqualTo("92");
             }
             try (var statement = connection.prepareStatement("select count(*) from catalog_management.product where id=?")) {
                 statement.setObject(1, product);
