@@ -82,7 +82,7 @@ class RefreshSessionPostgresIntegrationTests {
 	}
 
 	@Test
-	void refreshTokenReuseRevokesReplacementSessionFamily() {
+    void refreshTokenReuseRevokesReplacementSessionFamily() {
 		var first = signIn.signIn(new SignInCommand("owner@icisa-test.local", PASSWORD, "icisa-test", ClientSurface.PLATFORM));
 		var replacement = refresh.refresh(new RefreshSessionCommand(first.refreshToken(), ClientSurface.PLATFORM));
 
@@ -96,6 +96,23 @@ class RefreshSessionPostgresIntegrationTests {
 		Integer revokedSessions = jdbc.queryForObject(
 				"select count(*) from iam.refresh_session where family_id = ? and revoked_at is not null",
 				Integer.class, familyId);
-		assertThat(revokedSessions).isEqualTo(2);
-	}
+        assertThat(revokedSessions).isEqualTo(2);
+    }
+
+    @Test
+    void refreshTokenReuseIsDetectedAfterMembershipLosesItsActivePolicy() {
+        var first = signIn.signIn(new SignInCommand("owner@icisa-test.local", PASSWORD, "icisa-test", ClientSurface.PLATFORM));
+        var replacement = refresh.refresh(new RefreshSessionCommand(first.refreshToken(), ClientSurface.PLATFORM));
+        UUID membershipId = jdbc.queryForObject("select membership_id from iam.refresh_session where id=?",
+                UUID.class, UUID.fromString(first.sessionId().value()));
+        jdbc.update("update tenant_management.workspace_membership set status='SUSPENDED' where id=?", membershipId);
+        try {
+            assertThatThrownBy(() -> refresh.refresh(new RefreshSessionCommand(first.refreshToken(), ClientSurface.PLATFORM)))
+                    .isInstanceOf(RefreshTokenReuseDetectedException.class);
+            assertThatThrownBy(() -> refresh.refresh(new RefreshSessionCommand(replacement.refreshToken(), ClientSurface.PLATFORM)))
+                    .isInstanceOf(RefreshTokenReuseDetectedException.class);
+        } finally {
+            jdbc.update("update tenant_management.workspace_membership set status='ACTIVE' where id=?", membershipId);
+        }
+    }
 }

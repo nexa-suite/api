@@ -41,6 +41,11 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
     @Override
     public Optional<ManualSalesOrderView> findByIdempotency(String tenantId, String workspaceId, String actorMembershipId,
                                                             String idempotencyKey, String requestHash) {
+        // The idempotency row cannot be claimed before the order exists because its
+        // foreign key is intentionally NOT NULL. Serialize the complete request
+        // transaction on the deterministic key before any order side effect.
+        String lockKey = tenantId + ":" + workspaceId + ":" + actorMembershipId + ":" + idempotencyKey;
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?, 0))", rs -> null, lockKey);
         return jdbc.query("select request_hash,sales_order_id from sales.manual_order_idempotency where tenant_id=? and workspace_id=? "
                         + "and actor_membership_id=? and idempotency_key=? for update",
                 (org.springframework.jdbc.core.ResultSetExtractor<Optional<ManualSalesOrderView>>) rs -> {

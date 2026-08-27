@@ -51,7 +51,7 @@ management:
 info:
   application:
     name: Nexa API
-    status: foundation
+    status: backend-v1-implementation-freeze
 
 nexa:
   database:
