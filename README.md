@@ -16,7 +16,7 @@
 
 ## Overview
 
-Spring Boot modular monolith. The API implements the eleven Blueprint business bounded contexts through canonical module roots. Legacy PostgreSQL schema names and released HTTP/Java names remain compatibility storage/contracts where required; they do not redefine ownership. The v0.16.0 wave closes the Backend V1 implementation boundary, hardens runtime isolation and exposes only the minimal client/native transport readiness required by the existing contracts.
+Spring Boot modular monolith. The API implements the eleven Blueprint business bounded contexts through canonical module roots. Legacy PostgreSQL schema names and released HTTP/Java names remain compatibility storage/contracts where required; they do not redefine ownership. The v0.16.1 freeze-closure patch hardens the Backend V1 implementation boundary and runtime isolation without adding product semantics or mobile domain scope.
 
 ## Related repositories
 

@@ -3,6 +3,30 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.16.1] - 2026-08-27
+
+Backend V1 freeze-closure patch for the Nexa API. v0.16.0 remains immutable;
+this release adds no product semantics, bounded context or mobile domain.
+
+### Fixed
+
+- Made sign-out fail closed when durable session revocation fails; browser refresh cookies clear only after successful revocation.
+- Preserved refresh-token reuse detection after membership authorization is suspended.
+- Serialized manual Sales Order idempotency claims before order side effects.
+- Replayed durable card payment claims after a successful provider webhook settles the receivable.
+- Recovered system workflow actors at workspace creation and closed stale outbox/Stripe inbox attempts at their retry limits.
+- Hardened runtime PostgreSQL privilege validation against replication, effective memberships, schema creation and unapproved `SECURITY DEFINER` execution.
+
+### Changed
+
+- Added additive Flyway migration `V92__close_stripe_webhook_dead_letter_gap.sql` to persist Stripe inbox dead letters.
+- Added adversarial PostgreSQL, authentication, idempotency, worker and migration coverage.
+- Updated implementation metadata and security documentation to distinguish Backend V1 implementation freeze from the separate Production Gate.
+
+### Validation
+
+- Directed Docker-backed closure tests pass; final full-verify, CI and release evidence are recorded in `docs/releases/v0.16.1.md`.
+
 ## [0.16.0] - 2026-08-27
 
 Backend V1 implementation closure and client/mobile technical readiness for
