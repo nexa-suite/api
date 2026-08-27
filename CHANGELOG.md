@@ -23,8 +23,8 @@ the Nexa API. No new Product V1 scope or bounded context is introduced.
 ### Validation
 
 - Docker-backed PostgreSQL, ClamAV, MinIO and Stripe-compatible integration
-  verification passed locally; final release evidence is recorded in
-  `docs/releases/v0.16.0.md`.
+  verification passed locally: 441 tests, 0 failures, 0 errors and 0 skips;
+  final release evidence is recorded in `docs/releases/v0.16.0.md`.
 
 ## [0.15.0] - 2026-08-26
 
