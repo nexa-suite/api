@@ -150,6 +150,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                     || requested.put(line.fulfillmentLineId(), line) != null) throw error("FULFILLMENT_PICKING_LINES_INVALID");
         }
         if (requested.size() != currentLines.size()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
+        if (isMixedPickingMode(requested.values())) throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
         Instant validationNow = clock.instant();
         Long allocationVersion = request.allocationVersion();
         boolean shortage = false;
@@ -219,6 +220,18 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "PICK_CONFIRM",
                 request.idempotencyKey(), request.requestHash(), request.fulfillmentId(), now);
         return load(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+    }
+
+    static boolean isMixedPickingMode(Iterable<PickedLine> lines) {
+        boolean physical = false;
+        boolean legacy = false;
+        for (PickedLine line : lines) {
+            boolean hasPhysicalReference = line.physicalAllocationLineId() != null || line.lotId() != null
+                    || line.warehouseId() != null;
+            physical |= hasPhysicalReference;
+            legacy |= !hasPhysicalReference;
+        }
+        return physical && legacy;
     }
 
     @Override
