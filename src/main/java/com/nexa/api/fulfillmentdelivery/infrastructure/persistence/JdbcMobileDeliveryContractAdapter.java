@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.MobileDeliveryContractPort;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -20,9 +21,11 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContractPort {
     private final JdbcTemplate jdbc;
+    private final SalesOrderFulfillmentQuery salesOrders;
 
-    public JdbcMobileDeliveryContractAdapter(JdbcTemplate jdbc) {
+    public JdbcMobileDeliveryContractAdapter(JdbcTemplate jdbc, SalesOrderFulfillmentQuery salesOrders) {
         this.jdbc = jdbc;
+        this.salesOrders = salesOrders;
     }
 
     @Override
@@ -150,15 +153,22 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
     }
 
     private UUID customerAccount(UUID tenant, UUID workspace, DeliveryRow delivery) {
-        return jdbc.query("select coalesce(so.client_account_id, dispatch.client_account_id) customer_account_id "
+        UUID salesOrderId = jdbc.query("select case when d.fulfillment_id is not null then f.sales_order_id else dispatch.sales_order_id end sales_order_id "
                         + "from logistics.delivery d "
                         + "left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id "
-                        + "left join sales.sales_order so on so.tenant_id=f.tenant_id and so.workspace_id=f.workspace_id and so.id=f.sales_order_id "
                         + "left join logistics.dispatch_order dispatch on dispatch.tenant_id=d.tenant_id and dispatch.workspace_id=d.workspace_id and dispatch.id=d.dispatch_order_id "
                         + "where d.tenant_id=? and d.workspace_id=? and d.id=? "
-                        + "and coalesce(so.client_account_id, dispatch.client_account_id) is not null",
-                (rs, row) -> rs.getObject("customer_account_id", UUID.class), tenant, workspace, delivery.id())
+                        + "and case when d.fulfillment_id is not null then f.sales_order_id else dispatch.sales_order_id end is not null",
+                (rs, row) -> rs.getObject("sales_order_id", UUID.class), tenant, workspace, delivery.id())
                 .stream().findFirst().orElseThrow(() -> error("BUYER_RELATIONSHIP_NOT_FOUND", false));
+        SalesOrderFulfillmentQuery.Snapshot order;
+        try {
+            order = salesOrders.get(tenant, workspace, salesOrderId);
+        } catch (RuntimeException exception) {
+            throw error("BUYER_RELATIONSHIP_NOT_FOUND", false);
+        }
+        if (order.clientAccountId() == null) throw error("BUYER_RELATIONSHIP_NOT_FOUND", false);
+        return order.clientAccountId();
     }
 
     private boolean assignedDriver(UUID tenant, UUID workspace, UUID delivery, UUID membership, UUID user) {

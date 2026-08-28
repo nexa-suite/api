@@ -4,6 +4,7 @@ import com.nexa.api.notifications.application.port.in.NotificationProjectionPort
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
+import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
 import com.nexa.api.notifications.application.service.NotificationService;
 import com.nexa.api.notifications.application.service.PushRoutingService;
 import org.springframework.beans.factory.ObjectProvider;
@@ -19,8 +20,10 @@ public class NotificationRuntimeConfiguration {
 	@Bean
 	NotificationUseCase notificationUseCase(NotificationInboxPersistencePort inbox,
 		NotificationPreferencePersistencePort preferences, CustomerAccountQuery accounts,
-				ObjectProvider<PushRoutingService> pushRouting, ApplicationEventPublisher eventPublisher) {
-		return new NotificationService(inbox, preferences, accounts, pushRouting.getIfAvailable(), eventPublisher);
+				ObjectProvider<PushRoutingService> pushRouting, ApplicationEventPublisher eventPublisher,
+				ObjectProvider<PushNotificationOutboxPort> pushOutbox) {
+		return new NotificationService(inbox, preferences, accounts, pushRouting.getIfAvailable(), eventPublisher,
+				pushOutbox.getIfAvailable());
 	}
 
 	@Bean

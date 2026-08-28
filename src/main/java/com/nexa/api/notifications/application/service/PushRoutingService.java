@@ -1,5 +1,6 @@
 package com.nexa.api.notifications.application.service;
 
+import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
 import com.nexa.api.notifications.application.port.out.PushProviderPort;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
@@ -42,6 +43,7 @@ public final class PushRoutingService {
         UUID tenant = uuid(event.tenantId());
         UUID workspace = uuid(event.workspaceId());
         if (tenant == null || workspace == null) return;
+        RuntimeException retryableFailure = null;
         for (String recipient : event.recipientMembershipIds()) {
             UUID membership = uuid(recipient);
             if (membership == null) continue;
@@ -52,22 +54,28 @@ public final class PushRoutingService {
                     result = provider.deliver(new PushProviderPort.Delivery(subscription.id(), event.eventId(),
                             event.eventType(), category, title, message, deepLink));
                     if (result == null) {
-                        result = new PushProviderPort.DeliveryResult("FAILED", "PROVIDER_INVALID_RESULT", "Provider returned no result");
+                        result = new PushProviderPort.DeliveryResult("RETRYABLE", "PROVIDER_INVALID_RESULT", "Provider returned no result");
                     }
                 } catch (RuntimeException exception) {
-                    result = new PushProviderPort.DeliveryResult("FAILED", "PROVIDER_EXCEPTION", "Provider delivery failed");
+                    result = new PushProviderPort.DeliveryResult("RETRYABLE", "PROVIDER_EXCEPTION", "Provider delivery failed");
                 }
                 try {
                     var attempt = new PushSubscriptionPersistencePort.DeliveryAttempt(
                             tenant, workspace, subscription.id(), event.eventId(), event.eventType(),
                             normalizedStatus(result.status()), normalizedProviderCode(result.providerCode()), result.error(), event.occurredAt());
                     recordAttempt(attempt);
-                } catch (RuntimeException ignored) {
-                    // A routing-attempt recording failure must not roll back the
-                    // already durable in-app notification projection.
+                    if ("RETRYABLE".equals(normalizedStatus(result.status()))) {
+                        retryableFailure = new NotificationOperationException("PUSH_DELIVERY_RETRYABLE", false);
+                    }
+                } catch (RuntimeException exception) {
+                    // The push work item is already separate from the durable
+                    // in-app projection. Propagate so the canonical outbox can
+                    // retry the delivery or move it to its dead-letter state.
+                    retryableFailure = exception;
                 }
             }
         }
+        if (retryableFailure != null) throw retryableFailure;
     }
 
     private void recordAttempt(PushSubscriptionPersistencePort.DeliveryAttempt attempt) {

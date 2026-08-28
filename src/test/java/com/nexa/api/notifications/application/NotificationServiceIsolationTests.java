@@ -3,6 +3,7 @@ package com.nexa.api.notifications.application;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPage;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
+import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
 import com.nexa.api.notifications.application.service.NotificationService;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
 import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
@@ -66,6 +67,27 @@ class NotificationServiceIsolationTests {
 		var candidate = org.mockito.ArgumentCaptor.forClass(PushNotificationCandidate.class);
 		verify(publisher).publishEvent(candidate.capture());
 		assertThat(candidate.getValue().projection()).isEqualTo(event);
+		verify(routing, never()).route(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+				org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+	}
+
+	@Test
+	void persistsPushCandidateInDurableOutboxWhenAvailable() {
+		NotificationInboxPersistencePort inbox = mock(NotificationInboxPersistencePort.class);
+		NotificationPreferencePersistencePort preferences = mock(NotificationPreferencePersistencePort.class);
+		CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+		PushRoutingService routing = mock(PushRoutingService.class);
+		PushNotificationOutboxPort outbox = mock(PushNotificationOutboxPort.class);
+		org.springframework.context.ApplicationEventPublisher publisher = mock(org.springframework.context.ApplicationEventPublisher.class);
+		NotificationProjection event = new NotificationProjection(UUID.randomUUID().toString(),
+				"3a0a7af1-83ad-4c20-bb31-3ea89f4e4f10", "7c30dcf8-bf35-40dc-bd3d-fad4dd1b3a17", null,
+				"SalesOrder", UUID.randomUUID().toString(), "SALES_ORDER_CONFIRMED", "CONFIRMED", Instant.now(),
+				Set.of("24c5e28d-2249-4c12-b6d8-9d5f3e4f0cd2"));
+
+		new NotificationService(inbox, preferences, accounts, routing, publisher, outbox).project(event);
+
+		verify(outbox).enqueue(org.mockito.ArgumentMatchers.any(PushNotificationCandidate.class));
+		verify(publisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
 		verify(routing, never()).route(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
 				org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
 	}

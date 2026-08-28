@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -62,14 +63,16 @@ class PushSubscriptionServiceTests {
                         "ANDROID", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
         doThrow(new IllegalStateException("provider unavailable")).when(provider).deliver(any());
 
-        new PushRoutingService(persistence, provider).route(new NotificationProjection(
+        assertThatThrownBy(() -> new PushRoutingService(persistence, provider).route(new NotificationProjection(
                 eventId.toString(), TENANT.toString(), WORKSPACE.toString(), null, "SalesOrder", UUID.randomUUID().toString(),
                 "SALES_ORDER_CONFIRMED", "CONFIRMED", Instant.now(), Set.of(MEMBERSHIP.toString())),
-                "ORDER_STATUS", "Order confirmed", "Order confirmed.", "/sales-orders/1");
+                "ORDER_STATUS", "Order confirmed", "Order confirmed.", "/sales-orders/1"))
+                .isInstanceOf(com.nexa.api.notifications.application.exception.NotificationOperationException.class)
+                .hasMessage("PUSH_DELIVERY_RETRYABLE");
 
         var attempt = org.mockito.ArgumentCaptor.forClass(PushSubscriptionPersistencePort.DeliveryAttempt.class);
         verify(persistence).recordAttempt(attempt.capture());
-        assertThat(attempt.getValue().status()).isEqualTo("FAILED");
+        assertThat(attempt.getValue().status()).isEqualTo("RETRYABLE");
         assertThat(attempt.getValue().providerCode()).isEqualTo("PROVIDER_EXCEPTION");
         assertThat(attempt.getValue().error()).isEqualTo("Provider delivery failed");
         assertThat(attempt.getValue().eventId()).isEqualTo(eventId.toString());

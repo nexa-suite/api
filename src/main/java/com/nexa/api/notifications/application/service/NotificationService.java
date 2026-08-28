@@ -9,6 +9,7 @@ import com.nexa.api.notifications.application.port.in.NotificationProjectionPort
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
+import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
@@ -26,24 +27,32 @@ public final class NotificationService implements NotificationUseCase, Notificat
 	private final CustomerAccountQuery accounts;
 	private final PushRoutingService pushRouting;
 	private final ApplicationEventPublisher eventPublisher;
+	private final PushNotificationOutboxPort pushOutbox;
 
 	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
 			CustomerAccountQuery accounts) {
-		this(inbox, preferences, accounts, null, null);
+		this(inbox, preferences, accounts, null, null, null);
 	}
 
 	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
 			CustomerAccountQuery accounts, PushRoutingService pushRouting) {
-		this(inbox, preferences, accounts, pushRouting, null);
+		this(inbox, preferences, accounts, pushRouting, null, null);
 	}
 
 	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
 			CustomerAccountQuery accounts, PushRoutingService pushRouting, ApplicationEventPublisher eventPublisher) {
+		this(inbox, preferences, accounts, pushRouting, eventPublisher, null);
+	}
+
+	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
+			CustomerAccountQuery accounts, PushRoutingService pushRouting, ApplicationEventPublisher eventPublisher,
+			PushNotificationOutboxPort pushOutbox) {
 		this.inbox = Objects.requireNonNull(inbox, "Notification inbox is required");
 		this.preferences = Objects.requireNonNull(preferences, "Notification preferences are required");
 		this.accounts = Objects.requireNonNull(accounts, "Client accounts are required");
 		this.pushRouting = pushRouting;
 		this.eventPublisher = eventPublisher;
+		this.pushOutbox = pushOutbox;
 	}
 
 	@Override
@@ -111,8 +120,17 @@ public final class NotificationService implements NotificationUseCase, Notificat
 		if (pushRouting != null) {
 			var candidate = new com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate(
 					event, category, title, body, deepLink);
-			if (eventPublisher != null) eventPublisher.publishEvent(candidate);
+			if (pushOutbox != null) pushOutbox.enqueue(candidate);
+			else if (eventPublisher != null) eventPublisher.publishEvent(candidate);
 			else pushRouting.route(event, category, title, body, deepLink);
+		}
+	}
+
+	@Override
+	public void deliverPush(com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate candidate) {
+		Objects.requireNonNull(candidate, "Push notification candidate is required");
+		if (pushRouting != null) {
+			pushRouting.route(candidate.projection(), candidate.category(), candidate.title(), candidate.message(), candidate.deepLink());
 		}
 	}
 

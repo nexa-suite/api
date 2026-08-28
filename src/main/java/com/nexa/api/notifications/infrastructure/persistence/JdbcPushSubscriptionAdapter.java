@@ -90,9 +90,11 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
     public void recordAttempt(DeliveryAttempt request) {
         require(request.tenantId(), request.workspaceId(), request.subscriptionId(), request.eventId(), request.eventType(),
                 request.status(), request.providerCode(), request.now());
-        jdbc.update("insert into notifications.push_delivery_attempt(id,tenant_id,workspace_id,subscription_id,event_id,event_type,status,provider_code,error,attempt_number,created_at) values (?,?,?,?,?,?,?,?,?,1,?)",
+        Integer attemptNumber = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from notifications.push_delivery_attempt where tenant_id=? and workspace_id=? and subscription_id=? and event_id=?",
+                Integer.class, request.tenantId(), request.workspaceId(), request.subscriptionId(), uuid(request.eventId()));
+        jdbc.update("insert into notifications.push_delivery_attempt(id,tenant_id,workspace_id,subscription_id,event_id,event_type,status,provider_code,error,attempt_number,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
                 UUID.randomUUID(), request.tenantId(), request.workspaceId(), request.subscriptionId(), uuid(request.eventId()),
-                request.eventType(), request.status(), request.providerCode(), request.error(), Timestamp.from(request.now()));
+                request.eventType(), request.status(), request.providerCode(), request.error(), attemptNumber, Timestamp.from(request.now()));
     }
 
     private PushSubscription load(UUID tenant, UUID workspace, UUID id) {

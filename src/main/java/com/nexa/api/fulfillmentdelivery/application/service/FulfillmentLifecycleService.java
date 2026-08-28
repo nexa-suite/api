@@ -178,7 +178,7 @@ public class FulfillmentLifecycleService {
                 new FulfillmentPersistencePort.PickingRequest(
                         tenant(context), workspace(context), fulfillmentId, expectedVersion, actor(context),
                         command.pickerIdentityId() == null ? context.userId().value() : command.pickerIdentityId(),
-                        idempotencyKey, hash("picking-confirm-v1|" + fulfillmentId + "|" + expectedVersion + "|" + pickingCanonical(command)),
+                        idempotencyKey, pickingRequestHash(fulfillmentId, expectedVersion, command),
                         command.startedAt(), command.completedAt(), bounded(command.notes()), command.allocationVersion(), lines));
         trace(context, "FULFILLMENT_PICKING_CONFIRMED", "Fulfillment", fulfillmentId, idempotencyKey,
                 Map.of("status", result.status(), "lineCount", lines.size()));
@@ -553,6 +553,29 @@ public class FulfillmentLifecycleService {
     private static String shortageResolutionCanonical(ShortageResolutionCommand command) {
         return Objects.toString(command.reason(), "<null>") + "|" + command.lines().stream()
                 .sorted(Comparator.comparing(line -> line.fulfillmentLineId().toString()))
+                .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.quantity() + ":" + line.unit())
+                .reduce((left, right) -> left + ";" + right).orElse("");
+    }
+
+    /**
+     * Keep the v0.16.1 request hash for legacy logical picking while binding
+     * the richer Mobile physical-picking payload to its current canonical
+     * representation. This lets an in-flight Web retry replay after v0.17.0
+     * without being misclassified as a payload conflict.
+     */
+    private static String pickingRequestHash(UUID fulfillmentId, long expectedVersion, PickingCommand command) {
+        String canonical = hasPhysicalPickingBinding(command) ? pickingCanonical(command) : legacyPickingCanonical(command);
+        return hash("picking-confirm-v1|" + fulfillmentId + "|" + expectedVersion + "|" + canonical);
+    }
+
+    private static boolean hasPhysicalPickingBinding(PickingCommand command) {
+        return command.allocationVersion() != null || command.lines().stream().anyMatch(line -> line != null
+                && (line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null
+                || line.fefoOverride() || (line.fefoOverrideReason() != null && !line.fefoOverrideReason().isBlank())));
+    }
+
+    private static String legacyPickingCanonical(PickingCommand command) {
+        return command.lines().stream().sorted(Comparator.comparing(line -> line.fulfillmentLineId().toString()))
                 .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.quantity() + ":" + line.unit())
                 .reduce((left, right) -> left + ";" + right).orElse("");
     }
