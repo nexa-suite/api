@@ -11,6 +11,12 @@ import java.util.UUID;
 public interface SellableSkuQuery {
     Optional<SellableSkuReference> findActive(UUID tenantId, UUID workspaceId, UUID skuId);
 
+    /**
+     * Returns the catalog policy needed by inventory-owned physical validation.
+     * This deliberately exposes no persistence type or catalog write capability.
+     */
+    Optional<SellableSkuPolicy> findPhysicalValidationPolicy(UUID tenantId, UUID workspaceId, UUID skuId);
+
     default Map<UUID, SellableSkuReference> findActive(
             UUID tenantId, UUID workspaceId, List<UUID> skuIds) {
         if (skuIds == null || skuIds.isEmpty()) return Map.of();
@@ -26,5 +32,9 @@ public interface SellableSkuQuery {
     record SellableSkuReference(UUID skuId, UUID familyId, String familyCode, String skuCode,
                                 String legacyCatalogItemId, String familyName, String presentation,
                                 String unitOfMeasure, BigDecimal price, String currency) {
+    }
+
+    record SellableSkuPolicy(UUID skuId, String status, boolean visible,
+                             BigDecimal temperatureMin, BigDecimal temperatureMax) {
     }
 }
