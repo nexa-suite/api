@@ -28,6 +28,19 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/route-starts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/handoff-notes")).isTrue();
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/skus/resolve")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/inventory/lots/resolve")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/inventory/physical-allocation-scan-validations")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/handoff-tokens")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/delivery-handoff/validations")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/buyer-receipts")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions/{subscriptionId}/disable")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions/{subscriptionId}")).isTrue();
+        assertRequiredHeader(document, "/api/v1/deliveries/{deliveryId}/handoff-tokens", "post", "Idempotency-Key");
+        assertRequiredHeader(document, "/api/v1/deliveries/{deliveryId}/buyer-receipts", "post", "Idempotency-Key");
+        assertRequiredHeader(document, "/api/v1/notifications/push-subscriptions", "post", "X-Nexa-Client");
+        assertRequiredHeader(document, "/api/v1/notifications/push-subscriptions", "post", "Idempotency-Key");
         assertThat(document.at("/components/securitySchemes/nativeRefreshToken/name").asText())
                 .isEqualTo("X-Nexa-Refresh-Token");
         var refresh = document.get("paths").get("/api/v1/authentication/refresh").get("post");
@@ -93,5 +106,16 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
             return value.decimalValue().stripTrailingZeros().toPlainString();
         }
         return value.toString();
+    }
+
+    private static void assertRequiredHeader(tools.jackson.databind.JsonNode document, String path,
+                                             String method, String name) {
+        boolean required = false;
+        for (tools.jackson.databind.JsonNode parameter : document.get("paths").get(path).get(method).get("parameters")) {
+            if (name.equals(parameter.get("name").asText()) && "header".equals(parameter.get("in").asText())) {
+                required = parameter.get("required").asBoolean();
+            }
+        }
+        assertThat(required).as("%s %s must require header %s in OpenAPI", method, path, name).isTrue();
     }
 }

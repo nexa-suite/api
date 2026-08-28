@@ -1,9 +1,12 @@
 package com.nexa.api.catalogcommercialpolicy.infrastructure;
 
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogSkuUseCase;
+import com.nexa.api.catalogcommercialpolicy.application.port.in.SkuIdentifierResolutionUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogAuthorizationPort;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogSkuPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SkuIdentifierResolutionQuery;
 import com.nexa.api.catalogcommercialpolicy.application.service.CatalogSkuServiceFacade;
+import com.nexa.api.catalogcommercialpolicy.application.service.SkuIdentifierResolutionService;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.query.CatalogTransactionalProxy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,5 +23,12 @@ public class CatalogSkuRuntimeConfiguration {
             Clock clock, PlatformTransactionManager transactionManager) {
         return CatalogTransactionalProxy.required(new CatalogSkuServiceFacade(port, authorization, clock),
                 CatalogSkuUseCase.class, transactionManager);
+    }
+
+    @Bean
+    SkuIdentifierResolutionUseCase skuIdentifierResolutionUseCase(SkuIdentifierResolutionQuery query,
+            CatalogAuthorizationPort authorization, PlatformTransactionManager transactionManager) {
+        return CatalogTransactionalProxy.required(new SkuIdentifierResolutionService(query, authorization),
+                SkuIdentifierResolutionUseCase.class, transactionManager);
     }
 }

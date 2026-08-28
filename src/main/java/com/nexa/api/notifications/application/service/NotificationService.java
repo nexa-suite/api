@@ -15,6 +15,7 @@ import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Locale;
 import java.util.Objects;
@@ -23,12 +24,26 @@ public final class NotificationService implements NotificationUseCase, Notificat
 	private final NotificationInboxPersistencePort inbox;
 	private final NotificationPreferencePersistencePort preferences;
 	private final CustomerAccountQuery accounts;
+	private final PushRoutingService pushRouting;
+	private final ApplicationEventPublisher eventPublisher;
 
 	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
 			CustomerAccountQuery accounts) {
+		this(inbox, preferences, accounts, null, null);
+	}
+
+	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
+			CustomerAccountQuery accounts, PushRoutingService pushRouting) {
+		this(inbox, preferences, accounts, pushRouting, null);
+	}
+
+	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
+			CustomerAccountQuery accounts, PushRoutingService pushRouting, ApplicationEventPublisher eventPublisher) {
 		this.inbox = Objects.requireNonNull(inbox, "Notification inbox is required");
 		this.preferences = Objects.requireNonNull(preferences, "Notification preferences are required");
 		this.accounts = Objects.requireNonNull(accounts, "Client accounts are required");
+		this.pushRouting = pushRouting;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@Override
@@ -83,13 +98,21 @@ public final class NotificationService implements NotificationUseCase, Notificat
 	public void project(NotificationProjection event) {
 		Objects.requireNonNull(event, "Notification projection event is required");
 		String category = category(event.eventType());
-		if (!preferences.isEnabled(event.tenantId(), event.workspaceId(), category, "IN_APP")) return;
 		String title = title(event.eventType());
 		String body = body(event.eventType(), event.publicStatus());
 		String deepLink = deepLink(event.eventType(), event.aggregateId());
+		boolean inAppEnabled = preferences.isEnabled(event.tenantId(), event.workspaceId(), category, "IN_APP");
 		for (String recipientMembershipId : event.recipientMembershipIds()) {
-			inbox.insertIfAbsent(new ProjectedNotification(event.eventId(), event.tenantId(), event.workspaceId(), recipientMembershipId,
-					category, title, body, deepLink, event.aggregateType(), event.aggregateId(), event.occurredAt()));
+			if (inAppEnabled) {
+				inbox.insertIfAbsent(new ProjectedNotification(event.eventId(), event.tenantId(), event.workspaceId(), recipientMembershipId,
+						category, title, body, deepLink, event.aggregateType(), event.aggregateId(), event.occurredAt()));
+			}
+		}
+		if (pushRouting != null) {
+			var candidate = new com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate(
+					event, category, title, body, deepLink);
+			if (eventPublisher != null) eventPublisher.publishEvent(candidate);
+			else pushRouting.route(event, category, title, body, deepLink);
 		}
 	}
 

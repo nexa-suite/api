@@ -32,6 +32,9 @@ public final class NotificationModels {
 		}
 	}
 
+	public record PushNotificationCandidate(NotificationProjection projection, String category, String title,
+			String message, String deepLink) { }
+
 	public record ProjectedNotification(String eventId, String tenantId, String workspaceId,
 			String recipientMembershipId, String category, String title, String message, String deepLink,
 			String subjectType, String subjectId, Instant createdAt) { }

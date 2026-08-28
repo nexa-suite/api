@@ -4,6 +4,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.Fulf
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.LineView;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
+import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,9 +19,11 @@ import java.time.Instant;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** SQL adapter for the BC-06 fulfillment aggregate and quantity ledger. */
@@ -29,10 +32,12 @@ import java.util.UUID;
 public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePort {
     private final JdbcTemplate jdbc;
     private final Clock clock;
+    private final PhysicalAllocationCommands physicalAllocations;
 
-    public JdbcFulfillmentLifecycleAdapter(JdbcTemplate jdbc, Clock clock) {
+    public JdbcFulfillmentLifecycleAdapter(JdbcTemplate jdbc, Clock clock, PhysicalAllocationCommands physicalAllocations) {
         this.jdbc = jdbc;
         this.clock = Objects.requireNonNull(clock, "Clock is required");
+        this.physicalAllocations = Objects.requireNonNull(physicalAllocations, "Physical allocations are required");
     }
 
     @Override
@@ -145,11 +150,35 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                     || requested.put(line.fulfillmentLineId(), line) != null) throw error("FULFILLMENT_PICKING_LINES_INVALID");
         }
         if (requested.size() != currentLines.size()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
+        Instant validationNow = clock.instant();
+        Long allocationVersion = request.allocationVersion();
         boolean shortage = false;
+        Set<UUID> physicalAllocationLineIds = new HashSet<>();
         for (FulfillmentLineRow line : currentLines) {
             PickedLine picked = requested.get(line.id());
             if (picked == null || !line.skuId().equals(picked.skuId()) || picked.quantity().compareTo(line.allocatedQuantity()) > 0
                     || !line.unit().equalsIgnoreCase(picked.unit())) throw error("FULFILLMENT_PICKING_QUANTITY_INVALID");
+            boolean hasPhysicalReference = picked.physicalAllocationLineId() != null || picked.lotId() != null
+                    || picked.warehouseId() != null;
+            if (picked.fefoOverride() && !hasPhysicalReference) throw error("OVERRIDE_NOT_ALLOWED");
+            if (hasPhysicalReference) {
+                if (picked.physicalAllocationLineId() == null || picked.lotId() == null
+                        || picked.warehouseId() == null || allocationVersion == null) {
+                    throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+                }
+                if (!physicalAllocationLineIds.add(picked.physicalAllocationLineId())) {
+                    throw error("FULFILLMENT_PICKING_LINES_INVALID");
+                }
+                PhysicalAllocationCommands.PickingScanValidationResult validation = physicalAllocations.validatePickingScan(
+                        new PhysicalAllocationCommands.PickingScanValidationRequest(request.tenantId(), request.workspaceId(),
+                                request.fulfillmentId(), picked.physicalAllocationLineId(), picked.skuId(), picked.lotId(),
+                                picked.warehouseId(), picked.quantity(), picked.unit(), allocationVersion, validationNow,
+                                request.actorMembershipId(), picked.fefoOverride(), picked.fefoOverrideReason()));
+                if (!"MATCH".equals(validation.outcome()) && !"ALLOWED_OVERRIDE".equals(validation.outcome())) {
+                    throw error(validation.outcome());
+                }
+                allocationVersion = validation.allocationVersion();
+            }
             shortage |= picked.quantity().compareTo(line.allocatedQuantity()) < 0;
         }
         Instant now = request.completedAt() == null ? (request.startedAt() == null ? clock.instant() : request.startedAt()) : request.completedAt();
@@ -163,8 +192,9 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         for (FulfillmentLineRow line : currentLines) {
             PickedLine picked = requested.get(line.id());
             if (picked.quantity().signum() > 0) {
-                jdbc.update("insert into logistics.picking_result_line(id,tenant_id,workspace_id,picking_result_id,fulfillment_line_id,quantity,unit,created_at) values (?,?,?,?,?,?,?,?)",
-                        UUID.randomUUID(), request.tenantId(), request.workspaceId(), resultId, line.id(), picked.quantity(), line.unit(), Timestamp.from(now));
+                jdbc.update("insert into logistics.picking_result_line(id,tenant_id,workspace_id,picking_result_id,fulfillment_line_id,quantity,unit,physical_allocation_line_id,lot_id,warehouse_id,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
+                        UUID.randomUUID(), request.tenantId(), request.workspaceId(), resultId, line.id(), picked.quantity(), line.unit(),
+                        picked.physicalAllocationLineId(), picked.lotId(), picked.warehouseId(), Timestamp.from(now));
             }
             jdbc.update("update logistics.fulfillment_line set picked_quantity=? where tenant_id=? and workspace_id=? and id=?",
                     picked.quantity(), request.tenantId(), request.workspaceId(), line.id());

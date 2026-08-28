@@ -124,11 +124,13 @@ class RlsRuntimeDatabaseIsolationIT {
             assertThat(count(connection, "select count(*) from logistics.dispatch_number_counter where tenant_id = ? and workspace_id = ?", fixture.scope().tenantId(), fixture.scope().workspaceId())).isEqualTo(1);
             assertThat(count(connection, "select count(*) from business_documents.document_generation_request where id = ?", fixture.generationId())).isEqualTo(1);
             assertThat(count(connection, "select count(*) from business_documents.evidence_object where id = ?", fixture.evidenceId())).isEqualTo(1);
+            assertThat(count(connection, "select count(*) from notifications.push_subscription where id = ?", fixture.pushSubscriptionId())).isEqualTo(1);
 
             setSessionScope(connection, new Scope(UUID.randomUUID(), UUID.randomUUID()));
             assertThat(count(connection, "select count(*) from warehouse.warehouse where id = ?", fixture.warehouseId())).isZero();
             assertThat(count(connection, "select count(*) from logistics.dispatch_number_counter where tenant_id = ? and workspace_id = ?", fixture.scope().tenantId(), fixture.scope().workspaceId())).isZero();
             assertThat(count(connection, "select count(*) from business_documents.evidence_object where id = ?", fixture.evidenceId())).isZero();
+            assertThat(count(connection, "select count(*) from notifications.push_subscription where id = ?", fixture.pushSubscriptionId())).isZero();
 
             setSessionScope(connection, fixture.scope());
             assertThat(execute(connection, "update business_documents.document_generation_request set status='COMPLETED',claim_token=null where id=? and tenant_id=? and workspace_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
@@ -164,6 +166,7 @@ class RlsRuntimeDatabaseIsolationIT {
         UUID membershipId = UUID.randomUUID();
         UUID generationId = UUID.randomUUID();
         UUID evidenceId = UUID.randomUUID();
+        UUID pushSubscriptionId = UUID.randomUUID();
         UUID subjectId = UUID.randomUUID();
         UUID currentToken = UUID.randomUUID();
         Timestamp now = Timestamp.from(Instant.now());
@@ -180,6 +183,9 @@ class RlsRuntimeDatabaseIsolationIT {
                         userId, "rls-worker-" + userId + "@example.test", "rls-worker-" + userId + "@example.test", "rls-worker-" + userId, "rls-worker-" + userId, "RLS worker", "es", now, now);
                 execute(connection, "insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)",
                         membershipId, workspaceId, userId, now, now);
+                execute(connection, "insert into notifications.push_subscription(id,tenant_id,workspace_id,recipient_membership_id,user_id,surface,installation_id,platform,provider_token_hash,status,created_at,updated_at,last_seen_at,version) values (?,?,?,?,?,'PLATFORM',?,'IOS',?,'ENABLED',?,?,?,0)",
+                        pushSubscriptionId, tenantId, workspaceId, membershipId, userId, "rls-installation-" + pushSubscriptionId,
+                        "a".repeat(64), now, now, now);
                 execute(connection, "insert into warehouse.warehouse(id,tenant_id,workspace_id,code,name,status,created_at,updated_at) values (?,?,?,?,'RLS worker warehouse','ACTIVE',?,?)",
                         warehouseId, tenantId, workspaceId, "RLS-" + warehouseId.toString().substring(0, 8), now, now);
                 execute(connection, "insert into logistics.dispatch_number_counter(tenant_id,workspace_id,dispatch_year,next_value) values (?,?,?,?)",
@@ -189,7 +195,7 @@ class RlsRuntimeDatabaseIsolationIT {
                 execute(connection, "insert into business_documents.evidence_object(id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,object_key,lifecycle_status,declared_content_type,original_filename,scan_attempt_count,next_scan_at,created_at,updated_at,lease_until,claim_token) values (?,?,?,null,'SALES_ORDER',?,null,'SCANNING','application/pdf','worker.pdf',1,?,?,?,?,?)",
                         evidenceId, tenantId, workspaceId, subjectId, now, now, now, Timestamp.from(Instant.now().plusSeconds(600)), currentToken);
                 connection.commit();
-                return new RuntimeSecurityFixture(scope, warehouseId, generationId, evidenceId, currentToken,
+                return new RuntimeSecurityFixture(scope, warehouseId, generationId, evidenceId, pushSubscriptionId, currentToken,
                         membershipId, userId, tenantId);
             } catch (SQLException exception) {
                 connection.rollback();
@@ -203,6 +209,7 @@ class RlsRuntimeDatabaseIsolationIT {
             connection.setAutoCommit(false);
             try {
                 setSessionScope(connection, fixture.scope());
+                execute(connection, "delete from notifications.push_subscription where id=?", fixture.pushSubscriptionId());
                 execute(connection, "delete from business_documents.document_generation_request where id=?", fixture.generationId());
                 execute(connection, "delete from business_documents.evidence_object where id=?", fixture.evidenceId());
                 execute(connection, "delete from logistics.dispatch_number_counter where tenant_id=? and workspace_id=?", fixture.scope().tenantId(), fixture.scope().workspaceId());
@@ -273,10 +280,10 @@ class RlsRuntimeDatabaseIsolationIT {
         assertThat(forceRlsTables)
                 .as("RLS must be enabled and forced for every table used by this isolation proof")
                 .containsExactlyInAnyOrder("business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
-                        "notifications.inbox_item",
+                        "notifications.inbox_item", "notifications.push_subscription", "notifications.push_subscription_command_idempotency", "notifications.push_delivery_attempt",
                         "payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.reconciliation_refund_idempotency", "payments.receivable", "payments.receivable_allocation",
                         "warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation", "warehouse.physical_allocation", "warehouse.physical_allocation_line", "warehouse.physical_allocation_event", "warehouse.physical_allocation_command_idempotency",
-                        "logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line", "logistics.fulfillment", "logistics.fulfillment_line", "logistics.fulfillment_command_idempotency", "logistics.fulfillment_event", "logistics.picking_result", "logistics.picking_result_line", "logistics.picking_discrepancy", "logistics.picking_discrepancy_resolution", "logistics.delivery", "logistics.delivery_command_idempotency", "logistics.delivery_assignment", "logistics.delivery_quantity_outcome", "logistics.delivery_event", "logistics.temperature_evidence", "logistics.temperature_excursion", "logistics.proof_of_delivery_addendum",
+                        "logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line", "logistics.fulfillment", "logistics.fulfillment_line", "logistics.fulfillment_command_idempotency", "logistics.fulfillment_event", "logistics.picking_result", "logistics.picking_result_line", "logistics.picking_discrepancy", "logistics.picking_discrepancy_resolution", "logistics.delivery", "logistics.delivery_command_idempotency", "logistics.delivery_assignment", "logistics.delivery_quantity_outcome", "logistics.delivery_event", "logistics.temperature_evidence", "logistics.temperature_excursion", "logistics.proof_of_delivery_addendum", "logistics.delivery_handoff_token", "logistics.buyer_receipt_fact",
                         "warehouse.safety_stock_policy", "warehouse.inventory_transfer", "warehouse.inventory_backing", "warehouse.inventory_backing_line", "warehouse.inventory_backing_position", "payments.financial_adjustment", "payments.financial_ledger_entry", "payments.refund_credit_obligation", "payments.receivable_application",
                         "sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.commercial_commitment", "sales.commercial_commitment_line", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_event", "sales.idempotency_record", "sales.idempotency_response", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order", "sales.sales_order_event");
     }
@@ -411,6 +418,7 @@ class RlsRuntimeDatabaseIsolationIT {
     private record ScopedRow(Scope scope, UUID accountId, UUID addressId) { }
     private record Fixture(List<ScopedRow> rows, List<UUID> tenantIds) { }
     private record RuntimeSecurityFixture(Scope scope, UUID warehouseId, UUID generationId, UUID evidenceId,
+                                          UUID pushSubscriptionId,
                                           UUID currentToken, UUID membershipId, UUID userId, UUID tenantId) { }
 
 }
