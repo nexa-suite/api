@@ -18,6 +18,7 @@ import com.nexa.api.inventoryavailability.domain.model.warehouse.WarehouseServic
 import com.nexa.api.inventoryavailability.domain.model.warehouse.WarehouseStatus;
 import com.nexa.api.inventoryavailability.domain.policy.FefoAllocationPolicy;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
@@ -63,6 +64,9 @@ abstract class WarehouseJdbcSupport {
         this.changeFeed = changeFeed;
         this.catalog = catalog;
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
+        if (this.transactionTemplate != null) {
+            this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        }
         this.operationalSettings = operationalSettings;
     }
 

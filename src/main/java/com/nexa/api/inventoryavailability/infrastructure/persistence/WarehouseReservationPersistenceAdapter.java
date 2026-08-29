@@ -195,13 +195,15 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         for (WorkspaceScope scope : scopes) {
             RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
             try {
-                Runnable expireScope = () -> {
-                    List<ScopeId> expired = jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100 for update skip locked",
-                            (rs, row) -> new ScopeId(scope.tenantId(), scope.workspaceId(), rs.getObject(1, UUID.class)), scope.tenantId(), scope.workspaceId());
-                    for (ScopeId candidate : expired) expireOne(candidate);
-                };
-                if (transactionTemplate == null) expireScope.run();
-                else transactionTemplate.executeWithoutResult(status -> expireScope.run());
+                // Do not retain lot locks from one reservation while the batch
+                // advances to another. Each candidate claims its reservation
+                // row and releases every lot lock at the end of its own tx.
+                List<ScopeId> expired = jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100",
+                        (rs, row) -> new ScopeId(scope.tenantId(), scope.workspaceId(), rs.getObject(1, UUID.class)), scope.tenantId(), scope.workspaceId());
+                for (ScopeId candidate : expired) {
+                    if (transactionTemplate == null) expireOne(candidate);
+                    else transactionTemplate.executeWithoutResult(status -> expireOne(candidate));
+                }
             } catch (RuntimeException exception) {
                 LOGGER.error("Warehouse reservation expiration failed tenantId={} workspaceId={}", scope.tenantId(), scope.workspaceId(), exception);
             } finally {

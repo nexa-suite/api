@@ -77,6 +77,28 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, List<UUID> candidateLotIds) {
+        if (tenantId == null || workspaceId == null || fulfillmentId == null) {
+            throw new IllegalArgumentException("Physical picking lot lock scope is incomplete");
+        }
+        List<UUID> candidates = candidateLotIds == null ? List.of() : candidateLotIds.stream()
+                .filter(Objects::nonNull).distinct().toList();
+        String placeholders = candidates.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        String candidatePredicate = candidates.isEmpty() ? "" : " or l.id in (" + placeholders + ")";
+        List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId, fulfillmentId));
+        args.addAll(candidates);
+        jdbc.query("select l.id from warehouse.inventory_lot l where l.tenant_id=? and l.workspace_id=? and (exists ("
+                        + "select 1 from warehouse.physical_allocation_line allocation_line "
+                        + "join warehouse.physical_allocation allocation on allocation.tenant_id=allocation_line.tenant_id "
+                        + "and allocation.workspace_id=allocation_line.workspace_id and allocation.id=allocation_line.physical_allocation_id "
+                        + "where allocation_line.tenant_id=l.tenant_id and allocation_line.workspace_id=l.workspace_id "
+                        + "and allocation_line.lot_id=l.id and allocation.fulfillment_id=? )" + candidatePredicate + ") "
+                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
+                (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public AllocationResult allocate(AllocationRequest request) {
         lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "ALLOCATE", request.idempotencyKey());
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "ALLOCATE", request.idempotencyKey());

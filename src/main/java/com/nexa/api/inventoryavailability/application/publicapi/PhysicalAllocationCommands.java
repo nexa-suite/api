@@ -20,6 +20,14 @@ public interface PhysicalAllocationCommands {
      */
     void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
 
+    /**
+     * Acquires every fulfillment lot and any candidate lots for a picking
+     * command in the canonical inventory-lot order before per-line validation.
+     * This keeps multi-line and FEFO-override commands deadlock-free across
+     * concurrent fulfillments.
+     */
+    void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, List<UUID> candidateLotIds);
+
     AllocationResult allocate(AllocationRequest request);
 
     /**

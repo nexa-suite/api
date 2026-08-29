@@ -182,6 +182,11 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         if (isMixedPickingMode(effectiveLines)) {
             throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
         }
+        // Lock every allocated lot plus FEFO-override candidates before the
+        // per-line validation loop. The request line order is a presentation
+        // detail and cannot define the cross-fulfillment lock order.
+        physicalAllocations.lockLotsForPicking(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
+                pickingLotIds(effectiveLines));
         Instant validationNow = clock.instant();
         boolean shortage = false;
         Set<UUID> physicalAllocationLineIds = new HashSet<>();
@@ -338,6 +343,12 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
             if (remaining.signum() > 0) throw error("INSUFFICIENT_ALLOCATED_QUANTITY");
         }
         return result;
+    }
+
+    private static List<UUID> pickingLotIds(List<PickedLine> lines) {
+        if (lines == null) return List.of();
+        return lines.stream().filter(Objects::nonNull).map(PickedLine::lotId)
+                .filter(Objects::nonNull).distinct().toList();
     }
 
     @Override
