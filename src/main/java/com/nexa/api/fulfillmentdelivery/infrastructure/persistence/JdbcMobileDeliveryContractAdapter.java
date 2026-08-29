@@ -124,27 +124,38 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
         if (jdbc.queryForObject("select count(*) from logistics.buyer_receipt_fact where tenant_id=? and workspace_id=? and delivery_attempt_id=?", Integer.class,
                 request.tenantId(), request.workspaceId(), handoff.attemptId()) > 0) throw error("BUYER_RECEIPT_ALREADY_RECORDED", false);
         if (!isActiveDelivery(delivery.status())) throw error("DELIVERY_HANDOFF_NOT_ACTIVE", false);
-        if (!handoff.expiresAt().isAfter(request.now())) throw error("DELIVERY_HANDOFF_EXPIRED", false);
+        if (!handoff.expiresAt().isAfter(databaseNow())) throw error("DELIVERY_HANDOFF_EXPIRED", false);
         if (!"ACTIVE".equals(handoff.status())) throw error("DELIVERY_HANDOFF_TOKEN_INVALID", false);
         AttemptRow attempt = jdbc.query("select id,status from logistics.delivery_attempt where tenant_id=? and workspace_id=? and id=? and delivery_id=? for update",
                 (rs, row) -> new AttemptRow(rs.getObject("id", UUID.class), rs.getString("status")), request.tenantId(), request.workspaceId(), handoff.attemptId(), request.deliveryId())
                 .stream().findFirst().orElseThrow(() -> error("DELIVERY_ATTEMPT_NOT_FOUND", true));
         if (isTerminalAttempt(attempt.status())) throw error("DELIVERY_HANDOFF_NOT_ACTIVE", false);
+        // The attempt lock can also wait. Recheck with wall-clock database time
+        // after every lock that can delay acceptance of the ephemeral handoff.
+        if (!handoff.expiresAt().isAfter(databaseNow())) throw error("DELIVERY_HANDOFF_EXPIRED", false);
         BigDecimal delivered = jdbc.queryForObject("select coalesce(sum(coalesce(received_quantity, case when attempted_quantity is null then quantity else 0 end)),0) from logistics.delivery_attempt_line where tenant_id=? and workspace_id=? and delivery_attempt_id=?",
                 BigDecimal.class, request.tenantId(), request.workspaceId(), handoff.attemptId());
         if (request.acceptedQuantity().compareTo(delivered) > 0
                 || ("ACCEPTED".equals(request.decision()) && request.acceptedQuantity().compareTo(delivered) != 0)) {
             throw error("BUYER_RECEIPT_QUANTITY_INVALID", false);
         }
+        // PostgreSQL CURRENT_TIMESTAMP is transaction-start time; clock_timestamp
+        // makes the final TTL check observe time elapsed during the transaction.
+        Instant occurredAt = databaseNow();
+        if (!handoff.expiresAt().isAfter(occurredAt)) throw error("DELIVERY_HANDOFF_EXPIRED", false);
         UUID receiptId = UUID.randomUUID();
         jdbc.update("insert into logistics.buyer_receipt_fact(id,tenant_id,workspace_id,delivery_id,delivery_attempt_id,customer_account_id,buyer_membership_id,handoff_token_id,decision,driver_delivered_quantity,accepted_quantity,reason,occurred_at,idempotency_key,request_hash) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 receiptId, request.tenantId(), request.workspaceId(), request.deliveryId(), handoff.attemptId(), request.customerAccountId(),
                 request.buyerMembershipId(), handoff.id(), request.decision(), delivered, request.acceptedQuantity(), request.reason(),
-                Timestamp.from(request.now()), request.idempotencyKey(), request.requestHash());
+                Timestamp.from(occurredAt), request.idempotencyKey(), request.requestHash());
         if (jdbc.update("update logistics.delivery_handoff_token set status='CONSUMED' where tenant_id=? and workspace_id=? and id=? and status='ACTIVE'",
                 request.tenantId(), request.workspaceId(), handoff.id()) != 1) throw error("CONCURRENCY_CONFLICT", false);
         return new BuyerReceipt(receiptId, request.deliveryId(), handoff.attemptId(), request.decision(), delivered,
-                request.acceptedQuantity(), request.reason(), request.now(), false);
+                request.acceptedQuantity(), request.reason(), occurredAt, false);
+    }
+
+    private Instant databaseNow() {
+        return jdbc.queryForObject("select clock_timestamp()", Timestamp.class).toInstant();
     }
 
     private DeliveryRow lockDelivery(UUID tenant, UUID workspace, UUID id) {

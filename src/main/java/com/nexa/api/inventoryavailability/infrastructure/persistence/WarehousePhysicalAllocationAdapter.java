@@ -645,13 +645,14 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                 .stream().findFirst().orElse(null);
     }
 
-    /** Serializes the two-lot override pair before the row locks below. */
+    /** Locks the two-lot override pair in the same order as every allocation path. */
     private void lockOverrideLots(UUID tenant, UUID workspace, UUID currentLotId, UUID candidateLotId) {
         List<UUID> ids = java.util.stream.Stream.of(currentLotId, candidateLotId).filter(Objects::nonNull).distinct()
                 .sorted().toList();
         if (ids.size() < 2) return;
-        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
-                tenant + "|" + workspace + "|physical-allocation-fefo-override|" + ids.get(0) + "|" + ids.get(1));
+        jdbc.query("select l.id from warehouse.inventory_lot l where l.tenant_id=? and l.workspace_id=? and l.id in (?,?) order by "
+                        + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
+                (rs, row) -> rs.getObject("id", UUID.class), tenant, workspace, ids.get(0), ids.get(1));
     }
 
     private BackingRow lockBacking(UUID tenant, UUID workspace, UUID backingId) {

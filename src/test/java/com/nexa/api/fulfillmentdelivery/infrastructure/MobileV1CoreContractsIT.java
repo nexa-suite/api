@@ -8,8 +8,11 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.context.TestPropertySource;
 
 import java.math.BigDecimal;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -28,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Real PostgreSQL matrix for the approved Mobile V1 backend contracts. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@TestPropertySource(properties = "nexa.mobile.delivery-handoff-ttl=PT10S")
 class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
     @Autowired
@@ -336,6 +340,47 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(issueBody))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.token").doesNotExist()).andReturn();
         assertThat(json(issueReplay).get("handoffId").asText()).isEqualTo(json(issued).get("handoffId").asText());
+
+        // The receipt command must not reuse a pre-lock time snapshot. Hold the
+        // delivery row, let the handoff expire, then release the lock.
+        String issuedToken = token;
+        ExecutorService expiryExecutor = Executors.newSingleThreadExecutor();
+        try (Connection deliveryLock = openMigratorConnection()) {
+            deliveryLock.setAutoCommit(false);
+            try (PreparedStatement statement = deliveryLock.prepareStatement(
+                    "select id from logistics.delivery where tenant_id=? and workspace_id=? and id=? for update")) {
+                statement.setObject(1, UUID.fromString(tenantId()));
+                statement.setObject(2, UUID.fromString(workspaceId()));
+                statement.setObject(3, delivery);
+                statement.executeQuery().close();
+            }
+            Future<MvcResult> expiredReceipt = expiryExecutor.submit(() -> mockMvc.perform(
+                    post("/api/v1/deliveries/" + deliveryId + "/buyer-receipts")
+                            .header("Authorization", "Bearer " + buyer)
+                            .header("Idempotency-Key", "expired-while-locked-" + uuid())
+                            .contentType(MediaType.APPLICATION_JSON).content(
+                                    "{\"token\":\"" + issuedToken + "\",\"decision\":\"ACCEPTED\",\"acceptedQuantity\":1}"))
+                    .andReturn());
+            Thread.sleep(500L);
+            assertThat(expiredReceipt.isDone()).as("receipt should wait for the delivery row lock").isFalse();
+            Thread.sleep(10_500L);
+            deliveryLock.commit();
+
+            MvcResult expired = expiredReceipt.get(20, TimeUnit.SECONDS);
+            assertThat(expired.getResponse().getStatus()).isEqualTo(409);
+            assertThat(json(expired).get("code").asText()).isEqualTo("DELIVERY_HANDOFF_EXPIRED");
+        } finally {
+            expiryExecutor.shutdownNow();
+        }
+
+        // The expired active binding is replaced through the normal command;
+        // the rest of this test continues with a fresh token.
+        MvcResult renewed = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", "handoff-renewed-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(issueBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isNotEmpty()).andReturn();
+        token = json(renewed).get("token").asText();
 
         String validateBody = "{\"token\":\"" + token + "\"}";
         mockMvc.perform(post("/api/v1/delivery-handoff/validations").header("Authorization", "Bearer " + buyer)
