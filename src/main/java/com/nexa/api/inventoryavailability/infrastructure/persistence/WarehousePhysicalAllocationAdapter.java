@@ -87,17 +87,25 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         String candidatePredicate = candidates.isEmpty() ? "" : " or l.id in (" + placeholders + ")";
         List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId, fulfillmentId));
         args.addAll(candidates);
-        jdbc.query("select l.id from warehouse.inventory_lot l "
-                        + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
-                        + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
-                        + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
-                        + "where l.tenant_id=? and l.workspace_id=? and (exists ("
+        String pickingLotsFrom = " from warehouse.inventory_lot l "
+                + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
+                + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
+                + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id ";
+        String pickingLotsScope = "where l.tenant_id=? and l.workspace_id=? and (exists ("
                         + "select 1 from warehouse.physical_allocation_line allocation_line "
                         + "join warehouse.physical_allocation allocation on allocation.tenant_id=allocation_line.tenant_id "
                         + "and allocation.workspace_id=allocation_line.workspace_id and allocation.id=allocation_line.physical_allocation_id "
                         + "where allocation_line.tenant_id=l.tenant_id and allocation_line.workspace_id=l.workspace_id "
                         + "and allocation_line.lot_id=l.id and allocation.fulfillment_id=? )" + candidatePredicate + ") "
-                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l,w,z",
+                        ;
+        jdbc.query("select w.id" + pickingLotsFrom + pickingLotsScope
+                        + "order by " + WarehouseLotLockOrder.warehouse("w") + " for update of w",
+                (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
+        jdbc.query("select z.id" + pickingLotsFrom + pickingLotsScope
+                        + "order by " + WarehouseLotLockOrder.storageZone("z") + " for update of z",
+                (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
+        jdbc.query("select l.id" + pickingLotsFrom + pickingLotsScope
+                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
                 (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
     }
 
@@ -209,6 +217,10 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
             if (currentLotId != null) lockOverrideLots(request.tenantId(), request.workspaceId(), currentLotId, request.lotId());
         }
 
+        // confirmPicking pre-locks every participating parent, lot and
+        // candidate before this per-line read. The standalone scan endpoint
+        // is read-only, so it must not acquire a second, line-specific lock
+        // order that could deadlock with the canonical pre-lock above.
         List<AllocationScanRow> rows = jdbc.query("select l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.lot_id,l.quantity,l.released_quantity,l.consumed_quantity,l.unit,"
                         + "lot.status lot_status,lot.expiration_date,lot.unit lot_unit,"
                         + "lot.stock_quantity,lot.reserved_quantity,lot.version lot_version,w.status warehouse_status,z.status zone_status,z.zone_type,"
@@ -226,8 +238,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                         + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
                         + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
                         + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
-                        + "where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? and l.id=? "
-                        + "for update of l,lot,w,z",
+                        + "where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? and l.id=?",
                 (rs, row) -> new AllocationScanRow(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
                         rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class),
                         rs.getObject("lot_id", UUID.class),

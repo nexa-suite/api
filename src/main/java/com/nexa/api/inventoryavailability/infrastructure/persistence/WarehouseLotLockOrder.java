@@ -4,6 +4,14 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 final class WarehouseLotLockOrder {
     private WarehouseLotLockOrder() { }
 
+    static String warehouse(String alias) {
+        return alias + ".id";
+    }
+
+    static String storageZone(String alias) {
+        return alias + ".warehouse_id," + alias + ".id";
+    }
+
     static String inventoryLot(String alias) {
         return alias + ".sku_id," + alias + ".warehouse_id," + alias
                 + ".expiration_date," + alias + ".received_at," + alias + ".id";
