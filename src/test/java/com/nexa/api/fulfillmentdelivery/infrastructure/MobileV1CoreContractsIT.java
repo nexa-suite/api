@@ -183,6 +183,32 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void physicalPickingAcceptsAFullSplitAllocationAcrossMultipleLots() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        PhysicalFlow flow = createPickingFlow(warehouse, sales, "picking-split-" + uuid(), "2");
+        UUID secondLot = insertAlternativeLot(flow, "SPLIT-" + uuid(), "1");
+        PhysicalLine second = splitAllocation(flow, secondLot);
+
+        mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/picking-confirmations")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", flow.pickingEtag())
+                        .header("Idempotency-Key", "picking-split-confirm-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(splitPickingBody(flow, second)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PICKED"));
+
+        assertThat(jdbc.queryForObject("select picked_quantity from logistics.fulfillment_line where id=?", BigDecimal.class,
+                flow.fulfillmentLineId())).isEqualByComparingTo("2");
+        assertThat(jdbc.queryForObject("select count(*) from logistics.picking_result_line where fulfillment_line_id=?",
+                Integer.class, flow.fulfillmentLineId())).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select coalesce(sum(quantity),0) from logistics.picking_result_line where fulfillment_line_id=?",
+                BigDecimal.class, flow.fulfillmentLineId())).isEqualByComparingTo("2");
+    }
+
+    @Test
     void fefoOverrideRequiresReasonAndRebindsOnlyAValidSameWarehouseLot() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
@@ -453,11 +479,44 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         return id;
     }
 
+    private PhysicalLine splitAllocation(PhysicalFlow flow, UUID secondLot) {
+        jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity-1,version=version+1 where id=? and reserved_quantity>=1",
+                flow.lotId());
+        jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity+1,version=version+1 where id=?",
+                secondLot);
+        jdbc.update("update warehouse.physical_allocation_line set quantity=quantity-1 where id=? and quantity>=1",
+                flow.physicalAllocationLineId());
+        UUID secondLine = UUID.randomUUID();
+        jdbc.update("insert into warehouse.physical_allocation_line(id,tenant_id,workspace_id,physical_allocation_id,sku_id,catalog_item_id,warehouse_id,zone_id,lot_id,quantity,released_quantity,consumed_quantity,unit,expiration_date,created_at) "
+                        + "select ?,tenant_id,workspace_id,physical_allocation_id,sku_id,catalog_item_id,warehouse_id,zone_id,?,1,0,0,unit,"
+                        + "(select expiration_date from warehouse.inventory_lot where id=?),current_timestamp "
+                        + "from warehouse.physical_allocation_line where id=?",
+                secondLine, secondLot, secondLot, flow.physicalAllocationLineId());
+        return jdbc.queryForObject("select id,sku_id,lot_id,warehouse_id,? from warehouse.physical_allocation_line where id=?",
+                (rs, row) -> new PhysicalLine(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
+                        rs.getObject(3, UUID.class), rs.getObject(4, UUID.class), rs.getLong(5)),
+                flow.allocationVersion(), secondLine);
+    }
+
     private static String pickingBody(PhysicalFlow flow, String quantity) {
-        return "{\"allocationVersion\":" + flow.allocationVersion() + ",\"lines\":[{\"fulfillmentLineId\":\""
-                + flow.fulfillmentLineId() + "\",\"skuId\":\"" + flow.skuId() + "\",\"quantity\":" + quantity
-                + ",\"unit\":\"UNIT\",\"physicalAllocationLineId\":\"" + flow.physicalAllocationLineId()
-                + "\",\"lotId\":\"" + flow.lotId() + "\",\"warehouseId\":\"" + flow.warehouseId() + "\"}]}";
+        return "{\"allocationVersion\":" + flow.allocationVersion() + ",\"lines\":["
+                + pickingLineBody(flow.fulfillmentLineId(), flow.skuId(), quantity, flow.physicalAllocationLineId(), flow.lotId(), flow.warehouseId())
+                + "]}";
+    }
+
+    private static String splitPickingBody(PhysicalFlow first, PhysicalLine second) {
+        return "{\"allocationVersion\":" + first.allocationVersion() + ",\"lines\":["
+                + pickingLineBody(first.fulfillmentLineId(), first.skuId(), "1", first.physicalAllocationLineId(), first.lotId(), first.warehouseId())
+                + "," + pickingLineBody(first.fulfillmentLineId(), second.skuId(), "1", second.id(), second.lotId(), second.warehouseId())
+                + "]}";
+    }
+
+    private static String pickingLineBody(UUID fulfillmentLineId, UUID skuId, String quantity,
+                                          UUID physicalAllocationLineId, UUID lotId, UUID warehouseId) {
+        return "{\"fulfillmentLineId\":\"" + fulfillmentLineId + "\",\"skuId\":\"" + skuId
+                + "\",\"quantity\":" + quantity + ",\"unit\":\"UNIT\",\"physicalAllocationLineId\":\""
+                + physicalAllocationLineId + "\",\"lotId\":\"" + lotId + "\",\"warehouseId\":\""
+                + warehouseId + "\"}";
     }
 
     private static String pickingBody(PhysicalFlow flow, UUID lotId, boolean override, String reason, String quantity) {

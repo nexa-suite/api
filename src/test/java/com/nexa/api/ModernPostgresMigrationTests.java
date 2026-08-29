@@ -95,8 +95,11 @@ class ModernPostgresMigrationTests {
 				assertPurchaseRequestExpiryIndex(connection);
 				assertIndexExists(connection, "catalog_management", "ix_sellable_sku_gtin_resolution");
 				assertIndexExists(connection, "warehouse", "ix_inventory_lot_batch_resolution");
-				assertIndexExists(connection, "logistics", "ix_handoff_token_expiry");
-			}
+					assertIndexExists(connection, "logistics", "ix_handoff_token_expiry");
+					assertIndexExists(connection, "logistics", "uq_picking_result_line_legacy_v17");
+					assertIndexExists(connection, "logistics", "uq_picking_result_line_physical_v17");
+					assertCompositeMembershipForeignKeys(connection);
+				}
 		assertOnlyOneConcurrentOutboxLeaseClaimWins();
 	}
 
@@ -255,6 +258,28 @@ class ModernPostgresMigrationTests {
 			try (var result = statement.executeQuery()) {
 				assertThat(result.next()).isTrue();
 				assertThat(result.getBoolean(1)).as("index %s.%s", schema, index).isTrue();
+			}
+		}
+	}
+
+	private static void assertCompositeMembershipForeignKeys(java.sql.Connection connection) throws SQLException {
+		assertConstraintContains(connection, "notifications", "push_subscription", "fk_push_subscription_recipient",
+				"FOREIGN KEY (workspace_id, recipient_membership_id)");
+		assertConstraintContains(connection, "notifications", "push_subscription_command_idempotency",
+				"fk_push_subscription_idempotency_actor", "FOREIGN KEY (workspace_id, actor_membership_id)");
+	}
+
+	private static void assertConstraintContains(java.sql.Connection connection, String schema, String table,
+												 String constraint, String expected) throws SQLException {
+		try (var statement = connection.prepareStatement(
+				"select pg_get_constraintdef(c.oid) from pg_constraint c join pg_class r on r.oid=c.conrelid "
+						+ "join pg_namespace n on n.oid=r.relnamespace where n.nspname=? and r.relname=? and c.conname=?")) {
+			statement.setString(1, schema);
+			statement.setString(2, table);
+			statement.setString(3, constraint);
+			try (var result = statement.executeQuery()) {
+				assertThat(result.next()).as("constraint %s.%s.%s exists", schema, table, constraint).isTrue();
+				assertThat(result.getString(1)).contains(expected);
 			}
 		}
 	}

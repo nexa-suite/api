@@ -24,14 +24,14 @@ ALTER TABLE logistics.buyer_receipt_fact
     );
 
 ALTER TABLE notifications.push_subscription
-    ADD CONSTRAINT fk_push_subscription_recipient FOREIGN KEY (workspace_id, recipient_membership_id)
-        REFERENCES tenant_management.workspace_membership (workspace_id, id),
+    ADD CONSTRAINT fk_push_subscription_recipient FOREIGN KEY (recipient_membership_id)
+        REFERENCES tenant_management.workspace_membership (id),
     ADD CONSTRAINT fk_push_subscription_user FOREIGN KEY (user_id)
         REFERENCES iam.user_account (id);
 
 ALTER TABLE notifications.push_subscription_command_idempotency
-    ADD CONSTRAINT fk_push_subscription_idempotency_actor FOREIGN KEY (workspace_id, actor_membership_id)
-        REFERENCES tenant_management.workspace_membership (workspace_id, id);
+    ADD CONSTRAINT fk_push_subscription_idempotency_actor FOREIGN KEY (actor_membership_id)
+        REFERENCES tenant_management.workspace_membership (id);
 
 CREATE UNIQUE INDEX uq_push_attempt_delivery
     ON notifications.push_delivery_attempt

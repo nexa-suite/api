@@ -6,6 +6,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -117,6 +118,8 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         assertThat(json(replay).get("id").asText()).isEqualTo(dispatch.id());
         assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?", Integer.class,
                 java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select coalesce(sum(received_quantity),0) from logistics.delivery_attempt_line where delivery_attempt_id=(select id from logistics.delivery_attempt where delivery_id=? order by attempt_number desc limit 1)",
+                BigDecimal.class, java.util.UUID.fromString(dispatch.id()))).isEqualByComparingTo("0.5");
         assertThat(jdbc.queryForObject("select count(*) from logistics.continuation_delivery where source_delivery_id=?", Integer.class,
                 java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from logistics.proof_of_delivery where dispatch_order_id=?", Integer.class,

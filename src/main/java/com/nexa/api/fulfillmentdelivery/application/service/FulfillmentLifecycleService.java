@@ -525,7 +525,11 @@ public class FulfillmentLifecycleService {
     }
 
     private static String pickingCanonical(PickingCommand command) {
-        return command.allocationVersion() + "|" + command.lines().stream().sorted(Comparator.comparing(line -> line.fulfillmentLineId().toString()))
+        return command.allocationVersion() + "|" + command.lines().stream()
+                .sorted(Comparator.comparing((PickingLine line) -> line.fulfillmentLineId().toString())
+                        .thenComparing(line -> Objects.toString(line.physicalAllocationLineId(), ""))
+                        .thenComparing(line -> Objects.toString(line.lotId(), ""))
+                        .thenComparing(line -> Objects.toString(line.warehouseId(), "")))
                 .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.quantity() + ":" + line.unit()
                         + ":" + line.physicalAllocationLineId() + ":" + line.lotId() + ":" + line.warehouseId()
                         + ":" + line.fefoOverride() + ":" + line.fefoOverrideReason())
