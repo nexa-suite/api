@@ -141,6 +141,9 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
             ensureHash(prior.requestHash(), request.requestHash());
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
+        if (hasPhysicalPickingBinding(request)) {
+            physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        }
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (!"PICKING".equals(current.status())) throw error("FULFILLMENT_PICKING_REQUIRED");
         List<FulfillmentLineRow> currentLines = lockLines(request.tenantId(), request.workspaceId(), request.fulfillmentId());
@@ -155,6 +158,9 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         if (requested.size() != currentLines.size()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
         if (isMixedPickingMode(request.lines() == null ? List.of() : request.lines())) {
             throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+        }
+        if (containsDuplicateLegacyLines(requested)) {
+            throw error("FULFILLMENT_PICKING_LINES_INVALID");
         }
         Instant validationNow = clock.instant();
         Long allocationVersion = request.allocationVersion();
@@ -246,12 +252,25 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         boolean physical = false;
         boolean legacy = false;
         for (PickedLine line : lines) {
-            boolean hasPhysicalReference = line.physicalAllocationLineId() != null || line.lotId() != null
-                    || line.warehouseId() != null;
+            boolean hasPhysicalReference = hasPhysicalPickingReference(line);
             physical |= hasPhysicalReference;
             legacy |= !hasPhysicalReference;
         }
         return physical && legacy;
+    }
+
+    static boolean containsDuplicateLegacyLines(Map<UUID, List<PickedLine>> requested) {
+        return requested.values().stream().anyMatch(lines -> lines.size() > 1
+                && lines.stream().anyMatch(line -> !hasPhysicalPickingReference(line)));
+    }
+
+    private static boolean hasPhysicalPickingBinding(PickingRequest request) {
+        return request.allocationVersion() != null || (request.lines() != null && request.lines().stream()
+                .anyMatch(line -> line != null && hasPhysicalPickingReference(line)));
+    }
+
+    private static boolean hasPhysicalPickingReference(PickedLine line) {
+        return line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null;
     }
 
     @Override

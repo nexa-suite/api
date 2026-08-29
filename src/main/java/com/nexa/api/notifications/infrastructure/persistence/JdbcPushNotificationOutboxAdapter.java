@@ -3,9 +3,8 @@ package com.nexa.api.notifications.infrastructure.persistence;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
 import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.context.annotation.Profile;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.nio.charset.StandardCharsets;
@@ -24,10 +23,10 @@ public class JdbcPushNotificationOutboxAdapter implements PushNotificationOutbox
             "PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED", "SALES_ORDER_CONFIRMED",
             "DISPATCH_DELIVERED", "DELIVERY_COMPLETED", "POD_COMPLETED", "PAYMENT_SUCCEEDED");
 
-    private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort outbox;
 
-    public JdbcPushNotificationOutboxAdapter(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public JdbcPushNotificationOutboxAdapter(CanonicalOutboxPort outbox) {
+        this.outbox = outbox;
     }
 
     @Override
@@ -52,7 +51,7 @@ public class JdbcPushNotificationOutboxAdapter implements PushNotificationOutbox
         payload.put("title", candidate.title());
         payload.put("message", candidate.message());
         payload.put("deepLink", candidate.deepLink());
-        CanonicalOutbox.append(jdbc, "NOTIFICATION_PUSH_DELIVERY_REQUESTED", "NotificationPushDelivery", workId,
+        outbox.append("NOTIFICATION_PUSH_DELIVERY_REQUESTED", "NotificationPushDelivery", workId,
                 UUID.fromString(projection.tenantId()), UUID.fromString(projection.workspaceId()),
                 projection.occurredAt(), "notification-push-" + sourceEventId, sourceEventId, "1.0", payload);
     }

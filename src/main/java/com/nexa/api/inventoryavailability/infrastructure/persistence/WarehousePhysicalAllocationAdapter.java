@@ -66,6 +66,17 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        if (tenantId == null || workspaceId == null || fulfillmentId == null) {
+            throw new IllegalArgumentException("Physical allocation lock scope is incomplete");
+        }
+        if (lockByFulfillment(tenantId, workspaceId, fulfillmentId) == null) {
+            throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        }
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public AllocationResult allocate(AllocationRequest request) {
         lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "ALLOCATE", request.idempotencyKey());
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "ALLOCATE", request.idempotencyKey());

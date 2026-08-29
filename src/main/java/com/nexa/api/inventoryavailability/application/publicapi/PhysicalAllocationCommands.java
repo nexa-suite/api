@@ -13,6 +13,13 @@ import java.util.UUID;
 public interface PhysicalAllocationCommands {
     AllocationResult getByFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
 
+    /**
+     * Acquires the allocation row lock for a fulfillment-scoped transaction.
+     * Cross-context lifecycle commands use this before locking fulfillment so
+     * physical allocation and fulfillment operations share one lock order.
+     */
+    void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
+
     AllocationResult allocate(AllocationRequest request);
 
     /**

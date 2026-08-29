@@ -20,6 +20,8 @@ import java.util.UUID;
 @Repository
 @Profile("!test")
 public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContractPort {
+    // V79 stored delivered quantity in quantity. V91 made the richer fields
+    // nullable for historical rows; do not turn those rows into zero facts.
     private final JdbcTemplate jdbc;
     private final SalesOrderFulfillmentQuery salesOrders;
 
@@ -71,7 +73,7 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
     @Transactional(propagation = Propagation.MANDATORY)
     public HandoffValidation validate(ValidationRequest request) {
         requireScope(request.tenantId(), request.workspaceId(), request.buyerMembershipId(), request.customerAccountId(), request.tokenHash(), request.now());
-        return jdbc.query("select h.id,h.delivery_id,h.delivery_attempt_id,h.expires_at,h.status handoff_status,d.status delivery_status,a.status attempt_status,coalesce(sum(coalesce(l.received_quantity,0)),0) delivered_quantity "
+        return jdbc.query("select h.id,h.delivery_id,h.delivery_attempt_id,h.expires_at,h.status handoff_status,d.status delivery_status,a.status attempt_status,coalesce(sum(coalesce(l.received_quantity, case when l.attempted_quantity is null then l.quantity else 0 end)),0) delivered_quantity "
                         + "from logistics.delivery_handoff_token h join logistics.delivery d on d.tenant_id=h.tenant_id and d.workspace_id=h.workspace_id and d.id=h.delivery_id "
                         + "join logistics.delivery_attempt a on a.tenant_id=h.tenant_id and a.workspace_id=h.workspace_id and a.id=h.delivery_attempt_id and a.delivery_id=h.delivery_id "
                         + "left join logistics.delivery_attempt_line l on l.tenant_id=a.tenant_id and l.workspace_id=a.workspace_id and l.delivery_attempt_id=a.id "
@@ -128,7 +130,7 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
                 (rs, row) -> new AttemptRow(rs.getObject("id", UUID.class), rs.getString("status")), request.tenantId(), request.workspaceId(), handoff.attemptId(), request.deliveryId())
                 .stream().findFirst().orElseThrow(() -> error("DELIVERY_ATTEMPT_NOT_FOUND", true));
         if (isTerminalAttempt(attempt.status())) throw error("DELIVERY_HANDOFF_NOT_ACTIVE", false);
-        BigDecimal delivered = jdbc.queryForObject("select coalesce(sum(coalesce(received_quantity,0)),0) from logistics.delivery_attempt_line where tenant_id=? and workspace_id=? and delivery_attempt_id=?",
+        BigDecimal delivered = jdbc.queryForObject("select coalesce(sum(coalesce(received_quantity, case when attempted_quantity is null then quantity else 0 end)),0) from logistics.delivery_attempt_line where tenant_id=? and workspace_id=? and delivery_attempt_id=?",
                 BigDecimal.class, request.tenantId(), request.workspaceId(), handoff.attemptId());
         if (request.acceptedQuantity().compareTo(delivered) > 0
                 || ("ACCEPTED".equals(request.decision()) && request.acceptedQuantity().compareTo(delivered) != 0)) {
