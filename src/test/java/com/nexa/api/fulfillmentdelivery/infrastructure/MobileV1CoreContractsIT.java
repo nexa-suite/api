@@ -122,6 +122,17 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PHYSICAL_SCAN_REFERENCE_REQUIRED"));
 
+        mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/picking-confirmations")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", flow.pickingEtag())
+                        .header("Idempotency-Key", "allocation-version-without-physical-ref-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"allocationVersion\":" + flow.allocationVersion() + ",\"lines\":[{\"fulfillmentLineId\":\""
+                                + flow.fulfillmentLineId() + "\",\"skuId\":\"" + flow.skuId()
+                                + "\",\"quantity\":2,\"unit\":\"UNIT\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PHYSICAL_SCAN_REFERENCE_REQUIRED"));
+
         String pickingBody = pickingBody(flow, "2");
         mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/picking-confirmations")
                         .header("Authorization", "Bearer " + warehouse)
@@ -231,6 +242,17 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         .header("If-Match", flow.pickingEtag())
                         .header("Idempotency-Key", "override-no-reason-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON).content(bodyWithoutReason))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("OVERRIDE_NOT_ALLOWED"));
+
+        mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/picking-confirmations")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", flow.pickingEtag())
+                        .header("Idempotency-Key", "override-without-physical-ref-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[{\"fulfillmentLineId\":\"" + flow.fulfillmentLineId()
+                                + "\",\"skuId\":\"" + flow.skuId() + "\",\"quantity\":1,\"unit\":\"UNIT\","
+                                + "\"fefoOverride\":true,\"fefoOverrideReason\":\"FEFO exception\"}]}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("OVERRIDE_NOT_ALLOWED"));
         assertThat(stock(flow.lotId())).isEqualTo(beforeOverride);

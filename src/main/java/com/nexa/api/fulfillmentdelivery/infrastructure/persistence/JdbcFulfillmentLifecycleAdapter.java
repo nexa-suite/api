@@ -153,6 +153,16 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                     || line.quantity().signum() < 0 || line.unit() == null || line.unit().isBlank()) {
                 throw error("FULFILLMENT_PICKING_LINES_INVALID");
             }
+            if (line.fefoOverride() && !hasCompletePhysicalPickingReference(line)) {
+                throw error("OVERRIDE_NOT_ALLOWED");
+            }
+            if (!line.fefoOverride() && line.fefoOverrideReason() != null && !line.fefoOverrideReason().isBlank()) {
+                throw error("OVERRIDE_NOT_ALLOWED");
+            }
+            if (request.allocationVersion() != null && line.quantity().signum() > 0
+                    && !hasCompletePhysicalPickingReference(line)) {
+                throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+            }
             requested.computeIfAbsent(line.fulfillmentLineId(), ignored -> new ArrayList<>()).add(line);
         }
         if (requested.size() != currentLines.size()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
@@ -281,6 +291,10 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
 
     private static boolean hasPhysicalPickingReference(PickedLine line) {
         return line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null;
+    }
+
+    private static boolean hasCompletePhysicalPickingReference(PickedLine line) {
+        return line.physicalAllocationLineId() != null && line.lotId() != null && line.warehouseId() != null;
     }
 
     private static Map<UUID, List<PickedLine>> groupPickedLines(List<PickedLine> lines) {

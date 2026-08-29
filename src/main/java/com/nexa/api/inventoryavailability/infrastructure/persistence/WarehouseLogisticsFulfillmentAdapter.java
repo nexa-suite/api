@@ -136,10 +136,10 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
                         + "join warehouse.inventory_reservation_line rl on rl.id=a.reservation_line_id "
                         + "join warehouse.inventory_reservation r on r.id=rl.reservation_id "
                         + "join warehouse.inventory_lot l on l.id=a.lot_id and l.tenant_id=r.tenant_id and l.workspace_id=r.workspace_id "
-                        // Keep the lot lock order identical to physical
-                        // allocation/dispatch paths: SKU, warehouse, FEFO
-                        // date, receipt time, then lot identity.
-                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by l.sku_id,l.warehouse_id,l.expiration_date,l.received_at,l.id for update of l",
+                        // Keep the lot lock order identical to reservation,
+                        // backing and physical-allocation paths.
+                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by "
+                        + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
                 (rs, row) -> new Allocation(rs.getObject("lot_id", UUID.class), rs.getBigDecimal("quantity"),
                         rs.getString("unit"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class),
                         rs.getString("catalog_item_id"), rs.getObject("sku_id", UUID.class), rs.getBigDecimal("stock_quantity"),

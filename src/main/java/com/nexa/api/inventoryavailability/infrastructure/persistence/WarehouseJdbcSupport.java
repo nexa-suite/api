@@ -234,7 +234,9 @@ abstract class WarehouseJdbcSupport {
                         + "where l.tenant_id=? and l.workspace_id=? and " + skuPredicate + " and l.status='AVAILABLE' "
                         + "and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity "
                         + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
-                        + warehousePredicate + " order by l.expiration_date,l.received_at,l.id"
+                        // FEFO remains the selection policy below; it must not
+                        // define the cross-route lock order.
+                        + warehousePredicate + " order by " + WarehouseLotLockOrder.inventoryLot("l")
                         + (lock ? " for update of l" : ""),
                 (rs, row) -> new FefoAllocationPolicy.LotSnapshot(
                         rs.getObject("id").toString(), rs.getBigDecimal("available"), rs.getString("unit"),

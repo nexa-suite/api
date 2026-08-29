@@ -576,7 +576,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                         + "and not exists (select 1 from warehouse.inventory_temperature_evaluation evaluation where evaluation.tenant_id=l.tenant_id and evaluation.workspace_id=l.workspace_id and evaluation.lot_id=l.id and evaluation.status='OPEN' and evaluation.disposition='HOLD') "
                         + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
                         + "and l.stock_quantity-l.reserved_quantity>0 and (" + predicate + ") "
-                        + "order by l.sku_id,l.warehouse_id,l.expiration_date,l.received_at,l.id for update of l",
+                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
                 (rs, row) -> new LotRow(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getString("unit"), rs.getObject("expiration_date", LocalDate.class), rs.getTimestamp("received_at").toInstant(), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getLong("version"), rs.getBigDecimal("safety_stock")), args.toArray());
     }
 
@@ -660,7 +660,8 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     }
 
     private List<AllocationLot> allocationLots(UUID tenant, UUID workspace, UUID allocationId) {
-        return jdbc.query("select l.lot_id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.quantity,l.released_quantity,l.consumed_quantity,lot.expiration_date,lot.stock_quantity,lot.reserved_quantity,lot.unit,lot.version from warehouse.physical_allocation_line l join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? order by l.sku_id,l.warehouse_id,lot.expiration_date,lot.received_at,l.lot_id for update of lot",
+        return jdbc.query("select l.lot_id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.quantity,l.released_quantity,l.consumed_quantity,lot.expiration_date,lot.stock_quantity,lot.reserved_quantity,lot.unit,lot.version from warehouse.physical_allocation_line l join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? order by "
+                        + WarehouseLotLockOrder.physicalAllocationLot("l", "lot") + " for update of lot",
                 (rs, row) -> new AllocationLot(rs.getObject("lot_id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getBigDecimal("quantity"), rs.getBigDecimal("released_quantity"), rs.getBigDecimal("consumed_quantity"), rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getString("unit"), rs.getLong("version")), tenant, workspace, allocationId);
     }
 
