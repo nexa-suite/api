@@ -86,11 +86,55 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
     }
 
     @Override
-    public boolean wasSent(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId) {
-        require(tenantId, workspaceId, subscriptionId, eventId);
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public DeliveryClaim claimDelivery(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId,
+                                       String deliveryKey, Instant now) {
+        require(tenantId, workspaceId, subscriptionId, eventId, deliveryKey, now);
+        UUID eventUuid = uuid(eventId);
+        UUID claimToken = UUID.randomUUID();
+        int inserted = jdbc.update("""
+                insert into notifications.push_delivery_claim
+                    (tenant_id,workspace_id,subscription_id,event_id,delivery_key,status,claim_token,lease_until,created_at,updated_at)
+                values (?,?,?,?,?,'CLAIMED',?,current_timestamp + interval '10 minutes',?,?)
+                on conflict (tenant_id,workspace_id,subscription_id,event_id) do nothing
+                """, tenantId, workspaceId, subscriptionId, eventUuid, deliveryKey, claimToken,
+                Timestamp.from(now), Timestamp.from(now));
+        if (inserted == 1) return new DeliveryClaim(DeliveryClaimStatus.CLAIMED, claimToken);
+
         Boolean sent = jdbc.queryForObject("select exists(select 1 from notifications.push_delivery_attempt where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='SENT')",
-                Boolean.class, tenantId, workspaceId, subscriptionId, uuid(eventId));
-        return Boolean.TRUE.equals(sent);
+                Boolean.class, tenantId, workspaceId, subscriptionId, eventUuid);
+        if (Boolean.TRUE.equals(sent)) {
+            jdbc.update("update notifications.push_delivery_claim set status='SENT',claim_token=null,lease_until=null,updated_at=? where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status<>'SENT'",
+                    Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid);
+            return new DeliveryClaim(DeliveryClaimStatus.ALREADY_SENT, null);
+        }
+
+        int reclaimed = jdbc.update("""
+                update notifications.push_delivery_claim
+                   set claim_token=?, lease_until=current_timestamp + interval '10 minutes', updated_at=?
+                 where tenant_id=? and workspace_id=? and subscription_id=? and event_id=?
+                   and status='CLAIMED' and lease_until <= current_timestamp
+                """, claimToken, Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid);
+        return reclaimed == 1
+                ? new DeliveryClaim(DeliveryClaimStatus.CLAIMED, claimToken)
+                : new DeliveryClaim(DeliveryClaimStatus.BUSY, null);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void completeDelivery(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId,
+                                 UUID claimToken, boolean sent, Instant now) {
+        require(tenantId, workspaceId, subscriptionId, eventId, claimToken, now);
+        UUID eventUuid = uuid(eventId);
+        int changed = sent
+                ? jdbc.update("update notifications.push_delivery_claim set status='SENT',claim_token=null,lease_until=null,updated_at=? where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='CLAIMED' and claim_token=?",
+                Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid, claimToken)
+                : jdbc.update("update notifications.push_delivery_claim set claim_token=null,lease_until=current_timestamp,updated_at=? where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='CLAIMED' and claim_token=?",
+                Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid, claimToken);
+        if (changed == 1) return;
+        if (sent && Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from notifications.push_delivery_claim where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='SENT')",
+                Boolean.class, tenantId, workspaceId, subscriptionId, eventUuid))) return;
+        throw new NotificationOperationException("PUSH_DELIVERY_CLAIM_LOST", true);
     }
 
     @Override

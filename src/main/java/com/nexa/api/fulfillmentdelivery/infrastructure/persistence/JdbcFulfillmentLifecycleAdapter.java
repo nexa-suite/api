@@ -141,9 +141,9 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
             ensureHash(prior.requestHash(), request.requestHash());
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
-        if (hasPhysicalPickingBinding(request)) {
-            physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
-        }
+        // Every fulfillment created since V91 has a physical allocation. Lock
+        // it before the fulfillment row for one stable cross-context order.
+        physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (!"PICKING".equals(current.status())) throw error("FULFILLMENT_PICKING_REQUIRED");
         List<FulfillmentLineRow> currentLines = lockLines(request.tenantId(), request.workspaceId(), request.fulfillmentId());
@@ -156,14 +156,23 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
             requested.computeIfAbsent(line.fulfillmentLineId(), ignored -> new ArrayList<>()).add(line);
         }
         if (requested.size() != currentLines.size()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
-        if (isMixedPickingMode(request.lines() == null ? List.of() : request.lines())) {
-            throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
-        }
         if (containsDuplicateLegacyLines(requested)) {
             throw error("FULFILLMENT_PICKING_LINES_INVALID");
         }
-        Instant validationNow = clock.instant();
+
+        List<PickedLine> effectiveLines = request.lines();
         Long allocationVersion = request.allocationVersion();
+        if (!hasPhysicalPickingBinding(request) && current.physicalAllocationId() != null) {
+            PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
+                    request.tenantId(), request.workspaceId(), request.fulfillmentId());
+            effectiveLines = bindLegacyPicking(effectiveLines, allocation);
+            requested = groupPickedLines(effectiveLines);
+            allocationVersion = allocation.version();
+        }
+        if (isMixedPickingMode(effectiveLines)) {
+            throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+        }
+        Instant validationNow = clock.instant();
         boolean shortage = false;
         Set<UUID> physicalAllocationLineIds = new HashSet<>();
         Map<UUID, BigDecimal> pickedQuantities = new HashMap<>();
@@ -252,6 +261,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         boolean physical = false;
         boolean legacy = false;
         for (PickedLine line : lines) {
+            if (line == null || line.quantity() == null || line.quantity().signum() == 0) continue;
             boolean hasPhysicalReference = hasPhysicalPickingReference(line);
             physical |= hasPhysicalReference;
             legacy |= !hasPhysicalReference;
@@ -271,6 +281,49 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
 
     private static boolean hasPhysicalPickingReference(PickedLine line) {
         return line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null;
+    }
+
+    private static Map<UUID, List<PickedLine>> groupPickedLines(List<PickedLine> lines) {
+        Map<UUID, List<PickedLine>> grouped = new HashMap<>();
+        for (PickedLine line : lines) grouped.computeIfAbsent(line.fulfillmentLineId(), ignored -> new ArrayList<>()).add(line);
+        return grouped;
+    }
+
+    /**
+     * Keeps the v0.16.1 request shape while binding positive legacy quantities
+     * to the already-created physical allocation. Zero quantities remain
+     * logical shortage markers and are reconciled by the shortage command.
+     */
+    private static List<PickedLine> bindLegacyPicking(List<PickedLine> legacyLines,
+                                                       PhysicalAllocationCommands.AllocationResult allocation) {
+        Map<UUID, List<PhysicalAllocationCommands.Line>> bySku = new HashMap<>();
+        Map<UUID, BigDecimal> remainingByAllocationLine = new HashMap<>();
+        for (PhysicalAllocationCommands.Line line : allocation.lines()) {
+            bySku.computeIfAbsent(line.skuId(), ignored -> new ArrayList<>()).add(line);
+            remainingByAllocationLine.put(line.id(), line.quantity().subtract(line.releasedQuantity())
+                    .subtract(line.consumedQuantity()).max(BigDecimal.ZERO));
+        }
+        List<PickedLine> result = new ArrayList<>();
+        for (PickedLine legacy : legacyLines) {
+            if (legacy.quantity().signum() == 0) {
+                result.add(legacy);
+                continue;
+            }
+            BigDecimal remaining = legacy.quantity();
+            for (PhysicalAllocationCommands.Line allocated : bySku.getOrDefault(legacy.skuId(), List.of())) {
+                if (!allocated.unit().equalsIgnoreCase(legacy.unit())) continue;
+                BigDecimal available = remainingByAllocationLine.getOrDefault(allocated.id(), BigDecimal.ZERO);
+                BigDecimal take = available.min(remaining);
+                if (take.signum() == 0) continue;
+                result.add(new PickedLine(legacy.fulfillmentLineId(), legacy.skuId(), take, legacy.unit(),
+                        allocated.id(), allocated.lotId(), allocated.warehouseId(), false, null));
+                remainingByAllocationLine.put(allocated.id(), available.subtract(take));
+                remaining = remaining.subtract(take);
+                if (remaining.signum() == 0) break;
+            }
+            if (remaining.signum() > 0) throw error("INSUFFICIENT_ALLOCATED_QUANTITY");
+        }
+        return result;
     }
 
     @Override

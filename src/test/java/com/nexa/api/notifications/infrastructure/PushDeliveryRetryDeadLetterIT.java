@@ -67,6 +67,8 @@ class PushDeliveryRetryDeadLetterIT extends NexaWorkflowIntegrationSupport {
                 Integer.class, subscriptionId, sourceEventId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("select status from notifications.push_delivery_attempt where subscription_id=? and event_id=?",
                 String.class, subscriptionId, sourceEventId)).isEqualTo("DEFERRED");
+        assertThat(jdbc.queryForObject("select count(*) from notifications.push_delivery_claim where subscription_id=? and event_id=? and status='CLAIMED' and claim_token is null and lease_until <= current_timestamp",
+                Integer.class, subscriptionId, sourceEventId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from integration.inbox_event where consumer_name=? and event_id=?",
                 Integer.class, "nexa-service-foundation-v1-push", outboxEventId)).isZero();
     }

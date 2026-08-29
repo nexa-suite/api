@@ -9,8 +9,22 @@ public interface PushSubscriptionPersistencePort {
     PushSubscription register(RegisterRequest request);
     PushSubscription disable(DisableRequest request);
     List<PushSubscription> activeForRecipient(UUID tenantId, UUID workspaceId, UUID recipientMembershipId);
-    boolean wasSent(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId);
+    DeliveryClaim claimDelivery(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId,
+                                String deliveryKey, Instant now);
+    void completeDelivery(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId,
+                          UUID claimToken, boolean sent, Instant now);
     void recordAttempt(DeliveryAttempt request);
+
+    enum DeliveryClaimStatus { CLAIMED, ALREADY_SENT, BUSY }
+
+    record DeliveryClaim(DeliveryClaimStatus status, UUID claimToken) {
+        public DeliveryClaim {
+            if (status == null) throw new IllegalArgumentException("Delivery claim status is required");
+            if (status == DeliveryClaimStatus.CLAIMED && claimToken == null) {
+                throw new IllegalArgumentException("A claimed delivery requires a claim token");
+            }
+        }
+    }
 
     record RegisterRequest(UUID tenantId, UUID workspaceId, UUID recipientMembershipId, UUID userId,
                            String surface, String installationId, String platform, String tokenHash,

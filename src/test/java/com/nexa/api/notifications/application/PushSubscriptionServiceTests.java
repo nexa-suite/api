@@ -63,6 +63,7 @@ class PushSubscriptionServiceTests {
         when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
                 new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
                         "ANDROID", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
+        claim(persistence, PushSubscriptionPersistencePort.DeliveryClaimStatus.CLAIMED);
         doThrow(new IllegalStateException("provider unavailable")).when(provider).deliver(any());
 
         assertThatThrownBy(() -> new PushRoutingService(persistence, provider).route(new NotificationProjection(
@@ -92,6 +93,7 @@ class PushSubscriptionServiceTests {
         when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
                 new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
                         "ANDROID", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
+        claim(persistence, PushSubscriptionPersistencePort.DeliveryClaimStatus.CLAIMED);
         when(provider.deliver(any())).thenReturn(new PushProviderPort.DeliveryResult("DEFERRED", "PROVIDER_NOT_CONFIGURED", null));
 
         assertThatThrownBy(() -> new PushRoutingService(persistence, provider).routeDurable(new NotificationProjection(
@@ -115,7 +117,7 @@ class PushSubscriptionServiceTests {
         when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
                 new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
                         "ANDROID", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
-        when(persistence.wasSent(TENANT, WORKSPACE, subscriptionId, eventId.toString())).thenReturn(true);
+        claim(persistence, PushSubscriptionPersistencePort.DeliveryClaimStatus.ALREADY_SENT);
 
         new PushRoutingService(persistence, provider).routeDurable(new NotificationProjection(
                 eventId.toString(), TENANT.toString(), WORKSPACE.toString(), null, "SalesOrder", UUID.randomUUID().toString(),
@@ -134,6 +136,7 @@ class PushSubscriptionServiceTests {
         when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
                 new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
                         "IOS", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
+        claim(persistence, PushSubscriptionPersistencePort.DeliveryClaimStatus.CLAIMED);
         String longError = "x".repeat(2_001);
         when(provider.deliver(any())).thenReturn(new PushProviderPort.DeliveryResult("FAILED", "provider", longError));
 
@@ -155,6 +158,7 @@ class PushSubscriptionServiceTests {
         when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
                 new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
                         "IOS", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
+        claim(persistence, PushSubscriptionPersistencePort.DeliveryClaimStatus.CLAIMED);
         when(provider.deliver(any())).thenReturn(new PushProviderPort.DeliveryResult("UNKNOWN", "provider", "invalid result"));
 
         new PushRoutingService(persistence, provider).route(new NotificationProjection(
@@ -175,6 +179,13 @@ class PushSubscriptionServiceTests {
         when(context.userId()).thenReturn(new UserId(USER));
         when(context.surface()).thenReturn(Surface.PLATFORM);
         return context;
+    }
+
+    private static void claim(PushSubscriptionPersistencePort persistence,
+                              PushSubscriptionPersistencePort.DeliveryClaimStatus status) {
+        UUID token = status == PushSubscriptionPersistencePort.DeliveryClaimStatus.CLAIMED ? UUID.randomUUID() : null;
+        when(persistence.claimDelivery(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new PushSubscriptionPersistencePort.DeliveryClaim(status, token));
     }
 
     private static String sha256(String value) {

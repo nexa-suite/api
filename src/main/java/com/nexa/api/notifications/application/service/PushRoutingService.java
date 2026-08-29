@@ -60,8 +60,26 @@ public final class PushRoutingService {
             if (membership == null) continue;
             for (PushSubscriptionPersistencePort.PushSubscription subscription
                     : subscriptions.activeForRecipient(tenant, workspace, membership)) {
-                if (subscriptions.wasSent(tenant, workspace, subscription.id(), event.eventId())) continue;
+                PushSubscriptionPersistencePort.DeliveryClaim claim;
+                try {
+                    claim = subscriptions.claimDelivery(tenant, workspace, subscription.id(), event.eventId(),
+                            deliveryKey(event.eventId(), subscription.id()), java.time.Instant.now());
+                    if (claim == null || claim.status() == null) {
+                        throw new NotificationOperationException("PUSH_DELIVERY_CLAIM_UNAVAILABLE", false);
+                    }
+                } catch (RuntimeException exception) {
+                    retryableFailure = exception;
+                    continue;
+                }
+                if (claim.status() == PushSubscriptionPersistencePort.DeliveryClaimStatus.ALREADY_SENT) continue;
+                if (claim.status() == PushSubscriptionPersistencePort.DeliveryClaimStatus.BUSY) {
+                    if (retryDeferred) retryableFailure = new NotificationOperationException("PUSH_DELIVERY_RETRYABLE", false);
+                    continue;
+                }
+
                 PushProviderPort.DeliveryResult result;
+                boolean sent = false;
+                java.time.Instant attemptAt = java.time.Instant.now();
                 try {
                     result = provider.deliver(new PushProviderPort.Delivery(subscription.id(), event.eventId(),
                             event.eventType(), category, title, message, deepLink,
@@ -76,8 +94,9 @@ public final class PushRoutingService {
                     String status = normalizedStatus(result.status());
                     var attempt = new PushSubscriptionPersistencePort.DeliveryAttempt(
                             tenant, workspace, subscription.id(), event.eventId(), event.eventType(),
-                            status, normalizedProviderCode(result.providerCode()), normalizedError(result.error()), event.occurredAt());
+                            status, normalizedProviderCode(result.providerCode()), normalizedError(result.error()), attemptAt);
                     recordAttempt(attempt);
+                    sent = "SENT".equals(status);
                     if ("RETRYABLE".equals(status) || (retryDeferred && "DEFERRED".equals(status))) {
                         retryableFailure = new NotificationOperationException("PUSH_DELIVERY_RETRYABLE", false);
                     }
@@ -86,6 +105,13 @@ public final class PushRoutingService {
                     // in-app projection. Propagate so the canonical outbox can
                     // retry the delivery or move it to its dead-letter state.
                     retryableFailure = exception;
+                } finally {
+                    try {
+                        subscriptions.completeDelivery(tenant, workspace, subscription.id(), event.eventId(),
+                                claim.claimToken(), sent, java.time.Instant.now());
+                    } catch (RuntimeException exception) {
+                        retryableFailure = exception;
+                    }
                 }
             }
         }
