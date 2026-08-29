@@ -132,9 +132,12 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
 
     private static String physicalAllocationLockSql() {
         return "select l.id from warehouse.inventory_lot l "
+                + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
+                + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
+                + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
                 + "where l.tenant_id=? and l.workspace_id=? and l.sku_id=? and l.id in (?,?) "
                 + "and l.status='AVAILABLE' and l.stock_quantity-l.reserved_quantity>0 "
-                + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l";
+                + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l,w,z";
     }
 
     private record LotRef(UUID id, UUID skuId, UUID warehouseId, LocalDate expirationDate, Instant receivedAt) { }

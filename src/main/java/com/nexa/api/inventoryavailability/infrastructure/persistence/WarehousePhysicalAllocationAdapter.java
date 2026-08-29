@@ -87,13 +87,17 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         String candidatePredicate = candidates.isEmpty() ? "" : " or l.id in (" + placeholders + ")";
         List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId, fulfillmentId));
         args.addAll(candidates);
-        jdbc.query("select l.id from warehouse.inventory_lot l where l.tenant_id=? and l.workspace_id=? and (exists ("
+        jdbc.query("select l.id from warehouse.inventory_lot l "
+                        + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
+                        + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
+                        + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
+                        + "where l.tenant_id=? and l.workspace_id=? and (exists ("
                         + "select 1 from warehouse.physical_allocation_line allocation_line "
                         + "join warehouse.physical_allocation allocation on allocation.tenant_id=allocation_line.tenant_id "
                         + "and allocation.workspace_id=allocation_line.workspace_id and allocation.id=allocation_line.physical_allocation_id "
                         + "where allocation_line.tenant_id=l.tenant_id and allocation_line.workspace_id=l.workspace_id "
                         + "and allocation_line.lot_id=l.id and allocation.fulfillment_id=? )" + candidatePredicate + ") "
-                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
+                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l,w,z",
                 (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
     }
 
