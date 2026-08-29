@@ -1,5 +1,6 @@
 package com.nexa.api.notifications.application;
 
+import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
 import com.nexa.api.notifications.application.port.out.PushProviderPort;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -70,12 +72,79 @@ class PushSubscriptionServiceTests {
                 .isInstanceOf(com.nexa.api.notifications.application.exception.NotificationOperationException.class)
                 .hasMessage("PUSH_DELIVERY_RETRYABLE");
 
+        var delivery = org.mockito.ArgumentCaptor.forClass(PushProviderPort.Delivery.class);
+        verify(provider).deliver(delivery.capture());
+        assertThat(delivery.getValue().deliveryKey()).isEqualTo("push|" + eventId + "|" + subscriptionId);
         var attempt = org.mockito.ArgumentCaptor.forClass(PushSubscriptionPersistencePort.DeliveryAttempt.class);
         verify(persistence).recordAttempt(attempt.capture());
         assertThat(attempt.getValue().status()).isEqualTo("RETRYABLE");
         assertThat(attempt.getValue().providerCode()).isEqualTo("PROVIDER_EXCEPTION");
         assertThat(attempt.getValue().error()).isEqualTo("Provider delivery failed");
         assertThat(attempt.getValue().eventId()).isEqualTo(eventId.toString());
+    }
+
+    @Test
+    void durableRoutingKeepsDeferredProviderWorkRetryable() {
+        PushSubscriptionPersistencePort persistence = mock(PushSubscriptionPersistencePort.class);
+        PushProviderPort provider = mock(PushProviderPort.class);
+        UUID subscriptionId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
+                new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
+                        "ANDROID", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
+        when(provider.deliver(any())).thenReturn(new PushProviderPort.DeliveryResult("DEFERRED", "PROVIDER_NOT_CONFIGURED", null));
+
+        assertThatThrownBy(() -> new PushRoutingService(persistence, provider).routeDurable(new NotificationProjection(
+                eventId.toString(), TENANT.toString(), WORKSPACE.toString(), null, "SalesOrder", UUID.randomUUID().toString(),
+                "SALES_ORDER_CONFIRMED", "CONFIRMED", Instant.now(), Set.of(MEMBERSHIP.toString())),
+                "ORDER_STATUS", "Order confirmed", "Order confirmed.", "/sales-orders/1"))
+                .isInstanceOf(NotificationOperationException.class)
+                .hasMessage("PUSH_DELIVERY_RETRYABLE");
+
+        var attempt = org.mockito.ArgumentCaptor.forClass(PushSubscriptionPersistencePort.DeliveryAttempt.class);
+        verify(persistence).recordAttempt(attempt.capture());
+        assertThat(attempt.getValue().status()).isEqualTo("DEFERRED");
+    }
+
+    @Test
+    void durableRetrySkipsSubscriptionsWithRecordedSuccess() {
+        PushSubscriptionPersistencePort persistence = mock(PushSubscriptionPersistencePort.class);
+        PushProviderPort provider = mock(PushProviderPort.class);
+        UUID subscriptionId = UUID.randomUUID();
+        UUID eventId = UUID.randomUUID();
+        when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
+                new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
+                        "ANDROID", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
+        when(persistence.wasSent(TENANT, WORKSPACE, subscriptionId, eventId.toString())).thenReturn(true);
+
+        new PushRoutingService(persistence, provider).routeDurable(new NotificationProjection(
+                eventId.toString(), TENANT.toString(), WORKSPACE.toString(), null, "SalesOrder", UUID.randomUUID().toString(),
+                "SALES_ORDER_CONFIRMED", "CONFIRMED", Instant.now(), Set.of(MEMBERSHIP.toString())),
+                "ORDER_STATUS", "Order confirmed", "Order confirmed.", "/sales-orders/1");
+
+        verify(provider, never()).deliver(any());
+        verify(persistence, never()).recordAttempt(any());
+    }
+
+    @Test
+    void truncatesProviderErrorToTheDurableColumnLimit() {
+        PushSubscriptionPersistencePort persistence = mock(PushSubscriptionPersistencePort.class);
+        PushProviderPort provider = mock(PushProviderPort.class);
+        UUID subscriptionId = UUID.randomUUID();
+        when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
+                new PushSubscriptionPersistencePort.PushSubscription(subscriptionId, MEMBERSHIP, "install-1",
+                        "IOS", "PLATFORM", "ENABLED", Instant.EPOCH, Instant.EPOCH, 0)));
+        String longError = "x".repeat(2_001);
+        when(provider.deliver(any())).thenReturn(new PushProviderPort.DeliveryResult("FAILED", "provider", longError));
+
+        new PushRoutingService(persistence, provider).route(new NotificationProjection(
+                UUID.randomUUID().toString(), TENANT.toString(), WORKSPACE.toString(), null, "SalesOrder", UUID.randomUUID().toString(),
+                "SALES_ORDER_CONFIRMED", "CONFIRMED", Instant.now(), Set.of(MEMBERSHIP.toString())),
+                "ORDER_STATUS", "Order confirmed", "Order confirmed.", "/sales-orders/1");
+
+        var attempt = org.mockito.ArgumentCaptor.forClass(PushSubscriptionPersistencePort.DeliveryAttempt.class);
+        verify(persistence).recordAttempt(attempt.capture());
+        assertThat(attempt.getValue().error()).hasSize(2_000);
     }
 
     @Test

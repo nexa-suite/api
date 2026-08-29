@@ -130,7 +130,7 @@ public final class NotificationService implements NotificationUseCase, Notificat
 	public void deliverPush(com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate candidate) {
 		Objects.requireNonNull(candidate, "Push notification candidate is required");
 		if (pushRouting != null) {
-			pushRouting.route(candidate.projection(), candidate.category(), candidate.title(), candidate.message(), candidate.deepLink());
+			pushRouting.routeDurable(candidate.projection(), candidate.category(), candidate.title(), candidate.message(), candidate.deepLink());
 		}
 	}
 

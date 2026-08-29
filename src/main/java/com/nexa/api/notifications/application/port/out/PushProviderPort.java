@@ -6,8 +6,9 @@ import java.util.UUID;
 public interface PushProviderPort {
     DeliveryResult deliver(Delivery delivery);
 
+    /** Stable event/subscription key for providers that support idempotent delivery. */
     record Delivery(UUID subscriptionId, String eventId, String eventType, String category,
-                    String title, String message, String deepLink) { }
+                    String title, String message, String deepLink, String deliveryKey) { }
 
     record DeliveryResult(String status, String providerCode, String error) { }
 }

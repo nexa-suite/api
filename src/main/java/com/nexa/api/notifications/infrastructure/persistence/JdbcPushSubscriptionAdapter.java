@@ -86,10 +86,19 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
     }
 
     @Override
+    public boolean wasSent(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId) {
+        require(tenantId, workspaceId, subscriptionId, eventId);
+        Boolean sent = jdbc.queryForObject("select exists(select 1 from notifications.push_delivery_attempt where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='SENT')",
+                Boolean.class, tenantId, workspaceId, subscriptionId, uuid(eventId));
+        return Boolean.TRUE.equals(sent);
+    }
+
+    @Override
     @Transactional
     public void recordAttempt(DeliveryAttempt request) {
         require(request.tenantId(), request.workspaceId(), request.subscriptionId(), request.eventId(), request.eventType(),
                 request.status(), request.providerCode(), request.now());
+        lockDeliveryAttempt(request.tenantId(), request.workspaceId(), request.subscriptionId(), uuid(request.eventId()));
         Integer attemptNumber = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from notifications.push_delivery_attempt where tenant_id=? and workspace_id=? and subscription_id=? and event_id=?",
                 Integer.class, request.tenantId(), request.workspaceId(), request.subscriptionId(), uuid(request.eventId()));
         jdbc.update("insert into notifications.push_delivery_attempt(id,tenant_id,workspace_id,subscription_id,event_id,event_type,status,provider_code,error,attempt_number,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
@@ -117,6 +126,11 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
     private void lockInstallation(UUID tenant, UUID workspace, UUID recipient, String installation) {
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
                 tenant + "|" + workspace + "|push-installation|" + recipient + "|" + installation);
+    }
+
+    private void lockDeliveryAttempt(UUID tenant, UUID workspace, UUID subscription, UUID eventId) {
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
+                tenant + "|" + workspace + "|push-delivery|" + subscription + "|" + eventId);
     }
 
     private static PushSubscription subscription(java.sql.ResultSet rs) throws java.sql.SQLException {

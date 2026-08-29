@@ -9,6 +9,7 @@ public interface PushSubscriptionPersistencePort {
     PushSubscription register(RegisterRequest request);
     PushSubscription disable(DisableRequest request);
     List<PushSubscription> activeForRecipient(UUID tenantId, UUID workspaceId, UUID recipientMembershipId);
+    boolean wasSent(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId);
     void recordAttempt(DeliveryAttempt request);
 
     record RegisterRequest(UUID tenantId, UUID workspaceId, UUID recipientMembershipId, UUID userId,
