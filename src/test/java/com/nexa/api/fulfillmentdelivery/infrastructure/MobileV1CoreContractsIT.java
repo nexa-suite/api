@@ -31,7 +31,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Real PostgreSQL matrix for the approved Mobile V1 backend contracts. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-@TestPropertySource(properties = "nexa.mobile.delivery-handoff-ttl=PT10S")
+@TestPropertySource(properties = {
+        "nexa.mobile.delivery-handoff-ttl=PT10S",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
     @Autowired
