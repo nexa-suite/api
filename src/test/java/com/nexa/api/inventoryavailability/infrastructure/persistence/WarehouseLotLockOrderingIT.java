@@ -32,6 +32,15 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
 
     @Test
     void legacyReservationAndPhysicalAllocationLockPathsDoNotDeadlockAcrossWarehouses() throws Exception {
+        assertLockPathsDoNotDeadlock(legacyReservationLockSql(), physicalAllocationLockSql());
+    }
+
+    @Test
+    void transferAndPhysicalAllocationLockPathsDoNotDeadlockAcrossWarehouses() throws Exception {
+        assertLockPathsDoNotDeadlock(transferLockSql(), physicalAllocationLockSql());
+    }
+
+    private void assertLockPathsDoNotDeadlock(String firstSql, String secondSql) throws Exception {
         ensureCommercialInventory();
         ensureCommercialInventory();
 
@@ -49,9 +58,8 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
         assertThat(lots).as("the cross-route lock test needs two warehouses").hasSizeGreaterThanOrEqualTo(2);
         List<LotRef> selected = lots.subList(0, 2);
 
-        // Make FEFO order intentionally differ from warehouse order. The old
-        // reservation query ordered by FEFO only; both routes must now use the
-        // same canonical order before applying their distinct business policy.
+        // Make FEFO order intentionally differ from warehouse order. Business
+        // selection may remain FEFO, but every route must lock canonically.
         LotRef canonicalFirst = selected.get(0);
         LotRef canonicalSecond = selected.get(1);
         jdbc.update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
@@ -63,9 +71,9 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
         CountDownLatch start = new CountDownLatch(1);
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
             Future<LockResult> reservation = executor.submit(() -> lockLots(
-                    legacyReservationLockSql(), tenant, workspace, sku, selected, ready, start));
+                    firstSql, tenant, workspace, sku, selected, ready, start));
             Future<LockResult> physical = executor.submit(() -> lockLots(
-                    physicalAllocationLockSql(), tenant, workspace, sku, selected, ready, start));
+                    secondSql, tenant, workspace, sku, selected, ready, start));
             assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
             start.countDown();
 
@@ -111,6 +119,12 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
     }
 
     private static String legacyReservationLockSql() {
+        return "select l.id from warehouse.inventory_lot l "
+                + "where l.tenant_id=? and l.workspace_id=? and l.sku_id=? and l.id in (?,?) "
+                + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l";
+    }
+
+    private static String transferLockSql() {
         return "select l.id from warehouse.inventory_lot l "
                 + "where l.tenant_id=? and l.workspace_id=? and l.sku_id=? and l.id in (?,?) "
                 + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l";
