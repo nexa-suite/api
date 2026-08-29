@@ -189,7 +189,8 @@ abstract class WarehouseJdbcSupport {
                         + "join warehouse.inventory_reservation r on r.id=l.reservation_id "
                         + "join warehouse.inventory_lot lot on lot.id=a.lot_id "
                         + "and lot.tenant_id=r.tenant_id and lot.workspace_id=r.workspace_id "
-                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by a.lot_id asc",
+                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by "
+                        + WarehouseLotLockOrder.inventoryLot("lot"),
                 (rs, row) -> new WarehouseOperationsService.AllocationView(
                         rs.getObject("lot_id").toString(), rs.getBigDecimal("quantity"), rs.getString("unit"),
                         rs.getObject("expiration_date", LocalDate.class)), tenantId, workspaceId, reservationId);
