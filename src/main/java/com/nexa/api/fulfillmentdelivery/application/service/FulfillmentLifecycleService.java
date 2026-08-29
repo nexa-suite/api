@@ -158,15 +158,35 @@ public class FulfillmentLifecycleService {
         requireKey(idempotencyKey);
         requireVersion(expectedVersion);
         if (command == null || command.lines() == null || command.lines().isEmpty()) throw invalid("FULFILLMENT_PICKING_LINES_REQUIRED");
+        if (command.lines().stream().filter(Objects::nonNull).anyMatch(PickingLine::fefoOverride)) {
+            context.requirePermission(PermissionKey.INVENTORY_ADJUST);
+        }
+        for (PickingLine line : command.lines()) {
+            if (line != null && line.fefoOverride() && (line.fefoOverrideReason() == null || line.fefoOverrideReason().isBlank())) {
+                throw invalid("OVERRIDE_NOT_ALLOWED");
+            }
+            if (line != null && !line.fefoOverride() && line.fefoOverrideReason() != null
+                    && !line.fefoOverrideReason().isBlank()) {
+                throw invalid("OVERRIDE_NOT_ALLOWED");
+            }
+            if (line != null && line.fefoOverride() && !hasCompletePhysicalPickingReference(line)) {
+                throw invalid("OVERRIDE_NOT_ALLOWED");
+            }
+            if (line != null && command.allocationVersion() != null && line.quantity() != null
+                    && line.quantity().signum() > 0 && !hasCompletePhysicalPickingReference(line)) {
+                throw invalid("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+            }
+        }
         List<FulfillmentPersistencePort.PickedLine> lines = command.lines().stream()
-                .map(line -> new FulfillmentPersistencePort.PickedLine(line.fulfillmentLineId(), line.skuId(), line.quantity(), line.unit()))
+                .map(line -> new FulfillmentPersistencePort.PickedLine(line.fulfillmentLineId(), line.skuId(), line.quantity(), line.unit(),
+                        line.physicalAllocationLineId(), line.lotId(), line.warehouseId(), line.fefoOverride(), line.fefoOverrideReason()))
                 .toList();
         FulfillmentModels.FulfillmentView result = fulfillments.confirmPicking(
                 new FulfillmentPersistencePort.PickingRequest(
                         tenant(context), workspace(context), fulfillmentId, expectedVersion, actor(context),
                         command.pickerIdentityId() == null ? context.userId().value() : command.pickerIdentityId(),
-                        idempotencyKey, hash("picking-confirm-v1|" + fulfillmentId + "|" + expectedVersion + "|" + pickingCanonical(command)),
-                        command.startedAt(), command.completedAt(), bounded(command.notes()), lines));
+                        idempotencyKey, pickingRequestHash(fulfillmentId, expectedVersion, command),
+                        command.startedAt(), command.completedAt(), bounded(command.notes()), command.allocationVersion(), lines));
         trace(context, "FULFILLMENT_PICKING_CONFIRMED", "Fulfillment", fulfillmentId, idempotencyKey,
                 Map.of("status", result.status(), "lineCount", lines.size()));
         if ("SHORTAGE".equals(result.status())) {
@@ -512,8 +532,14 @@ public class FulfillmentLifecycleService {
     }
 
     private static String pickingCanonical(PickingCommand command) {
-        return command.lines().stream().sorted(Comparator.comparing(line -> line.fulfillmentLineId().toString()))
-                .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.quantity() + ":" + line.unit())
+        return command.allocationVersion() + "|" + command.lines().stream()
+                .sorted(Comparator.comparing((PickingLine line) -> line.fulfillmentLineId().toString())
+                        .thenComparing(line -> Objects.toString(line.physicalAllocationLineId(), ""))
+                        .thenComparing(line -> Objects.toString(line.lotId(), ""))
+                        .thenComparing(line -> Objects.toString(line.warehouseId(), "")))
+                .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.quantity() + ":" + line.unit()
+                        + ":" + line.physicalAllocationLineId() + ":" + line.lotId() + ":" + line.warehouseId()
+                        + ":" + line.fefoOverride() + ":" + line.fefoOverrideReason())
                 .reduce((left, right) -> left + ";" + right).orElse("");
     }
 
@@ -538,6 +564,33 @@ public class FulfillmentLifecycleService {
     private static String shortageResolutionCanonical(ShortageResolutionCommand command) {
         return Objects.toString(command.reason(), "<null>") + "|" + command.lines().stream()
                 .sorted(Comparator.comparing(line -> line.fulfillmentLineId().toString()))
+                .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.quantity() + ":" + line.unit())
+                .reduce((left, right) -> left + ";" + right).orElse("");
+    }
+
+    /**
+     * Keep the v0.16.1 request hash for legacy logical picking while binding
+     * the richer Mobile physical-picking payload to its current canonical
+     * representation. This lets an in-flight Web retry replay after v0.17.0
+     * without being misclassified as a payload conflict.
+     */
+    private static String pickingRequestHash(UUID fulfillmentId, long expectedVersion, PickingCommand command) {
+        String canonical = hasPhysicalPickingBinding(command) ? pickingCanonical(command) : legacyPickingCanonical(command);
+        return hash("picking-confirm-v1|" + fulfillmentId + "|" + expectedVersion + "|" + canonical);
+    }
+
+    private static boolean hasPhysicalPickingBinding(PickingCommand command) {
+        return command.allocationVersion() != null || command.lines().stream().anyMatch(line -> line != null
+                && (line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null
+                || line.fefoOverride() || (line.fefoOverrideReason() != null && !line.fefoOverrideReason().isBlank())));
+    }
+
+    private static boolean hasCompletePhysicalPickingReference(PickingLine line) {
+        return line.physicalAllocationLineId() != null && line.lotId() != null && line.warehouseId() != null;
+    }
+
+    private static String legacyPickingCanonical(PickingCommand command) {
+        return command.lines().stream().sorted(Comparator.comparing(line -> line.fulfillmentLineId().toString()))
                 .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.quantity() + ":" + line.unit())
                 .reduce((left, right) -> left + ";" + right).orElse("");
     }
@@ -574,13 +627,28 @@ public class FulfillmentLifecycleService {
     private record LineKey(UUID skuId, String catalogItemId, String unit) { }
 
     public record PickingCommand(UUID pickerIdentityId, Instant startedAt, Instant completedAt,
-                                 String notes, List<PickingLine> lines) {
+                                 String notes, Long allocationVersion, List<PickingLine> lines) {
+        public PickingCommand(UUID pickerIdentityId, Instant startedAt, Instant completedAt,
+                              String notes, List<PickingLine> lines) {
+            this(pickerIdentityId, startedAt, completedAt, notes, null, lines);
+        }
         public PickingCommand {
             lines = List.copyOf(lines == null ? List.of() : lines);
         }
     }
 
-    public record PickingLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit) { }
+    public record PickingLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit,
+                              UUID physicalAllocationLineId, UUID lotId, UUID warehouseId,
+                              boolean fefoOverride, String fefoOverrideReason) {
+        public PickingLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit) {
+            this(fulfillmentLineId, skuId, quantity, unit, null, null, null, false, null);
+        }
+
+        public PickingLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit,
+                           UUID physicalAllocationLineId, UUID lotId, UUID warehouseId) {
+            this(fulfillmentLineId, skuId, quantity, unit, physicalAllocationLineId, lotId, warehouseId, false, null);
+        }
+    }
 
     public record ShortageResolutionCommand(String reason, List<ShortageLineCommand> lines) {
         public ShortageResolutionCommand {

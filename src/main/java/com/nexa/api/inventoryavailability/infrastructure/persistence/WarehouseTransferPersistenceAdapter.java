@@ -15,6 +15,7 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -112,7 +113,10 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
 
         TransferLot source = sourceHint == null
                 ? selectFefoSource(context, sourceWarehouseId, skuId, command.catalogItemId(), quantity, requestedUnit)
-                : loadTransferLot(context, sourceHint.id(), true);
+                : sourceHint;
+        TransferLot destination = destinationLot(context, destinationWarehouseId, skuId, source.batchNumber(), source.id(), false);
+        lockTransferLots(context, source.id(), destination == null ? null : destination.id());
+        source = loadTransferLot(context, source.id(), false);
         if (source.version() != expectedSourceVersion) throw error("CONCURRENCY_CONFLICT", false);
         if (source.status().equals("EXPIRED") || source.status().equals("DEPLETED")) {
             throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
@@ -142,7 +146,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             if (quantity.compareTo(transferable) > 0) throw error("INVENTORY_SAFETY_STOCK_PROTECTED", false);
         }
 
-        TransferLot destination = destinationLot(context, destinationWarehouseId, skuId, source.batchNumber(), source.id());
+        destination = destinationLot(context, destinationWarehouseId, skuId, source.batchNumber(), source.id(), false);
         if (destination != null && !destination.unit().equalsIgnoreCase(unit)) throw error("INVENTORY_UNIT_MISMATCH", false);
         if (destination != null && !destination.status().equals(source.status())
                 && !destination.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
@@ -219,7 +223,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (proposal.allocations().size() != 1 || proposal.shortage().signum() > 0) {
             throw error("INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", false);
         }
-        return loadTransferLot(context, uuid(proposal.allocations().getFirst().lotId()), true);
+        return loadTransferLot(context, uuid(proposal.allocations().getFirst().lotId()), false);
     }
 
     private TransferLot loadTransferLot(CurrentAccessContext context, UUID id, boolean lock) {
@@ -232,13 +236,30 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private TransferLot destinationLot(CurrentAccessContext context, UUID warehouseId, UUID skuId,
-                                       String batchNumber, UUID sourceLotId) {
+                                       String batchNumber, UUID sourceLotId, boolean lock) {
         return jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
                                 + "stock_quantity,reserved_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=? and sku_id=?"
-                                + " and batch_number=? and id<>? for update",
+                                + " and batch_number=? and id<>?" + (lock ? " for update" : ""),
                         (rs, row) -> transferLot(rs), tenant(context), workspace(context), warehouseId, skuId, batchNumber, sourceLotId)
                 .stream().findFirst().orElse(null);
+    }
+
+    /** Locks source and destination lots in the shared order used by allocation paths. */
+    private void lockTransferLots(CurrentAccessContext context, UUID sourceLotId, UUID destinationLotId) {
+        List<UUID> ids = java.util.stream.Stream.of(sourceLotId, destinationLotId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .sorted(Comparator.comparing(UUID::toString))
+                .toList();
+        if (ids.isEmpty()) return;
+        String placeholders = ids.stream().map(value -> "?").collect(java.util.stream.Collectors.joining(","));
+        List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        args.addAll(ids);
+        jdbc.query("select l.id from warehouse.inventory_lot l where l.tenant_id=? and l.workspace_id=?"
+                        + " and l.id in (" + placeholders + ") order by " + WarehouseLotLockOrder.inventoryLot("l")
+                        + " for update of l",
+                (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
     }
 
     private SafetyStockRow safetyStock(CurrentAccessContext context, UUID warehouseId, UUID skuId) {

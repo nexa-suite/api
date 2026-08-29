@@ -48,7 +48,7 @@ class ModernPostgresMigrationTests {
 			assertThat(tables(connection, "sales")).containsExactlyInAnyOrder("client_account", "client_account_membership", "client_account_address", "purchase_request", "purchase_request_line", "purchase_request_event", "idempotency_record", "idempotency_response", "manual_order_idempotency", "sales_order_sequence", "sales_order", "sales_order_line", "sales_order_event", "purchase_request_draft", "purchase_request_draft_line", "purchase_request_draft_destination", "purchase_request_draft_route", "purchase_request_draft_warehouse_selection", "purchase_request_draft_idempotency", "manual_sales_order_draft", "manual_sales_order_draft_line", "manual_sales_order_draft_idempotency", "commercial_commitment", "commercial_commitment_line");
 			assertThat(tables(connection, "integration")).containsExactlyInAnyOrder("change_event", "outbox_event", "inbox_event");
 				assertThat(tables(connection, "warehouse")).containsExactlyInAnyOrder("warehouse", "storage_zone", "inventory_lot", "stock_movement", "inventory_event", "inventory_reservation", "inventory_reservation_line", "inventory_reservation_allocation", "reservation_shortage", "command_idempotency", "warehouse_service_configuration", "selection_snapshot", "inventory_temperature_evaluation", "inventory_lot_disposition", "safety_stock_policy", "inventory_transfer", "inventory_backing", "inventory_backing_line", "inventory_backing_position", "physical_allocation", "physical_allocation_line", "physical_allocation_event", "physical_allocation_command_idempotency");
-				assertThat(tables(connection, "logistics")).containsExactlyInAnyOrder("dispatch_number_counter", "dispatch_order", "dispatch_event", "command_idempotency", "proof_of_delivery", "temperature_reading", "delivery_incident", "buyer_delivery_tracking", "operational_handoff_note", "delivery_attempt", "delivery_attempt_line", "continuation_delivery", "continuation_delivery_line", "fulfillment", "fulfillment_line", "fulfillment_command_idempotency", "fulfillment_event", "picking_result", "picking_result_line", "picking_discrepancy", "picking_discrepancy_resolution", "delivery", "delivery_command_idempotency", "delivery_assignment", "delivery_quantity_outcome", "delivery_event", "temperature_evidence", "temperature_excursion", "proof_of_delivery_addendum");
+				assertThat(tables(connection, "logistics")).containsExactlyInAnyOrder("dispatch_number_counter", "dispatch_order", "dispatch_event", "command_idempotency", "proof_of_delivery", "temperature_reading", "delivery_incident", "buyer_delivery_tracking", "operational_handoff_note", "delivery_attempt", "delivery_attempt_line", "continuation_delivery", "continuation_delivery_line", "fulfillment", "fulfillment_line", "fulfillment_command_idempotency", "fulfillment_event", "picking_result", "picking_result_line", "picking_discrepancy", "picking_discrepancy_resolution", "delivery", "delivery_command_idempotency", "delivery_assignment", "delivery_quantity_outcome", "delivery_event", "temperature_evidence", "temperature_excursion", "proof_of_delivery_addendum", "delivery_handoff_token", "buyer_receipt_fact");
 			assertThat(tables(connection, "catalog_management")).containsExactlyInAnyOrder("category", "brand", "product", "product_presentation", "product_asset_reference", "product_visibility", "product_price", "promotion", "promotion_product", "promotion_category", "promotion_client_account", "promotion_rule", "command_idempotency", "seed_import_history", "product_family", "product_variant", "sellable_sku", "sku_price", "promotion_sku");
 			assertThat(columns(connection, "catalog_management", "product_variant")).containsExactlyInAnyOrder(
 				"id", "tenant_id", "workspace_id", "family_id", "variant_code", "name", "description", "status",
@@ -59,7 +59,7 @@ class ModernPostgresMigrationTests {
 				assertThat(columns(connection, "payments", "financial_adjustment"))
 					.contains("adjusted_amount", "outstanding_amount", "receivable_version");
 			assertThat(tables(connection, "reference_data")).containsExactlyInAnyOrder("department", "province", "district", "road_type");
-			assertThat(tables(connection, "notifications")).containsExactly("inbox_item");
+				assertThat(tables(connection, "notifications")).containsExactlyInAnyOrder("inbox_item", "push_subscription", "push_subscription_command_idempotency", "push_delivery_attempt", "push_delivery_claim");
 			assertThat(tables(connection, "audit")).containsExactly("event");
 			assertThat(columns(connection, "integration", "outbox_event"))
 				.contains("processing_started_at", "lease_until", "claim_token");
@@ -91,9 +91,16 @@ class ModernPostgresMigrationTests {
 			assertThat(columns(connection, "catalog_management", "promotion")).contains("priority");
 			assertThat(indexColumns(connection, "sales", "uq_client_account_one_buyer"))
 			.containsExactly("tenant_id", "workspace_id", "client_account_id");
-			assertTenantWorkspaceRls(connection);
-			assertPurchaseRequestExpiryIndex(connection);
-		}
+				assertTenantWorkspaceRls(connection);
+				assertPurchaseRequestExpiryIndex(connection);
+				assertIndexExists(connection, "catalog_management", "ix_sellable_sku_gtin_resolution");
+				assertIndexExists(connection, "warehouse", "ix_inventory_lot_batch_resolution");
+					assertIndexExists(connection, "logistics", "ix_handoff_token_expiry");
+					assertIndexExists(connection, "logistics", "uq_picking_result_line_legacy_v17");
+					assertIndexExists(connection, "logistics", "uq_picking_result_line_physical_v17");
+					assertIndexExists(connection, "notifications", "ix_push_delivery_claim_lease");
+					assertCompositeMembershipForeignKeys(connection);
+				}
 		assertOnlyOneConcurrentOutboxLeaseClaimWins();
 	}
 
@@ -214,7 +221,8 @@ class ModernPostgresMigrationTests {
 				"notifications.inbox_item",
 				"payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.reconciliation_refund_idempotency", "payments.receivable", "payments.receivable_allocation",
 				"warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation", "warehouse.physical_allocation", "warehouse.physical_allocation_line", "warehouse.physical_allocation_event", "warehouse.physical_allocation_command_idempotency",
-				"logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line", "logistics.fulfillment", "logistics.fulfillment_line", "logistics.fulfillment_command_idempotency", "logistics.fulfillment_event", "logistics.picking_result", "logistics.picking_result_line", "logistics.picking_discrepancy", "logistics.picking_discrepancy_resolution", "logistics.delivery", "logistics.delivery_command_idempotency", "logistics.delivery_assignment", "logistics.delivery_quantity_outcome", "logistics.delivery_event", "logistics.temperature_evidence", "logistics.temperature_excursion", "logistics.proof_of_delivery_addendum",
+				"logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line", "logistics.fulfillment", "logistics.fulfillment_line", "logistics.fulfillment_command_idempotency", "logistics.fulfillment_event", "logistics.picking_result", "logistics.picking_result_line", "logistics.picking_discrepancy", "logistics.picking_discrepancy_resolution", "logistics.delivery", "logistics.delivery_command_idempotency", "logistics.delivery_assignment", "logistics.delivery_quantity_outcome", "logistics.delivery_event", "logistics.temperature_evidence", "logistics.temperature_excursion", "logistics.proof_of_delivery_addendum", "logistics.delivery_handoff_token", "logistics.buyer_receipt_fact",
+				"notifications.push_subscription", "notifications.push_subscription_command_idempotency", "notifications.push_delivery_attempt", "notifications.push_delivery_claim",
 				"warehouse.safety_stock_policy", "warehouse.inventory_transfer", "warehouse.inventory_backing", "warehouse.inventory_backing_line", "warehouse.inventory_backing_position", "payments.financial_adjustment", "payments.financial_ledger_entry", "payments.refund_credit_obligation", "payments.receivable_application",
 				"sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.commercial_commitment", "sales.commercial_commitment_line", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_event", "sales.idempotency_record", "sales.idempotency_response", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order", "sales.sales_order_event");
 		Set<String> actualTables = new java.util.HashSet<>();
@@ -240,6 +248,39 @@ class ModernPostgresMigrationTests {
 				StringBuilder plan = new StringBuilder();
 				while (result.next()) plan.append(result.getString(1));
 				assertThat(plan).contains("ix_purchase_request_expiry_due");
+			}
+		}
+	}
+
+	private static void assertIndexExists(java.sql.Connection connection, String schema, String index) throws SQLException {
+		try (var statement = connection.prepareStatement("select exists(select 1 from pg_indexes where schemaname=? and indexname=?)")) {
+			statement.setString(1, schema);
+			statement.setString(2, index);
+			try (var result = statement.executeQuery()) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getBoolean(1)).as("index %s.%s", schema, index).isTrue();
+			}
+		}
+	}
+
+	private static void assertCompositeMembershipForeignKeys(java.sql.Connection connection) throws SQLException {
+		assertConstraintContains(connection, "notifications", "push_subscription", "fk_push_subscription_recipient",
+				"FOREIGN KEY (workspace_id, recipient_membership_id)");
+		assertConstraintContains(connection, "notifications", "push_subscription_command_idempotency",
+				"fk_push_subscription_idempotency_actor", "FOREIGN KEY (workspace_id, actor_membership_id)");
+	}
+
+	private static void assertConstraintContains(java.sql.Connection connection, String schema, String table,
+												 String constraint, String expected) throws SQLException {
+		try (var statement = connection.prepareStatement(
+				"select pg_get_constraintdef(c.oid) from pg_constraint c join pg_class r on r.oid=c.conrelid "
+						+ "join pg_namespace n on n.oid=r.relnamespace where n.nspname=? and r.relname=? and c.conname=?")) {
+			statement.setString(1, schema);
+			statement.setString(2, table);
+			statement.setString(3, constraint);
+			try (var result = statement.executeQuery()) {
+				assertThat(result.next()).as("constraint %s.%s.%s exists", schema, table, constraint).isTrue();
+				assertThat(result.getString(1)).contains(expected);
 			}
 		}
 	}

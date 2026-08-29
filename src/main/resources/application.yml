@@ -56,6 +56,8 @@ info:
 nexa:
   database:
     require-least-privilege-runtime: ${NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME:true}
+  mobile:
+    delivery-handoff-ttl: ${NEXA_MOBILE_DELIVERY_HANDOFF_TTL:PT10M}
   security:
     issuer: ${NEXA_SECURITY_ISSUER:}
     audience: ${NEXA_SECURITY_AUDIENCE:}

@@ -4,6 +4,7 @@ import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.out.LogisticsEventContextQueryPort;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
+import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
 import com.nexa.api.payments.application.port.PaymentPort;
 import com.nexa.api.salescommitment.application.port.out.SalesEventContextQueryPort;
@@ -54,6 +55,7 @@ import java.util.UUID;
 public final class CanonicalOutboxEventProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(CanonicalOutboxEventProcessor.class);
     private static final String CONSUMER = "nexa-service-foundation-v1";
+    private static final String PUSH_DELIVERY_REQUESTED = "NOTIFICATION_PUSH_DELIVERY_REQUESTED";
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -132,12 +134,23 @@ public final class CanonicalOutboxEventProcessor {
             TechnicalMetrics.TimerSample timer = start("process");
             try {
                 RlsRequestScope.set(row.tenantId(), row.workspaceId());
-                transactionTemplate.executeWithoutResult(transaction -> {
-                    assertClaimOwner(row.eventId(), claimToken);
-                    processOne(row, claimToken);
-                    int finalized = jdbc.update("update integration.outbox_event set status='PUBLISHED',processed_at=current_timestamp,next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp", row.eventId(), claimToken);
-                    if (finalized != 1) throw new ClaimLostException();
-                });
+                if (PUSH_DELIVERY_REQUESTED.equals(row.eventType())) {
+                    // Push provider I/O is deliberately outside the source
+                    // business transaction. The same canonical outbox row
+                    // owns retry, lease fencing, and dead-letter handling.
+                    processPushDelivery(row, claimToken);
+                    transactionTemplate.executeWithoutResult(transaction -> {
+                        assertClaimOwner(row.eventId(), claimToken);
+                        jdbc.update("insert into integration.inbox_event(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) values (?,?,?,?,?,'PROCESSED') on conflict (consumer_name,event_id) do nothing", CONSUMER + "-push", row.eventId(), row.tenantId(), row.workspaceId(), Timestamp.from(Instant.now()));
+                        finalizePublished(row, claimToken);
+                    });
+                } else {
+                    transactionTemplate.executeWithoutResult(transaction -> {
+                        assertClaimOwner(row.eventId(), claimToken);
+                        processOne(row, claimToken);
+                        finalizePublished(row, claimToken);
+                    });
+                }
                 record(timer, "published");
                 count("publish", "success");
             } catch (RuntimeException exception) {
@@ -198,6 +211,31 @@ public final class CanonicalOutboxEventProcessor {
         }
         assertClaimOwner(event.eventId(), claimToken);
         jdbc.update("insert into integration.inbox_event(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) values (?,?,?,?,?,'PROCESSED') on conflict (consumer_name,event_id) do nothing", CONSUMER, event.eventId(), event.tenantId(), event.workspaceId(), Timestamp.from(Instant.now()));
+    }
+
+    private void processPushDelivery(EventRow event, UUID claimToken) {
+        assertClaimOwner(event.eventId(), claimToken);
+        Map<String, Object> payload = payload(event.payload());
+        NotificationProjection projection = new NotificationProjection(
+                string(payload.get("sourceEventId")),
+                string(payload.get("tenantId")),
+                string(payload.get("workspaceId")),
+                string(payload.get("clientAccountId")),
+                string(payload.get("aggregateType")),
+                string(payload.get("aggregateId")),
+                string(payload.get("eventType")),
+                string(payload.get("publicStatus")),
+                Instant.parse(string(payload.get("occurredAt"))),
+                strings(payload.get("recipientMembershipIds")));
+        notifications.deliverPush(new PushNotificationCandidate(projection,
+                string(payload.get("category")), string(payload.get("title")),
+                string(payload.get("message")), string(payload.get("deepLink"))));
+    }
+
+    private void finalizePublished(EventRow event, UUID claimToken) {
+        assertClaimOwner(event.eventId(), claimToken);
+        int finalized = jdbc.update("update integration.outbox_event set status='PUBLISHED',processed_at=current_timestamp,next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp", event.eventId(), claimToken);
+        if (finalized != 1) throw new ClaimLostException();
     }
 
     private void assertClaimOwner(UUID eventId, UUID claimToken) {
@@ -360,6 +398,13 @@ public final class CanonicalOutboxEventProcessor {
     private static UUID uuid(Object value) { if (value instanceof UUID id) return id; return UUID.fromString(String.valueOf(value)); }
     private static long number(Object value, long fallback) { return value instanceof Number number ? number.longValue() : value == null ? fallback : Long.parseLong(String.valueOf(value)); }
     private static String string(Object value) { return value == null ? null : String.valueOf(value); }
+
+    private static Set<String> strings(Object value) {
+        if (!(value instanceof Iterable<?> values)) return Set.of();
+        Set<String> result = new HashSet<>();
+        for (Object item : values) if (item != null && !String.valueOf(item).isBlank()) result.add(String.valueOf(item));
+        return Set.copyOf(result);
+    }
 
     private record EventRow(UUID eventId, String eventType, String aggregateType, UUID aggregateId, UUID tenantId,
                             UUID workspaceId, Instant occurredAt, String correlationId, UUID causationId,

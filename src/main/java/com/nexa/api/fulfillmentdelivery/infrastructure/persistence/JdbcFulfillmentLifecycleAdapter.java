@@ -4,6 +4,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.Fulf
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.LineView;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
+import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,9 +19,11 @@ import java.time.Instant;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** SQL adapter for the BC-06 fulfillment aggregate and quantity ledger. */
@@ -29,10 +32,12 @@ import java.util.UUID;
 public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePort {
     private final JdbcTemplate jdbc;
     private final Clock clock;
+    private final PhysicalAllocationCommands physicalAllocations;
 
-    public JdbcFulfillmentLifecycleAdapter(JdbcTemplate jdbc, Clock clock) {
+    public JdbcFulfillmentLifecycleAdapter(JdbcTemplate jdbc, Clock clock, PhysicalAllocationCommands physicalAllocations) {
         this.jdbc = jdbc;
         this.clock = Objects.requireNonNull(clock, "Clock is required");
+        this.physicalAllocations = Objects.requireNonNull(physicalAllocations, "Physical allocations are required");
     }
 
     @Override
@@ -136,21 +141,94 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
             ensureHash(prior.requestHash(), request.requestHash());
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
+        // Every fulfillment created since V91 has a physical allocation. Lock
+        // it before the fulfillment row for one stable cross-context order.
+        physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (!"PICKING".equals(current.status())) throw error("FULFILLMENT_PICKING_REQUIRED");
         List<FulfillmentLineRow> currentLines = lockLines(request.tenantId(), request.workspaceId(), request.fulfillmentId());
-        Map<UUID, PickedLine> requested = new HashMap<>();
+        Map<UUID, List<PickedLine>> requested = new HashMap<>();
         for (PickedLine line : request.lines() == null ? List.<PickedLine>of() : request.lines()) {
-            if (line == null || line.fulfillmentLineId() == null || line.quantity() == null || line.quantity().signum() < 0
-                    || requested.put(line.fulfillmentLineId(), line) != null) throw error("FULFILLMENT_PICKING_LINES_INVALID");
+            if (line == null || line.fulfillmentLineId() == null || line.skuId() == null || line.quantity() == null
+                    || line.quantity().signum() < 0 || line.unit() == null || line.unit().isBlank()) {
+                throw error("FULFILLMENT_PICKING_LINES_INVALID");
+            }
+            if (line.fefoOverride() && !hasCompletePhysicalPickingReference(line)) {
+                throw error("OVERRIDE_NOT_ALLOWED");
+            }
+            if (!line.fefoOverride() && line.fefoOverrideReason() != null && !line.fefoOverrideReason().isBlank()) {
+                throw error("OVERRIDE_NOT_ALLOWED");
+            }
+            if (request.allocationVersion() != null && line.quantity().signum() > 0
+                    && !hasCompletePhysicalPickingReference(line)) {
+                throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+            }
+            requested.computeIfAbsent(line.fulfillmentLineId(), ignored -> new ArrayList<>()).add(line);
         }
         if (requested.size() != currentLines.size()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
+        if (containsDuplicateLegacyLines(requested)) {
+            throw error("FULFILLMENT_PICKING_LINES_INVALID");
+        }
+
+        List<PickedLine> effectiveLines = request.lines();
+        Long allocationVersion = request.allocationVersion();
+        if (!hasPhysicalPickingBinding(request) && current.physicalAllocationId() != null) {
+            PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
+                    request.tenantId(), request.workspaceId(), request.fulfillmentId());
+            effectiveLines = bindLegacyPicking(effectiveLines, allocation);
+            requested = groupPickedLines(effectiveLines);
+            allocationVersion = allocation.version();
+        }
+        if (isMixedPickingMode(effectiveLines)) {
+            throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+        }
+        // Lock every allocated lot plus FEFO-override candidates before the
+        // per-line validation loop. The request line order is a presentation
+        // detail and cannot define the cross-fulfillment lock order.
+        physicalAllocations.lockLotsForPicking(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
+                pickingLotIds(effectiveLines));
+        Instant validationNow = clock.instant();
         boolean shortage = false;
+        Set<UUID> physicalAllocationLineIds = new HashSet<>();
+        Map<UUID, BigDecimal> pickedQuantities = new HashMap<>();
         for (FulfillmentLineRow line : currentLines) {
-            PickedLine picked = requested.get(line.id());
-            if (picked == null || !line.skuId().equals(picked.skuId()) || picked.quantity().compareTo(line.allocatedQuantity()) > 0
-                    || !line.unit().equalsIgnoreCase(picked.unit())) throw error("FULFILLMENT_PICKING_QUANTITY_INVALID");
-            shortage |= picked.quantity().compareTo(line.allocatedQuantity()) < 0;
+            List<PickedLine> pickedLines = requested.get(line.id());
+            if (pickedLines == null || pickedLines.isEmpty()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
+            BigDecimal pickedQuantity = BigDecimal.ZERO;
+            for (PickedLine picked : pickedLines) {
+                if (!line.skuId().equals(picked.skuId()) || !line.unit().equalsIgnoreCase(picked.unit())) {
+                    throw error("FULFILLMENT_PICKING_QUANTITY_INVALID");
+                }
+                pickedQuantity = pickedQuantity.add(picked.quantity());
+            }
+            if (pickedQuantity.compareTo(line.allocatedQuantity()) > 0) {
+                throw error("FULFILLMENT_PICKING_QUANTITY_INVALID");
+            }
+            pickedQuantities.put(line.id(), pickedQuantity);
+            for (PickedLine picked : pickedLines) {
+                boolean hasPhysicalReference = picked.physicalAllocationLineId() != null || picked.lotId() != null
+                        || picked.warehouseId() != null;
+                if (picked.fefoOverride() && !hasPhysicalReference) throw error("OVERRIDE_NOT_ALLOWED");
+                if (hasPhysicalReference) {
+                    if (picked.quantity().signum() <= 0 || picked.physicalAllocationLineId() == null
+                            || picked.lotId() == null || picked.warehouseId() == null || allocationVersion == null) {
+                        throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+                    }
+                    if (!physicalAllocationLineIds.add(picked.physicalAllocationLineId())) {
+                        throw error("FULFILLMENT_PICKING_LINES_INVALID");
+                    }
+                    PhysicalAllocationCommands.PickingScanValidationResult validation = physicalAllocations.validatePickingScan(
+                            new PhysicalAllocationCommands.PickingScanValidationRequest(request.tenantId(), request.workspaceId(),
+                                    request.fulfillmentId(), picked.physicalAllocationLineId(), picked.skuId(), picked.lotId(),
+                                    picked.warehouseId(), picked.quantity(), picked.unit(), allocationVersion, validationNow,
+                                    request.actorMembershipId(), picked.fefoOverride(), picked.fefoOverrideReason()));
+                    if (!"MATCH".equals(validation.outcome()) && !"ALLOWED_OVERRIDE".equals(validation.outcome())) {
+                        throw error(validation.outcome());
+                    }
+                    allocationVersion = validation.allocationVersion();
+                }
+            }
+            shortage |= pickedQuantity.compareTo(line.allocatedQuantity()) < 0;
         }
         Instant now = request.completedAt() == null ? (request.startedAt() == null ? clock.instant() : request.startedAt()) : request.completedAt();
         UUID resultId = UUID.randomUUID();
@@ -161,17 +239,20 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                 Timestamp.from(request.startedAt() == null ? now : request.startedAt()), Timestamp.from(now),
                 request.idempotencyKey(), request.requestHash(), Timestamp.from(now));
         for (FulfillmentLineRow line : currentLines) {
-            PickedLine picked = requested.get(line.id());
-            if (picked.quantity().signum() > 0) {
-                jdbc.update("insert into logistics.picking_result_line(id,tenant_id,workspace_id,picking_result_id,fulfillment_line_id,quantity,unit,created_at) values (?,?,?,?,?,?,?,?)",
-                        UUID.randomUUID(), request.tenantId(), request.workspaceId(), resultId, line.id(), picked.quantity(), line.unit(), Timestamp.from(now));
+            List<PickedLine> pickedLines = requested.get(line.id());
+            BigDecimal pickedQuantity = pickedQuantities.get(line.id());
+            for (PickedLine picked : pickedLines) {
+                if (picked.quantity().signum() <= 0) continue;
+                jdbc.update("insert into logistics.picking_result_line(id,tenant_id,workspace_id,picking_result_id,fulfillment_line_id,quantity,unit,physical_allocation_line_id,lot_id,warehouse_id,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
+                        UUID.randomUUID(), request.tenantId(), request.workspaceId(), resultId, line.id(), picked.quantity(), line.unit(),
+                        picked.physicalAllocationLineId(), picked.lotId(), picked.warehouseId(), Timestamp.from(now));
             }
             jdbc.update("update logistics.fulfillment_line set picked_quantity=? where tenant_id=? and workspace_id=? and id=?",
-                    picked.quantity(), request.tenantId(), request.workspaceId(), line.id());
-            if (picked.quantity().compareTo(line.allocatedQuantity()) < 0) {
+                    pickedQuantity, request.tenantId(), request.workspaceId(), line.id());
+            if (pickedQuantity.compareTo(line.allocatedQuantity()) < 0) {
                 jdbc.update("insert into logistics.picking_discrepancy(id,tenant_id,workspace_id,fulfillment_id,fulfillment_line_id,picking_result_id,kind,quantity,reason,actor_membership_id,created_at) values (?,?,?,?,?,?, 'SHORTAGE',?,?,?,?)",
                         UUID.randomUUID(), request.tenantId(), request.workspaceId(), request.fulfillmentId(), line.id(), resultId,
-                        line.allocatedQuantity().subtract(picked.quantity()), bounded(request.notes() == null ? "Picking shortage" : request.notes()), request.actorMembershipId(), Timestamp.from(now));
+                        line.allocatedQuantity().subtract(pickedQuantity), bounded(request.notes() == null ? "Picking shortage" : request.notes()), request.actorMembershipId(), Timestamp.from(now));
             }
         }
         String target = shortage ? "SHORTAGE" : "PICKED";
@@ -189,6 +270,85 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "PICK_CONFIRM",
                 request.idempotencyKey(), request.requestHash(), request.fulfillmentId(), now);
         return load(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+    }
+
+    static boolean isMixedPickingMode(Iterable<PickedLine> lines) {
+        boolean physical = false;
+        boolean legacy = false;
+        for (PickedLine line : lines) {
+            if (line == null || line.quantity() == null || line.quantity().signum() == 0) continue;
+            boolean hasPhysicalReference = hasPhysicalPickingReference(line);
+            physical |= hasPhysicalReference;
+            legacy |= !hasPhysicalReference;
+        }
+        return physical && legacy;
+    }
+
+    static boolean containsDuplicateLegacyLines(Map<UUID, List<PickedLine>> requested) {
+        return requested.values().stream().anyMatch(lines -> lines.size() > 1
+                && lines.stream().anyMatch(line -> !hasPhysicalPickingReference(line)));
+    }
+
+    private static boolean hasPhysicalPickingBinding(PickingRequest request) {
+        return request.allocationVersion() != null || (request.lines() != null && request.lines().stream()
+                .anyMatch(line -> line != null && hasPhysicalPickingReference(line)));
+    }
+
+    private static boolean hasPhysicalPickingReference(PickedLine line) {
+        return line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null;
+    }
+
+    private static boolean hasCompletePhysicalPickingReference(PickedLine line) {
+        return line.physicalAllocationLineId() != null && line.lotId() != null && line.warehouseId() != null;
+    }
+
+    private static Map<UUID, List<PickedLine>> groupPickedLines(List<PickedLine> lines) {
+        Map<UUID, List<PickedLine>> grouped = new HashMap<>();
+        for (PickedLine line : lines) grouped.computeIfAbsent(line.fulfillmentLineId(), ignored -> new ArrayList<>()).add(line);
+        return grouped;
+    }
+
+    /**
+     * Keeps the v0.16.1 request shape while binding positive legacy quantities
+     * to the already-created physical allocation. Zero quantities remain
+     * logical shortage markers and are reconciled by the shortage command.
+     */
+    private static List<PickedLine> bindLegacyPicking(List<PickedLine> legacyLines,
+                                                       PhysicalAllocationCommands.AllocationResult allocation) {
+        Map<UUID, List<PhysicalAllocationCommands.Line>> bySku = new HashMap<>();
+        Map<UUID, BigDecimal> remainingByAllocationLine = new HashMap<>();
+        for (PhysicalAllocationCommands.Line line : allocation.lines()) {
+            bySku.computeIfAbsent(line.skuId(), ignored -> new ArrayList<>()).add(line);
+            remainingByAllocationLine.put(line.id(), line.quantity().subtract(line.releasedQuantity())
+                    .subtract(line.consumedQuantity()).max(BigDecimal.ZERO));
+        }
+        List<PickedLine> result = new ArrayList<>();
+        for (PickedLine legacy : legacyLines) {
+            if (legacy.quantity().signum() == 0) {
+                result.add(legacy);
+                continue;
+            }
+            BigDecimal remaining = legacy.quantity();
+            for (PhysicalAllocationCommands.Line allocated : bySku.getOrDefault(legacy.skuId(), List.of())) {
+                if (!allocated.unit().equalsIgnoreCase(legacy.unit())) continue;
+                BigDecimal available = remainingByAllocationLine.getOrDefault(allocated.id(), BigDecimal.ZERO);
+                BigDecimal take = available.min(remaining);
+                if (take.signum() == 0) continue;
+                result.add(new PickedLine(legacy.fulfillmentLineId(), legacy.skuId(), take, legacy.unit(),
+                        allocated.id(), allocated.lotId(), allocated.warehouseId(), false, null));
+                remainingByAllocationLine.put(allocated.id(), available.subtract(take));
+                remaining = remaining.subtract(take);
+                if (remaining.signum() == 0) break;
+            }
+            if (remaining.signum() > 0) throw error("INSUFFICIENT_ALLOCATED_QUANTITY");
+        }
+        return result;
+    }
+
+    private static List<UUID> pickingLotIds(List<PickedLine> lines) {
+        if (lines == null) return List.of();
+        return lines.stream().filter(Objects::nonNull).map(PickedLine::lotId)
+                .filter(Objects::nonNull).distinct().toList();
     }
 
     @Override

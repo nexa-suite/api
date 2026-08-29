@@ -9,12 +9,14 @@ import com.nexa.api.notifications.application.port.in.NotificationProjectionPort
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
+import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Locale;
 import java.util.Objects;
@@ -23,12 +25,34 @@ public final class NotificationService implements NotificationUseCase, Notificat
 	private final NotificationInboxPersistencePort inbox;
 	private final NotificationPreferencePersistencePort preferences;
 	private final CustomerAccountQuery accounts;
+	private final PushRoutingService pushRouting;
+	private final ApplicationEventPublisher eventPublisher;
+	private final PushNotificationOutboxPort pushOutbox;
 
 	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
 			CustomerAccountQuery accounts) {
+		this(inbox, preferences, accounts, null, null, null);
+	}
+
+	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
+			CustomerAccountQuery accounts, PushRoutingService pushRouting) {
+		this(inbox, preferences, accounts, pushRouting, null, null);
+	}
+
+	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
+			CustomerAccountQuery accounts, PushRoutingService pushRouting, ApplicationEventPublisher eventPublisher) {
+		this(inbox, preferences, accounts, pushRouting, eventPublisher, null);
+	}
+
+	public NotificationService(NotificationInboxPersistencePort inbox, NotificationPreferencePersistencePort preferences,
+			CustomerAccountQuery accounts, PushRoutingService pushRouting, ApplicationEventPublisher eventPublisher,
+			PushNotificationOutboxPort pushOutbox) {
 		this.inbox = Objects.requireNonNull(inbox, "Notification inbox is required");
 		this.preferences = Objects.requireNonNull(preferences, "Notification preferences are required");
 		this.accounts = Objects.requireNonNull(accounts, "Client accounts are required");
+		this.pushRouting = pushRouting;
+		this.eventPublisher = eventPublisher;
+		this.pushOutbox = pushOutbox;
 	}
 
 	@Override
@@ -83,13 +107,30 @@ public final class NotificationService implements NotificationUseCase, Notificat
 	public void project(NotificationProjection event) {
 		Objects.requireNonNull(event, "Notification projection event is required");
 		String category = category(event.eventType());
-		if (!preferences.isEnabled(event.tenantId(), event.workspaceId(), category, "IN_APP")) return;
 		String title = title(event.eventType());
 		String body = body(event.eventType(), event.publicStatus());
 		String deepLink = deepLink(event.eventType(), event.aggregateId());
+		boolean inAppEnabled = preferences.isEnabled(event.tenantId(), event.workspaceId(), category, "IN_APP");
 		for (String recipientMembershipId : event.recipientMembershipIds()) {
-			inbox.insertIfAbsent(new ProjectedNotification(event.eventId(), event.tenantId(), event.workspaceId(), recipientMembershipId,
-					category, title, body, deepLink, event.aggregateType(), event.aggregateId(), event.occurredAt()));
+			if (inAppEnabled) {
+				inbox.insertIfAbsent(new ProjectedNotification(event.eventId(), event.tenantId(), event.workspaceId(), recipientMembershipId,
+						category, title, body, deepLink, event.aggregateType(), event.aggregateId(), event.occurredAt()));
+			}
+		}
+		if (pushRouting != null) {
+			var candidate = new com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate(
+					event, category, title, body, deepLink);
+			if (pushOutbox != null) pushOutbox.enqueue(candidate);
+			else if (eventPublisher != null) eventPublisher.publishEvent(candidate);
+			else pushRouting.route(event, category, title, body, deepLink);
+		}
+	}
+
+	@Override
+	public void deliverPush(com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate candidate) {
+		Objects.requireNonNull(candidate, "Push notification candidate is required");
+		if (pushRouting != null) {
+			pushRouting.routeDurable(candidate.projection(), candidate.category(), candidate.title(), candidate.message(), candidate.deepLink());
 		}
 	}
 

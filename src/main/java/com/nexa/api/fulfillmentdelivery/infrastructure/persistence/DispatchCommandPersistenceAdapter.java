@@ -439,8 +439,13 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                 attempt.id(), tenant, workspace, attempt.deliveryId(), attempt.number(), attempt.status().name(),
                 attempt.failureReason(), notes == null ? null : notes.trim(), timestamp(attempt.occurredAt()), timestamp(now));
         for (DeliveryAttemptLine line : attempt.lines()) {
-            jdbc.update("insert into logistics.delivery_attempt_line(id,tenant_id,workspace_id,delivery_attempt_id,catalog_item_id,quantity,unit,created_at) values (?,?,?,?,?,?,?,?)",
-                    UUID.randomUUID(), tenant, workspace, attempt.id(), line.catalogItemId(), line.quantity(), line.unit(), timestamp(now));
+            // Keep the legacy dispatch path compatible with the canonical
+            // Mobile G04 quantity projection. These columns were added in
+            // V91 and remain nullable for historical rows, but newly created
+            // partial/final attempts have an authoritative delivered value.
+            jdbc.update("insert into logistics.delivery_attempt_line(id,tenant_id,workspace_id,delivery_attempt_id,catalog_item_id,quantity,unit,created_at,attempted_quantity,received_quantity) values (?,?,?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), tenant, workspace, attempt.id(), line.catalogItemId(), line.quantity(), line.unit(), timestamp(now),
+                    line.quantity(), line.quantity());
         }
     }
 
