@@ -36,6 +36,16 @@ public class JdbcSellableSkuQuery implements SellableSkuQuery {
     }
 
     @Override
+    public Optional<SellableSkuPolicy> findPhysicalValidationPolicy(UUID tenantId, UUID workspaceId, UUID skuId) {
+        return jdbc.query("select id,status,visible,temperature_min,temperature_max from catalog_management.sellable_sku "
+                        + "where tenant_id=? and workspace_id=? and id=?",
+                (rs, ignored) -> new SellableSkuPolicy(rs.getObject("id", UUID.class), rs.getString("status"),
+                        rs.getBoolean("visible"), rs.getBigDecimal("temperature_min"),
+                        rs.getBigDecimal("temperature_max")), tenantId, workspaceId, skuId)
+                .stream().findFirst();
+    }
+
+    @Override
     public Map<UUID, SellableSkuReference> findActive(UUID tenantId, UUID workspaceId, List<UUID> skuIds) {
         if (skuIds == null || skuIds.isEmpty()) return Map.of();
         List<UUID> ids = skuIds.stream().filter(java.util.Objects::nonNull).distinct().toList();

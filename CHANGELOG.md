@@ -3,6 +3,45 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.17.0] - 2026-08-29
+
+Mobile V1 backend core contracts ready for client integration. This release
+remains a pre-v1 backend candidate; it does not claim complete Nexa V1,
+Production Ready status or full Mobile Product acceptance.
+
+### Added
+
+- Basic physical identifier resolution for SKU/GTIN and lot/batch references.
+- FEFO/picking scan validation and physical picking allocation binding.
+- Ephemeral Delivery QR handoff and one-time Buyer receipt/discrepancy fact.
+- Minimal native push subscription foundation with durable routing, retry and
+  dead-letter evidence.
+- Evidence compatibility changes actually delivered by these contracts.
+
+### Preserved
+
+- All eleven canonical Blueprint bounded contexts; no Mobile, Scanner, QR or
+  Device bounded context.
+- v0.16.1 authentication/security, v0.15 fulfillment/finance and v0.14
+  commercial/inventory semantics.
+- V1-V92 migration history and Web API backward compatibility.
+
+### Deferred
+
+- GPS/live tracking, offline sync, advanced transfer scanning, advanced GS1
+  parsing, IoT, quick actions, chat, route optimization and advanced push.
+- Mobile Product full implementation, returns/RMA, full disputes, SUNAT and
+  advanced BI.
+
+### Validation
+
+- Fresh release-branch `clean verify`: 482 tests, 0 failures, 0 errors and 0
+  skips, with PostgreSQL/Testcontainers plus ClamAV, MinIO and Stripe-compatible
+  adapters.
+- Fresh migration, RLS, concurrency, Mobile contract, OpenAPI, security/load,
+  CodeQL, supply-chain and container gates passed before publication.
+- Full release evidence is recorded in `docs/releases/v0.17.0.md`.
+
 ## [0.16.1] - 2026-08-27
 
 Backend V1 freeze-closure patch for the Nexa API. v0.16.0 remains immutable;

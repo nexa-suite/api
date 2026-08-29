@@ -8,6 +8,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurity
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -457,7 +458,7 @@ public final class GlobalExceptionHandler {
 			if (!exception.notFound() && "CONCURRENCY_CONFLICT".equals(exception.code()) && request.getHeader("If-Match") != null) {
 				return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Warehouse resource changed by another request", request);
 			}
-			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INSUFFICIENT_AVAILABLE_STOCK", "INSUFFICIENT_SELLABLE_AVAILABILITY", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INSUFFICIENT_AVAILABLE_STOCK", "INSUFFICIENT_SELLABLE_AVAILABILITY", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS", "STALE_ALLOCATION", "NOT_ALLOCATED", "WRONG_SKU", "WRONG_LOT", "WRONG_WAREHOUSE", "WRONG_UNIT", "EXPIRED", "QUARANTINED", "NON_SELLABLE", "INSUFFICIENT_ALLOCATED_QUANTITY", "OVERRIDE_NOT_ALLOWED" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
 		}
 		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)
@@ -495,10 +496,27 @@ public final class GlobalExceptionHandler {
 				case "IDEMPOTENCY_PAYLOAD_CONFLICT", "FULFILLMENT_ALREADY_EXISTS", "DELIVERY_TRANSITION_INVALID",
 						"FULFILLMENT_TRANSITION_INVALID", "DELIVERY_NOT_ATTEMPTABLE", "POD_NOT_CAPTURED",
 						"FULFILLMENT_SHORTAGE_NOT_OPEN", "FULFILLMENT_PICKING_REQUIRED", "FULFILLMENT_NOT_STAGED",
-						"POD_REQUIRES_FINAL_DELIVERY", "DELIVERY_NOT_ACTIVE" -> HttpStatus.CONFLICT;
+					"POD_REQUIRES_FINAL_DELIVERY", "DELIVERY_NOT_ACTIVE", "DELIVERY_HANDOFF_NOT_ACTIVE",
+					"DELIVERY_HANDOFF_EXPIRED", "DELIVERY_HANDOFF_TOKEN_INVALID", "BUYER_RECEIPT_ALREADY_RECORDED",
+					"STALE_ALLOCATION", "NOT_ALLOCATED", "WRONG_SKU", "WRONG_LOT", "WRONG_WAREHOUSE", "WRONG_UNIT",
+					"EXPIRED", "QUARANTINED", "NON_SELLABLE", "INSUFFICIENT_ALLOCATED_QUANTITY", "OVERRIDE_NOT_ALLOWED" -> HttpStatus.CONFLICT;
+					case "BUYER_ONLY_OPERATION", "BUYER_RELATIONSHIP_NOT_FOUND", "DELIVERY_HANDOFF_DRIVER_NOT_ASSIGNED" -> HttpStatus.FORBIDDEN;
 				default -> HttpStatus.BAD_REQUEST;
 			};
 			return response(status, code, "Fulfillment operation could not be completed", request);
+		}
+
+		@ExceptionHandler(NotificationOperationException.class)
+		public ResponseEntity<ProblemDetail> handleNotification(NotificationOperationException exception, HttpServletRequest request) {
+			ApiErrorCode code;
+			try { code = ApiErrorCode.valueOf(exception.code()); }
+			catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) {
+				case "IDEMPOTENCY_PAYLOAD_CONFLICT", "PUSH_SUBSCRIPTION_CONFLICT" -> HttpStatus.CONFLICT;
+				case "FORBIDDEN", "PUSH_NATIVE_CLIENT_REQUIRED" -> HttpStatus.FORBIDDEN;
+				default -> HttpStatus.BAD_REQUEST;
+			};
+			return response(status, code, "Notification operation could not be completed", request);
 		}
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)

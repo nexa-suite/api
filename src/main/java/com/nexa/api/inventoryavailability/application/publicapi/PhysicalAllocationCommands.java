@@ -13,7 +13,32 @@ import java.util.UUID;
 public interface PhysicalAllocationCommands {
     AllocationResult getByFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
 
+    /**
+     * Acquires the allocation row lock for a fulfillment-scoped transaction.
+     * Cross-context lifecycle commands use this before locking fulfillment so
+     * physical allocation and fulfillment operations share one lock order.
+     */
+    void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
+
+    /**
+     * Acquires every fulfillment lot and any candidate lots for a picking
+     * command in the canonical inventory-lot order before per-line validation.
+     * This keeps multi-line and FEFO-override commands deadlock-free across
+     * concurrent fulfillments.
+     */
+    void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, List<UUID> candidateLotIds);
+
     AllocationResult allocate(AllocationRequest request);
+
+    /**
+     * Validates one physical pick against the current allocation. A FEFO
+     * override is deliberately narrow: the caller must already be authorized
+     * for the inventory-adjust capability, provide a reason, and the adapter
+     * must atomically rebind the complete unpicked line to a sellable lot in
+     * the same SKU and warehouse. The implementation locks the allocation,
+     * line and candidate lots for the caller transaction.
+     */
+    PickingScanValidationResult validatePickingScan(PickingScanValidationRequest request);
 
     AllocationResult consumeForDispatch(ConsumeRequest request);
 
@@ -98,7 +123,43 @@ public interface PhysicalAllocationCommands {
         public AllocationResult { lines = List.copyOf(lines == null ? List.of() : lines); }
     }
 
-    record Line(UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId, UUID lotId,
+    record PickingScanValidationRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                                        UUID physicalAllocationLineId, UUID skuId, UUID lotId,
+                                        UUID warehouseId, BigDecimal quantity, String unit,
+                                        long expectedAllocationVersion, Instant now,
+                                        UUID actorMembershipId, boolean overrideRequested,
+                                        String overrideReason) {
+        public PickingScanValidationRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                                            UUID physicalAllocationLineId, UUID skuId, UUID lotId,
+                                            UUID warehouseId, BigDecimal quantity, String unit,
+                                            long expectedAllocationVersion, Instant now) {
+            this(tenantId, workspaceId, fulfillmentId, physicalAllocationLineId, skuId, lotId,
+                    warehouseId, quantity, unit, expectedAllocationVersion, now, null, false, null);
+        }
+
+        public PickingScanValidationRequest {
+            if (tenantId == null || workspaceId == null || fulfillmentId == null
+                || physicalAllocationLineId == null || skuId == null || lotId == null
+                || warehouseId == null || quantity == null || quantity.signum() <= 0 || unit == null || unit.isBlank()
+                || expectedAllocationVersion < 0 || now == null) {
+                throw new IllegalArgumentException("Picking scan validation request is incomplete");
+            }
+            unit = unit.trim();
+        }
+    }
+
+    record PickingScanValidationResult(String outcome, UUID physicalAllocationLineId, UUID lotId,
+                                       UUID warehouseId, BigDecimal allocatedQuantity,
+                                       BigDecimal remainingQuantity, long allocationVersion) { }
+
+    record Line(UUID id, UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId, UUID lotId,
                 BigDecimal quantity, BigDecimal releasedQuantity, BigDecimal consumedQuantity,
-                String unit, java.time.LocalDate expirationDate) { }
+                String unit, java.time.LocalDate expirationDate) {
+        public Line(UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId, UUID lotId,
+                    BigDecimal quantity, BigDecimal releasedQuantity, BigDecimal consumedQuantity,
+                    String unit, java.time.LocalDate expirationDate) {
+            this(null, skuId, catalogItemId, warehouseId, zoneId, lotId, quantity,
+                    releasedQuantity, consumedQuantity, unit, expirationDate);
+        }
+    }
 }

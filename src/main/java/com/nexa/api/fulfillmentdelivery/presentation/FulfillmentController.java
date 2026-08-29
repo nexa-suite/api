@@ -89,9 +89,10 @@ public final class FulfillmentController {
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody PickingRequest request) {
         FulfillmentLifecycleService.PickingCommand command = new FulfillmentLifecycleService.PickingCommand(
-                request.pickerIdentityId(), request.startedAt(), request.completedAt(), request.notes(),
+                request.pickerIdentityId(), request.startedAt(), request.completedAt(), request.notes(), request.allocationVersion(),
                 request.lines().stream().map(line -> new FulfillmentLifecycleService.PickingLine(
-                        line.fulfillmentLineId(), line.skuId(), line.quantity(), line.unit())).toList());
+                        line.fulfillmentLineId(), line.skuId(), line.quantity(), line.unit(), line.physicalAllocationLineId(),
+                        line.lotId(), line.warehouseId(), Boolean.TRUE.equals(line.fefoOverride()), line.fefoOverrideReason())).toList());
         return fulfillmentMutation(service.confirmPicking(context, fulfillmentId, version(ifMatch), idempotencyKey, command));
     }
 
@@ -261,12 +262,15 @@ public final class FulfillmentController {
     }
 
     public record PickingRequest(UUID pickerIdentityId, Instant startedAt, Instant completedAt,
+                                 @PositiveOrZero Long allocationVersion,
                                  @Size(max = 2000) String notes,
                                  @NotNull @Size(min = 1, max = 500) List<@Valid PickingLineRequest> lines) { }
 
     public record PickingLineRequest(@NotNull UUID fulfillmentLineId, @NotNull UUID skuId,
                                      @NotNull @PositiveOrZero BigDecimal quantity,
-                                     @NotBlank @Size(max = 32) String unit) { }
+                                     @NotBlank @Size(max = 32) String unit,
+                                     UUID physicalAllocationLineId, UUID lotId, UUID warehouseId,
+                                     Boolean fefoOverride, @Size(max = 2000) String fefoOverrideReason) { }
 
     public record ShortageResolutionRequest(@NotBlank @Size(max = 2000) String reason,
                                             @NotNull @Size(min = 1, max = 500)

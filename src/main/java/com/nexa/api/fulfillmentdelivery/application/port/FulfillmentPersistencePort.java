@@ -40,9 +40,23 @@ public interface FulfillmentPersistencePort {
     record PickingRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                           long expectedVersion, UUID actorMembershipId, UUID pickerIdentityId,
                           String idempotencyKey, String requestHash, Instant startedAt,
-                          Instant completedAt, String notes, List<PickedLine> lines) { }
+                          Instant completedAt, String notes, Long allocationVersion, List<PickedLine> lines) {
+        public PickingRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                              long expectedVersion, UUID actorMembershipId, UUID pickerIdentityId,
+                              String idempotencyKey, String requestHash, Instant startedAt,
+                              Instant completedAt, String notes, List<PickedLine> lines) {
+            this(tenantId, workspaceId, fulfillmentId, expectedVersion, actorMembershipId, pickerIdentityId,
+                    idempotencyKey, requestHash, startedAt, completedAt, notes, null, lines);
+        }
+    }
 
-    record PickedLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit) { }
+    record PickedLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit,
+                      UUID physicalAllocationLineId, UUID lotId, UUID warehouseId,
+                      boolean fefoOverride, String fefoOverrideReason) {
+        public PickedLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit) {
+            this(fulfillmentLineId, skuId, quantity, unit, null, null, null, false, null);
+        }
+    }
 
     record ShortageResolutionRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                                      long expectedVersion, UUID actorMembershipId,
