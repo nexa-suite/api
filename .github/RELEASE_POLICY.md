@@ -4,18 +4,30 @@
 
 Nexa repositories version independently using Semantic Versioning. While a repository remains pre-1.0, minor versions may contain approved evolution and patch versions contain compatible fixes or documentation changes. A version applies only to the repository that publishes it.
 
-Every release requires an annotated and signed Git tag, CHANGELOG entry, versioned release notes and a GitHub Release. From v0.14.0 onward, the tag signature must pass local verification and GitHub verification before publication. Published tags are immutable: do not retag, modify a published version or force push.
+Every release requires an annotated and signed Git tag, CHANGELOG entry, versioned release notes and a GitHub Release. The tag signature must pass local verification and GitHub verification before publication. Published tags are immutable during normal release operations; an explicitly authorized SCM history migration may reissue a tag only when its target commit is preserved and the release record is audited.
 
 ## Tag signing
 
-Release tags from v0.14.0 onward MUST be:
+Release tags MUST be:
 
 - annotated
 - signed with the repository maintainer's registered GPG or SSH signing key
 - verified locally with `git verify-tag <version>`
 - shown as `Verified` by GitHub after push
 
-The private signing key remains outside the repository. Do not publish a release tag when local or GitHub verification fails; correct signing configuration first. Existing unsigned tags are historical and immutable.
+The private signing key remains outside the repository. Do not publish a release tag when local or GitHub verification fails; correct signing configuration first. Existing unsigned tags remain historical; any reissue requires explicit SCM authorization, exact target preservation and a complete release audit.
+
+Local maintainer setup:
+
+```shell
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519_nexa_sign.pub
+git config --global commit.gpgSign true
+git config --global tag.gpgSign true
+git config gpg.ssh.allowedSignersFile .github/release-allowed-signers
+```
+
+The public signer allowlist is committed at `.github/release-allowed-signers`; the private key must never enter the repository.
 
 ## GitFlow
 
