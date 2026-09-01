@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## Historical lineage
+
+`v0.5.0` and `v0.7.0` were internal preparation states, not published
+releases. No public tag or GitHub Release is implied by their preparation
+commits; the public line remains `v0.4.0`, `v0.6.0`, `v0.8.0` and later.
+
 ## [0.17.0] - 2026-08-29
 
 Mobile V1 backend core contracts ready for client integration. This release
