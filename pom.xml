@@ -31,7 +31,7 @@
 		<spring-modulith.version>2.1.0</spring-modulith.version>
 		<archunit.version>1.5.0</archunit.version>
 		<testcontainers.version>2.0.5</testcontainers.version>
-		<stripe-java.version>31.4.0</stripe-java.version>
+		<stripe-java.version>33.4.0</stripe-java.version>
 	</properties>
 	<dependencyManagement>
 		<dependencies>
