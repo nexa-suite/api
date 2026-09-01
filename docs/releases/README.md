@@ -21,6 +21,17 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 | [v0.2.0](./v0.2.0.md) | Spring Boot runtime foundation, correlation and seed integrity |
 | [v0.1.0](./v0.1.0.md) | Initial modular monolith repository baseline |
 
+## Release-lineage gaps
+
+| Version | Classification | Evidence and meaning |
+|---|---|---|
+| `v0.5.0` | INTERNAL_PREPARATION_ONLY | Release-preparation commits exist; no public tag, GitHub Release or merged release PR. |
+| `v0.7.0` | INTERNAL_PREPARATION_ONLY | Release-preparation commit exists; no public tag, GitHub Release or merged release PR. |
+
+The public API line therefore advances from `v0.4.0` to `v0.6.0` and from
+`v0.6.0` to `v0.8.0` without fabricated releases. Preparation commits remain
+reachable in Git history.
+
 ## Historical and development material
 
 | Draft | Status |
