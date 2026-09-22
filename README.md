@@ -8,7 +8,7 @@
 
 **Authoritative business and integration backbone for Nexa Suite.**
 
-![Java 25](https://img.shields.io/badge/Java-25-ED8B00?style=flat-square&logo=openjdk&logoColor=white) ![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?style=flat-square&logo=springboot&logoColor=white) ![PostgreSQL 18.4](https://img.shields.io/badge/PostgreSQL-18.4-4169E1?style=flat-square&logo=postgresql&logoColor=white) ![Maven](https://img.shields.io/badge/Maven-build-C71A36?style=flat-square&logo=apachemaven&logoColor=white) ![Release](https://img.shields.io/github/v/release/nexa-suite/api?display_name=tag&sort=semver&style=flat-square&label=release)
+![Java 25](https://img.shields.io/badge/Java-25-ED8B00?style=flat-square&logo=openjdk&logoColor=white) ![Spring Boot 4.1.1](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F?style=flat-square&logo=springboot&logoColor=white) ![PostgreSQL 18.4](https://img.shields.io/badge/PostgreSQL-18.4-4169E1?style=flat-square&logo=postgresql&logoColor=white) ![Maven](https://img.shields.io/badge/Maven-build-C71A36?style=flat-square&logo=apachemaven&logoColor=white) ![Latest Git tag](https://img.shields.io/github/v/tag/nexa-suite/api?sort=semver&style=flat-square&label=latest%20Git%20tag)
 
 [OpenAPI](./docs/openapi/README.md) · [Architecture](./docs/architecture/) · [Releases](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
 
@@ -20,8 +20,9 @@
 
 Nexa API is a Spring Boot modular monolith for identity, tenant and workspace
 scope, commercial workflows, inventory, fulfillment, delivery, finance,
-documents, notifications and traceability. The current `0.17.0` release line
-provides selected contracts for Mobile integration; it does not claim a
+documents, notifications and traceability. The current `v0.17.1` Git tag
+identifies the latest tagged repository baseline and provides selected
+contracts for Mobile integration; it does not claim a
 completed Mobile Product or Product Acceptance.
 
 The API remains the server authority for authorization, tenant isolation,
@@ -45,7 +46,8 @@ Academic report and delivery evidence for Nexa Mobile.
 
 ### [Nexa Mobile](https://github.com/nexa-suite/mobile)
 
-Partial unmerged Operations Android/Kotlin/Jetpack Compose evidence; Buyer
+Partial Operations Android/Kotlin/Jetpack Compose implementation evidence is
+integrated in the current Mobile baseline, not a completed Mobile V1. Buyer
 Mobile remains an accepted Flutter/Dart target.
 
 ![Operations Android](https://img.shields.io/badge/Operations%20Mobile-partial%20evidence-3DDC84?style=flat-square&logo=android&logoColor=white) ![Buyer target](https://img.shields.io/badge/Buyer%20Mobile-TARGET%20Flutter%2FDart-64748B?style=flat-square)
@@ -130,7 +132,7 @@ business or persistence authorities.
 | Concern | Current evidence |
 | --- | --- |
 | Language | Java 25 |
-| Runtime | Spring Boot 4.1.0 |
+| Runtime | Spring Boot 4.1.1 |
 | HTTP/API | Spring MVC, REST and Springdoc OpenAPI 3.1.0 |
 | Security | Spring Security resource server |
 | Persistence | JPA infrastructure and PostgreSQL 18.4 local/Testcontainers baseline |
