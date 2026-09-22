@@ -18,6 +18,7 @@ import com.nexa.api.inventoryavailability.domain.model.warehouse.WarehouseServic
 import com.nexa.api.inventoryavailability.domain.model.warehouse.WarehouseStatus;
 import com.nexa.api.inventoryavailability.domain.policy.FefoAllocationPolicy;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
@@ -63,6 +64,9 @@ abstract class WarehouseJdbcSupport {
         this.changeFeed = changeFeed;
         this.catalog = catalog;
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
+        if (this.transactionTemplate != null) {
+            this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        }
         this.operationalSettings = operationalSettings;
     }
 
@@ -189,7 +193,8 @@ abstract class WarehouseJdbcSupport {
                         + "join warehouse.inventory_reservation r on r.id=l.reservation_id "
                         + "join warehouse.inventory_lot lot on lot.id=a.lot_id "
                         + "and lot.tenant_id=r.tenant_id and lot.workspace_id=r.workspace_id "
-                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by a.lot_id asc",
+                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by "
+                        + WarehouseLotLockOrder.inventoryLot("lot"),
                 (rs, row) -> new WarehouseOperationsService.AllocationView(
                         rs.getObject("lot_id").toString(), rs.getBigDecimal("quantity"), rs.getString("unit"),
                         rs.getObject("expiration_date", LocalDate.class)), tenantId, workspaceId, reservationId);
@@ -234,7 +239,9 @@ abstract class WarehouseJdbcSupport {
                         + "where l.tenant_id=? and l.workspace_id=? and " + skuPredicate + " and l.status='AVAILABLE' "
                         + "and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity "
                         + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
-                        + warehousePredicate + " order by l.expiration_date,l.received_at,l.id"
+                        // FEFO remains the selection policy below; it must not
+                        // define the cross-route lock order.
+                        + warehousePredicate + " order by " + WarehouseLotLockOrder.inventoryLot("l")
                         + (lock ? " for update of l" : ""),
                 (rs, row) -> new FefoAllocationPolicy.LotSnapshot(
                         rs.getObject("id").toString(), rs.getBigDecimal("available"), rs.getString("unit"),

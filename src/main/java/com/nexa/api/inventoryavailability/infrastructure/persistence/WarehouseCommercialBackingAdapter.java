@@ -127,7 +127,7 @@ public class WarehouseCommercialBackingAdapter implements InventoryBackingComman
                         + "and not exists (select 1 from warehouse.inventory_temperature_evaluation evaluation where evaluation.tenant_id=l.tenant_id and evaluation.workspace_id=l.workspace_id and evaluation.lot_id=l.id and evaluation.status='OPEN' and evaluation.disposition='HOLD') "
                         + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
                         + "and l.stock_quantity>l.reserved_quantity and (" + predicate + ") "
-                        + "order by l.sku_id,l.warehouse_id,l.expiration_date,l.id for update of l",
+                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
                 (rs, row) -> new LotRow(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getBigDecimal(4)), args.toArray());
     }
 

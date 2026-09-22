@@ -169,6 +169,13 @@ public class FulfillmentLifecycleService {
                     && !line.fefoOverrideReason().isBlank()) {
                 throw invalid("OVERRIDE_NOT_ALLOWED");
             }
+            if (line != null && line.fefoOverride() && !hasCompletePhysicalPickingReference(line)) {
+                throw invalid("OVERRIDE_NOT_ALLOWED");
+            }
+            if (line != null && command.allocationVersion() != null && line.quantity() != null
+                    && line.quantity().signum() > 0 && !hasCompletePhysicalPickingReference(line)) {
+                throw invalid("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+            }
         }
         List<FulfillmentPersistencePort.PickedLine> lines = command.lines().stream()
                 .map(line -> new FulfillmentPersistencePort.PickedLine(line.fulfillmentLineId(), line.skuId(), line.quantity(), line.unit(),
@@ -576,6 +583,10 @@ public class FulfillmentLifecycleService {
         return command.allocationVersion() != null || command.lines().stream().anyMatch(line -> line != null
                 && (line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null
                 || line.fefoOverride() || (line.fefoOverrideReason() != null && !line.fefoOverrideReason().isBlank())));
+    }
+
+    private static boolean hasCompletePhysicalPickingReference(PickingLine line) {
+        return line.physicalAllocationLineId() != null && line.lotId() != null && line.warehouseId() != null;
     }
 
     private static String legacyPickingCanonical(PickingCommand command) {

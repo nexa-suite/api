@@ -11,6 +11,7 @@ class BusinessDocumentWorkerSecurityTests {
     private static final Path SERVICE = Path.of("src/main/java/com/nexa/api/businessdocuments/infrastructure/persistence/BusinessDocumentService.java");
     private static final Path MIGRATION = Path.of("src/main/resources/db/migration/V81__harden_document_workers_and_warehouse_logistics_rls.sql");
     private static final Path RESERVATION_WORKER = Path.of("src/main/java/com/nexa/api/inventoryavailability/infrastructure/persistence/WarehouseReservationPersistenceAdapter.java");
+    private static final Path WAREHOUSE_SUPPORT = Path.of("src/main/java/com/nexa/api/inventoryavailability/infrastructure/persistence/WarehouseJdbcSupport.java");
     private static final Path EXPIRY_ENTRYPOINT = Path.of("src/main/java/com/nexa/api/inventoryavailability/application/ExpireReservation.java");
 
     @Test
@@ -40,10 +41,13 @@ class BusinessDocumentWorkerSecurityTests {
     @Test
     void reservationWorkerEstablishesScopeBeforeItsTransactionalWarehouseQuery() throws Exception {
         String adapter = Files.readString(RESERVATION_WORKER);
+        String support = Files.readString(WAREHOUSE_SUPPORT);
         String entrypoint = Files.readString(EXPIRY_ENTRYPOINT);
 
         assertThat(adapter).contains("select tenant_id,id from tenant_management.workspace", "RlsRequestScope.set", "RlsRequestScope.clear");
-        assertThat(adapter).contains("where tenant_id=? and workspace_id=? and status='RESERVED'", "for update skip locked");
+        assertThat(adapter).contains("where tenant_id=? and workspace_id=? and status='RESERVED'", "transactionTemplate.executeWithoutResult");
+        assertThat(adapter).doesNotContain("limit 100 for update skip locked");
+        assertThat(support).contains("PROPAGATION_REQUIRES_NEW");
         assertThat(entrypoint).doesNotContain("@Transactional");
     }
 }

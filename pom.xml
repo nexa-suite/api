@@ -5,12 +5,12 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>4.1.0</version>
+		<version>4.1.1</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.nexa</groupId>
 	<artifactId>api</artifactId>
-	<version>0.16.1</version>
+	<version>0.17.0</version>
 	<name>nexa-api</name>
 	<description>Nexa business and integration API built with Java 25 and Spring Boot, following modular monolith and domain-driven design principles.</description>
 	<url/>

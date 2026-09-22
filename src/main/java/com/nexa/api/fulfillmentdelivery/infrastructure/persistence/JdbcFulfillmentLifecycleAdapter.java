@@ -153,6 +153,16 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                     || line.quantity().signum() < 0 || line.unit() == null || line.unit().isBlank()) {
                 throw error("FULFILLMENT_PICKING_LINES_INVALID");
             }
+            if (line.fefoOverride() && !hasCompletePhysicalPickingReference(line)) {
+                throw error("OVERRIDE_NOT_ALLOWED");
+            }
+            if (!line.fefoOverride() && line.fefoOverrideReason() != null && !line.fefoOverrideReason().isBlank()) {
+                throw error("OVERRIDE_NOT_ALLOWED");
+            }
+            if (request.allocationVersion() != null && line.quantity().signum() > 0
+                    && !hasCompletePhysicalPickingReference(line)) {
+                throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
+            }
             requested.computeIfAbsent(line.fulfillmentLineId(), ignored -> new ArrayList<>()).add(line);
         }
         if (requested.size() != currentLines.size()) throw error("FULFILLMENT_PICKING_LINES_INCOMPLETE");
@@ -172,6 +182,11 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         if (isMixedPickingMode(effectiveLines)) {
             throw error("PHYSICAL_SCAN_REFERENCE_REQUIRED");
         }
+        // Lock every allocated lot plus FEFO-override candidates before the
+        // per-line validation loop. The request line order is a presentation
+        // detail and cannot define the cross-fulfillment lock order.
+        physicalAllocations.lockLotsForPicking(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
+                pickingLotIds(effectiveLines));
         Instant validationNow = clock.instant();
         boolean shortage = false;
         Set<UUID> physicalAllocationLineIds = new HashSet<>();
@@ -283,6 +298,10 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         return line.physicalAllocationLineId() != null || line.lotId() != null || line.warehouseId() != null;
     }
 
+    private static boolean hasCompletePhysicalPickingReference(PickedLine line) {
+        return line.physicalAllocationLineId() != null && line.lotId() != null && line.warehouseId() != null;
+    }
+
     private static Map<UUID, List<PickedLine>> groupPickedLines(List<PickedLine> lines) {
         Map<UUID, List<PickedLine>> grouped = new HashMap<>();
         for (PickedLine line : lines) grouped.computeIfAbsent(line.fulfillmentLineId(), ignored -> new ArrayList<>()).add(line);
@@ -324,6 +343,12 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
             if (remaining.signum() > 0) throw error("INSUFFICIENT_ALLOCATED_QUANTITY");
         }
         return result;
+    }
+
+    private static List<UUID> pickingLotIds(List<PickedLine> lines) {
+        if (lines == null) return List.of();
+        return lines.stream().filter(Objects::nonNull).map(PickedLine::lotId)
+                .filter(Objects::nonNull).distinct().toList();
     }
 
     @Override

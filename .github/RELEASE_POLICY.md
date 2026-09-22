@@ -4,18 +4,25 @@
 
 Nexa repositories version independently using Semantic Versioning. While a repository remains pre-1.0, minor versions may contain approved evolution and patch versions contain compatible fixes or documentation changes. A version applies only to the repository that publishes it.
 
-Every release requires an annotated and signed Git tag, CHANGELOG entry, versioned release notes and a GitHub Release. From v0.14.0 onward, the tag signature must pass local verification and GitHub verification before publication. Published tags are immutable: do not retag, modify a published version or force push.
+Every release requires an annotated SSH-signed Git tag, CHANGELOG entry, versioned release notes and a GitHub Release. The tag signature must pass local verification and GitHub verification before publication. Published tags are immutable: do not retag, modify a published version, delete a release or force-push history.
 
 ## Tag signing
 
-Release tags from v0.14.0 onward MUST be:
+Release tags MUST be:
 
 - annotated
-- signed with the repository maintainer's registered GPG or SSH signing key
+- signed with the repository maintainer's registered SSH signing key
 - verified locally with `git verify-tag <version>`
 - shown as `Verified` by GitHub after push
 
-The private signing key remains outside the repository. Do not publish a release tag when local or GitHub verification fails; correct signing configuration first. Existing unsigned tags are historical and immutable.
+The private signing key remains outside the repository. Do not publish a release tag when local or GitHub verification fails; correct signing configuration first. The corrected public release line is frozen; no tag or GitHub Release mutation is permitted by this policy.
+
+## Release cadence
+
+A merged PR is not automatically a release. Accumulate coherent changes on
+`develop` until a real consumable boundary exists. Use release candidates only
+when final validation needs a candidate freeze. Do not publish calendar-driven
+versions or one stable release per implementation PR.
 
 ## GitFlow
 

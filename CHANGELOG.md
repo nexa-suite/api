@@ -3,6 +3,51 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## Historical lineage
+
+`v0.5.0` and `v0.7.0` were internal preparation states, not published
+releases. No public tag or GitHub Release is implied by their preparation
+commits; the public line remains `v0.4.0`, `v0.6.0`, `v0.8.0` and later.
+
+## [0.17.0] - 2026-08-29
+
+Mobile V1 backend core contracts ready for client integration. This release
+remains a pre-v1 backend candidate; it does not claim complete Nexa V1,
+Production Ready status or full Mobile Product acceptance.
+
+### Added
+
+- Basic physical identifier resolution for SKU/GTIN and lot/batch references.
+- FEFO/picking scan validation and physical picking allocation binding.
+- Ephemeral Delivery QR handoff and one-time Buyer receipt/discrepancy fact.
+- Minimal native push subscription foundation with durable routing, retry and
+  dead-letter evidence.
+- Evidence compatibility changes actually delivered by these contracts.
+
+### Preserved
+
+- All eleven canonical Blueprint bounded contexts; no Mobile, Scanner, QR or
+  Device bounded context.
+- v0.16.1 authentication/security, v0.15 fulfillment/finance and v0.14
+  commercial/inventory semantics.
+- V1-V92 migration history and Web API backward compatibility.
+
+### Deferred
+
+- GPS/live tracking, offline sync, advanced transfer scanning, advanced GS1
+  parsing, IoT, quick actions, chat, route optimization and advanced push.
+- Mobile Product full implementation, returns/RMA, full disputes, SUNAT and
+  advanced BI.
+
+### Validation
+
+- Fresh release-branch `clean verify`: 482 tests, 0 failures, 0 errors and 0
+  skips, with PostgreSQL/Testcontainers plus ClamAV, MinIO and Stripe-compatible
+  adapters.
+- Fresh migration, RLS, concurrency, Mobile contract, OpenAPI, security/load,
+  CodeQL, supply-chain and container gates passed before publication.
+- Full release evidence is recorded in `docs/releases/v0.17.0.md`.
+
 ## [0.16.1] - 2026-08-27
 
 Backend V1 freeze-closure patch for the Nexa API. v0.16.0 remains immutable;
@@ -197,3 +242,122 @@ Functional convergence continuation baseline for the API.
 ### Validation
 
 - API CI, integration verification, CodeQL, container and security-load gates passed for the release candidate.
+
+## [0.9.0] - 2026-08-18
+
+Operations stabilization for the consolidated commercial, Warehouse and Logistics baseline.
+
+### Added
+
+- Public contact/demo request intake with validation, durable throttling and audit evidence.
+- Forward-only Flyway hardening for direct tenant-scoped membership and manual sales-draft tables.
+
+### Changed
+
+- Sales Order creator identity, aggregate-owned lifecycle and concurrent conversion replay.
+- Warehouse FEFO/expiration handling, route-start ownership, dispatch number initialization and fail-closed workspace context resolution.
+
+### Validation
+
+- Local and remote API CI, supply-chain, security/load and CodeQL validation passed for the published release.
+
+[Release evidence](https://github.com/nexa-suite/api/releases/tag/v0.9.0) · [Detailed evidence](https://github.com/nexa-suite/api/blob/v0.9.0/docs/releases/v0.9.0.md)
+
+## [0.8.0] - 2026-08-01
+
+Consolidated commercial, warehouse and logistics API baseline.
+
+### Added
+
+- Purchase Request to Sales Order conversion, lifecycle, idempotency and secure Change Feed.
+- Warehouse topology, lots, movements, FEFO reservations, readiness and atomic reservation consumption.
+- Dispatch creation, preparation, assignment, scheduling, route readiness/start, temperature incidents, reprogramming and POD metadata.
+
+### Changed
+
+- Buyer delivery tracking through client-account-safe projections.
+
+### Validation
+
+- 122 tests passed; fresh PostgreSQL migrations V1 through V21, Flyway validation, OpenAPI path parity and the canonical Modern Docker source build passed.
+
+[Release evidence](https://github.com/nexa-suite/api/releases/tag/v0.8.0) · [Detailed evidence](https://github.com/nexa-suite/api/blob/v0.8.0/docs/releases/v0.8.0.md)
+
+## [0.6.0] - 2026-07-30
+
+Consolidated Identity, tenant administration, security and commercial foundation work; intermediate planned versions were not published.
+
+### Added
+
+- IAM/session lifecycle, Organization Administration, Client Accounts and Purchase Requests with tenant/workspace scope, audit events, optimistic concurrency and idempotent submission.
+- Server-authoritative catalog and price snapshots, plus Sales Order domain readiness.
+
+### Changed
+
+- Established authenticated tenant/workspace access, `ETag`, `If-Match` and `Idempotency-Key` contracts for protected commercial operations.
+
+### Validation
+
+- API, Platform and Portal tests, Testcontainers PostgreSQL integration, OpenAPI generation, Flyway validation, security matrix and source Compose build passed.
+
+[Release evidence](https://github.com/nexa-suite/api/releases/tag/v0.6.0) · [Detailed evidence](https://github.com/nexa-suite/api/blob/v0.6.0/docs/releases/v0.6.0.md)
+
+## [0.4.0] - 2026-07-29
+
+Read-only Catalog Management query contract backed by the checksum-validated 50-item seed.
+
+### Added
+
+- `GET /api/v1/catalog-items` and `GET /api/v1/catalog-items/{catalogItemId}`.
+- Bounded query parameters and explicit summary/detail DTOs for catalog discovery.
+
+### Validation
+
+- 44 Maven tests, Springdoc OpenAPI parsing, Docker health checks and Platform/Portal Playwright smoke validation passed.
+
+[Release evidence](https://github.com/nexa-suite/api/releases/tag/v0.4.0) · [Detailed evidence](https://github.com/nexa-suite/api/blob/v0.4.0/docs/releases/v0.4.0.md)
+
+## [0.3.0] - 2026-07-29
+
+Catalog Management domain foundation and repository governance update.
+
+### Added
+
+- Pure `CatalogItem` aggregate with explicit value objects and invariants.
+- Anticorruption mapping from the canonical seed import record, with stock ownership kept outside Catalog Management.
+
+### Validation
+
+- Domain invariant, purity and seed-mapping tests, Maven tests and package validation passed.
+
+[Release evidence](https://github.com/nexa-suite/api/releases/tag/v0.3.0) · [Detailed evidence](https://github.com/nexa-suite/api/blob/v0.3.0/docs/releases/v0.3.0.md)
+
+## [0.2.0] - 2026-07-28
+
+Shared HTTP foundations and canonical catalog seed authority.
+
+### Added
+
+- Correlation-ID propagation and temporary MDC cleanup.
+- Problem Details errors with stable codes and validation fields.
+- Checksum-validated 50-item catalog seed and generated build metadata.
+
+### Validation
+
+- Maven tests/package, seed integrity and HTTP Problem Details tests passed.
+
+[Release evidence](https://github.com/nexa-suite/api/releases/tag/v0.2.0) · [Detailed evidence](https://github.com/nexa-suite/api/blob/v0.2.0/docs/releases/v0.2.0.md)
+
+## [0.1.0] - 2026-07-28
+
+Initial independent Spring Boot repository baseline.
+
+### Added
+
+- Java/Spring application baseline, bounded-context package structure and Actuator health/info surface.
+
+### Validation
+
+- Repository baseline build and test validation passed before tagging.
+
+[Release evidence](https://github.com/nexa-suite/api/releases/tag/v0.1.0) · [Detailed evidence](https://github.com/nexa-suite/api/blob/v0.1.0/docs/releases/v0.1.0.md)

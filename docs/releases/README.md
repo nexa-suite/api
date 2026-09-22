@@ -4,6 +4,7 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 
 | Release | Summary |
 |---|---|
+| [v0.17.0](./v0.17.0.md) | Mobile V1 Core Contracts |
 | [v0.16.1](./v0.16.1.md) | Backend V1 Freeze-Closure Patch |
 | [v0.16.0](./v0.16.0.md) | Backend V1 Closure and Mobile Readiness |
 | [v0.15.0](./v0.15.0.md) | Fulfillment and Financial Completion |
@@ -20,6 +21,17 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 | [v0.2.0](./v0.2.0.md) | Spring Boot runtime foundation, correlation and seed integrity |
 | [v0.1.0](./v0.1.0.md) | Initial modular monolith repository baseline |
 
+## Release-lineage gaps
+
+| Version | Classification | Evidence and meaning |
+|---|---|---|
+| `v0.5.0` | INTERNAL_PREPARATION_ONLY | Release-preparation commits exist; no public tag, GitHub Release or merged release PR. |
+| `v0.7.0` | INTERNAL_PREPARATION_ONLY | Release-preparation commit exists; no public tag, GitHub Release or merged release PR. |
+
+The public API line therefore advances from `v0.4.0` to `v0.6.0` and from
+`v0.6.0` to `v0.8.0` without fabricated releases. Preparation commits remain
+reachable in Git history.
+
 ## Historical and development material
 
 | Draft | Status |
@@ -27,4 +39,6 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 | [UNRELEASED HISTORICAL CANDIDATE: v0.7.0](./v0.7.0.md) | Consolidated into later published work; no tag or GitHub Release |
 | [UNRELEASED DRAFT: v0.8.1 candidate](./v0.8.1.md) | Development material retained for historical context; no published tag or GitHub Release |
 
-Current implementation version is `0.16.1`. Publication still requires the repository release policy, signed release evidence and the Docker-backed integration/security gates; the v0.16.1 note records those results at release time.
+Current implementation version is `0.17.0`. This release records the backend
+Mobile V1 core-contract candidate for client integration. It does not claim
+complete Nexa V1, Production Ready status or full Mobile Product acceptance.

@@ -77,6 +77,40 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, List<UUID> candidateLotIds) {
+        if (tenantId == null || workspaceId == null || fulfillmentId == null) {
+            throw new IllegalArgumentException("Physical picking lot lock scope is incomplete");
+        }
+        List<UUID> candidates = candidateLotIds == null ? List.of() : candidateLotIds.stream()
+                .filter(Objects::nonNull).distinct().toList();
+        String placeholders = candidates.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        String candidatePredicate = candidates.isEmpty() ? "" : " or l.id in (" + placeholders + ")";
+        List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId, fulfillmentId));
+        args.addAll(candidates);
+        String pickingLotsFrom = " from warehouse.inventory_lot l "
+                + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
+                + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
+                + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id ";
+        String pickingLotsScope = "where l.tenant_id=? and l.workspace_id=? and (exists ("
+                        + "select 1 from warehouse.physical_allocation_line allocation_line "
+                        + "join warehouse.physical_allocation allocation on allocation.tenant_id=allocation_line.tenant_id "
+                        + "and allocation.workspace_id=allocation_line.workspace_id and allocation.id=allocation_line.physical_allocation_id "
+                        + "where allocation_line.tenant_id=l.tenant_id and allocation_line.workspace_id=l.workspace_id "
+                        + "and allocation_line.lot_id=l.id and allocation.fulfillment_id=? )" + candidatePredicate + ") "
+                        ;
+        jdbc.query("select w.id" + pickingLotsFrom + pickingLotsScope
+                        + "order by " + WarehouseLotLockOrder.warehouse("w") + " for update of w",
+                (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
+        jdbc.query("select z.id" + pickingLotsFrom + pickingLotsScope
+                        + "order by " + WarehouseLotLockOrder.storageZone("z") + " for update of z",
+                (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
+        jdbc.query("select l.id" + pickingLotsFrom + pickingLotsScope
+                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
+                (rs, row) -> rs.getObject("id", UUID.class), args.toArray());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public AllocationResult allocate(AllocationRequest request) {
         lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "ALLOCATE", request.idempotencyKey());
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "ALLOCATE", request.idempotencyKey());
@@ -183,6 +217,10 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
             if (currentLotId != null) lockOverrideLots(request.tenantId(), request.workspaceId(), currentLotId, request.lotId());
         }
 
+        // confirmPicking pre-locks every participating parent, lot and
+        // candidate before this per-line read. The standalone scan endpoint
+        // is read-only, so it must not acquire a second, line-specific lock
+        // order that could deadlock with the canonical pre-lock above.
         List<AllocationScanRow> rows = jdbc.query("select l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.lot_id,l.quantity,l.released_quantity,l.consumed_quantity,l.unit,"
                         + "lot.status lot_status,lot.expiration_date,lot.unit lot_unit,"
                         + "lot.stock_quantity,lot.reserved_quantity,lot.version lot_version,w.status warehouse_status,z.status zone_status,z.zone_type,"
@@ -200,8 +238,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                         + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
                         + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
                         + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
-                        + "where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? and l.id=? "
-                        + "for update of l,lot,w,z",
+                        + "where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? and l.id=?",
                 (rs, row) -> new AllocationScanRow(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
                         rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class),
                         rs.getObject("lot_id", UUID.class),
@@ -576,7 +613,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                         + "and not exists (select 1 from warehouse.inventory_temperature_evaluation evaluation where evaluation.tenant_id=l.tenant_id and evaluation.workspace_id=l.workspace_id and evaluation.lot_id=l.id and evaluation.status='OPEN' and evaluation.disposition='HOLD') "
                         + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
                         + "and l.stock_quantity-l.reserved_quantity>0 and (" + predicate + ") "
-                        + "order by l.sku_id,l.warehouse_id,l.expiration_date,l.received_at,l.id for update of l",
+                        + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
                 (rs, row) -> new LotRow(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getString("unit"), rs.getObject("expiration_date", LocalDate.class), rs.getTimestamp("received_at").toInstant(), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getLong("version"), rs.getBigDecimal("safety_stock")), args.toArray());
     }
 
@@ -645,13 +682,14 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                 .stream().findFirst().orElse(null);
     }
 
-    /** Serializes the two-lot override pair before the row locks below. */
+    /** Locks the two-lot override pair in the same order as every allocation path. */
     private void lockOverrideLots(UUID tenant, UUID workspace, UUID currentLotId, UUID candidateLotId) {
         List<UUID> ids = java.util.stream.Stream.of(currentLotId, candidateLotId).filter(Objects::nonNull).distinct()
                 .sorted().toList();
         if (ids.size() < 2) return;
-        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
-                tenant + "|" + workspace + "|physical-allocation-fefo-override|" + ids.get(0) + "|" + ids.get(1));
+        jdbc.query("select l.id from warehouse.inventory_lot l where l.tenant_id=? and l.workspace_id=? and l.id in (?,?) order by "
+                        + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
+                (rs, row) -> rs.getObject("id", UUID.class), tenant, workspace, ids.get(0), ids.get(1));
     }
 
     private BackingRow lockBacking(UUID tenant, UUID workspace, UUID backingId) {
@@ -660,7 +698,8 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     }
 
     private List<AllocationLot> allocationLots(UUID tenant, UUID workspace, UUID allocationId) {
-        return jdbc.query("select l.lot_id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.quantity,l.released_quantity,l.consumed_quantity,lot.expiration_date,lot.stock_quantity,lot.reserved_quantity,lot.unit,lot.version from warehouse.physical_allocation_line l join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? order by l.sku_id,l.warehouse_id,lot.expiration_date,lot.received_at,l.lot_id for update of lot",
+        return jdbc.query("select l.lot_id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.quantity,l.released_quantity,l.consumed_quantity,lot.expiration_date,lot.stock_quantity,lot.reserved_quantity,lot.unit,lot.version from warehouse.physical_allocation_line l join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? order by "
+                        + WarehouseLotLockOrder.physicalAllocationLot("l", "lot") + " for update of lot",
                 (rs, row) -> new AllocationLot(rs.getObject("lot_id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getBigDecimal("quantity"), rs.getBigDecimal("released_quantity"), rs.getBigDecimal("consumed_quantity"), rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getString("unit"), rs.getLong("version")), tenant, workspace, allocationId);
     }
 
