@@ -31,7 +31,7 @@ jobs:
           docker run -d --name nexa-ci-minio -p 9000:9000 \
             -e MINIO_ROOT_USER="$MINIO_ROOT_USER" \
             -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
-            minio/minio:RELEASE.2024-10-13T13-34-11Z server /data
+            quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z server /data
           adapters_ready=0
           for _ in $(seq 1 60); do
             stripe_ready=0
@@ -52,10 +52,10 @@ jobs:
           fi
           docker volume create nexa-ci-minio-config >/dev/null
           docker run --rm --network host -v nexa-ci-minio-config:/root/.mc \
-            minio/mc:RELEASE.2024-10-08T09-37-26Z \
+            quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z \
             alias set ci http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
           docker run --rm --network host -v nexa-ci-minio-config:/root/.mc \
-            minio/mc:RELEASE.2024-10-08T09-37-26Z \
+            quay.io/minio/mc:RELEASE.2024-10-08T09-37-26Z \
             mb --ignore-existing ci/nexa-private
           docker logs nexa-ci-clamav
           docker logs nexa-ci-stripe-mock
