@@ -142,6 +142,7 @@ public class CatalogSkuService implements CatalogSkuPort {
     @Transactional
     public CatalogSkuModels.PriceView createPrice(CatalogScope scope, UUID skuId, BigDecimal amount, String currency,
             Instant validFrom, Instant validUntil, String sourceCode, String sourceDescription, String idempotencyKey) {
+        lockPriceWrites(scope, skuId);
         requireSku(scope, skuId);
         UUID candidate = UUID.randomUUID();
         UUID id = idempotency.reserve(scope, "sku-price:create", idempotencyKey,
@@ -153,6 +154,15 @@ public class CatalogSkuService implements CatalogSkuPort {
                 id, scope.tenantId(), scope.workspaceId(), skuId, amount, currency, Timestamp.from(validFrom),
                 validUntil == null ? null : Timestamp.from(validUntil), optional(sourceCode, 80), optional(sourceDescription, 255));
         return price(scope, skuId, id);
+    }
+
+    private void lockPriceWrites(CatalogScope scope, UUID skuId) {
+        // Serialize price-period decisions for one SKU. The exclusion constraint
+        // remains the final invariant; this makes concurrent API outcomes use its
+        // business conflict classification instead of a transaction-level race.
+        List<UUID> locked = jdbc.query("select id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=? for update",
+                (rs, row) -> rs.getObject("id", UUID.class), scope.tenantId(), scope.workspaceId(), skuId);
+        if (locked.isEmpty()) throw new IllegalArgumentException("SKU not found");
     }
 
     @Override
