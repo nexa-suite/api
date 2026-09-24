@@ -1,5 +1,11 @@
 # IAM domain foundation
 
+> Historical foundation note: this document records API-era domain analysis,
+> not current Product, Domain or implementation authority. See the [Nexa
+> Blueprint](https://github.com/nexa-suite/blueprint) for accepted meaning and
+> the [current API module map](../architecture/bounded-context-module-map.md)
+> for implementation ownership.
+
 ## Scope
 
 IAM owns the identity account and the lifecycle of an authentication session. This task establishes framework-free domain objects and application ports; it does not add REST endpoints, persistence, migrations, JWT handling, tenant membership or workspace state.

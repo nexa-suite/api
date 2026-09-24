@@ -1,5 +1,11 @@
 # Sales Domain Foundation
 
+> Historical foundation note: this document records API-era domain analysis,
+> not current Product, Domain or implementation authority. See the [Nexa
+> Blueprint](https://github.com/nexa-suite/blueprint) for accepted meaning and
+> the [current API module map](../architecture/bounded-context-module-map.md)
+> for implementation ownership.
+
 ## Scope
 
 Sales owns the commercial identity of a purchase request, a sales order and the
@@ -22,9 +28,10 @@ catalog definitions, warehouse stock, shipment execution or fiscal documents.
 `REJECTED` and `CANCELLED`. `SalesOrderStatus` currently exposes `DRAFT`,
 `CONFIRMED`, `COMPLETED` and `CANCELLED`.
 
-The repository README still classifies Sales as planned and contains no
-implemented sales lifecycle or transition rules. Therefore these enum members
-are candidate vocabulary only: the authoritative states, transitions,
+At the time this foundation was recorded, the repository README classified
+Sales as planned and this repository contained no implemented sales lifecycle
+or transition rules. Therefore these enum members were candidate vocabulary
+only: the authoritative states, transitions,
 reopening policy and mapping to external contracts remain unresolved. No
 application service or HTTP contract may infer those rules from the enums.
 

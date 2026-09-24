@@ -1,5 +1,11 @@
 # Invoicing Domain Foundation
 
+> Historical foundation note: this document records API-era domain analysis,
+> not current Product, Domain or implementation authority. See the [Nexa
+> Blueprint](https://github.com/nexa-suite/blueprint) for accepted meaning and
+> the [current API module map](../architecture/bounded-context-module-map.md)
+> for implementation ownership.
+
 ## Scope
 
 Invoicing owns the identity of fiscal documents and payments associated with
@@ -18,9 +24,10 @@ or payment provider.
 - `PaymentStatus` provides `PENDING`, `AUTHORIZED`, `SETTLED`, `FAILED` and
   `REFUNDED` as candidate payment vocabulary.
 
-The current API classifies Invoicing as planned and has no fiscal-provider,
-tax-authority or payment-provider implementation. The authoritative invoice
-and payment states, legal numbering rules, settlement evidence, refund
+At the time this foundation was recorded, the API classified Invoicing as
+planned and had no fiscal-provider, tax-authority or payment-provider
+implementation. The authoritative invoice and payment states, legal numbering
+rules, settlement evidence, refund
 semantics and allowed transitions remain unresolved. These enums are not an
 external fiscal contract.
 
