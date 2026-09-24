@@ -10,7 +10,7 @@ or responder organization.
 | --- | --- | --- |
 | HTTP API | Spring Boot container, non-root `nexa` user, Actuator liveness/readiness health checks | Ingress, TLS, allowed origins, trusted proxy configuration, startup and shutdown smoke. |
 | PostgreSQL | Flyway V1–V100, separate migrator and restricted runtime login, transaction-local Tenant/Workspace scope | Managed service and version, role provisioning, migration job, least-privilege grants, complete RLS coverage decision, upgrade and restore rehearsal. |
-| Private objects | S3-compatible adapter; disposable MinIO in integration tests | Provider, private bucket policy, encryption, key lifecycle, object restore and retention. |
+| Private objects | S3-compatible adapter; disposable LocalStack S3 emulator in integration tests | Provider, private bucket policy, encryption, key lifecycle, object restore and retention. |
 | Email | SMTP adapter and security notification outbox | Provider, sender/domain verification, delivery failure handling, credential rotation. |
 | Malware scan | ClamAV network adapter and local deterministic mode | Scanner operation, signatures, availability policy, failure and quarantine exercises. |
 | Payments | Disabled/deterministic local path and Stripe-compatible adapter/webhook | Provider/account setup, webhook secret rotation, replay and failure exercise, reconciliation ownership. |
@@ -20,6 +20,8 @@ or responder organization.
 Configuration entry points are `src/main/resources/application*.yml` and
 `ops/compose/modern.compose.yml`. The local Compose profile and its sample
 secrets are development infrastructure, not a production deployment template.
+Its current MinIO Docker Hub image is unavailable to a clean runner; replacing
+that local service requires a plan that preserves existing local object data.
 Required secret categories include database runtime/migrator credentials, JWT
 signing material, throttling and notification encryption keys, SMTP, object
 storage, payment webhook/API credentials, and optional maps credentials. A

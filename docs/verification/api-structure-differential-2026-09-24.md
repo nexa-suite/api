@@ -36,9 +36,11 @@ startup regression with 144 affected tests, not 144 independent defects.
   one separate `NotificationProjectionPort` delegate. A focused context test
   checks candidate resolution. The existing integration suite exercises
   application startup and notification behavior.
-- The MinIO integration test provisions its own disposable MinIO container and
-  private bucket with test-only credentials. CI no longer provisions a second
-  MinIO service for that test.
+- The S3-compatible object-storage integration test provisions its own
+  disposable S3 emulator and private bucket with test-only credentials. CI no
+  longer provisions a separate object-storage service for that test. The
+  original MinIO image stopped resolving from Docker Hub on a clean CI runner;
+  the fixture now uses a pullable LocalStack image.
 - A controller test covers remote address and forwarded-header extraction
   through the trusted-proxy resolver, preserving the HTTP adapter seam after
   its lower-level resolver test moved to `edge`.
@@ -51,5 +53,5 @@ idempotency tests are included in that count. The CI workflow change passed
 was not separately tested on this host.
 
 This result closes the observed structural-refactor regression and the shared
-MinIO test dependency. It does not certify production deployment, complete
+object-storage test dependency. It does not certify production deployment, complete
 RLS coverage, integrated clients, or Product/System Acceptance.

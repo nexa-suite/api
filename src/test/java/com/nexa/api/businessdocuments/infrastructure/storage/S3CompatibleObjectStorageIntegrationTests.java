@@ -15,25 +15,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class S3CompatibleObjectStorageIntegrationTests {
-    private static final String ACCESS_KEY = "nexa-test-access";
-    private static final String SECRET_KEY = "nexa-test-secret-key";
+    private static final String ACCESS_KEY = "test";
+    private static final String SECRET_KEY = "test";
     private static final String BUCKET = "nexa-test-private";
 
     @Test
-    void writesReadsAndDeletesAPrivateObjectThroughMinio() throws Exception {
-        try (GenericContainer<?> minio = new GenericContainer<>(DockerImageName.parse("minio/minio:RELEASE.2024-10-13T13-34-11Z"))
-                .withExposedPorts(9000)
-                .withEnv("MINIO_ROOT_USER", ACCESS_KEY)
-                .withEnv("MINIO_ROOT_PASSWORD", SECRET_KEY)
-                .withCommand("server", "/data")
-                .waitingFor(Wait.forHttp("/minio/health/ready").forPort(9000).forStatusCode(200))) {
-            minio.start();
-            assertThat(minio.execInContainer("mc", "alias", "set", "test", "http://127.0.0.1:9000", ACCESS_KEY, SECRET_KEY)
+    void writesReadsAndDeletesAPrivateObjectThroughS3Emulator() throws Exception {
+        try (GenericContainer<?> s3 = new GenericContainer<>(DockerImageName.parse("localstack/localstack:4.10.0"))
+                .withExposedPorts(4566)
+                .withEnv("SERVICES", "s3")
+                .withEnv("AWS_DEFAULT_REGION", "us-east-1")
+                .waitingFor(Wait.forHttp("/_localstack/health").forPort(4566).forStatusCode(200))) {
+            s3.start();
+            assertThat(s3.execInContainer("awslocal", "s3api", "create-bucket", "--bucket", BUCKET)
                     .getExitCode()).isZero();
-            assertThat(minio.execInContainer("mc", "mb", "test/" + BUCKET).getExitCode()).isZero();
 
             MockEnvironment environment = new MockEnvironment()
-                    .withProperty("nexa.object-storage.endpoint", "http://" + minio.getHost() + ":" + minio.getMappedPort(9000))
+                    .withProperty("nexa.object-storage.endpoint", "http://" + s3.getHost() + ":" + s3.getMappedPort(4566))
                     .withProperty("nexa.object-storage.bucket", BUCKET)
                     .withProperty("nexa.object-storage.access-key", ACCESS_KEY)
                     .withProperty("nexa.object-storage.secret-key", SECRET_KEY)
