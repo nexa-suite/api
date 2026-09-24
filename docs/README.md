@@ -20,11 +20,11 @@ contexts.
 
 - [OpenAPI instructions and compatibility checks](./openapi/README.md)
 - [Committed OpenAPI snapshot](./openapi/openapi.json)
+- [Cross-client API contract evidence — 2026-09-24](./verification/cross-client-contract-2026-09-24.md)
 
 ## Security implementation
 
 - [Current-schema RLS audit](./security/rls-current-schema-audit.md)
-
 - [Authentication](./security/authentication.md)
 - [Authorization](./security/authorization.md)
 - [Tenant resolution](./security/tenant-resolution.md)
@@ -47,11 +47,13 @@ structural refactor should rewrite them.
 - [Operations overview](../ops/README.md)
 - [Compose runtime details](../ops/compose/README.md)
 - [Local setup and verification scripts](../scripts/README.md)
+- [Production-gate runtime requirements](./operations/production-gate-requirements.md)
 
 ## Testing and release evidence
 
 - [Testing notes](./testing/)
 - [API structure differential — 2026-09-24](./verification/api-structure-differential-2026-09-24.md)
+- [API foundation verification — 2026-09-24](./verification/foundation-gates-2026-09-24.md)
 - [Release notes](./releases/README.md)
 - [Repository changelog](../CHANGELOG.md)
 - [Historical audits](./audits/)
