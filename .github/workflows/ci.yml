@@ -52,6 +52,27 @@ jobs:
         run: >-
           ./mvnw clean verify -Dnexa.integration.enabled=true
           -Dspring.datasource.hikari.maximum-pool-size=32
+      - name: Build API container
+        run: docker build --tag nexa-api:ci .
+      - name: Scan source dependencies, configuration, and secrets
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          timeout: 15m
+          skip-dirs: target
+      - name: Scan API container
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: nexa-api:ci
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          timeout: 15m
       - name: Verify OpenAPI compatibility against base snapshot
         if: ${{ github.event_name == 'pull_request' }}
         env:
