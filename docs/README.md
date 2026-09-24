@@ -49,6 +49,7 @@ structural refactor should rewrite them.
 ## Testing and release evidence
 
 - [Testing notes](./testing/)
+- [API structure differential — 2026-09-24](./verification/api-structure-differential-2026-09-24.md)
 - [Release notes](./releases/README.md)
 - [Repository changelog](../CHANGELOG.md)
 - [Historical audits](./audits/)
