@@ -3,7 +3,7 @@ package com.nexa.api.creditreceivables.infrastructure.persistence;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableApplicationCommands;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -23,10 +23,13 @@ import java.util.UUID;
 public class JdbcReceivableApplicationAdapter implements ReceivableApplicationCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
+    private final CanonicalOutboxPort canonicalOutbox;
 
-    public JdbcReceivableApplicationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability) {
+    public JdbcReceivableApplicationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
+                                           CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
         this.traceability = traceability;
+        this.canonicalOutbox = canonicalOutbox;
     }
 
     @Override
@@ -69,7 +72,7 @@ public class JdbcReceivableApplicationAdapter implements ReceivableApplicationCo
                 nextPaid, nextStatus, Timestamp.from(request.now()), request.tenantId(), request.workspaceId(), request.receivableId(), receivable.version()) != 1) {
             throw error("CONCURRENCY_CONFLICT");
         }
-        CanonicalOutbox.append(jdbc, "ReceivablePosted.v1", "Receivable", request.receivableId(), request.tenantId(),
+        canonicalOutbox.append("ReceivablePosted.v1", "Receivable", request.receivableId(), request.tenantId(),
                 request.workspaceId(), request.now(), request.occurrenceKey(), null, "1.0", request.paymentId().toString(),
                 Map.of("receivableId", request.receivableId(), "paymentId", request.paymentId(), "amount", request.amount(), "currency", request.currency()));
         traceability.record(new BusinessTraceabilityCommands.TraceRequest(request.tenantId(), request.workspaceId(),

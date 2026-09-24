@@ -2,6 +2,7 @@
         id = "BC-02-customer-buyer-relationships",
         allowedDependencies = {
                 "shared",
+                "shared :: shared-error-primitives",
                 "BC-03-catalog-commercial-policy :: sales-catalog",
                 "BC-01-tenant-access-governance :: access",
                 "BC-01-tenant-access-governance :: access-context",

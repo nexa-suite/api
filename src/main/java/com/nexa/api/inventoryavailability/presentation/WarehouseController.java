@@ -1,5 +1,6 @@
 package com.nexa.api.inventoryavailability.presentation;
 
+import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -218,35 +219,35 @@ public final class WarehouseController {
     }
 
     @PostMapping("/inventory/inbound-receipts")
-    public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId()), key, String.valueOf(correlation)));
         return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
     }
 
     @PostMapping("/inventory/adjustments")
-    public ResponseEntity<LotResponse> adjust(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<LotResponse> adjust(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var result = lot(service.adjust(c, r.lotId(), r.quantity(), r.direction() == null || r.direction().equalsIgnoreCase("IN"), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
     @PostMapping("/inventory/waste-movements")
-    public ResponseEntity<LotResponse> waste(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<LotResponse> waste(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var result = lot(service.waste(c, r.lotId(), r.quantity(), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
     @PostMapping("/inventory/lots/{lotId}/blocks")
-    public ResponseEntity<LotResponse> blockLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<LotResponse> blockLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         return mutation(service.blockLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
     }
 
     @PostMapping("/inventory/lots/{lotId}/quarantines")
-    public ResponseEntity<LotResponse> quarantineLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<LotResponse> quarantineLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         return mutation(service.quarantineLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
     }
 
     @PostMapping("/inventory/lots/{lotId}/availability-restorations")
-    public ResponseEntity<LotResponse> restoreLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<LotResponse> restoreLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         return mutation(service.restoreLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
     }
 
@@ -256,7 +257,7 @@ public final class WarehouseController {
                                                    @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                    @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                    @RequestBody DispositionRequest r,
-                                                   @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+                                                   @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         return mutation(service.disposeLot(c, lotId, r.disposition(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
     }
 
@@ -289,7 +290,7 @@ public final class WarehouseController {
                                                                   @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                                   @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                                   @Valid @RequestBody SafetyStockRequest request,
-                                                                  @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+                                                                  @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         WarehouseOperationsService.SafetyStockCommand command = new WarehouseOperationsService.SafetyStockCommand(
                 request.warehouseId(), request.skuId(), request.catalogItemId(), request.quantity(), request.unit());
         SafetyStockResponse value = safetyStock(service.upsertSafetyStock(c, command, version(ifMatch), key, String.valueOf(correlation)));
@@ -320,7 +321,7 @@ public final class WarehouseController {
                                                       @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                       @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                       @Valid @RequestBody TransferRequest request,
-                                                      @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+                                                      @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         WarehouseOperationsService.TransferCommand command = new WarehouseOperationsService.TransferCommand(
                 request.sourceLotId(), request.sourceWarehouseId(), request.sourceZoneId(),
                 request.destinationWarehouseId(), request.destinationZoneId(), request.skuId(),
@@ -334,7 +335,7 @@ public final class WarehouseController {
     public ReservationPreviewResponse preview(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId) { return preview(service.preview(c, salesOrderId)); }
 
     @PostMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservations")
-    public ResponseEntity<ReservationDetailResponse> reserve(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<ReservationDetailResponse> reserve(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var result = reservation(service.reserve(c, salesOrderId, version(ifMatch), key, String.valueOf(correlation)));
         return ResponseEntity.status("RESERVED".equals(result.status()) ? 201 : 409).eTag(etag(result.version())).body(result);
     }
@@ -348,7 +349,7 @@ public final class WarehouseController {
     public ReservationDetailResponse reservation(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) { return reservation(service.reservation(c, id)); }
 
     @PostMapping("/inventory-reservations/{id}/releases")
-    public ResponseEntity<ReservationDetailResponse> release(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = "com.nexa.api.shared.presentation.http.CorrelationIdFilter.correlationId", required = false) Object correlation) {
+    public ResponseEntity<ReservationDetailResponse> release(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var result = reservation(service.release(c, id, version(ifMatch), key, r.reason(), String.valueOf(correlation), false));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }

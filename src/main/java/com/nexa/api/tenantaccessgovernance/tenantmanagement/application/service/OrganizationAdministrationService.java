@@ -18,7 +18,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.members
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.workspace.WorkspaceSlug;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.shared.application.port.out.NoopChangeEventPersistence;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.RoleDefinitionPersistencePort;

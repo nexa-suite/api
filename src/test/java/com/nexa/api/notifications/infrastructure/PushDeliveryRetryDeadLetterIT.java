@@ -1,6 +1,6 @@
 package com.nexa.api.notifications.infrastructure;
 
-import com.nexa.api.shared.infrastructure.events.CanonicalOutboxEventProcessor;
+import com.nexa.api.bootstrap.runtime.events.CanonicalOutboxEventProcessor;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;

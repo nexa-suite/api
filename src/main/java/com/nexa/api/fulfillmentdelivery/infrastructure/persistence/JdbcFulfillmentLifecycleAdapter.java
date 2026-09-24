@@ -5,7 +5,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.Line
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -31,11 +31,14 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePort {
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final Clock clock;
     private final PhysicalAllocationCommands physicalAllocations;
 
-    public JdbcFulfillmentLifecycleAdapter(JdbcTemplate jdbc, Clock clock, PhysicalAllocationCommands physicalAllocations) {
+    public JdbcFulfillmentLifecycleAdapter(JdbcTemplate jdbc, Clock clock, PhysicalAllocationCommands physicalAllocations,
+                                           CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
+        this.canonicalOutbox = canonicalOutbox;
         this.clock = Objects.requireNonNull(clock, "Clock is required");
         this.physicalAllocations = Objects.requireNonNull(physicalAllocations, "Physical allocations are required");
     }
@@ -263,7 +266,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         insertEvent(request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.status(), target,
                 shortage ? "FULFILLMENT_SHORTAGE" : "PICKING_CONFIRMED", request.actorMembershipId(), bounded(request.notes()), now);
         if (shortage) {
-            CanonicalOutbox.append(jdbc, "FulfillmentShortage.v1", "Fulfillment", request.fulfillmentId(),
+            canonicalOutbox.append("FulfillmentShortage.v1", "Fulfillment", request.fulfillmentId(),
                     request.tenantId(), request.workspaceId(), now, request.idempotencyKey(), null, "1.0",
                     request.idempotencyKey(), Map.of("fulfillmentId", request.fulfillmentId(), "pickingResultId", resultId));
         }

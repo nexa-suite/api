@@ -16,7 +16,7 @@ import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.Passwo
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.PasswordResetRequest;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.PasswordResetRequestId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.PasswordResetTokenHash;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;

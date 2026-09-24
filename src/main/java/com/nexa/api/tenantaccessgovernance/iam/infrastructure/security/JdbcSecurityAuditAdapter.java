@@ -2,7 +2,7 @@ package com.nexa.api.tenantaccessgovernance.iam.infrastructure.security;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;

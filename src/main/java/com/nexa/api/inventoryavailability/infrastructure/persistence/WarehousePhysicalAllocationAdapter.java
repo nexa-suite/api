@@ -1,6 +1,6 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
@@ -31,26 +31,30 @@ import java.util.stream.Collectors;
 @Profile("!test")
 public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCommands {
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final BusinessTraceabilityCommands traceability;
     private final SalesOrderFulfillmentQuery salesOrders;
     private final SellableSkuQuery sellableSkus;
 
     @Autowired
     public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
-                                              SalesOrderFulfillmentQuery salesOrders, SellableSkuQuery sellableSkus) {
+                                              SalesOrderFulfillmentQuery salesOrders, SellableSkuQuery sellableSkus,
+                                              CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
+        this.canonicalOutbox = canonicalOutbox;
         this.traceability = traceability;
         this.salesOrders = salesOrders;
         this.sellableSkus = sellableSkus;
     }
 
     public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
-                                              SalesOrderFulfillmentQuery salesOrders) {
-        this(jdbc, traceability, salesOrders, null);
+                                              SalesOrderFulfillmentQuery salesOrders, CanonicalOutboxPort canonicalOutbox) {
+        this(jdbc, traceability, salesOrders, null, canonicalOutbox);
     }
 
-    public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability) {
-        this(jdbc, traceability, null, null);
+    public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
+                                              CanonicalOutboxPort canonicalOutbox) {
+        this(jdbc, traceability, null, null, canonicalOutbox);
     }
 
     @Override
@@ -188,7 +192,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         jdbc.update("insert into warehouse.physical_allocation_event(id,tenant_id,workspace_id,physical_allocation_id,event_type,actor_membership_id,reason,occurred_at) values (?,?,?,?,?,?,?,?)",
                 UUID.randomUUID(), request.tenantId(), request.workspaceId(), request.allocationId(), "ALLOCATED", request.actorMembershipId(),
                 "Inventory backing consumed by physical allocation", timestamp(request.now()));
-        CanonicalOutbox.append(jdbc, "PhysicalAllocationCreated.v1", "PhysicalAllocation", request.allocationId(),
+        canonicalOutbox.append("PhysicalAllocationCreated.v1", "PhysicalAllocation", request.allocationId(),
                 request.tenantId(), request.workspaceId(), request.now(), request.idempotencyKey(), null, "1.0",
                 Map.of("allocationId", request.allocationId(), "inventoryBackingId", request.inventoryBackingId(),
                         "fulfillmentId", request.fulfillmentId(), "salesOrderId", request.salesOrderId()));

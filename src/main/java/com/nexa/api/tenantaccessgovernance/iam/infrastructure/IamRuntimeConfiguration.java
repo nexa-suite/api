@@ -9,7 +9,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AccessPolicy
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AuthenticationTokenPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordVerificationPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SessionPort;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.UserAccountQueryPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.service.CurrentSessionService;
 import com.nexa.api.tenantaccessgovernance.iam.application.service.RefreshSessionService;

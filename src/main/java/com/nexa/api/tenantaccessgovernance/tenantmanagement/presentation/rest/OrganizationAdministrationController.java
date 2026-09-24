@@ -1,6 +1,6 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest;
 
-import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
+import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.*;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.OrganizationAdministrationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
@@ -83,7 +83,7 @@ public class OrganizationAdministrationController {
 
 	private static long version(String value) { if (value == null || value.isBlank()) throw new PreconditionRequiredException(); try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new PreconditionRequiredException(); } }
 	private static String etag(long version) { return "\"" + version + "\""; }
-	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
+	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
 	public record WorkspaceCreate(String name, String slug) { }
 	public record WorkspacePatch(String name,String slug,String status) { }
 	public record RolesPatch(Set<String> roles, Set<String> roleDefinitionIds) {

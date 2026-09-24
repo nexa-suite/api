@@ -16,13 +16,13 @@ import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQ
 import com.nexa.api.payments.domain.model.payment.Payment;
 import com.nexa.api.payments.domain.model.payment.PaymentMethod;
 import com.nexa.api.payments.domain.model.payment.PaymentStatus;
-import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
+import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
-import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
+import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
@@ -63,12 +63,13 @@ public class PaymentService implements PaymentPersistencePort {
     private static final Logger LOGGER = LoggerFactory.getLogger(PaymentService.class);
     private static final int MAX_RECONCILIATION_ATTEMPTS = 10;
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final StripePaymentProvider stripe;
     private final String publishableKey;
     private final String webhookSecret;
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final TechnicalMetrics metrics;
+    private final TechnicalMetricsPort metrics;
     private final ReceivableApplicationCommands receivableApplications;
     private final CreditPaymentCommands creditPayments;
     private final ReceivableCommands receivables;
@@ -82,15 +83,17 @@ public class PaymentService implements PaymentPersistencePort {
                           @Value("${nexa.payments.publishable-key:}") String publishableKey,
                           @Value("${nexa.payments.webhook-secret:}") String webhookSecret,
                           PlatformTransactionManager transactionManager,
-                          ObjectProvider<TechnicalMetrics> metrics,
+                          ObjectProvider<TechnicalMetricsPort> metrics,
                           ReceivableApplicationCommands receivableApplications,
                           CreditPaymentCommands creditPayments,
                           ReceivableCommands receivables,
                           BusinessDocumentCommands documents,
                           BusinessEvidenceQuery businessEvidence,
                           CustomerAccountQuery customerAccounts,
-                          SalesOrderFulfillmentQuery salesOrders) {
+                          SalesOrderFulfillmentQuery salesOrders,
+                          CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc; this.stripe = stripe; this.publishableKey = publishableKey == null ? "" : publishableKey;
+        this.canonicalOutbox = canonicalOutbox;
         this.webhookSecret = webhookSecret == null ? "" : webhookSecret;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.metrics = metrics == null ? null : metrics.getIfAvailable();
@@ -608,7 +611,7 @@ public class PaymentService implements PaymentPersistencePort {
                 continue;
             }
             count("claim", "acquired");
-            TechnicalMetrics.TimerSample timer = start("process");
+            TechnicalMetricsPort.TimerSample timer = start("process");
             try {
                 if (item.tenantId() != null && item.workspaceId() != null) RlsRequestScope.set(item.tenantId(), item.workspaceId());
                 transactionTemplate.executeWithoutResult(transaction -> {
@@ -647,8 +650,8 @@ public class PaymentService implements PaymentPersistencePort {
         }
     }
 
-    private TechnicalMetrics.TimerSample start(String operation) { return metrics == null ? null : metrics.start("inbox", operation); }
-    private void record(TechnicalMetrics.TimerSample timer, String outcome) { if (metrics != null && timer != null) timer.stop(outcome); }
+    private TechnicalMetricsPort.TimerSample start(String operation) { return metrics == null ? null : metrics.start("inbox", operation); }
+    private void record(TechnicalMetricsPort.TimerSample timer, String outcome) { if (metrics != null && timer != null) timer.stop(outcome); }
     private void count(String operation, String outcome) { if (metrics != null) metrics.count("inbox", operation, outcome); }
 
     @Transactional
@@ -813,7 +816,7 @@ public class PaymentService implements PaymentPersistencePort {
         documents.enqueuePaymentReceipt(tenant(payment), workspace(payment), payment.id(), receivable.clientAccountId(), requester, eventKey, Instant.now());
     }
 
-    private void outbox(PaymentRow payment, String eventType, Map<String, Object> payload) { CanonicalOutbox.append(jdbc, eventType, "Payment", payment.id(), tenant(payment), workspace(payment), Instant.now(), "payment-" + payment.id(), null, "1.0", payload); }
+    private void outbox(PaymentRow payment, String eventType, Map<String, Object> payload) { canonicalOutbox.append(eventType, "Payment", payment.id(), tenant(payment), workspace(payment), Instant.now(), "payment-" + payment.id(), null, "1.0", payload); }
     private String json(Object payload) { try { return objectMapper.writeValueAsString(payload); } catch (Exception exception) { throw new IllegalStateException("Payment JSON serialization failed", exception); } }
 
     private PaymentModels.ReceivableView receivableView(ReceivableRow row) {

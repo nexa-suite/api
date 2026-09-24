@@ -18,7 +18,7 @@ import com.nexa.api.salescommitment.domain.model.delivery.RouteSnapshot;
 import com.nexa.api.salescommitment.domain.model.delivery.WarehouseSnapshot;
 import com.nexa.api.salescommitment.domain.model.purchaserequestdraft.PurchaseRequestDraft;
 import com.nexa.api.salescommitment.domain.model.purchaserequestdraft.PurchaseRequestDraftStatus;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
@@ -51,6 +51,7 @@ import java.util.HexFormat;
 public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private static final String SCHEMA = "1.0";
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final ObjectMapper objectMapper;
     private final CommercialCommitmentPort commitments;
     private final MapRoutingPort maps;
@@ -65,8 +66,9 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
                                        CommercialCommitmentPort commitments, MapRoutingPort maps,
                                        CustomerAccountQuery customers, CustomerAddressQuery addresses,
                                        CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
-                                       WarehouseSelectionQuery warehouses) {
+                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
+        this.canonicalOutbox = canonicalOutbox;
         this.objectMapper = objectMapper;
         this.commitments = commitments;
         this.maps = maps == null ? new com.nexa.api.salescommitment.infrastructure.maps.LocalDeterministicMapAdapter() : maps;
@@ -325,7 +327,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
             commitments.activateForPurchaseRequest(tenant(context), workspace(context), requestId);
         }
         Map<String, Object> payload = new LinkedHashMap<>(); payload.put("purchaseRequestId", requestId); payload.put("draftId", draft.id()); payload.put("clientAccountId", draft.clientAccountId()); payload.put("status", "SUBMITTED");
-        CanonicalOutbox.append(jdbc, "PURCHASE_REQUEST_SUBMITTED", "PurchaseRequest", requestId, tenant(context), workspace(context), now,
+        canonicalOutbox.append("PURCHASE_REQUEST_SUBMITTED", "PurchaseRequest", requestId, tenant(context), workspace(context), now,
                 "purchase-request-" + requestId, null, SCHEMA, payload);
     }
     private void requireBuyerClient(CurrentAccessContext context, UUID clientId) {

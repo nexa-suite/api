@@ -22,7 +22,7 @@ public class OrganizationAdministrationRuntimeConfiguration {
 
 	@Bean
 	OrganizationAdministrationUseCase organizationAdministrationUseCase(OrganizationAdministrationPort port,
-			com.nexa.api.shared.application.port.out.SecurityAuditPort audit,
+			com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort audit,
 			com.nexa.api.shared.application.port.out.ChangeEventPersistencePort changes,
 			RoleDefinitionPersistencePort roleDefinitions, AuthorizationVersionPort authorizationVersions,
 			PlatformTransactionManager transactionManager) {

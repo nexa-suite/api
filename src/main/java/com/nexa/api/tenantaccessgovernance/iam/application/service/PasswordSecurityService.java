@@ -9,7 +9,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordVeri
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.RefreshSessionPersistencePort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityNotificationOutboxPort;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.password.PasswordPolicy;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

@@ -17,7 +17,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SessionPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.UserAccountQueryPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AuthenticationThrottlePort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.NoopAuthenticationThrottle;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.AuthenticationSession;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.RefreshTokenFamilyId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;

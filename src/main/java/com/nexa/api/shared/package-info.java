@@ -1,6 +1,6 @@
 /**
- * Temporarily open only for the cross-context HTTP/security/error composition
- * described by ADR-001. It may not own domain state or inbound business ports.
+ * Closed technical module for framework-neutral error, event, context and
+ * observability contracts. It owns no business state or application workflow.
  */
-@org.springframework.modulith.ApplicationModule(id = "shared", type = org.springframework.modulith.ApplicationModule.Type.OPEN)
+@org.springframework.modulith.ApplicationModule(id = "shared")
 package com.nexa.api.shared;

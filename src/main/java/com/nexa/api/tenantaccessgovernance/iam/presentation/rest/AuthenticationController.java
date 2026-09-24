@@ -17,8 +17,8 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.WorkspacePrevie
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
-import com.nexa.api.shared.infrastructure.security.CookieOriginGuardFilter;
-import com.nexa.api.shared.infrastructure.observability.SecurityMetrics;
+import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.AuthenticationTransport;
+import com.nexa.api.shared.application.port.out.SecurityMetricsPort;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -75,11 +75,11 @@ public class AuthenticationController {
 	private final WorkspacePreviewUseCase workspacePreview;
 	private final boolean secureCookie;
 	private final Clock clock;
-	private final ObjectProvider<SecurityMetrics> securityMetrics;
+	private final ObjectProvider<SecurityMetricsPort> securityMetrics;
 
 	public AuthenticationController(SignInUseCase signIn, RefreshSessionUseCase refresh, SignOutUseCase signOut,
 			CurrentSessionUseCase currentSession, WorkspacePreviewUseCase workspacePreview, @Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie,
-			Environment environment, Clock clock, ObjectProvider<SecurityMetrics> securityMetrics) {
+			Environment environment, Clock clock, ObjectProvider<SecurityMetricsPort> securityMetrics) {
 		this.signIn = signIn;
 		this.refresh = refresh;
 		this.signOut = signOut;
@@ -107,10 +107,10 @@ public class AuthenticationController {
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
 	public AuthenticationResponse signIn(@Valid @RequestBody SignInRequest request,
 			@Parameter(description = "Set to NATIVE for the explicit non-browser session transport")
-			@RequestHeader(name = CookieOriginGuardFilter.NATIVE_CLIENT_HEADER, required = false) String clientTransport,
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER, required = false) String clientTransport,
 			HttpServletRequest httpRequest,
 			HttpServletResponse response) {
-		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(httpRequest);
+		boolean nativeTransport = isNativeSessionTransport(httpRequest);
 		AuthenticationResult result = signIn.signIn(new SignInCommand(new LoginIdentifier(request.identifier()), request.password(),
 				request.workspaceSlug(), request.surface(), clientFingerprint(httpRequest)));
 		writeRefreshTransport(response, result, nativeTransport);
@@ -132,7 +132,7 @@ public class AuthenticationController {
 			@CookieValue(name = PLATFORM_COOKIE, required = false) String platformRefresh,
 			@CookieValue(name = PORTAL_COOKIE, required = false) String portalRefresh,
 			HttpServletRequest request, HttpServletResponse response) {
-		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(request);
+		boolean nativeTransport = isNativeSessionTransport(request);
 		ClientSurface requestedSurface = parseSurface(surface);
 		String refreshToken = nativeTransport ? nativeRefreshToken
 				: requestedSurface == ClientSurface.PLATFORM ? platformRefresh : portalRefresh;
@@ -149,14 +149,14 @@ public class AuthenticationController {
 	public ResponseEntity<Void> signOut(Authentication authentication,
 			@RequestHeader(name = "X-Nexa-Surface", required = false) String surface,
 			HttpServletRequest request, HttpServletResponse response) {
-		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(request);
+		boolean nativeTransport = isNativeSessionTransport(request);
 		if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {
 			var jwt = jwtAuthentication.getToken();
 			try {
 				signOut.signOut(new SignOutCommand(new SessionId(required(jwt.getClaimAsString("sid"))),
 						new UserAccountId(required(jwt.getSubject())), parseSurface(required(jwt.getClaimAsString("surface")))));
 			} catch (RuntimeException exception) {
-				SecurityMetrics metric = securityMetrics.getIfAvailable();
+				SecurityMetricsPort metric = securityMetrics.getIfAvailable();
 				if (metric != null) metric.increment("authentication.signout.failure");
 				throw exception;
 			}
@@ -181,6 +181,11 @@ public class AuthenticationController {
 			return;
 		}
 		writeRefreshCookie(response, result.surface(), result.refreshToken(), result.refreshTokenExpiresAt());
+	}
+
+	private static boolean isNativeSessionTransport(HttpServletRequest request) {
+		return AuthenticationTransport.isNativeSessionTransport(request.getHeader("Origin"),
+				request.getHeader(AuthenticationTransport.NATIVE_CLIENT_HEADER), request.getRequestURI());
 	}
 
 	private void writeRefreshCookie(HttpServletResponse response, ClientSurface surface, String value, java.time.Instant expiresAt) {

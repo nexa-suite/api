@@ -1,13 +1,17 @@
 package com.nexa.api.tenantaccessgovernance.iam.domain.model.password;
 
-/** Compatibility alias retaining the IAM-facing package for existing callers and tests. */
+/** Stable IAM policy name used by authentication and invitation flows. */
 public final class PasswordPolicy {
-	public static final int MINIMUM_LENGTH = com.nexa.api.shared.domain.model.password.PasswordPolicy.MINIMUM_LENGTH;
-	public static final int MAXIMUM_LENGTH = com.nexa.api.shared.domain.model.password.PasswordPolicy.MAXIMUM_LENGTH;
+	public static final int MINIMUM_LENGTH = com.nexa.api.tenantaccessgovernance.iam.domain.model.password.PasswordPolicyRules.MINIMUM_LENGTH;
+	public static final int MAXIMUM_LENGTH = com.nexa.api.tenantaccessgovernance.iam.domain.model.password.PasswordPolicyRules.MAXIMUM_LENGTH;
 
 	private PasswordPolicy() { }
 
 	public static boolean isValid(String password) {
-		return com.nexa.api.shared.domain.model.password.PasswordPolicy.isValid(password);
+		return com.nexa.api.tenantaccessgovernance.iam.domain.model.password.PasswordPolicyRules.isValid(password);
+	}
+
+	public static boolean isValid(String password, int minimumLength) {
+		return com.nexa.api.tenantaccessgovernance.iam.domain.model.password.PasswordPolicyRules.isValid(password, minimumLength);
 	}
 }

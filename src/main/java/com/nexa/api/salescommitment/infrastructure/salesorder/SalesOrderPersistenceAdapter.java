@@ -35,7 +35,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identit
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -60,6 +60,7 @@ import tools.jackson.databind.ObjectMapper;
 @Profile("!test")
 public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, SalesOrderAggregatePersistencePort, SalesOrderConversionPersistencePort {
 	private final JdbcTemplate jdbc;
+	private final CanonicalOutboxPort canonicalOutbox;
 	private final ChangeEventPersistencePort changeFeed;
 	private final CommercialCommitmentPort commitments;
 	private final CustomerAccountQuery customers;
@@ -72,8 +73,10 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	@org.springframework.beans.factory.annotation.Autowired
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
 			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
-			ReceivableCommands receivables, FinancialAdjustmentCommands financialAdjustments, Clock clock, ObjectMapper objectMapper) {
+			ReceivableCommands receivables, FinancialAdjustmentCommands financialAdjustments, Clock clock, ObjectMapper objectMapper,
+			CanonicalOutboxPort canonicalOutbox) {
 		this.jdbc = jdbc;
+		this.canonicalOutbox = canonicalOutbox;
 		this.changeFeed = changeFeed;
 		this.commitments = commitments;
 		this.customers = customers;
@@ -86,23 +89,25 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
 			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
-			ReceivableCommands receivables, Clock clock) {
-		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, receivables, null, clock, new ObjectMapper());
+			ReceivableCommands receivables, Clock clock, CanonicalOutboxPort canonicalOutbox) {
+		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, receivables, null, clock, new ObjectMapper(), canonicalOutbox);
 	}
 
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
-			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations, Clock clock) {
-		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, null, clock);
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
+			Clock clock, CanonicalOutboxPort canonicalOutbox) {
+		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, null, clock, canonicalOutbox);
 	}
 
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
-			CommercialCommitmentPort commitments, CustomerAccountQuery customers) {
-		this(jdbc, changeFeed, commitments, customers, null, null, Clock.systemUTC());
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, CanonicalOutboxPort canonicalOutbox) {
+		this(jdbc, changeFeed, commitments, customers, null, null, Clock.systemUTC(), canonicalOutbox);
 	}
 
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
-			CommercialCommitmentPort commitments, CustomerAccountQuery customers, Clock clock) {
-		this(jdbc, changeFeed, commitments, customers, null, null, clock);
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, Clock clock,
+			CanonicalOutboxPort canonicalOutbox) {
+		this(jdbc, changeFeed, commitments, customers, null, null, clock, canonicalOutbox);
 	}
 
 	@Override
@@ -165,7 +170,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		changeFeed.append(tenant.toString(), workspace.toString(), aggregate.clientAccountId().toString(), "sales_order", orderId.toString(), eventType, aggregate.status().name(), nowEpochMillis, true);
 		SalesOrderView result = find(tenant.toString(), workspace.toString(), null, orderId.toString()).orElseThrow();
 		if ("confirm".equals(action)) {
-			CanonicalOutbox.append(jdbc, "SALES_ORDER_CONFIRMED", "SalesOrder", orderId, tenant, workspace,
+			canonicalOutbox.append("SALES_ORDER_CONFIRMED", "SalesOrder", orderId, tenant, workspace,
 					Instant.ofEpochMilli(nowEpochMillis), "sales-order-" + orderId, null, "1.0",
 					Map.of("salesOrderId", orderId, "salesOrderVersion", result.version(), "status", result.status()));
 		}

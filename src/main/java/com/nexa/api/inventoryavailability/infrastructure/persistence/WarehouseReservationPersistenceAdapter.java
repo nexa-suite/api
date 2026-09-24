@@ -2,7 +2,7 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
 import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
+import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;

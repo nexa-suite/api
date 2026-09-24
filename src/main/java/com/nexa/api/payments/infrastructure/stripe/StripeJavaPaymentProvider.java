@@ -2,7 +2,7 @@ package com.nexa.api.payments.infrastructure.stripe;
 
 import com.nexa.api.payments.application.port.StripePaymentProvider;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
-import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
+import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import com.stripe.StripeClient;
 import com.stripe.exception.ApiConnectionException;
 import com.stripe.exception.AuthenticationException;
@@ -37,7 +37,7 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     private final int readTimeoutMs;
     private final int maxNetworkRetries;
     private final StripeClient client;
-    private final TechnicalMetrics metrics;
+    private final TechnicalMetricsPort metrics;
 
     @Autowired
     public StripeJavaPaymentProvider(
@@ -47,22 +47,22 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
             @Value("${nexa.payments.connect-timeout-ms:5000}") int connectTimeoutMs,
             @Value("${nexa.payments.read-timeout-ms:10000}") int readTimeoutMs,
             @Value("${nexa.payments.max-network-retries:0}") int maxNetworkRetries,
-            ObjectProvider<TechnicalMetrics> metrics) {
+            ObjectProvider<TechnicalMetricsPort> metrics) {
         this(secretKey, webhookSecret, apiBaseUrl, connectTimeoutMs, readTimeoutMs, maxNetworkRetries,
                 metrics == null ? null : metrics.getIfAvailable());
     }
 
     public StripeJavaPaymentProvider(String secretKey, String webhookSecret) {
-        this(secretKey, webhookSecret, "", 5000, 10000, 0, (TechnicalMetrics) null);
+        this(secretKey, webhookSecret, "", 5000, 10000, 0, (TechnicalMetricsPort) null);
     }
 
     public StripeJavaPaymentProvider(String secretKey, String webhookSecret, String apiBaseUrl) {
-        this(secretKey, webhookSecret, apiBaseUrl, 5000, 10000, 0, (TechnicalMetrics) null);
+        this(secretKey, webhookSecret, apiBaseUrl, 5000, 10000, 0, (TechnicalMetricsPort) null);
     }
 
     private StripeJavaPaymentProvider(String secretKey, String webhookSecret, String apiBaseUrl,
                                       int connectTimeoutMs, int readTimeoutMs, int maxNetworkRetries,
-                                      TechnicalMetrics metrics) {
+                                      TechnicalMetricsPort metrics) {
         if (secretKey == null || secretKey.isBlank() || webhookSecret == null || webhookSecret.isBlank()) {
             throw new IllegalStateException("Stripe secret and webhook secret are required for the stripe provider");
         }
@@ -87,7 +87,7 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
 
     @Override
     public StripePaymentProvider.PaymentIntent createPaymentIntent(PaymentIntentRequest request) {
-        TechnicalMetrics.TimerSample timer = start("create_payment_intent");
+        TechnicalMetricsPort.TimerSample timer = start("create_payment_intent");
         try {
             PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
                     .setAmount(request.amountMinor())
@@ -107,7 +107,7 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     @Override
     public Optional<StripePaymentProvider.PaymentIntent> retrievePaymentIntent(String providerId) {
         if (providerId == null || providerId.isBlank()) return Optional.empty();
-        TechnicalMetrics.TimerSample timer = start("retrieve_payment_intent");
+        TechnicalMetricsPort.TimerSample timer = start("retrieve_payment_intent");
         try {
             com.stripe.model.PaymentIntent intent = client.paymentIntents().retrieve(providerId, options(null));
             stop(timer, "success");
@@ -121,7 +121,7 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     @Override
     public StripePaymentProvider.PaymentIntent confirmPaymentIntent(String providerId) {
         if (providerId == null || providerId.isBlank()) throw new IllegalArgumentException("Stripe PaymentIntent id is required");
-        TechnicalMetrics.TimerSample timer = start("confirm_payment_intent");
+        TechnicalMetricsPort.TimerSample timer = start("confirm_payment_intent");
         try {
             com.stripe.model.PaymentIntent confirmed = client.paymentIntents().confirm(providerId, options(null));
             stop(timer, "success");
@@ -135,7 +135,7 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     @Override
     public StripePaymentProvider.Refund refundPayment(String providerId, long amountMinor, String currency, String idempotencyKey) {
         if (providerId == null || providerId.isBlank()) throw new IllegalArgumentException("Stripe PaymentIntent id is required");
-        TechnicalMetrics.TimerSample timer = start("refund_payment");
+        TechnicalMetricsPort.TimerSample timer = start("refund_payment");
         try {
             RefundCreateParams params = RefundCreateParams.builder()
                     .setPaymentIntent(providerId)
@@ -210,11 +210,11 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
                 : "request";
     }
 
-    private TechnicalMetrics.TimerSample start(String operation) {
+    private TechnicalMetricsPort.TimerSample start(String operation) {
         return metrics == null ? null : metrics.start("stripe", operation);
     }
 
-    private void stop(TechnicalMetrics.TimerSample timer, String outcome) {
+    private void stop(TechnicalMetricsPort.TimerSample timer, String outcome) {
         if (timer != null) timer.stop(outcome);
     }
 }

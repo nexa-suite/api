@@ -1,6 +1,6 @@
 package com.nexa.api.creditreceivables.infrastructure.persistence;
 
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,9 +19,11 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcReceivableCommands implements ReceivableCommands {
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
 
-    public JdbcReceivableCommands(JdbcTemplate jdbc) {
+    public JdbcReceivableCommands(JdbcTemplate jdbc, CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
+        this.canonicalOutbox = canonicalOutbox;
     }
 
     @Override
@@ -58,7 +60,7 @@ public class JdbcReceivableCommands implements ReceivableCommands {
         }
 
         settleReservation(tenantId, workspaceId, salesOrderId, occurredAt);
-        CanonicalOutbox.append(jdbc, "RECEIVABLE_CREATED", "Receivable", receivableId, tenantId, workspaceId,
+        canonicalOutbox.append("RECEIVABLE_CREATED", "Receivable", receivableId, tenantId, workspaceId,
                 occurredAt, "receivable-" + receivableId, null, "1.0", Map.of(
                         "receivableId", receivableId, "subjectType", "SALES_ORDER", "subjectId", salesOrderId,
                         "amount", amount, "currency", normalizedCurrency));

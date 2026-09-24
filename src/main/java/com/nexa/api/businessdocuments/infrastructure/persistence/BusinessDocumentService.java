@@ -15,8 +15,8 @@ import com.nexa.api.businessdocuments.domain.model.businessdocument.BusinessDocu
 import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectReference;
 import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectSnapshot;
 import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectType;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
-import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
+import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
@@ -48,6 +48,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private static final Logger LOGGER = LoggerFactory.getLogger(BusinessDocumentService.class);
     private static final String WORKER_LEASE = "current_timestamp + interval '10 minutes'";
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final ObjectStoragePort storage;
     private final ContentScannerPort scanner;
     private final DocumentRendererPort renderer;
@@ -56,8 +57,10 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private final TransactionTemplate transactionTemplate;
 
     public BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner, DocumentRendererPort renderer,
-            DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections, PlatformTransactionManager transactionManager) {
+            DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections,
+            PlatformTransactionManager transactionManager, CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc; this.storage = storage; this.scanner = scanner; this.renderer = renderer; this.subjects = subjects; this.projections = projections;
+        this.canonicalOutbox = canonicalOutbox;
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
     }
 
@@ -117,7 +120,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
                         + "values (?,?,?,?,?,?,?,?,?,'PENDING',?,?,?) on conflict do nothing",
                 requestId, tenantId, workspaceId, requestedByMembershipId, documentId, "PAYMENT", paymentId,
                 "PAYMENT_RECEIPT", "PDF", "payment-receipt-" + paymentId, sha256(eventKey), Timestamp.from(occurredAt));
-        CanonicalOutbox.append(jdbc, "BUSINESS_DOCUMENT_GENERATION_REQUESTED", "BusinessDocument", documentId,
+        canonicalOutbox.append("BUSINESS_DOCUMENT_GENERATION_REQUESTED", "BusinessDocument", documentId,
                 tenantId, workspaceId, occurredAt, "payment-receipt-" + paymentId, null, "1.0",
                 "payment-receipt-" + paymentId,
                 Map.of("documentId", documentId, "requestId", requestId, "subjectType", "PAYMENT",
@@ -453,7 +456,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private record EvidenceRow(UUID id, UUID clientAccountId, String subjectType, UUID subjectId, String objectKey, String lifecycleStatus,
             String declaredContentType, String detectedContentType, String originalFilename, String checksumSha256, long byteSize,
             Instant createdAt, Instant scannedAt, String failureCode, Instant updatedAt) { }
-    private void outbox(CurrentAccessContext context, String type, UUID aggregateId, Map<String, Object> payload) { CanonicalOutbox.append(jdbc, type, "BusinessDocument", aggregateId, tenant(context), workspace(context), Instant.now(), "document-" + aggregateId, null, "1.0", payload); }
+    private void outbox(CurrentAccessContext context, String type, UUID aggregateId, Map<String, Object> payload) { canonicalOutbox.append(type, "BusinessDocument", aggregateId, tenant(context), workspace(context), Instant.now(), "document-" + aggregateId, null, "1.0", payload); }
     private void read(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_READ); }
     private void requireGeneration(CurrentAccessContext context) { if (context.hasRole(MembershipRole.BUYER)) context.requirePermission(PermissionKey.DOCUMENT_READ); else context.requirePermission(PermissionKey.DOCUMENT_GENERATE); }
     private void authorizeClientScope(CurrentAccessContext context, String clientAccountId) { if (context.hasRole(MembershipRole.BUYER)) { if (clientAccountId == null || !Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?)", Boolean.class, tenant(context), workspace(context), uuid(clientAccountId), context.membershipId().value()))) throw new IllegalArgumentException("Document is outside buyer scope"); } }
