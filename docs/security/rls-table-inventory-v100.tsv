@@ -1,0 +1,166 @@
+table	category	tenant_id	workspace_id	rls_enabled	rls_forced	policy
+audit.event	A	t	t	f	f	NONE
+business_documents.business_document	A	t	t	t	t	USING+WITH CHECK
+business_documents.document_generation_request	F	t	t	f	f	NONE
+business_documents.evidence_object	A	t	t	t	t	USING+WITH CHECK
+business_documents.object_storage_object	A	t	t	t	t	USING+WITH CHECK
+catalog_management.brand	A	t	t	f	f	NONE
+catalog_management.category	A	t	t	f	f	NONE
+catalog_management.command_idempotency	A	t	t	f	f	NONE
+catalog_management.product	A	t	t	f	f	NONE
+catalog_management.product_asset_reference	A	t	t	f	f	NONE
+catalog_management.product_family	A	t	t	f	f	NONE
+catalog_management.product_presentation	A	t	t	f	f	NONE
+catalog_management.product_price	A	t	t	f	f	NONE
+catalog_management.product_variant	A	t	t	f	f	NONE
+catalog_management.product_visibility	A	t	t	f	f	NONE
+catalog_management.promotion	A	t	t	f	f	NONE
+catalog_management.promotion_category	A	t	t	f	f	NONE
+catalog_management.promotion_client_account	A	t	t	f	f	NONE
+catalog_management.promotion_product	A	t	t	f	f	NONE
+catalog_management.promotion_rule	A	t	t	f	f	NONE
+catalog_management.promotion_sku	A	t	t	f	f	NONE
+catalog_management.seed_import_history	A	t	t	f	f	NONE
+catalog_management.sellable_sku	A	t	t	f	f	NONE
+catalog_management.sku_price	A	t	t	f	f	NONE
+iam.authentication_failure	E	f	f	f	f	NONE
+iam.password_credential	E	f	f	f	f	NONE
+iam.password_reset_request	E	f	f	f	f	NONE
+iam.password_reset_throttle_bucket	E	f	f	f	f	NONE
+iam.public_contact_request	E	f	f	f	f	NONE
+iam.public_contact_throttle_bucket	E	f	f	f	f	NONE
+iam.refresh_session	E	f	f	f	f	NONE
+iam.security_audit_event	E	t	t	f	f	NONE
+iam.security_notification_outbox	F	f	f	f	f	NONE
+iam.system_operator_throttle_bucket	E	f	f	f	f	NONE
+iam.user_account	E	f	f	f	f	NONE
+iam.workspace_preview_throttle_bucket	E	f	f	f	f	NONE
+integration.change_event	F	t	t	f	f	NONE
+integration.inbox_event	F	t	t	f	f	NONE
+integration.outbox_event	F	t	t	f	f	NONE
+logistics.buyer_receipt_fact	A	t	t	t	t	USING+WITH CHECK
+logistics.command_idempotency	A	t	t	t	t	USING+WITH CHECK
+logistics.continuation_delivery	A	t	t	t	t	USING+WITH CHECK
+logistics.continuation_delivery_line	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_assignment	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_attempt	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_attempt_line	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_command_idempotency	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_event	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_handoff_token	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_incident	A	t	t	t	t	USING+WITH CHECK
+logistics.delivery_quantity_outcome	A	t	t	t	t	USING+WITH CHECK
+logistics.dispatch_event	A	t	t	t	t	USING+WITH CHECK
+logistics.dispatch_number_counter	A	t	t	t	t	USING+WITH CHECK
+logistics.dispatch_order	A	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment	A	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment_command_idempotency	A	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment_event	A	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment_line	A	t	t	t	t	USING+WITH CHECK
+logistics.operational_handoff_note	A	t	t	t	t	USING+WITH CHECK
+logistics.picking_discrepancy	A	t	t	t	t	USING+WITH CHECK
+logistics.picking_discrepancy_resolution	A	t	t	t	t	USING+WITH CHECK
+logistics.picking_result	A	t	t	t	t	USING+WITH CHECK
+logistics.picking_result_line	A	t	t	t	t	USING+WITH CHECK
+logistics.proof_of_delivery	A	t	t	t	t	USING+WITH CHECK
+logistics.proof_of_delivery_addendum	A	t	t	t	t	USING+WITH CHECK
+logistics.temperature_evidence	A	t	t	t	t	USING+WITH CHECK
+logistics.temperature_excursion	A	t	t	t	t	USING+WITH CHECK
+logistics.temperature_reading	A	t	t	t	t	USING+WITH CHECK
+notifications.inbox_item	A	t	t	t	t	USING+WITH CHECK
+notifications.push_delivery_attempt	A	t	t	t	t	USING+WITH CHECK
+notifications.push_delivery_claim	A	t	t	t	t	USING+WITH CHECK
+notifications.push_subscription	A	t	t	t	t	USING+WITH CHECK
+notifications.push_subscription_command_idempotency	A	t	t	t	t	USING+WITH CHECK
+payments.credit_account	A	t	t	t	t	USING+WITH CHECK
+payments.credit_reservation	A	t	t	t	t	USING+WITH CHECK
+payments.financial_adjustment	A	t	t	t	t	USING+WITH CHECK
+payments.financial_ledger_entry	A	t	t	t	t	USING+WITH CHECK
+payments.payment	A	t	t	t	t	USING+WITH CHECK
+payments.payment_attempt	A	t	t	t	t	USING+WITH CHECK
+payments.payment_event	A	t	t	t	t	USING+WITH CHECK
+payments.payment_reconciliation_case	A	t	t	t	t	USING+WITH CHECK
+payments.receivable	A	t	t	t	t	USING+WITH CHECK
+payments.receivable_allocation	A	t	t	t	t	USING+WITH CHECK
+payments.receivable_application	A	t	t	t	t	USING+WITH CHECK
+payments.reconciliation_refund_idempotency	A	t	t	t	t	USING+WITH CHECK
+payments.refund_credit_obligation	A	t	t	t	t	USING+WITH CHECK
+payments.stripe_event_inbox	F	t	t	f	f	NONE
+public.flyway_schema_history	E	f	f	f	f	NONE
+reference_data.department	D	f	f	f	f	NONE
+reference_data.district	D	f	f	f	f	NONE
+reference_data.province	D	f	f	f	f	NONE
+reference_data.road_type	D	f	f	f	f	NONE
+sales.client_account	A	t	t	t	t	USING+WITH CHECK
+sales.client_account_address	A	t	t	t	t	USING+WITH CHECK
+sales.client_account_membership	A	t	t	t	t	USING+WITH CHECK
+sales.commercial_commitment	A	t	t	t	t	USING+WITH CHECK
+sales.commercial_commitment_line	A	t	t	t	t	USING+WITH CHECK
+sales.idempotency_record	A	t	t	t	t	USING+WITH CHECK
+sales.idempotency_response	A	t	t	t	t	USING+WITH CHECK
+sales.manual_order_idempotency	A	t	t	f	f	NONE
+sales.manual_sales_order_draft	A	t	t	t	t	USING+WITH CHECK
+sales.manual_sales_order_draft_idempotency	A	t	t	t	t	USING+WITH CHECK
+sales.manual_sales_order_draft_line	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_destination	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_idempotency	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_line	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_route	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_warehouse_selection	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_event	A	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_line	C	f	f	f	f	NONE
+sales.sales_order	A	t	t	t	t	USING+WITH CHECK
+sales.sales_order_event	A	t	t	t	t	USING+WITH CHECK
+sales.sales_order_line	C	f	f	f	f	NONE
+sales.sales_order_sequence	A	t	t	f	f	NONE
+tenant_management.custom_field_definition	A	t	t	f	f	NONE
+tenant_management.membership_admin_event	A	t	t	f	f	NONE
+tenant_management.membership_authorization_state	A	t	t	f	f	NONE
+tenant_management.membership_role_assignment	A	t	t	f	f	NONE
+tenant_management.membership_role_definition	A	t	t	f	f	NONE
+tenant_management.notification_preference	C	f	t	f	f	NONE
+tenant_management.operational_settings	C	f	t	f	f	NONE
+tenant_management.organization_invitation	A	t	t	f	f	NONE
+tenant_management.organization_invitation_idempotency	B	t	f	f	f	NONE
+tenant_management.organization_invitation_role	C	f	f	f	f	NONE
+tenant_management.organization_registration	A	t	t	f	f	NONE
+tenant_management.organization_registration_draft_idempotency	E	f	f	f	f	NONE
+tenant_management.organization_settings	B	t	f	f	f	NONE
+tenant_management.permission_definition	D	f	f	f	f	NONE
+tenant_management.reference_plan_assignment	B	t	f	f	f	NONE
+tenant_management.regional_settings	B	t	f	f	f	NONE
+tenant_management.role_definition	A	t	t	f	f	NONE
+tenant_management.role_permission	C	f	f	f	f	NONE
+tenant_management.tenant	B	f	f	f	f	NONE
+tenant_management.tenant_security_settings	B	t	f	f	f	NONE
+tenant_management.unit_preferences	B	t	f	f	f	NONE
+tenant_management.workspace	B	t	f	f	f	NONE
+tenant_management.workspace_creation_idempotency	A	t	t	f	f	NONE
+tenant_management.workspace_membership	C	f	t	f	f	NONE
+tenant_management.workspace_settings	C	f	t	f	f	NONE
+warehouse.command_idempotency	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_backing	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_backing_line	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_backing_position	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_event	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_lot	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_lot_disposition	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_reservation	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_reservation_allocation	C	f	f	f	f	NONE
+warehouse.inventory_reservation_line	C	f	f	f	f	NONE
+warehouse.inventory_temperature_evaluation	A	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_transfer	A	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation	A	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation_command_idempotency	A	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation_event	A	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation_line	A	t	t	t	t	USING+WITH CHECK
+warehouse.reservation_shortage	C	f	f	f	f	NONE
+warehouse.safety_stock_policy	A	t	t	t	t	USING+WITH CHECK
+warehouse.selection_snapshot	A	t	t	t	t	USING+WITH CHECK
+warehouse.stock_movement	A	t	t	t	t	USING+WITH CHECK
+warehouse.storage_zone	A	t	t	t	t	USING+WITH CHECK
+warehouse.warehouse	A	t	t	t	t	USING+WITH CHECK
+warehouse.warehouse_service_configuration	A	t	t	t	t	USING+WITH CHECK

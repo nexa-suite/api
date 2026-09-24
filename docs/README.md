@@ -23,6 +23,8 @@ contexts.
 
 ## Security implementation
 
+- [Current-schema RLS audit](./security/rls-current-schema-audit.md)
+
 - [Authentication](./security/authentication.md)
 - [Authorization](./security/authorization.md)
 - [Tenant resolution](./security/tenant-resolution.md)

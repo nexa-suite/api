@@ -7,6 +7,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.sql.SQLException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -92,6 +97,7 @@ class ModernPostgresMigrationTests {
 			assertThat(indexColumns(connection, "sales", "uq_client_account_one_buyer"))
 			.containsExactly("tenant_id", "workspace_id", "client_account_id");
 				assertTenantWorkspaceRls(connection);
+				assertCurrentSchemaRlsInventory(connection);
 				assertPurchaseRequestExpiryIndex(connection);
 				assertIndexExists(connection, "catalog_management", "ix_sellable_sku_gtin_resolution");
 				assertIndexExists(connection, "warehouse", "ix_inventory_lot_batch_resolution");
@@ -102,6 +108,46 @@ class ModernPostgresMigrationTests {
 					assertCompositeMembershipForeignKeys(connection);
 				}
 		assertOnlyOneConcurrentOutboxLeaseClaimWins();
+	}
+
+	private static void assertCurrentSchemaRlsInventory(java.sql.Connection connection) throws Exception {
+		var lines = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v100.tsv"));
+		assertThat(lines.getFirst()).isEqualTo("table\tcategory\ttenant_id\tworkspace_id\trls_enabled\trls_forced\tpolicy");
+		Map<String, List<String>> expected = new LinkedHashMap<>();
+		for (String line : lines.subList(1, lines.size())) {
+			String[] fields = line.split("\t", -1);
+			assertThat(fields).hasSize(7);
+			assertThat(fields[1]).isIn("A", "B", "C", "D", "E", "F", "G");
+			assertThat(expected.put(fields[0], List.of(fields[2], fields[3], fields[4], fields[5])))
+					.as("each table appears once: %s", fields[0]).isNull();
+		}
+		Map<String, List<String>> actual = new LinkedHashMap<>();
+		try (var statement = connection.createStatement(); var result = statement.executeQuery("""
+				select n.nspname || '.' || c.relname, bool_or(a.attname='tenant_id'),
+				       bool_or(a.attname='workspace_id'),c.relrowsecurity,c.relforcerowsecurity
+				from pg_class c join pg_namespace n on n.oid=c.relnamespace
+				left join pg_attribute a on a.attrelid=c.oid and a.attnum>0 and not a.attisdropped
+				where c.relkind='r' and n.nspname not in ('pg_catalog','information_schema')
+				group by n.nspname,c.relname,c.relrowsecurity,c.relforcerowsecurity
+				order by 1
+				""")) {
+			while (result.next()) {
+				actual.put(result.getString(1), List.of(
+						result.getBoolean(2) ? "t" : "f", result.getBoolean(3) ? "t" : "f",
+						result.getBoolean(4) ? "t" : "f", result.getBoolean(5) ? "t" : "f"));
+			}
+		}
+		assertThat(actual).as("every current PostgreSQL table must be classified with accurate scope and RLS flags")
+				.isEqualTo(expected);
+		try (var statement = connection.createStatement(); var result = statement.executeQuery("""
+				select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
+				where c.relkind='r' and c.relrowsecurity
+				  and not exists (select 1 from pg_policies p where p.schemaname=n.nspname
+				      and p.tablename=c.relname and p.qual is not null and p.with_check is not null)
+				""")) {
+			assertThat(result.next()).isTrue();
+			assertThat(result.getLong(1)).as("protected tables require USING and WITH CHECK policies").isZero();
+		}
 	}
 
 	private static void assertOnlyOneConcurrentOutboxLeaseClaimWins() throws Exception {
