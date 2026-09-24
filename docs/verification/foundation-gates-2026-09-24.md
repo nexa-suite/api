@@ -14,9 +14,9 @@ Product Acceptance, System Acceptance, or the Blueprint Production Gate.
 | Operations Mobile auth/network | PASS for local unit contracts | `./gradlew :core:auth:testDebugUnitTest :core:network:testDebugUnitTest --no-daemon --console=plain` in `mobile/apps/operations-android`; [consumer boundary](./cross-client-contract-2026-09-24.md). |
 | Docker and Compose | PASS locally | `docker compose --env-file .env.local -f ops/compose/modern.compose.yml config --quiet`; final multi-stage API image built, with a non-root runtime user and health check. |
 | Isolated HTTP smoke | PASS for exercised routes | Fresh disposable PostgreSQL and final API image: readiness `200`/`UP`; unauthenticated `GET /api/v1/session` `401`; invalid public contact `400`; valid demo contact `202`/`RECEIVED`, one row persisted. Containers and network were removed after the run. No existing local database was modified. |
-| Remote security/load | PASS on `9aa5e46` | GitHub run `36058575522` passed. The 20-second, 4-VU service smoke sent 650 requests, all 650 checks passed, p95 473.7 ms / p99 496.7 ms; the business command smoke sent 2,720 requests, all 2,720 checks passed, p95 109.6 ms / p99 143.0 ms. This short test is not a production capacity target or performance certification. |
-| Remote supply chain | PASS on `9aa5e46` | GitHub run `36058575693` passed filesystem and container jobs, including SBOM/provenance generation and high/critical image scan. |
-| Remote API CI | First run failed on fixture image availability | GitHub run `36058575688` had 485 tests without failures; the object-storage integration errored because `minio/minio:RELEASE.2024-10-13T13-34-11Z` returns pull denied on a clean runner. The fixture now uses a pullable LocalStack S3 container; its focused test and full local suite pass. Follow-up run status is recorded at handoff. |
+| Remote security/load | PASS on `32ddade` | [GitHub run 36061315883](https://github.com/nexa-suite/api/actions/runs/36061315883) passed. The 20-second, 4-VU service smoke sent 640 requests with 640 checks passed, 0 HTTP failures, p95 478.0 ms / p99 499.3 ms; the business command smoke sent 2,630 requests with all checks passed, p95 109.2 ms / p99 158.6 ms. Authenticated role scans and baseline ZAP reported 0 FAIL-NEW findings, with low/informational warnings. This short test is not a production capacity target or performance certification. |
+| Remote supply chain | PASS on `32ddade` | [GitHub run 36061315843](https://github.com/nexa-suite/api/actions/runs/36061315843) passed filesystem and container jobs, including SBOM/provenance generation and high/critical image scan. |
+| Remote API CI | PASS on `32ddade` | [GitHub run 36061316028](https://github.com/nexa-suite/api/actions/runs/36061316028) passed all 486 tests and OpenAPI compatibility. The earlier [run 36058575688](https://github.com/nexa-suite/api/actions/runs/36058575688) errored because Docker Hub denied the old MinIO image pull on a clean runner. The test fixture now uses a pullable LocalStack S3 container. |
 | CI workflow syntax | PASS | `actionlint .github/workflows/*.yml`. The existing Supply Chain workflow builds an attested image, emits an SBOM, and gates source/image Trivy scans on high or critical findings. |
 
 ## Container and supply chain snapshot
@@ -43,3 +43,6 @@ integrated new Web client smoke, or live Android-to-API smoke was performed.
 The local Compose stack still references a MinIO image that a clean Docker Hub
 runner cannot pull; Compose configuration validation is not a clean-stack
 startup result.
+The authenticated ZAP workflow now uploads only k6 metric summaries; full ZAP
+traffic and API runtime logs stay in the ephemeral runner and are not uploaded
+as artifacts.
