@@ -19,6 +19,11 @@ public interface SessionPort {
 
 	Optional<SessionRecord> findByAccessToken(String accessToken);
 
+	/** Locks the session identified by the signed access token until the surrounding transaction commits. */
+	default Optional<SessionRecord> findByAccessTokenForUpdate(String accessToken) {
+		return findByAccessToken(accessToken);
+	}
+
 	default Optional<SessionRecord> findBySessionId(SessionId sessionId) { return Optional.empty(); }
 
 	Optional<SessionRecord> findByRefreshToken(String refreshToken);

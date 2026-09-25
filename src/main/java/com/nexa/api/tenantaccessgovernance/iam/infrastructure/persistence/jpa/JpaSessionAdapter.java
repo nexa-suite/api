@@ -61,11 +61,23 @@ public class JpaSessionAdapter implements SessionPort {
 	@Override
 	@Transactional(readOnly = true)
 	public Optional<SessionRecord> findByAccessToken(String accessToken) {
+		return findByAccessToken(accessToken, false);
+	}
+
+	@Override
+	@Transactional
+	public Optional<SessionRecord> findByAccessTokenForUpdate(String accessToken) {
+		return findByAccessToken(accessToken, true);
+	}
+
+	private Optional<SessionRecord> findByAccessToken(String accessToken, boolean lock) {
 		try {
 			var jwt = decoder.decode(accessToken);
 			String value = jwt.getClaimAsString("sid");
 			if (value == null) return Optional.empty();
-			return sessions.findById(UUID.fromString(value)).flatMap(entity -> toRecord(entity, accessToken, null, jwt.getIssuedAt(), jwt.getExpiresAt()));
+			UUID sessionId = UUID.fromString(value);
+			return (lock ? sessions.findByIdForUpdate(sessionId) : sessions.findById(sessionId))
+					.flatMap(entity -> toRecord(entity, accessToken, null, jwt.getIssuedAt(), jwt.getExpiresAt()));
 		} catch (RuntimeException exception) {
 			return Optional.empty();
 		}

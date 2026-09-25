@@ -33,6 +33,15 @@ public class UserAccountJpaAdapter implements UserAccountRepository {
 					new StoredUserAccount(toDomain(account), credential.getPasswordHash())));
 	}
 
+	@Override
+	public Optional<UserAccount> findById(UserAccountId userAccountId) {
+		try {
+			return accounts.findById(UUID.fromString(userAccountId.value())).map(UserAccountJpaAdapter::toDomain);
+		} catch (IllegalArgumentException exception) {
+			return Optional.empty();
+		}
+	}
+
 	private static UserAccount toDomain(UserAccountJpaEntity entity) {
 		UserAccount account = UserAccount.create(new UserAccountId(entity.getId().toString()),
 				new Username(entity.getUsername()), new EmailAddress(entity.getEmail()), new DisplayName(entity.getDisplayName()));

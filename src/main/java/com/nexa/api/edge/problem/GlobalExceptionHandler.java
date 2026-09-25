@@ -2,6 +2,9 @@ package com.nexa.api.edge.problem;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidCredentialsException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidRefreshTokenException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidAccessContextTicketException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.MissingAccessContextAuthorityException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.SelectedAccessContextUnavailableException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.SessionNotFoundException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.AuthenticationThrottledException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurityException;
@@ -160,6 +163,27 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.UNAUTHORIZED, ApiErrorCode.REFRESH_SESSION_INVALID, "Authentication session is invalid", request);
 	}
 
+	@ExceptionHandler(InvalidAccessContextTicketException.class)
+	public ResponseEntity<ProblemDetail> handleInvalidAccessContextTicket(InvalidAccessContextTicketException exception,
+			HttpServletRequest request) {
+		return response(HttpStatus.UNAUTHORIZED, ApiErrorCode.CONTEXT_TICKET_INVALID,
+				"Access context credential is invalid or expired", request);
+	}
+
+	@ExceptionHandler(SelectedAccessContextUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleUnavailableAccessContext(SelectedAccessContextUnavailableException exception,
+			HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.ACCESS_CONTEXT_SELECTION_REJECTED,
+				"Selected access context is unavailable", request);
+	}
+
+	@ExceptionHandler(MissingAccessContextAuthorityException.class)
+	public ResponseEntity<ProblemDetail> handleMissingAccessContextAuthority(MissingAccessContextAuthorityException exception,
+			HttpServletRequest request) {
+		return response(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTHENTICATION_REQUIRED,
+				"An access context credential is required", request);
+	}
+
 	@ExceptionHandler(AccessDeniedException.class)
 	public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
@@ -245,6 +269,8 @@ public final class GlobalExceptionHandler {
 		String message = exception.getMessage() == null ? "" : exception.getMessage().toLowerCase(java.util.Locale.ROOT);
 		ApiErrorCode code = message.contains("cross-surface")
 				? ApiErrorCode.ROLE_TRANSITION_NOT_ALLOWED
+				: message.contains("revoked membership")
+				? ApiErrorCode.MEMBERSHIP_REVOKED
 				: message.contains("usable administrative workspace")
 				? ApiErrorCode.LAST_USABLE_ADMINISTRATIVE_WORKSPACE_REQUIRED : ApiErrorCode.LAST_ACTIVE_OWNER_REQUIRED;
 		return response(HttpStatus.CONFLICT, code, "Organization membership policy prevents this change", request);

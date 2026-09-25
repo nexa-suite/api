@@ -78,6 +78,10 @@ public class OrganizationAdministrationController {
 	@PostMapping("/workspace-memberships/{membershipId}/suspensions")
 	public ResponseEntity<WorkspaceMembershipSummary> suspend(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.suspendMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 
+	@PostMapping("/workspace-memberships/{membershipId}/revocations")
+	@Operation(operationId = "revokeWorkspaceMembership")
+	public ResponseEntity<WorkspaceMembershipSummary> revoke(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.revokeMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
+
 	@PostMapping("/workspace-memberships/{membershipId}/reactivations")
 	public ResponseEntity<WorkspaceMembershipSummary> reactivate(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.reactivateMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 

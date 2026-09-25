@@ -226,6 +226,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 			long expectedVersion, String correlationId) {
 		context.requirePermission(PermissionKey.TENANT_MEMBER_MANAGE);
 		var current = findMembership(context, membershipId);
+		if ("REVOKED".equals(current.status())) throw new OrganizationAdministrationInvariantViolation("Revoked membership cannot be suspended");
 		if ("DISABLED".equals(current.status())) {
 			if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
 			return new OrganizationAdministrationResult<>(current, current.version());
@@ -240,10 +241,29 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 	}
 
 	@Override
+	public OrganizationAdministrationResult<WorkspaceMembershipSummary> revokeMembership(CurrentAccessContext context, String membershipId,
+			long expectedVersion, String correlationId) {
+		context.requirePermission(PermissionKey.TENANT_MEMBER_MANAGE);
+		var current = findMembership(context, membershipId);
+		if ("REVOKED".equals(current.status())) {
+			if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
+			return new OrganizationAdministrationResult<>(current, current.version());
+		}
+		if (containsRole(current, MembershipRole.TENANT_ADMIN)) { port.lockTenant(context.tenantId().toString()); if (port.activeTenantAdminCount(current.workspaceId()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active tenant admin must remain"); }
+		if (containsRole(current, MembershipRole.COMPANY_OWNER)) { port.lockTenant(context.tenantId().toString()); if (port.activeCompanyOwnerCount(context.tenantId().toString()) <= 1) throw new OrganizationAdministrationInvariantViolation("At least one active company owner must remain"); }
+		if (port.updateStatus(context.tenantId().toString(), current.id(), "REVOKED", expectedVersion) == 0) throw new ConcurrencyConflictException();
+		port.appendMembershipEvent("MEMBERSHIP_REVOKED", context.tenantId().toString(), current.workspaceId(), current.id(), context.membershipId().toString(), String.join(",", current.roles()), current.status(), String.join(",", current.roles()), "REVOKED", correlationId);
+		audit(context, "MEMBERSHIP_REVOKED", current.id(), correlationId, java.util.Map.of("status", "REVOKED"));
+		publishChange(context, "membership", current.id(), "organization.membership.revoked", "REVOKED");
+		return new OrganizationAdministrationResult<>(findMembership(context, current.id()), expectedVersion + 1);
+	}
+
+	@Override
 	public OrganizationAdministrationResult<WorkspaceMembershipSummary> reactivateMembership(CurrentAccessContext context, String membershipId,
 			long expectedVersion, String correlationId) {
 		context.requirePermission(PermissionKey.TENANT_MEMBER_MANAGE);
 		var current = findMembership(context, membershipId);
+		if ("REVOKED".equals(current.status())) throw new OrganizationAdministrationInvariantViolation("Revoked membership cannot be reactivated");
 		if ("ACTIVE".equals(current.status())) {
 			if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
 			return new OrganizationAdministrationResult<>(current, current.version());
@@ -261,7 +281,12 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 	}
 	private WorkspaceMembershipSummary findMembership(CurrentAccessContext context, String id) {
 		try {
-			return port.findMembership(context.tenantId().toString(), id).orElseThrow(() -> new ApiResourceNotFoundException("membership"));
+			WorkspaceMembershipSummary membership = port.findMembership(context.tenantId().toString(), id)
+					.orElseThrow(() -> new ApiResourceNotFoundException("membership"));
+			if (!context.workspaceId().toString().equals(membership.workspaceId())) {
+				throw new ApiResourceNotFoundException("membership");
+			}
+			return membership;
 		} catch (TenantManagementInvariantViolation exception) {
 			throw new ApiResourceNotFoundException("membership");
 		}

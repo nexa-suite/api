@@ -93,6 +93,8 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 			return;
 		}
 
+		RlsRequestScope.set(tenantId.value(), workspaceId.value());
+		try {
 		try {
 			accessSession.validate(new SessionId(sessionIdClaim), new com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId(jwt.getSubject()),
 					com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface.valueOf(surface.name()), authorizationVersionClaim);
@@ -133,9 +135,7 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		verifiedAuthentication.setDetails(jwtAuthentication.getDetails());
 		SecurityContextHolder.getContext().setAuthentication(verifiedAuthentication);
 		request.setAttribute(ACCESS_CONTEXT_ATTRIBUTE, resolved);
-		RlsRequestScope.set(resolved.tenantId().value(), resolved.workspaceId().value());
-		try {
-			filterChain.doFilter(request, response);
+		filterChain.doFilter(request, response);
 		} finally {
 			RlsRequestScope.clear();
 		}
