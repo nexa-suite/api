@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -104,7 +105,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
     }
 
     @Test
-    void partialTransferIsAtomicAndIdempotent() throws Exception {
+    void transferDispatchAndReceiptKeepInTransitQuantityUnavailableAndHistoryAppendOnly() throws Exception {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-TR-" + suffix, "Transfer source");
@@ -120,6 +121,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                 + "\",\"destinationZoneId\":\"" + destinationZone
                 + "\",\"quantity\":\"4\",\"unit\":\"UNIT\",\"reason\":\"Rebalance cold-chain stock\"}";
         String key = "tr-partial-" + suffix;
+        var availabilityBefore = availability(token);
 
         MvcResult created = mockMvc.perform(post("/api/v1/inventory/transfers")
                         .header("Authorization", "Bearer " + token)
@@ -127,10 +129,13 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.mode").value("PARTIAL"))
+                .andExpect(jsonPath("$.status").value("REQUESTED"))
                 .andExpect(jsonPath("$.requestedQuantity").value(4))
-                .andExpect(jsonPath("$.transferredQuantity").value(4))
+                .andExpect(jsonPath("$.transferredQuantity").value(0))
                 .andExpect(jsonPath("$.sourceVersionBefore").value(0))
-                .andExpect(jsonPath("$.sourceVersionAfter").value(1))
+                .andExpect(jsonPath("$.sourceVersionAfter").value(nullValue()))
+                .andExpect(jsonPath("$.destinationLotId").value(nullValue()))
+                .andExpect(jsonPath("$.version").value(0))
                 .andReturn();
         String transferId = json(created).get("id").asText();
 
@@ -140,25 +145,95 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andReturn();
         assertThat(json(replay).get("id").asText()).isEqualTo(transferId);
+        assertThat(stock(lotId)).isEqualByComparingTo("10");
+        assertThat(destinationLotCount(destination.warehouseId(), destinationZone, "B-TR-" + suffix)).isZero();
+        assertAvailabilityDelta(availabilityBefore, availability(token), "0");
+        mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/receipts")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "tr-premature-receipt-" + suffix))
+                .andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.code").value("PRECONDITION_FAILED"));
+        assertThat(stock(lotId)).isEqualByComparingTo("10");
+        assertThat(destinationLotCount(destination.warehouseId(), destinationZone, "B-TR-" + suffix)).isZero();
 
+        MvcResult dispatched = mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/dispatches")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "tr-dispatch-" + suffix))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_TRANSIT"))
+                .andExpect(jsonPath("$.transferredQuantity").value(4))
+                .andExpect(jsonPath("$.sourceVersionAfter").value(1))
+                .andExpect(jsonPath("$.destinationLotId").value(nullValue()))
+                .andExpect(jsonPath("$.version").value(1))
+                .andExpect(jsonPath("$.dispatchedAt").isNotEmpty())
+                .andReturn();
         assertThat(stock(lotId)).isEqualByComparingTo("6");
-        UUID destinationLotId = jdbc.queryForObject("select id from warehouse.inventory_lot where tenant_id=? and workspace_id=?"
-                        + " and warehouse_id=? and zone_id=? and batch_number=?",
-                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(destination.warehouseId()),
-                UUID.fromString(destinationZone), "B-TR-" + suffix);
-        assertThat(stock(destinationLotId.toString())).isEqualByComparingTo("4");
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_transfer where id=?", Integer.class,
-                UUID.fromString(transferId))).isEqualTo(1);
+        assertThat(destinationLotCount(destination.warehouseId(), destinationZone, "B-TR-" + suffix)).isZero();
+        assertAvailabilityDelta(availabilityBefore, availability(token), "-4");
+
+        MvcResult dispatchReplay = mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/dispatches")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "tr-dispatch-" + suffix))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(dispatchReplay).get("status").asText()).isEqualTo("IN_TRANSIT");
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_OUT'",
+                Integer.class, UUID.fromString(lotId))).isEqualTo(1);
+
+        MvcResult received = mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/receipts")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", dispatched.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "tr-receipt-" + suffix))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RECEIVED"))
+                .andExpect(jsonPath("$.destinationVersionAfter").value(0))
+                .andExpect(jsonPath("$.version").value(2))
+                .andExpect(jsonPath("$.receivedAt").isNotEmpty())
+                .andReturn();
+        String destinationLotId = json(received).get("destinationLotId").asText();
+        assertThat(stock(lotId)).isEqualByComparingTo("6");
+        assertThat(stock(destinationLotId)).isEqualByComparingTo("4");
+        assertAvailabilityDelta(availabilityBefore, availability(token), "0");
         assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_OUT'",
                 Integer.class, UUID.fromString(lotId))).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_IN'",
-                Integer.class, destinationLotId)).isEqualTo(1);
+                Integer.class, UUID.fromString(destinationLotId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select array_to_string(array_agg(to_status order by transfer_version), ',')"
+                        + " from warehouse.inventory_transfer_history where transfer_id=?",
+                String.class, UUID.fromString(transferId))).isEqualTo("REQUESTED,IN_TRANSIT,RECEIVED");
 
         mockMvc.perform(post("/api/v1/inventory/transfers")
                         .header("Authorization", "Bearer " + token)
                         .header("If-Match", lotEtag).header("Idempotency-Key", "tr-stale-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON).content(body.replace("\"4\"", "\"1\"")))
                 .andExpect(status().isPreconditionFailed());
+    }
+
+    private tools.jackson.databind.JsonNode availability(String token) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/inventory-availability")
+                        .header("Authorization", "Bearer " + token)
+                        .param("catalogItemId", "CAT-0002"))
+                .andExpect(status().isOk()).andReturn();
+        return json(result).get(0);
+    }
+
+    private static void assertAvailabilityDelta(tools.jackson.databind.JsonNode before,
+                                               tools.jackson.databind.JsonNode after, String delta) {
+        BigDecimal physicalBefore = new BigDecimal(before.get("physicalQuantity").asText());
+        BigDecimal sellableBefore = new BigDecimal(before.get("sellableQuantity").asText());
+        BigDecimal physicalAfter = new BigDecimal(after.get("physicalQuantity").asText());
+        BigDecimal sellableAfter = new BigDecimal(after.get("sellableQuantity").asText());
+        assertThat(physicalAfter.subtract(physicalBefore)).isEqualByComparingTo(delta);
+        assertThat(sellableAfter.subtract(sellableBefore)).isEqualByComparingTo(delta);
+    }
+
+    private int destinationLotCount(String warehouseId, String zoneId, String batch) {
+        return jdbc.queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=?"
+                        + " and warehouse_id=? and zone_id=? and batch_number=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(warehouseId),
+                UUID.fromString(zoneId), batch);
     }
 
     @Test

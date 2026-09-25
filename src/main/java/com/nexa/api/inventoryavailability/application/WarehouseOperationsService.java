@@ -122,6 +122,14 @@ public class WarehouseOperationsService {
                                     String key, String correlation) {
         return transferInventory.execute(context, command, expectedSourceVersion, key, correlation);
     }
+    public TransferSummary dispatchTransfer(CurrentAccessContext context, String id, long expectedVersion,
+                                            String key, String correlation) {
+        return transferInventory.dispatch(context, id, expectedVersion, key, correlation);
+    }
+    public TransferSummary receiveTransfer(CurrentAccessContext context, String id, long expectedVersion,
+                                           String key, String correlation) {
+        return transferInventory.receive(context, id, expectedVersion, key, correlation);
+    }
     public ReservationPreview preview(CurrentAccessContext context, String orderId) { return prepareFulfillment.execute(context, orderId); }
     public ReservationDetail reserve(CurrentAccessContext context, String orderId, long expected, String key, String correlation) { return reserveInventory.execute(context, orderId, expected, key, correlation); }
     public ReservationDetail release(CurrentAccessContext context, String reservationId, long expected, String key, String reason, String correlation, boolean expiry) {
@@ -173,7 +181,8 @@ public class WarehouseOperationsService {
                                   String skuId, String catalogItemId, String batchNumber, LocalDate expirationDate,
                                   BigDecimal requestedQuantity, BigDecimal transferredQuantity, String unit,
                                   String mode, String status, String reason, Instant createdAt,
-                                  long sourceVersionBefore, long sourceVersionAfter, long destinationVersionAfter) { }
+                                  long sourceVersionBefore, Long sourceVersionAfter, Long destinationVersionAfter,
+                                  long version, Instant dispatchedAt, Instant receivedAt) { }
     public record MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt, String skuId) {
         public MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt) {
             this(id, lotId, catalogItemId, type, quantity, unit, quantityBefore, quantityAfter, reservedBefore, reservedAfter, reason, occurredAt, null);
