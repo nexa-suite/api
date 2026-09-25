@@ -51,6 +51,6 @@ class PurchaseRequestMaterialChangeRlsIT extends PostgresIntegrationSupport {
                 from pg_constraint
                 where conrelid='sales.purchase_request_material_change'::regclass and conname='ck_pr_material_change_status'
                 """, String.class);
-        assertThat(proposalStatusConstraint).contains("PROPOSED", "ACCEPTED").doesNotContain("REJECTED");
+        assertThat(proposalStatusConstraint).contains("PROPOSED", "ACCEPTED", "REJECTED", "EXPIRED");
     }
 }
