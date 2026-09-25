@@ -51,28 +51,31 @@ public class LocalDevelopmentBootstrap {
 		UUID tenantId = tenant(now);
 		UUID workspaceId = workspace(tenantId, now);
 		RlsRequestScope.set(tenantId, workspaceId);
-		List<UserSeed> users = new ArrayList<>(List.of(
-				new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", Set.of("TENANT_ADMIN", "COMPANY_OWNER")),
-				new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", Set.of("SALES")),
-				new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", Set.of("WAREHOUSE")),
-				new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", Set.of("LOGISTICS")),
-				new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER"))));
-		addOptionalUser(users, "NEXA_DEV_TENANT_ADMIN_EMAIL", "NEXA_DEV_TENANT_ADMIN_PASSWORD", Set.of("TENANT_ADMIN"));
-		UUID buyerUserId = null;
-		for (UserSeed user : users) {
-			UUID userId = user(user, now);
-			if (user.roles().contains("BUYER")) buyerUserId = userId;
-			jdbc.update("insert into tenant_management.workspace_membership "
-					+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
-					+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
-					LocalIdentityIds.forMembership(workspaceId, userId), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
-			UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
-			jdbc.update("delete from tenant_management.membership_role_definition a using tenant_management.role_definition r where a.role_id=r.id and a.membership_id=? and r.tenant_id is null", membershipId);
-			for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) select ?,?,?,r.id,? from tenant_management.role_definition r where r.tenant_id is null and r.code=lower(?) on conflict do nothing", membershipId, tenantId, workspaceId, timestamp(now), role);
-			jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?,?,?,?,?) on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=excluded.updated_at", membershipId, tenantId, workspaceId, 0, timestamp(now));
+		try {
+			List<UserSeed> users = new ArrayList<>(List.of(
+					new UserSeed("NEXA_DEV_OWNER_EMAIL", "NEXA_DEV_OWNER_PASSWORD", Set.of("TENANT_ADMIN", "COMPANY_OWNER")),
+					new UserSeed("NEXA_DEV_SALES_EMAIL", "NEXA_DEV_SALES_PASSWORD", Set.of("SALES")),
+					new UserSeed("NEXA_DEV_WAREHOUSE_EMAIL", "NEXA_DEV_WAREHOUSE_PASSWORD", Set.of("WAREHOUSE")),
+					new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", Set.of("LOGISTICS")),
+					new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER"))));
+			addOptionalUser(users, "NEXA_DEV_TENANT_ADMIN_EMAIL", "NEXA_DEV_TENANT_ADMIN_PASSWORD", Set.of("TENANT_ADMIN"));
+			UUID buyerUserId = null;
+			for (UserSeed user : users) {
+				UUID userId = user(user, now);
+				if (user.roles().contains("BUYER")) buyerUserId = userId;
+				jdbc.update("insert into tenant_management.workspace_membership "
+						+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
+						+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
+						LocalIdentityIds.forMembership(workspaceId, userId), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
+				UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
+				jdbc.update("delete from tenant_management.membership_role_definition a using tenant_management.role_definition r where a.role_id=r.id and a.membership_id=? and r.tenant_id is null", membershipId);
+				for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) select ?,?,?,r.id,? from tenant_management.role_definition r where r.tenant_id is null and r.code=lower(?) on conflict do nothing", membershipId, tenantId, workspaceId, timestamp(now), role);
+				jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?,?,?,?,?) on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=excluded.updated_at", membershipId, tenantId, workspaceId, 0, timestamp(now));
+			}
+			seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
+		} finally {
+			RlsRequestScope.clear();
 		}
-		seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
-		RlsRequestScope.clear();
 	}
 
 	/**
@@ -171,23 +174,35 @@ public class LocalDevelopmentBootstrap {
 	private UUID tenant(Instant now) {
 		String slug = defaulted("NEXA_DEV_TENANT_SLUG", "icisa").toLowerCase(java.util.Locale.ROOT);
 		String name = defaulted("NEXA_DEV_TENANT_NAME", "ICISA");
-		List<UUID> existing = jdbc.query("select id from tenant_management.tenant where slug = ?", (rs, row) -> rs.getObject(1, UUID.class), slug);
-		if (!existing.isEmpty()) return existing.get(0);
-		UUID id = LocalIdentityIds.forTenant(slug);
-		jdbc.update("insert into tenant_management.tenant (id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, 'ACTIVE', ?, ?, 0)", id, name, slug, timestamp(now), timestamp(now));
-		return id;
+		return transactionTemplate.execute(status -> {
+			jdbc.queryForObject("select set_config('app.bootstrap_tenant_slug', ?, true)", String.class, slug);
+			List<UUID> existing = jdbc.query("select id from tenant_management.tenant where slug = ?", (rs, row) -> rs.getObject(1, UUID.class), slug);
+			if (!existing.isEmpty()) return existing.get(0);
+			UUID id = LocalIdentityIds.forTenant(slug);
+			setTenantScope(id);
+			jdbc.update("insert into tenant_management.tenant (id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, 'ACTIVE', ?, ?, 0)", id, name, slug, timestamp(now), timestamp(now));
+			return id;
+		});
 	}
 
 	private UUID workspace(UUID tenantId, Instant now) {
 		String slug = defaulted("NEXA_DEV_WORKSPACE_SLUG", "icisa").toLowerCase(java.util.Locale.ROOT);
 		String name = defaulted("NEXA_DEV_WORKSPACE_NAME", "ICISA Workspace");
-		List<UUID> existing = jdbc.query("select id from tenant_management.workspace where tenant_id = ? and slug = ?",
-				(rs, row) -> rs.getObject(1, UUID.class), tenantId, slug);
-		if (!existing.isEmpty()) return existing.get(0);
-		UUID id = LocalIdentityIds.forWorkspace(tenantId, slug);
-		jdbc.update("insert into tenant_management.workspace (id, tenant_id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)",
-				id, tenantId, name, slug, timestamp(now), timestamp(now));
-		return id;
+		return transactionTemplate.execute(status -> {
+			setTenantScope(tenantId);
+			List<UUID> existing = jdbc.query("select id from tenant_management.workspace where tenant_id = ? and slug = ?",
+					(rs, row) -> rs.getObject(1, UUID.class), tenantId, slug);
+			if (!existing.isEmpty()) return existing.get(0);
+			UUID id = LocalIdentityIds.forWorkspace(tenantId, slug);
+			jdbc.update("insert into tenant_management.workspace (id, tenant_id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)",
+					id, tenantId, name, slug, timestamp(now), timestamp(now));
+			return id;
+		});
+	}
+
+	private void setTenantScope(UUID tenantId) {
+		jdbc.queryForObject("select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', '', true)",
+				String.class, tenantId.toString());
 	}
 
 	private UUID user(UserSeed seed, Instant now) {

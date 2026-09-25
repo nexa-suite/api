@@ -1,0 +1,167 @@
+table	category	tenant_id	workspace_id	rls_enabled	rls_forced	policy
+audit.event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+business_documents.business_document	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+business_documents.document_generation_request	CROSS_SCOPE_WORKER	t	t	f	f	NONE
+business_documents.evidence_object	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+business_documents.object_storage_object	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.brand	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.category	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.command_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.product	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.product_asset_reference	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.product_family	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.product_presentation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.product_price	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.product_variant	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.product_visibility	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.promotion	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.promotion_category	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.promotion_client_account	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.promotion_product	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.promotion_rule	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.promotion_sku	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.seed_import_history	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.sellable_sku	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+catalog_management.sku_price	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+iam.access_context_selection_ticket	GLOBAL_IDENTITY_SECURITY	f	f	f	f	NONE
+iam.authentication_failure	GLOBAL_IDENTITY_SECURITY	f	f	f	f	NONE
+iam.password_credential	GLOBAL_IDENTITY_SECURITY	f	f	f	f	NONE
+iam.password_reset_request	GLOBAL_IDENTITY_SECURITY	f	f	f	f	NONE
+iam.password_reset_throttle_bucket	TECHNICAL_GLOBAL	f	f	f	f	NONE
+iam.public_contact_request	TECHNICAL_GLOBAL	f	f	f	f	NONE
+iam.public_contact_throttle_bucket	TECHNICAL_GLOBAL	f	f	f	f	NONE
+iam.refresh_session	GLOBAL_IDENTITY_SECURITY	f	f	f	f	NONE
+iam.security_audit_event	GLOBAL_IDENTITY_SECURITY	t	t	f	f	NONE
+iam.security_notification_outbox	CROSS_SCOPE_WORKER	f	f	f	f	NONE
+iam.system_operator_throttle_bucket	TECHNICAL_GLOBAL	f	f	f	f	NONE
+iam.user_account	GLOBAL_IDENTITY_SECURITY	f	f	f	f	NONE
+iam.workspace_preview_throttle_bucket	TECHNICAL_GLOBAL	f	f	f	f	NONE
+integration.change_event	CROSS_SCOPE_WORKER	t	t	f	f	NONE
+integration.inbox_event	CROSS_SCOPE_WORKER	t	t	f	f	NONE
+integration.outbox_event	CROSS_SCOPE_WORKER	t	t	f	f	NONE
+logistics.buyer_receipt_fact	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.command_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.continuation_delivery	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.continuation_delivery_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_assignment	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_attempt	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_attempt_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_command_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_handoff_token	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_incident	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.delivery_quantity_outcome	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.dispatch_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.dispatch_number_counter	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.dispatch_order	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment_command_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.fulfillment_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.operational_handoff_note	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.picking_discrepancy	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.picking_discrepancy_resolution	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.picking_result	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.picking_result_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.proof_of_delivery	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.proof_of_delivery_addendum	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.temperature_evidence	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.temperature_excursion	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+logistics.temperature_reading	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+notifications.inbox_item	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+notifications.push_delivery_attempt	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+notifications.push_delivery_claim	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+notifications.push_subscription	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+notifications.push_subscription_command_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.credit_account	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.credit_reservation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.financial_adjustment	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.financial_ledger_entry	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.payment	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.payment_attempt	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.payment_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.payment_reconciliation_case	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.receivable	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.receivable_allocation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.receivable_application	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.reconciliation_refund_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.refund_credit_obligation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+payments.stripe_event_inbox	CROSS_SCOPE_WORKER	t	t	f	f	NONE
+public.flyway_schema_history	TECHNICAL_GLOBAL	f	f	f	f	NONE
+reference_data.department	GLOBAL_REFERENCE	f	f	f	f	NONE
+reference_data.district	GLOBAL_REFERENCE	f	f	f	f	NONE
+reference_data.province	GLOBAL_REFERENCE	f	f	f	f	NONE
+reference_data.road_type	GLOBAL_REFERENCE	f	f	f	f	NONE
+sales.client_account	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.client_account_address	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.client_account_membership	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.commercial_commitment	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.commercial_commitment_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.idempotency_record	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.idempotency_response	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.manual_order_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.manual_sales_order_draft	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.manual_sales_order_draft_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.manual_sales_order_draft_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_destination	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_route	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_draft_warehouse_selection	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.purchase_request_line	INHERITED_SCOPE_JUSTIFIED	f	f	f	f	NONE
+sales.sales_order	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.sales_order_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+sales.sales_order_line	INHERITED_SCOPE_JUSTIFIED	f	f	f	f	NONE
+sales.sales_order_sequence	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.custom_field_definition	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.membership_admin_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.membership_authorization_state	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.membership_role_assignment	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.membership_role_definition	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.notification_preference	INHERITED_SCOPE_JUSTIFIED	f	t	f	f	NONE
+tenant_management.operational_settings	INHERITED_SCOPE_JUSTIFIED	f	t	f	f	NONE
+tenant_management.organization_invitation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.organization_invitation_idempotency	FORCED_RLS_DIRECT_SCOPE	t	f	t	t	USING+WITH CHECK (tenant)
+tenant_management.organization_invitation_role	INHERITED_SCOPE_JUSTIFIED	f	f	f	f	NONE
+tenant_management.organization_registration	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.organization_registration_draft_idempotency	TECHNICAL_GLOBAL	f	f	f	f	NONE
+tenant_management.organization_settings	FORCED_RLS_DIRECT_SCOPE	t	f	t	t	USING+WITH CHECK (tenant)
+tenant_management.permission_definition	GLOBAL_REFERENCE	f	f	f	f	NONE
+tenant_management.reference_plan_assignment	FORCED_RLS_DIRECT_SCOPE	t	f	t	t	USING+WITH CHECK (tenant)
+tenant_management.regional_settings	FORCED_RLS_DIRECT_SCOPE	t	f	t	t	USING+WITH CHECK (tenant)
+tenant_management.role_definition	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.role_permission	INHERITED_SCOPE_JUSTIFIED	f	f	f	f	NONE
+tenant_management.tenant	FORCED_RLS_DIRECT_SCOPE	f	f	t	t	USING+WITH CHECK (tenant id)+visible workspace/bootstrap
+tenant_management.tenant_security_settings	FORCED_RLS_DIRECT_SCOPE	t	f	t	t	USING+WITH CHECK (tenant)
+tenant_management.unit_preferences	FORCED_RLS_DIRECT_SCOPE	t	f	t	t	USING+WITH CHECK (tenant)
+tenant_management.workspace	FORCED_RLS_DIRECT_SCOPE	t	f	t	t	USING+WITH CHECK (tenant)+login/member/authenticated-user/worker SELECT
+tenant_management.workspace_creation_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+tenant_management.workspace_membership	INHERITED_SCOPE_JUSTIFIED	f	t	f	f	NONE
+tenant_management.workspace_settings	INHERITED_SCOPE_JUSTIFIED	f	t	f	f	NONE
+warehouse.command_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_backing	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_backing_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_backing_position	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_lot	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_lot_disposition	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_reservation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_reservation_allocation	INHERITED_SCOPE_JUSTIFIED	f	f	f	f	NONE
+warehouse.inventory_reservation_line	INHERITED_SCOPE_JUSTIFIED	f	f	f	f	NONE
+warehouse.inventory_temperature_evaluation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.inventory_transfer	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation_command_idempotency	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation_event	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.physical_allocation_line	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.reservation_shortage	INHERITED_SCOPE_JUSTIFIED	f	f	f	f	NONE
+warehouse.safety_stock_policy	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.selection_snapshot	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.stock_movement	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.storage_zone	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.warehouse	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK
+warehouse.warehouse_service_configuration	FORCED_RLS_DIRECT_SCOPE	t	t	t	t	USING+WITH CHECK

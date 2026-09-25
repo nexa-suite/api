@@ -693,11 +693,22 @@ public class PaymentService implements PaymentPersistencePort {
         UUID lastTenant = null;
         UUID lastWorkspace = null;
         while (true) {
-            List<WorkspaceScope> scopes = lastTenant == null
-                    ? jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id limit 100",
-                    (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)))
-                    : jdbc.query("select tenant_id,id from tenant_management.workspace where (tenant_id,id) > (?,?) order by tenant_id,id limit 100",
-                    (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)), lastTenant, lastWorkspace);
+            List<WorkspaceScope> scopes;
+            UUID afterTenant = lastTenant;
+            UUID afterWorkspace = lastWorkspace;
+            RlsRequestScope.enableCrossScopeWorkspaceScan();
+            try {
+                scopes = transactionTemplate.execute(status -> {
+                    jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
+                    return afterTenant == null
+                            ? jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id limit 100",
+                            (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)))
+                            : jdbc.query("select tenant_id,id from tenant_management.workspace where (tenant_id,id) > (?,?) order by tenant_id,id limit 100",
+                            (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)), afterTenant, afterWorkspace);
+                });
+            } finally {
+                RlsRequestScope.clearCrossScopeWorkspaceScan();
+            }
             if (scopes.isEmpty()) break;
             for (WorkspaceScope scope : scopes) {
                 RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
