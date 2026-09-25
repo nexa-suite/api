@@ -1,6 +1,7 @@
 package com.nexa.api.edge.problem;
 
 import com.nexa.api.edge.http.CorrelationIdFilter;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidAccessContextTicketException;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import jakarta.validation.Valid;
@@ -121,6 +122,13 @@ class GlobalExceptionHandlerTests {
 				.andExpect(jsonPath("$.code").value("CLIENT_ACCOUNT_NOT_FOUND"));
 	}
 
+	@Test
+	void mapsInvalidAccessContextTicketToFrozenUnauthorizedContract() throws Exception {
+		mockMvc.perform(get("/invalid-context-ticket"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("CONTEXT_TICKET_INVALID"));
+	}
+
 	@RestController
 	public static class TestController {
 		@PostMapping("/test")
@@ -177,6 +185,11 @@ class GlobalExceptionHandlerTests {
 		@GetMapping("/missing-client-address")
 		void missingClientAddress() {
 			throw new ApiResourceNotFoundException("client-account-address");
+		}
+
+		@GetMapping("/invalid-context-ticket")
+		void invalidContextTicket() {
+			throw new InvalidAccessContextTicketException();
 		}
 	}
 

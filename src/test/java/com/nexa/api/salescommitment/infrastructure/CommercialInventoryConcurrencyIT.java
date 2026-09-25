@@ -28,12 +28,12 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
     @Test
     void concurrentDirectOrderRetriesWithSameKeyCreateOneLogicalEffect() throws Exception {
         ensureCommercialInventory();
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String key = "direct-concurrent-same-key-" + uuid();
 
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-            Future<MvcResult> first = executor.submit(() -> directOrder(sales, key, directBody(buyerClientAccountId(), "IMMEDIATE", "1")));
-            Future<MvcResult> second = executor.submit(() -> directOrder(sales, key, directBody(buyerClientAccountId(), "IMMEDIATE", "1")));
+            Future<MvcResult> first = executor.submit(() -> directOrder(buyer, key, directBody(buyerClientAccountId(), "IMMEDIATE", "1")));
+            Future<MvcResult> second = executor.submit(() -> directOrder(buyer, key, directBody(buyerClientAccountId(), "IMMEDIATE", "1")));
             MvcResult firstResult = first.get(30, TimeUnit.SECONDS);
             MvcResult secondResult = second.get(30, TimeUnit.SECONDS);
 
@@ -63,10 +63,10 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
         if (demand.signum() <= 0) demand = capacity;
         BigDecimal orderDemand = demand;
 
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-            Future<MvcResult> first = executor.submit(() -> directOrder(sales, "direct-inventory-race-a-" + uuid(), directBody(buyerClientAccountId(), "IMMEDIATE", orderDemand.toPlainString())));
-            Future<MvcResult> second = executor.submit(() -> directOrder(sales, "direct-inventory-race-b-" + uuid(), directBody(buyerClientAccountId(), "IMMEDIATE", orderDemand.toPlainString())));
+            Future<MvcResult> first = executor.submit(() -> directOrder(buyer, "direct-inventory-race-a-" + uuid(), directBody(buyerClientAccountId(), "IMMEDIATE", orderDemand.toPlainString())));
+            Future<MvcResult> second = executor.submit(() -> directOrder(buyer, "direct-inventory-race-b-" + uuid(), directBody(buyerClientAccountId(), "IMMEDIATE", orderDemand.toPlainString())));
             List<MvcResult> results = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
 
             assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 201).count()).isEqualTo(1);
@@ -78,34 +78,42 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
     void competingCreditLineDirectOrdersCannotExceedCreditAvailability() throws Exception {
         ensureCommercialInventory();
         UUID client = isolatedClientAccount();
-        BigDecimal unitPrice = jdbc.queryForObject(
-                "select p.amount from catalog_management.sku_price p join catalog_management.sellable_sku s "
-                        + "on s.tenant_id=p.tenant_id and s.workspace_id=p.workspace_id and s.id=p.sku_id "
-                        + "where p.tenant_id=?::uuid and p.workspace_id=?::uuid and s.legacy_catalog_item_id='CAT-0002' "
-                        + "and p.cancelled_at is null and p.valid_from <= current_timestamp and (p.valid_until is null or p.valid_until > current_timestamp) order by p.valid_from desc limit 1",
-                BigDecimal.class, tenantId(), workspaceId());
-        jdbc.update("update sales.client_account set credit_limit=?,current_commercial_exposure=0,available_credit=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
-                unitPrice, unitPrice, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), client);
+        UUID originalBuyerAccount = UUID.fromString(buyerClientAccountId());
+        UUID buyerMembership = UUID.fromString(membershipId(BUYER_EMAIL));
+        jdbc.update("update sales.client_account_membership set client_account_id=? where client_account_id=? and workspace_membership_id=?",
+                client, originalBuyerAccount, buyerMembership);
+        try {
+            BigDecimal unitPrice = jdbc.queryForObject(
+                    "select p.amount from catalog_management.sku_price p join catalog_management.sellable_sku s "
+                            + "on s.tenant_id=p.tenant_id and s.workspace_id=p.workspace_id and s.id=p.sku_id "
+                            + "where p.tenant_id=?::uuid and p.workspace_id=?::uuid and s.legacy_catalog_item_id='CAT-0002' "
+                            + "and p.cancelled_at is null and p.valid_from <= current_timestamp and (p.valid_until is null or p.valid_until > current_timestamp) order by p.valid_from desc limit 1",
+                    BigDecimal.class, tenantId(), workspaceId());
+            jdbc.update("update sales.client_account set credit_limit=?,current_commercial_exposure=0,available_credit=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+                    unitPrice, unitPrice, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), client);
+            String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+            try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+                Future<MvcResult> first = executor.submit(() -> directOrder(buyer, "direct-credit-race-a-" + uuid(), directBody(client.toString(), "CREDIT_LINE", "1")));
+                Future<MvcResult> second = executor.submit(() -> directOrder(buyer, "direct-credit-race-b-" + uuid(), directBody(client.toString(), "CREDIT_LINE", "1")));
+                List<MvcResult> results = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
 
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-            Future<MvcResult> first = executor.submit(() -> directOrder(sales, "direct-credit-race-a-" + uuid(), directBody(client.toString(), "CREDIT_LINE", "1")));
-            Future<MvcResult> second = executor.submit(() -> directOrder(sales, "direct-credit-race-b-" + uuid(), directBody(client.toString(), "CREDIT_LINE", "1")));
-            List<MvcResult> results = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+                assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 201).count()).isEqualTo(1);
+                assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 409).count()).isEqualTo(1);
+            }
 
-            assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 201).count()).isEqualTo(1);
-            assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 409).count()).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select credit_exposure + reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
+                    BigDecimal.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), client)).isLessThanOrEqualTo(unitPrice);
+        } finally {
+            jdbc.update("update sales.client_account_membership set client_account_id=? where client_account_id=? and workspace_membership_id=?",
+                    originalBuyerAccount, client, buyerMembership);
         }
-
-        assertThat(jdbc.queryForObject("select credit_exposure + reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
-                BigDecimal.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), client)).isLessThanOrEqualTo(unitPrice);
     }
 
     @Test
     void multiSkuDirectOrderUsesDeterministicLockSetAndRollsBackWithoutPartialState() throws Exception {
         ensureCommercialInventory();
         seedInventory("CAT-0001", 10);
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         int commitmentsBefore = jdbc.queryForObject(
                 "select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'",
                 Integer.class, tenantId(), workspaceId());
@@ -116,7 +124,7 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
                 "select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid",
                 Integer.class, tenantId(), workspaceId());
 
-        MvcResult rejected = directOrder(sales, "direct-multi-sku-" + uuid(), multiSkuBody());
+        MvcResult rejected = directOrder(buyer, "direct-multi-sku-" + uuid(), multiSkuBody());
         assertThat(rejected.getResponse().getStatus()).isEqualTo(409);
 
         assertThat(jdbc.queryForObject(
@@ -133,8 +141,9 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
     @Test
     void confirmationAndCancellationRaceHasOneTerminalWinner() throws Exception {
         ensureCommercialInventory();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        MvcResult pending = directOrder(buyer, "direct-terminal-race-" + uuid(), directBody(buyerClientAccountId(), "PREPAID", "1"));
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
-        MvcResult pending = directOrder(sales, "direct-terminal-race-" + uuid(), directBody(buyerClientAccountId(), "PREPAID", "1"));
         assertThat(pending.getResponse().getStatus()).isEqualTo(202);
         UUID orderId = UUID.fromString(json(pending).get("id").asText());
         UUID receivableId = createPrepaidConfirmationEvidence(orderId);

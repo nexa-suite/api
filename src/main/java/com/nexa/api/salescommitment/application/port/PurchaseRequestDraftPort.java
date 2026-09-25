@@ -10,6 +10,7 @@ import java.util.UUID;
 
 public interface PurchaseRequestDraftPort {
     PurchaseRequestDraftModels.DraftView create(CurrentAccessContext context, UUID clientAccountId, LocalDate requestedDeliveryDate);
+    PurchaseRequestDraftModels.DraftPage list(CurrentAccessContext context, int page, int size);
     PurchaseRequestDraftModels.DraftView get(CurrentAccessContext context, UUID draftId);
     PurchaseRequestDraftModels.DraftView replaceLines(CurrentAccessContext context, UUID draftId, long expectedVersion, List<LineCommand> commands);
     PurchaseRequestDraftModels.DraftView setDestination(CurrentAccessContext context, UUID draftId, long expectedVersion, UUID addressId);

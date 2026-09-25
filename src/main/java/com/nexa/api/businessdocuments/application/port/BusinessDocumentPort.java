@@ -13,6 +13,7 @@ public interface BusinessDocumentPort {
     BusinessDocumentModels.DocumentView get(CurrentAccessContext context, UUID documentId);
     List<BusinessDocumentModels.DocumentEventView> events(CurrentAccessContext context, UUID documentId);
     BusinessDocumentModels.GenerationRequestView regenerate(CurrentAccessContext context, UUID documentId, String idempotencyKey);
+    BusinessDocumentModels.GenerationRequestView replace(CurrentAccessContext context, UUID documentId, String idempotencyKey);
     BusinessDocumentModels.Download download(CurrentAccessContext context, UUID documentId);
     BusinessDocumentModels.EvidenceView uploadEvidence(CurrentAccessContext context, String subjectType, UUID subjectId, String originalFilename, String declaredContentType, byte[] content);
     BusinessDocumentModels.EvidenceView requestEvidence(CurrentAccessContext context, String subjectType, UUID subjectId, String originalFilename, String declaredContentType, String idempotencyKey);

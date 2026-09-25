@@ -118,9 +118,10 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
 
     private SalesOrderResource createConfirmedDirectOrder() throws Exception {
         ensureCommercialInventory();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         MvcResult created = mockMvc.perform(post("/api/v1/direct-orders")
-                        .header("Authorization", "Bearer " + sales)
+                        .header("Authorization", "Bearer " + buyer)
                         .header("Idempotency-Key", "rollback-financial-order-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"clientAccountId\":\"" + buyerClientAccountId()

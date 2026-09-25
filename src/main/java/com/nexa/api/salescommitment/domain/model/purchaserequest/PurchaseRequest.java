@@ -59,13 +59,27 @@ public final class PurchaseRequest {
 		ensureEditable(); if (!lines.removeIf(line -> line.id().equals(lineId))) throw new SalesInvariantViolation("Purchase request line not found");
 	}
 	public void submit() { if (status != PurchaseRequestStatus.DRAFT && status != PurchaseRequestStatus.NEEDS_ADJUSTMENT) throw new SalesInvariantViolation("Purchase request cannot be submitted"); if (lines.isEmpty()) throw new SalesInvariantViolation("Purchase request requires a line"); status = PurchaseRequestStatus.SUBMITTED; }
-	public void startReview() { transition(PurchaseRequestStatus.SUBMITTED, PurchaseRequestStatus.IN_REVIEW); }
-	public void requestAdjustment(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.NEEDS_ADJUSTMENT); reviewNote = note == null ? null : note.trim(); }
-	public void approve(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.APPROVED); reviewNote = note == null ? null : note.trim(); }
-	public void reject(String note) { validateReviewNote(note); transition(PurchaseRequestStatus.IN_REVIEW, PurchaseRequestStatus.REJECTED); reviewNote = note == null ? null : note.trim(); }
-	public void convertToOrder() { transition(PurchaseRequestStatus.APPROVED, PurchaseRequestStatus.CONVERTED_TO_ORDER); }
-	public void expire() { if (status == PurchaseRequestStatus.CONVERTED_TO_ORDER || status == PurchaseRequestStatus.REJECTED || status == PurchaseRequestStatus.CANCELLED || status == PurchaseRequestStatus.WITHDRAWN || status == PurchaseRequestStatus.EXPIRED) throw new SalesInvariantViolation("Purchase request cannot be expired"); status = PurchaseRequestStatus.EXPIRED; }
-	public void withdraw() { if (status == PurchaseRequestStatus.CONVERTED_TO_ORDER || status == PurchaseRequestStatus.REJECTED || status == PurchaseRequestStatus.CANCELLED || status == PurchaseRequestStatus.EXPIRED || status == PurchaseRequestStatus.WITHDRAWN) throw new SalesInvariantViolation("Purchase request cannot be withdrawn"); status = PurchaseRequestStatus.WITHDRAWN; }
+	/** Review is an action, not a persisted Purchase Request status. */
+	public void startReview() { requireReviewable(); }
+	public void proposeChanges(String note) { validateReviewNote(note); requireReviewable(); status = PurchaseRequestStatus.CHANGES_PROPOSED; reviewNote = note == null ? null : note.trim(); }
+	/** A buyer's acceptance makes the new terms authoritative and returns the PR to its submitted lifecycle. */
+	public void acceptProposedChanges() { transition(PurchaseRequestStatus.CHANGES_PROPOSED, PurchaseRequestStatus.SUBMITTED); }
+	public void reject(String note) {
+		validateReviewNote(note);
+		if (status != PurchaseRequestStatus.SUBMITTED && status != PurchaseRequestStatus.CHANGES_PROPOSED
+				&& status != PurchaseRequestStatus.IN_REVIEW && status != PurchaseRequestStatus.NEEDS_ADJUSTMENT) {
+			throw new SalesInvariantViolation("Purchase request cannot be rejected");
+		}
+		status = PurchaseRequestStatus.REJECTED;
+		reviewNote = note == null ? null : note.trim();
+	}
+	public void convertToOrder() {
+		if (status != PurchaseRequestStatus.SUBMITTED && status != PurchaseRequestStatus.APPROVED
+				&& status != PurchaseRequestStatus.IN_REVIEW) throw new SalesInvariantViolation("Purchase request cannot be converted");
+		status = PurchaseRequestStatus.CONVERTED;
+	}
+	public void expire() { if (status == PurchaseRequestStatus.CONVERTED || status == PurchaseRequestStatus.CONVERTED_TO_ORDER || status == PurchaseRequestStatus.REJECTED || status == PurchaseRequestStatus.CANCELLED || status == PurchaseRequestStatus.WITHDRAWN || status == PurchaseRequestStatus.EXPIRED) throw new SalesInvariantViolation("Purchase request cannot be expired"); status = PurchaseRequestStatus.EXPIRED; }
+	public void withdraw() { if (status == PurchaseRequestStatus.CONVERTED || status == PurchaseRequestStatus.CONVERTED_TO_ORDER || status == PurchaseRequestStatus.REJECTED || status == PurchaseRequestStatus.CANCELLED || status == PurchaseRequestStatus.EXPIRED || status == PurchaseRequestStatus.WITHDRAWN) throw new SalesInvariantViolation("Purchase request cannot be withdrawn"); status = PurchaseRequestStatus.WITHDRAWN; }
 	public void cancel() { if (status != PurchaseRequestStatus.DRAFT && status != PurchaseRequestStatus.SUBMITTED && status != PurchaseRequestStatus.NEEDS_ADJUSTMENT) throw new SalesInvariantViolation("Purchase request cannot be cancelled"); status = PurchaseRequestStatus.CANCELLED; }
 	public PurchaseRequestId id() { return id; }
 	public String clientAccountId() { return clientAccountId; }
@@ -79,6 +93,7 @@ public final class PurchaseRequest {
 	public String reviewNote() { return reviewNote; }
 	public List<PurchaseRequestLine> lines() { return List.copyOf(lines); }
 	private void ensureEditable() { if (status != PurchaseRequestStatus.DRAFT && status != PurchaseRequestStatus.NEEDS_ADJUSTMENT) throw new SalesInvariantViolation("Purchase request is not editable"); }
+	private void requireReviewable() { if (status != PurchaseRequestStatus.SUBMITTED) throw new SalesInvariantViolation("Purchase request is not submitted"); }
 	private void transition(PurchaseRequestStatus expected, PurchaseRequestStatus next) { if (status != expected) throw new SalesInvariantViolation("Invalid purchase request transition"); status = next; }
 	private static void validateReviewNote(String note) { if (note != null && note.length() > 2000) throw new SalesInvariantViolation("Review note is too long"); }
 }

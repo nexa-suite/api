@@ -90,7 +90,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
     @Override
     public Optional<CatalogItemDetail> findByCatalogItemId(CatalogScope scope, CatalogItemId id) {
         String predicate = " where s.tenant_id=? and s.workspace_id=? and s.legacy_catalog_item_id=? and s.status='ACTIVE' and s.visible=true"
-                + (scope.buyerView() ? " and pv.buyer_visible=true" : "");
+                + buyerVisibility(scope);
         List<Row> rows = jdbc.query(selectSql() + fromClause() + predicate, this::row,
                 scope.tenantId(), scope.workspaceId(), id.value());
         if (rows.isEmpty()) return Optional.empty();
@@ -104,7 +104,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         if (values.isEmpty()) return List.of();
         String placeholders = values.stream().map(ignored -> "?").collect(Collectors.joining(","));
         String predicate = " where s.tenant_id=? and s.workspace_id=? and s.legacy_catalog_item_id in (" + placeholders + ")"
-                + " and s.status='ACTIVE' and s.visible=true" + (scope.buyerView() ? " and pv.buyer_visible=true" : "");
+                + " and s.status='ACTIVE' and s.visible=true" + buyerVisibility(scope);
         List<Object> parameters = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
         parameters.addAll(values);
         List<Row> rows = jdbc.query(selectSql() + fromClause() + predicate, this::row, parameters.toArray());
@@ -122,7 +122,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(), label, value,
                 string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
                 row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
-                row.variantCode(), row.variantName());
+                row.variantCode(), row.variantName(), available.sellableAvailability());
     }
 
     private CatalogItemDetail detail(Row row, Enrichment enrichment) {
@@ -135,7 +135,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 row.temperature(), row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(),
                 label, value, string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
                 row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
-                row.variantCode(), row.variantName());
+                row.variantCode(), row.variantName(), available.sellableAvailability());
     }
 
     private String promotionLabel(String catalogItemId, Enrichment enrichment) {
@@ -161,7 +161,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
             prices.put(row.catalogItemId(), new CatalogPricingView(result.basePrice(), result.effectivePrice(),
                     result.discountAmount(), row.currency(), result.appliedPromotions().stream()
                             .map(value -> new CatalogPricingView.AppliedPromotion(value.id().toString(), value.name(),
-                                    value.discountType(), value.discountAmount())).toList(), asOf));
+                                    value.discountType(), value.discountAmount())).toList(), asOf, scope.buyerView()));
         }
         return new Enrichment(availabilityById, promotionsById, prices);
     }
@@ -235,12 +235,18 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
     private String predicate(CatalogScope scope, CatalogSearchCriteria criteria) {
         StringBuilder sql = new StringBuilder(" where s.tenant_id=? and s.workspace_id=? and s.status='ACTIVE' and s.visible=true");
-        if (scope.buyerView()) sql.append(" and pv.buyer_visible=true");
+        sql.append(buyerVisibility(scope));
         if (criteria.query() != null && !criteria.query().isBlank()) sql.append(" and (lower(f.name) like lower(?) or lower(coalesce(v.name,'')) like lower(?) or lower(coalesce(p.name,'')) like lower(?) or lower(coalesce(p.description,'')) like lower(?) or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or lower(coalesce(s.legacy_catalog_item_id,'')) like lower(?))");
         if (criteria.brand() != null) sql.append(" and lower(b.name) like lower(?)");
         if (criteria.category() != null) sql.append(" and lower(c.name) like lower(?)");
         if (criteria.coldChainRequirement() != null) sql.append(" and f.storage_family=?");
         return sql.toString();
+    }
+
+    private static String buyerVisibility(CatalogScope scope) {
+        return scope.buyerView()
+                ? " and pv.buyer_visible=true and f.status='ACTIVE' and (s.legacy_product_id is null or p.status='ACTIVE')"
+                : "";
     }
 
     private List<Object> args(CatalogScope scope, CatalogSearchCriteria criteria) {

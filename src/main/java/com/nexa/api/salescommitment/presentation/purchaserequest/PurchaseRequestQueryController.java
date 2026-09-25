@@ -39,7 +39,7 @@ public class PurchaseRequestQueryController {
 	@GetMapping
 	@Operation(operationId = "listPurchaseRequests")
 	public PurchaseRequestPageResponse list(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
-			@RequestParam(required = false) @Pattern(regexp = "(?i)DRAFT|SUBMITTED|IN_REVIEW|NEEDS_ADJUSTMENT|APPROVED|REJECTED|CANCELLED|CONVERTED_TO_ORDER") String status,
+			@RequestParam(required = false) @Pattern(regexp = "(?i)DRAFT|SUBMITTED|CHANGES_PROPOSED|CONVERTED|REJECTED|WITHDRAWN|EXPIRED|IN_REVIEW|NEEDS_ADJUSTMENT|APPROVED|CANCELLED|CONVERTED_TO_ORDER") String status,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)NORMAL|HIGH|URGENT") String priority, @RequestParam(required = false) String search,
 			@RequestParam(required = false) LocalDate createdFrom, @RequestParam(required = false) LocalDate createdTo,
 			@RequestParam(defaultValue = "0") @Min(0) int page, @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
@@ -58,5 +58,12 @@ public class PurchaseRequestQueryController {
 	@Operation(operationId = "listPurchaseRequestEvents")
 	public List<com.nexa.api.salescommitment.presentation.purchaserequest.response.PurchaseRequestEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
 		return sales.events(context, id).stream().map(mapper::event).toList();
+	}
+
+	@GetMapping("/{id}/material-changes/current")
+	@Operation(operationId = "getCurrentPurchaseRequestMaterialChange")
+	public com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView currentMaterialChange(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
+		return sales.currentMaterialChange(context, id);
 	}
 }

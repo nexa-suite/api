@@ -32,7 +32,12 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 		String where = " where r.tenant_id=? and r.workspace_id=?";
 		List<Object> args = new ArrayList<>(List.of(uuid(tenant), uuid(workspace)));
 		if (buyerAccount != null) { where += " and r.client_account_id=?"; args.add(uuid(buyerAccount)); }
-		if (filter.status() != null && !filter.status().isBlank()) { where += " and r.status=?"; args.add(filter.status().toUpperCase(java.util.Locale.ROOT)); }
+		if (filter.status() != null && !filter.status().isBlank()) {
+			String status = filter.status().toUpperCase(java.util.Locale.ROOT);
+			if ("SUBMITTED".equals(status)) where += " and r.status in ('SUBMITTED','IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED')";
+			else if ("CONVERTED".equals(status)) where += " and r.status in ('CONVERTED','CONVERTED_TO_ORDER')";
+			else { where += " and r.status=?"; args.add(status); }
+		}
 		if (filter.priority() != null && !filter.priority().isBlank()) { where += " and r.priority=?"; args.add(filter.priority().toUpperCase(java.util.Locale.ROOT)); }
 		if (filter.search() != null && !filter.search().isBlank()) { where += " and lower(r.code) like ?"; args.add("%" + filter.search().toLowerCase(java.util.Locale.ROOT) + "%"); }
 		if (filter.createdFrom() != null) { where += " and r.created_at >= ?"; args.add(filter.createdFrom()); }
@@ -164,7 +169,7 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 		if (requestIds.isEmpty()) return Map.of();
 		String placeholders = String.join(",", requestIds.stream().map(ignored -> "?").toList());
 		Map<String, List<PurchaseRequestLineView>> result = new HashMap<>();
-		jdbc.query("select purchase_request_id,id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,version from sales.purchase_request_line where purchase_request_id in (" + placeholders + ") order by created_at, id",
+		jdbc.query("select purchase_request_id,id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,version from sales.purchase_request_line where superseded_at is null and purchase_request_id in (" + placeholders + ") order by created_at, id",
 				(org.springframework.jdbc.core.RowCallbackHandler)
 				line -> result.computeIfAbsent(line.getObject(1).toString(), ignored -> new ArrayList<>()).add(new PurchaseRequestLineView(
 						line.getObject(2).toString(), line.getString(3), line.getString(4), line.getString(5), line.getBigDecimal(6), line.getString(7),

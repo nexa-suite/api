@@ -1,54 +1,78 @@
-# Current-schema RLS audit — V100
+# Current-schema RLS audit — V106 candidate
 
-Status: technical inventory, **coverage open**. This audit does not approve an
-exception or certify production isolation.
+Status: source-derived V106 inventory and evidence register. The V106 fresh
+schema, v0.17.1 upgrade, and restricted-runtime gates have not been verified in
+this reconciled checkout as part of this audit. This document does not certify
+production isolation; the deployed runtime role remains unverified.
 
-The [table inventory](./rls-table-inventory-v100.tsv) classifies all 165
-application and Flyway tables produced by a clean PostgreSQL 18.4 migration
-through V100. A separate read-only query against the local V100 database
-matched the table and RLS counts. No existing database was modified for this
-audit.
+The [V106 table inventory](./rls-table-inventory-v106.tsv) classifies the
+expected 169 physical application tables, including
+`public.flyway_schema_history`. The inventory has 170 lines including its
+header. Its category counts are source-derived and must match the live schema
+in `ModernPostgresRlsClosureMigrationTests.freshSchemaMatchesEveryTableClassificationAndV106Policy`:
 
-| Category | Meaning | Tables | With forced RLS | Without own RLS |
-| --- | --- | ---: | ---: | ---: |
-| A | Direct Tenant and Workspace business scope | 122 | 91 | 31 |
-| B | Tenant scope, including Tenant and Workspace identity rows | 8 | 0 | 8 |
-| C | Scope inherited through a parent or Workspace reference | 11 | 0 | 11 |
-| D | Global reference or configuration | 5 | 0 | 5 |
-| E | Global identity, security, or pre-context technical state | 13 | 0 | 13 |
-| F | Cross-scope technical/provider queues | 6 | 0 | 6 |
-| G | Other intentional exclusion | 0 | 0 | 0 |
-| **Total** | | **165** | **91** | **74** |
+| Category | Tables | Forced RLS | Own policy absent |
+| --- | ---: | ---: | ---: |
+| Forced direct Tenant/Workspace scope | 133 | 133 | 0 |
+| Inherited scope justified by parent/reference | 11 | 0 | 11 |
+| Global reference | 5 | 0 | 5 |
+| Global identity/security | 7 | 0 | 7 |
+| Technical global | 7 | 0 | 7 |
+| Cross-scope worker queues | 6 | 0 | 6 |
+| Approved exception | 0 | 0 | 0 |
+| **Total current tables** | **169** | **133** | **36** |
 
-All 91 protected tables have `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL
-SECURITY`, and at least one policy with `USING` and `WITH CHECK`. The local
-`nexa_runtime` login is neither superuser nor `BYPASSRLS`, does not own the
-application tables, and cannot create roles or databases. The `nexa` migrator
-owns all 165 tables and is privileged; it is not an ordinary runtime login.
-The integration suite's `RlsRuntimeDatabaseIsolationIT` exercises the
-restricted role, missing/mismatched scope, and pooled-connection cleanup.
+Of the 133 direct-scope tables, 125 have both `tenant_id` and `workspace_id`;
+six are Tenant-only, the Tenant root is keyed by its own `id`, and Workspace
+identity is Tenant-owned and keyed by `id`. The inventory assigns every table
+exactly one category. Every direct-scope row must have enabled and forced RLS
+and a policy with both `USING` and `WITH CHECK`. The
+[V106 direct-scope evidence register](./rls-direct-scope-evidence-v106.tsv)
+records the scope source, read/write paths, workers, policy shape, and
+table-specific evidence for all three tables added after V102.
 
-## Coverage decisions still needed
+## Changes after the historical V102 inventory
 
-The 31 unprotected category A tables include 19 `catalog_management` tables,
-`audit.event`, two Sales command/sequence tables, and nine Tenant Governance
-tables. Categories B and C add 19 rows with Tenant or inherited Workspace
-scope but no own policy. The inventory names every row. Parent constraints and
-application predicates are useful controls; they do not turn an unprotected
-table into RLS evidence.
+The V100 and V102 TSV snapshots and the V102 evidence register are retained as
+historical migration evidence; they do not describe the V106 schema. V103 adds
+`warehouse.inventory_transfer_history`, a directly scoped append-only history
+table. V104 adds
+`sales.purchase_request_material_change`, a directly scoped proposal record
+with runtime `SELECT`, `INSERT`, and `UPDATE` privileges and no `DELETE` grant.
+V105 adds a scoped replacement-document foreign key and index but no table.
+V106 adds `warehouse.stock_temperature_evidence`, a directly scoped,
+append-only, pending-only table with runtime `SELECT` and `INSERT` privileges.
+The current candidate V104 grant is guarded when `nexa_runtime` is absent;
+V1–V105 migration files remain historical and are not rewritten by this audit.
 
-Category F contains `integration` outbox/inbox/change queues,
-`payments.stripe_event_inbox`,
-`business_documents.document_generation_request`, and
-`iam.security_notification_outbox`. Their workers need cross-scope claiming
-followed by explicit scoped effects. Category E includes identity and
-pre-context state; `iam.security_audit_event` also carries Tenant and Workspace
-columns. These technical classifications require explicit Security/Data
-review before any permanent RLS exclusion. Category D covers four immutable
-reference tables and the permission definition registry.
+The V102 direct-scope baseline was 130 tables. These three post-V102 tables
+raise the expected V106 inventory to 133. No category is treated as an
+approved RLS exception. The remaining 36 tables are specifically classified
+as inherited, global reference/identity, technical global, or cross-scope
+worker records; their classification does not imply that they are public or
+that application authorization is unnecessary.
 
-An additive migration should follow a reviewed per-table policy and worker
-access design, with non-owner runtime tests for read, write, absent scope,
-cross-Tenant IDs, rollback, pool reuse, and stale worker claims. The current
-Blueprint records complete RLS coverage proof as open. No policy or historical
-migration was changed in this audit.
+`iam.access_context_selection_ticket` remains a global identity/security
+classification: it stores only a hashed, short-lived selection ticket, its
+user and surface, and consumed/revoked timestamps. IAM validates the opaque
+ticket before using its persisted identity. This classification is not a
+claim that the table is public.
+
+## Verification gates and limits
+
+- Fresh-schema verification must compare every live table, scope-column fact,
+  RLS flag, policy expression, and runtime privilege with the V106 inventory.
+- Upgrade verification must start from the exact published `v0.17.1` V100
+  migration baseline, apply the current migrations through V106, and retain
+  historical rows.
+- Restricted-runtime verification must use the disposable `nexa_runtime`
+  login without role switching; it must prove missing and mismatched scopes
+  fail closed, including writes to the V104 material-change table.
+- CI must fetch the `v0.17.1` tag before Maven verification for the upgrade
+  test.
+- Production certification still requires verifying that the deployed runtime
+  role is not superuser, `BYPASSRLS`, a table owner, or the migration principal.
+
+The older [scope classification review](./rls-scope-classification.md) records
+v0.16.1-era decisions only and is superseded for current coverage by this V106
+candidate inventory.

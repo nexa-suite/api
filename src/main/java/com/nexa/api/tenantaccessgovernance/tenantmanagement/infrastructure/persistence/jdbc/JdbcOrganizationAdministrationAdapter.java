@@ -82,8 +82,8 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	}
 	@Override @Transactional public int updateStatus(String tenantId,String membershipId,String status,long version){
 		lockMembershipWorkspace(tenantId, membershipId);
-		int updated = jdbc.update("update tenant_management.workspace_membership m set status=?,updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.version=? and " + TENANT_ADMIN_GUARD,status,uuid(tenantId),uuid(membershipId),version,!"DISABLED".equals(status));
-		if (updated == 1 && "DISABLED".equals(status)) {
+		int updated = jdbc.update("update tenant_management.workspace_membership m set status=?,updated_at=current_timestamp,version=m.version+1 from tenant_management.workspace w where m.workspace_id=w.id and w.tenant_id=? and m.id=? and m.version=? and " + TENANT_ADMIN_GUARD,status,uuid(tenantId),uuid(membershipId),version,!Set.of("DISABLED", "REVOKED").contains(status));
+		if (updated == 1 && Set.of("DISABLED", "REVOKED").contains(status)) {
 			jdbc.queryForObject("select tenant_management.bump_authorization_membership(?)", Object.class, uuid(membershipId));
 			jdbc.update("update iam.refresh_session set revoked_at=current_timestamp,version=version+1 where membership_id=? and revoked_at is null", uuid(membershipId));
 		}

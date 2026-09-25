@@ -95,6 +95,27 @@ public class PurchaseRequestCommandController {
 	@PostMapping("/{id}/withdrawals")
 	@Operation(operationId = "withdrawPurchaseRequest")
 	public ResponseEntity<PurchaseRequestDetailResponse> withdraw(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key) { return transition(context, id, "withdraw", null, ifMatch, key); }
+	@PostMapping("/{id}/material-changes")
+	@Operation(operationId = "proposePurchaseRequestMaterialChange")
+	public ResponseEntity<com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView> proposeMaterialChange(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
+			@RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String key,
+			@Valid @RequestBody ProposeMaterialChangeRequest request) {
+		var value = sales.proposeMaterialChange(context, id, SalesHttpHeaders.requireVersion(ifMatch), request.reason(),
+				request.priority(), request.requestedDeliveryDate(), request.deliveryProfileSnapshot(), request.paymentOption(),
+				request.comment(), mapper.requestedLines(request), key);
+		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.requestVersion())).body(value);
+	}
+	@PostMapping("/{id}/material-changes/{proposalId}/acceptances")
+	@Operation(operationId = "acceptPurchaseRequestMaterialChange")
+	public ResponseEntity<PurchaseRequestDetailResponse> acceptMaterialChange(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
+			@PathVariable String proposalId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String key) {
+		var value = sales.acceptMaterialChange(context, id, proposalId, SalesHttpHeaders.requireVersion(ifMatch), key);
+		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	}
 
 	private ResponseEntity<PurchaseRequestDetailResponse> transition(CurrentAccessContext context, String id, String action, String note, String ifMatch, String key) {
 		var value = sales.transition(context, id, action, note, SalesHttpHeaders.requireVersion(ifMatch), key); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));

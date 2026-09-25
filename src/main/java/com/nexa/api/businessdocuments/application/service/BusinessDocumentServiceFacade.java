@@ -20,6 +20,7 @@ public class BusinessDocumentServiceFacade {
     public BusinessDocumentModels.DocumentView get(CurrentAccessContext c, UUID id) { return port.get(c, id); }
     public List<BusinessDocumentModels.DocumentEventView> events(CurrentAccessContext c, UUID id) { return port.events(c, id); }
     public BusinessDocumentModels.GenerationRequestView regenerate(CurrentAccessContext c, UUID id, String key) { return port.regenerate(c, id, key); }
+    public BusinessDocumentModels.GenerationRequestView replace(CurrentAccessContext c, UUID id, String key) { return port.replace(c, id, key); }
     public BusinessDocumentModels.Download download(CurrentAccessContext c, UUID id) { return port.download(c, id); }
     public BusinessDocumentModels.EvidenceView uploadEvidence(CurrentAccessContext c, String subjectType, UUID subjectId, String filename, String contentType, byte[] content) { return port.uploadEvidence(c, subjectType, subjectId, filename, contentType, content); }
     public BusinessDocumentModels.EvidenceView requestEvidence(CurrentAccessContext c, String subjectType, UUID subjectId, String filename, String contentType, String key) { return port.requestEvidence(c, subjectType, subjectId, filename, contentType, key); }

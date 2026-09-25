@@ -52,7 +52,10 @@ public class OpenApiConfiguration {
 							.description("HttpOnly SameSite=Strict refresh cookie; Portal uses NEXA_PORTAL_REFRESH"))
 						.addSecuritySchemes("nativeRefreshToken", new SecurityScheme().type(SecurityScheme.Type.APIKEY)
 							.in(SecurityScheme.In.HEADER).name("X-Nexa-Refresh-Token")
-							.description("Rotated opaque token for the explicit NATIVE transport; pair with X-Nexa-Client: NATIVE")));
+							.description("Rotated opaque token for the explicit NATIVE transport; pair with X-Nexa-Client: NATIVE"))
+						.addSecuritySchemes("contextTicket", new SecurityScheme().type(SecurityScheme.Type.APIKEY)
+							.in(SecurityScheme.In.HEADER).name("X-Nexa-Context-Ticket")
+							.description("Opaque, short-lived pre-context credential; pair with X-Nexa-Client: NATIVE")));
 	}
 
 	@Bean

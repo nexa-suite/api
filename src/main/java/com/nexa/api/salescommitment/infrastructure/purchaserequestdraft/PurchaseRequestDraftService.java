@@ -26,6 +26,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
@@ -92,10 +93,40 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     }
 
     @Transactional(readOnly = true)
+    public PurchaseRequestDraftModels.DraftPage list(CurrentAccessContext context, int page, int size) {
+        buyerRead(context);
+        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Draft page is invalid");
+        UUID clientAccountId = customers.findBuyerReference(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString())
+                .filter(com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference::active)
+                .map(reference -> UUID.fromString(reference.id()))
+                .orElseThrow(() -> new AccessDeniedException("Active Buyer relationship is required"));
+        long total = jdbc.queryForObject("select count(*) from sales.purchase_request_draft d "
+                        + "join sales.client_account a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.id=d.client_account_id "
+                        + "where d.tenant_id=? and d.workspace_id=? and d.buyer_membership_id=? and d.client_account_id=? "
+                        + "and d.status<>'SUBMITTED' and a.status='ACTIVE'", Long.class,
+                tenant(context), workspace(context), context.membershipId().value(), clientAccountId);
+        List<PurchaseRequestDraftModels.DraftSummaryView> items = jdbc.query("select d.id,d.status,d.version,d.requested_delivery_date, "
+                        + "(select count(*) from sales.purchase_request_draft_line l where l.tenant_id=d.tenant_id and l.workspace_id=d.workspace_id and l.draft_id=d.id) line_count, "
+                        + "d.created_at,d.updated_at from sales.purchase_request_draft d "
+                        + "join sales.client_account a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.id=d.client_account_id "
+                        + "where d.tenant_id=? and d.workspace_id=? and d.buyer_membership_id=? and d.client_account_id=? "
+                        + "and d.status<>'SUBMITTED' and a.status='ACTIVE' "
+                        + "order by d.updated_at desc,d.id asc limit ? offset ?",
+                (rs, row) -> new PurchaseRequestDraftModels.DraftSummaryView(rs.getObject("id", UUID.class).toString(),
+                        rs.getString("status"), rs.getLong("version"), rs.getObject("requested_delivery_date", LocalDate.class),
+                        rs.getInt("line_count"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()),
+                tenant(context), workspace(context), context.membershipId().value(), clientAccountId, size, (long) page * size);
+        int totalPages = total == 0 ? 0 : Math.toIntExact((total + size - 1) / size);
+        return new PurchaseRequestDraftModels.DraftPage(items, page, size, total, totalPages);
+    }
+
+    @Transactional(readOnly = true)
     public PurchaseRequestDraftModels.DraftView get(CurrentAccessContext context, UUID draftId) {
         buyerRead(context);
         DraftRow row = jdbc.query("select id,client_account_id,buyer_membership_id,status,version,requested_delivery_date,payment_preference,credit_result,route_provider,created_at,updated_at,submitted_at from sales.purchase_request_draft where tenant_id=? and workspace_id=? and id=? and buyer_membership_id=?",
                 (rs, n) -> new DraftRow(rs.getObject("id", UUID.class), rs.getObject("client_account_id", UUID.class), rs.getObject("buyer_membership_id", UUID.class), rs.getString("status"), rs.getLong("version"), rs.getObject("requested_delivery_date", LocalDate.class), rs.getString("payment_preference"), rs.getString("credit_result"), rs.getString("route_provider"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(), rs.getTimestamp("submitted_at") == null ? null : rs.getTimestamp("submitted_at").toInstant()), tenant(context), workspace(context), draftId, context.membershipId().value()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Purchase request draft not found"));
+        requireBuyerClient(context, row.clientAccountId);
         List<PurchaseRequestDraftModels.LineView> lines = jdbc.query("select id,sku_id,sku_code_snapshot,presentation_snapshot,quantity,unit,base_unit_price,effective_unit_price,discount_amount,currency,notes from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=? order by created_at,id",
                 (rs, n) -> new PurchaseRequestDraftModels.LineView(rs.getObject("id", UUID.class).toString(), rs.getObject("sku_id", UUID.class).toString(), rs.getString("sku_code_snapshot"), rs.getString("presentation_snapshot"), rs.getBigDecimal("quantity"), rs.getString("unit"), rs.getBigDecimal("base_unit_price"), rs.getBigDecimal("effective_unit_price"), rs.getBigDecimal("discount_amount"), rs.getString("currency"), rs.getString("notes")), tenant(context), workspace(context), draftId);
         PurchaseRequestDraftModels.DestinationView destination = jdbc.query("select address_id,address_snapshot::text,snapshot_schema_version from sales.purchase_request_draft_destination where tenant_id=? and workspace_id=? and draft_id=?", (rs, n) -> new PurchaseRequestDraftModels.DestinationView(rs.getObject("address_id", UUID.class).toString(), rs.getString("address_snapshot"), rs.getString("snapshot_schema_version")), tenant(context), workspace(context), draftId).stream().findFirst().orElse(null);
@@ -228,6 +259,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
 
     private DraftRow mutable(CurrentAccessContext context, UUID id, long version) {
         DraftRow row = jdbc.query("select id,client_account_id,buyer_membership_id,status,version,requested_delivery_date,payment_preference,credit_result,route_provider,created_at,updated_at,submitted_at from sales.purchase_request_draft where tenant_id=? and workspace_id=? and id=? and buyer_membership_id=? for update", (rs, n) -> new DraftRow(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getString(4), rs.getLong(5), rs.getObject(6, LocalDate.class), rs.getString(7), rs.getString(8), rs.getString(9), rs.getTimestamp(10).toInstant(), rs.getTimestamp(11).toInstant(), rs.getTimestamp(12) == null ? null : rs.getTimestamp(12).toInstant()), tenant(context), workspace(context), id, context.membershipId().value()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Purchase request draft not found"));
+        requireBuyerClient(context, row.clientAccountId);
         PurchaseRequestDraft.requireMutable(PurchaseRequestDraftStatus.valueOf(row.status));
         if (row.version != version) throw new PurchaseRequestDraftConcurrencyException();
         return row;
@@ -320,7 +352,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
             return new SubmittedLine(catalogItemId, sku.familyId(), sku.familyCode(), sku.skuCode(), sku.presentation(),
                     line.quantity(), line.unit(), line.amount(), line.currency(), line.notes(), line.skuId());
         }).toList();
-        jdbc.batchUpdate("insert into sales.purchase_request_line (id,purchase_request_id,catalog_item_id,product_family_id,product_family_code_snapshot,sku_id,sku_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,0) on conflict (purchase_request_id,catalog_item_id) do nothing", lines, lines.size(), (ps, line) -> {
+        jdbc.batchUpdate("insert into sales.purchase_request_line (id,purchase_request_id,catalog_item_id,product_family_id,product_family_code_snapshot,sku_id,sku_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,0) on conflict (purchase_request_id,catalog_item_id) where superseded_at is null do nothing", lines, lines.size(), (ps, line) -> {
             ps.setObject(1, UUID.randomUUID()); ps.setObject(2, requestId); ps.setString(3, line.catalogItemId()); ps.setObject(4, line.familyId()); ps.setString(5, line.familyCode()); ps.setObject(6, line.skuId()); ps.setString(7, line.skuCode()); ps.setString(8, line.presentation()); ps.setString(9, line.presentation()); ps.setBigDecimal(10, line.quantity()); ps.setString(11, line.unit()); ps.setBigDecimal(12, line.amount()); ps.setString(13, line.currency()); ps.setString(14, line.notes()); ps.setTimestamp(15, Timestamp.from(now)); ps.setTimestamp(16, Timestamp.from(now));
         });
         if (commitments != null) {
@@ -335,8 +367,9 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         String workspaceId = workspace(context).toString();
         String membershipId = context.membershipId().value().toString();
         if (customers.findBuyerReference(tenantId, workspaceId, membershipId)
+                .filter(com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference::active)
                 .filter(reference -> reference.id().equals(clientId.toString())).isEmpty()) {
-            throw new IllegalArgumentException("Client account is outside buyer scope");
+            throw new AccessDeniedException("Active Buyer account relationship is required");
         }
     }
     private static void buyerRead(CurrentAccessContext context) { if (!context.hasRole(MembershipRole.BUYER)) throw new IllegalStateException("Buyer surface required"); context.requirePermission(PermissionKey.BUYER_SALES_READ); }

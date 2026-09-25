@@ -35,12 +35,25 @@ public class CatalogPersistenceBootstrap {
     @Order(Ordered.LOWEST_PRECEDENCE - 20)
     @Transactional
     public void importDeterministicSeed() {
-        List<Workspace> workspaces = jdbc.query("select t.id tenant_id,w.id workspace_id from tenant_management.tenant t join tenant_management.workspace w on w.tenant_id=t.id where t.status='ACTIVE' and w.status='ACTIVE' order by t.id,w.id",
-                (rs, row) -> new Workspace(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+        List<Workspace> workspaces;
+        try {
+            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
+            workspaces = jdbc.query("select t.id tenant_id,w.id workspace_id from tenant_management.tenant t join tenant_management.workspace w on w.tenant_id=t.id where t.status='ACTIVE' and w.status='ACTIVE' order by t.id,w.id",
+                    (rs, row) -> new Workspace(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+        } finally {
+            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', '', true)", String.class);
+        }
         if (workspaces.isEmpty()) return;
         List<CatalogSeedItemRecord> seeds = seedLoader.load();
         Instant now = Instant.now();
-        for (Workspace workspace : workspaces) importWorkspace(workspace, seeds, now);
+        try {
+            for (Workspace workspace : workspaces) {
+                setTransactionScope(workspace);
+                importWorkspace(workspace, seeds, now);
+            }
+        } finally {
+            clearTransactionScope();
+        }
     }
 
     private void importWorkspace(Workspace workspace, List<CatalogSeedItemRecord> seeds, Instant now) {
@@ -111,5 +124,12 @@ public class CatalogPersistenceBootstrap {
     }
 
     private static Timestamp timestamp(Instant value) { return Timestamp.from(value); }
+    private void setTransactionScope(Workspace workspace) {
+        jdbc.queryForObject("select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true)",
+                String.class, workspace.tenantId().toString(), workspace.workspaceId().toString());
+    }
+    private void clearTransactionScope() {
+        jdbc.queryForObject("select set_config('app.current_tenant_id', '', true) || set_config('app.current_workspace_id', '', true)", String.class);
+    }
     private record Workspace(UUID tenantId, UUID workspaceId) { }
 }

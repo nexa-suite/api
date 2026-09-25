@@ -62,9 +62,40 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 			.andExpect(jsonPath("$.items").isNotEmpty())
 			.andExpect(jsonPath("$.items[0].unitPrice.currency").value("PEN"))
+			.andExpect(jsonPath("$.items[0].basePrice").value(org.hamcrest.Matchers.nullValue()))
+			.andExpect(jsonPath("$.items[0].currentOfferPrice.amount").exists())
+			.andExpect(jsonPath("$.items[0].sellableAvailability").isNumber())
 			.andExpect(jsonPath("$.items[0].availabilityStatus")
 					.value(org.hamcrest.Matchers.isIn(new String[] {"OUT_OF_STOCK", "LOW", "AVAILABLE"})))
 			.andExpect(jsonPath("$.items[0].status").value("ACTIVE"));
+
+		String platformToken = accessToken(OWNER_EMAIL, "PLATFORM");
+		mockMvc.perform(get("/api/v1/catalog-items")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + platformToken)
+				.param("page", "0")
+				.param("size", "5"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].basePrice.amount").exists())
+			.andExpect(jsonPath("$.items[0].currentOfferPrice").value(org.hamcrest.Matchers.nullValue()));
+	}
+
+	@Test
+	void inactiveCustomerAccountCannotReadBuyerCatalog() throws Exception {
+		String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+		UUID tenant = UUID.fromString(tenantId());
+		UUID workspace = UUID.fromString(workspaceId());
+		UUID account = UUID.fromString(buyerClientAccountId());
+		try {
+			jdbc.update("update sales.client_account set status='INACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+					tenant, workspace, account);
+			mockMvc.perform(get("/api/v1/catalog-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
+					.andExpect(status().isForbidden());
+			mockMvc.perform(get("/api/v1/catalog-items/CAT-0001").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
+					.andExpect(status().isForbidden());
+		} finally {
+			jdbc.update("update sales.client_account set status='ACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+					tenant, workspace, account);
+		}
 	}
 
 	@Test

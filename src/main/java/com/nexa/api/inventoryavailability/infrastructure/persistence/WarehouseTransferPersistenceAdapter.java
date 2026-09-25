@@ -121,6 +121,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (source.status().equals("EXPIRED") || source.status().equals("DEPLETED")) {
             throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         }
+        if (!source.expirationDate().isAfter(LocalDate.now())) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         if (command.sourceWarehouseId() != null && !command.sourceWarehouseId().isBlank()
                 && !source.warehouseId().equals(command.sourceWarehouseId())) throw error("INVALID_REQUEST", false);
         if (command.sourceZoneId() != null && !command.sourceZoneId().isBlank()
@@ -150,68 +151,185 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (destination != null && !destination.unit().equalsIgnoreCase(unit)) throw error("INVENTORY_UNIT_MISMATCH", false);
         if (destination != null && !destination.status().equals(source.status())
                 && !destination.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
-
-        Timestamp occurred = now();
-        BigDecimal sourceAfter = source.onHand().subtract(quantity);
-        String sourceStatusAfter = sourceAfter.signum() == 0 ? "DEPLETED" : source.status();
-        checkUpdated(jdbc.update("update warehouse.inventory_lot set stock_quantity=?,status=?,version=version+1"
-                        + " where tenant_id=? and workspace_id=? and id=? and version=?",
-                sourceAfter, sourceStatusAfter, tenant(context), workspace(context), source.id(), expectedSourceVersion),
-                "transfer source update", "CONCURRENCY_CONFLICT");
-
-        UUID destinationLotId;
-        BigDecimal destinationBefore;
-        BigDecimal destinationAfter;
-        long destinationVersionAfter;
-        if (destination == null) {
-            destinationLotId = UUID.randomUUID();
-            destinationBefore = BigDecimal.ZERO;
-            destinationAfter = quantity;
-            destinationVersionAfter = 0;
-            checkUpdated(jdbc.update("insert into warehouse.inventory_lot"
-                            + "(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
-                            + "stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,temperature_value)"
-                            + " values (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)",
-                    destinationLotId, tenant(context), workspace(context), destinationWarehouseId, destinationZoneId,
-                    source.catalogItemId(), source.skuId(), source.batchNumber(), source.expirationDate(), Timestamp.from(source.receivedAt()),
-                    destinationAfter, unit, source.status(), source.temperatureRangeSnapshot(), source.temperatureValue()),
-                    "transfer destination insert");
-        } else {
-            destinationLotId = destination.id();
-            destinationBefore = destination.onHand();
-            destinationAfter = destination.onHand().add(quantity);
-            String destinationStatus = destination.status().equals("DEPLETED") ? source.status() : destination.status();
-            destinationVersionAfter = destination.version() + 1;
-            checkUpdated(jdbc.update("update warehouse.inventory_lot set stock_quantity=?,status=?,version=version+1"
-                            + " where tenant_id=? and workspace_id=? and id=? and version=?",
-                    destinationAfter, destinationStatus, tenant(context), workspace(context), destination.id(), destination.version()),
-                    "transfer destination update", "CONCURRENCY_CONFLICT");
-        }
-
-        insertMovement(context, source.warehouseUuid(), source.zoneUuid(), source.id(), source.catalogItemId(), source.skuId(),
-                "TRANSFER_OUT", quantity, unit, source.onHand(), sourceAfter, source.reserved(), source.reserved(), reason, correlationId, occurred);
-        insertMovement(context, destinationWarehouseId, destinationZoneId, destinationLotId, source.catalogItemId(), source.skuId(),
-                "TRANSFER_IN", quantity, unit, destinationBefore, destinationAfter,
-                destination == null ? BigDecimal.ZERO : destination.reserved(),
-                destination == null ? BigDecimal.ZERO : destination.reserved(), reason, correlationId, occurred);
-
         UUID transferId = UUID.randomUUID();
         String mode = quantity.compareTo(source.onHand()) == 0 && source.reserved().signum() == 0 ? "FULL" : "PARTIAL";
+        Timestamp requested = now();
+        String correlation = correlationId == null ? "unknown" : correlationId;
         checkUpdated(jdbc.update("insert into warehouse.inventory_transfer"
                         + "(id,tenant_id,workspace_id,source_warehouse_id,source_zone_id,source_lot_id,destination_warehouse_id,destination_zone_id,destination_lot_id,"
                         + "sku_id,catalog_item_id,batch_number,expiration_date,requested_quantity,transferred_quantity,unit,mode,status,reason,"
                         + "source_quantity_before,source_quantity_after,destination_quantity_before,destination_quantity_after,source_version_before,source_version_after,destination_version_after,"
-                        + "actor_membership_id,correlation_id,created_at,completed_at)"
-                        + " values (?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + "actor_membership_id,correlation_id,created_at,completed_at,version)"
+                        + " values (?,?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,?,NULL,NULL,?,?,?,NULL,0)",
                 transferId, tenant(context), workspace(context), source.warehouseUuid(), source.zoneUuid(), source.id(),
-                destinationWarehouseId, destinationZoneId, destinationLotId, source.skuId(), source.catalogItemId(),
-                source.batchNumber(), source.expirationDate(), quantity, quantity, unit, mode, "COMPLETED", reason,
-                source.onHand(), sourceAfter, destinationBefore, destinationAfter, source.version(), expectedSourceVersion + 1,
-                destinationVersionAfter, context.membershipId().value(), correlationId == null ? "unknown" : correlationId,
-                occurred, occurred), "transfer insert");
-        appendEvent(context, transferId, "warehouse.inventory.transfer.completed", "transfer", "COMPLETED", occurred);
+                destinationWarehouseId, destinationZoneId, source.skuId(), source.catalogItemId(), source.batchNumber(),
+                source.expirationDate(), quantity, BigDecimal.ZERO, unit, mode, "REQUESTED", reason,
+                source.onHand(), source.version(), context.membershipId().value(), correlation, requested),
+                "transfer request insert");
+        appendHistory(context, transferId, null, "REQUESTED", 0, correlation, requested);
+        appendEvent(context, transferId, "warehouse.inventory.transfer.requested", "transfer", "REQUESTED", requested);
         saveIdempotency(context, operation, idempotencyKey, hash, transferId.toString());
         return transfer(context, transferId.toString());
+    }
+
+    @Override
+    @Transactional
+    public WarehouseOperationsService.TransferSummary dispatch(CurrentAccessContext context, String transferId,
+            long expectedVersion, String idempotencyKey, String correlationId) {
+        requireWrite(context);
+        requireIdempotency(idempotencyKey);
+        if (expectedVersion < 0) throw error("INVALID_REQUEST", false);
+        String operation = "inventory-transfer-dispatch";
+        String hash = requestHash(operation, transferId, expectedVersion);
+        lockIdempotency(context, operation, idempotencyKey);
+        IdempotencyRecord prior = idempotent(context, operation, idempotencyKey);
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            return transfer(context, prior.resourceId());
+        }
+
+        TransferState transfer = transferState(context, transferId, true);
+        if (!transfer.status().equals("REQUESTED") || transfer.version() != expectedVersion) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        lockSkuScope(context, transfer.skuId().toString());
+        requireActiveWarehouse(context, transfer.destinationWarehouseId());
+        requireActiveZone(context, transfer.destinationWarehouseId(), transfer.destinationZoneId());
+        TransferLot source = loadTransferLot(context, transfer.sourceLotId(), true);
+        if (!source.warehouseUuid().equals(transfer.sourceWarehouseId())
+                || !source.zoneUuid().equals(transfer.sourceZoneId())
+                || !source.skuId().equals(transfer.skuId())) throw error("INVALID_REQUEST", false);
+        if (source.status().equals("EXPIRED") || source.status().equals("DEPLETED")
+                || !source.expirationDate().isAfter(LocalDate.now())) {
+            throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
+        }
+        if (source.onHand().subtract(source.reserved()).compareTo(transfer.quantity()) < 0) {
+            throw error("INSUFFICIENT_AVAILABLE_STOCK", false);
+        }
+        if (source.status().equals("AVAILABLE") && !source.warehouseUuid().equals(transfer.destinationWarehouseId())) {
+            SafetyStockRow safetyStock = safetyStock(context, source.warehouseUuid(), source.skuId());
+            if (safetyStock != null && !safetyStock.unit().equalsIgnoreCase(source.unit())) {
+                throw error("INVENTORY_UNIT_MISMATCH", false);
+            }
+            BigDecimal warehouseAvailable = usableWarehouseQuantity(context, source.warehouseUuid(), source.skuId());
+            BigDecimal protectedQuantity = safetyStock == null ? BigDecimal.ZERO : safetyStock.quantity();
+            BigDecimal transferable = warehouseAvailable.subtract(protectedQuantity).max(BigDecimal.ZERO)
+                    .min(source.onHand().subtract(source.reserved()));
+            if (transfer.quantity().compareTo(transferable) > 0) {
+                throw error("INVENTORY_SAFETY_STOCK_PROTECTED", false);
+            }
+        }
+
+        Timestamp dispatched = now();
+        BigDecimal sourceAfter = source.onHand().subtract(transfer.quantity());
+        String sourceStatusAfter = sourceAfter.signum() == 0 ? "DEPLETED" : source.status();
+        checkUpdated(jdbc.update("update warehouse.inventory_lot set stock_quantity=?,status=?,version=version+1"
+                        + " where tenant_id=? and workspace_id=? and id=? and version=?",
+                sourceAfter, sourceStatusAfter, tenant(context), workspace(context), source.id(), source.version()),
+                "transfer source dispatch", "CONCURRENCY_CONFLICT");
+        insertMovement(context, source.warehouseUuid(), source.zoneUuid(), source.id(), source.catalogItemId(), source.skuId(),
+                "TRANSFER_OUT", transfer.quantity(), source.unit(), source.onHand(), sourceAfter, source.reserved(),
+                source.reserved(), transfer.reason(), correlationId, dispatched);
+        String correlation = correlationId == null ? "unknown" : correlationId;
+        checkUpdated(jdbc.update("update warehouse.inventory_transfer set status='IN_TRANSIT',transferred_quantity=requested_quantity,"
+                        + "source_quantity_before=?,source_quantity_after=?,source_version_after=?,source_lot_status_at_dispatch=?,"
+                        + "dispatched_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status='REQUESTED' and version=?",
+                source.onHand(), sourceAfter, source.version() + 1, source.status(), dispatched,
+                tenant(context), workspace(context), transfer.id(), expectedVersion),
+                "transfer dispatch", "CONCURRENCY_CONFLICT");
+        appendHistory(context, transfer.id(), "REQUESTED", "IN_TRANSIT", expectedVersion + 1, correlation, dispatched);
+        appendEvent(context, transfer.id(), "warehouse.inventory.transfer.dispatched", "transfer", "IN_TRANSIT", dispatched);
+        saveIdempotency(context, operation, idempotencyKey, hash, transfer.id().toString());
+        return transfer(context, transfer.id().toString());
+    }
+
+    @Override
+    @Transactional
+    public WarehouseOperationsService.TransferSummary receive(CurrentAccessContext context, String transferId,
+            long expectedVersion, String idempotencyKey, String correlationId) {
+        requireWrite(context);
+        requireIdempotency(idempotencyKey);
+        if (expectedVersion < 0) throw error("INVALID_REQUEST", false);
+        String operation = "inventory-transfer-receipt";
+        String hash = requestHash(operation, transferId, expectedVersion);
+        lockIdempotency(context, operation, idempotencyKey);
+        IdempotencyRecord prior = idempotent(context, operation, idempotencyKey);
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            return transfer(context, prior.resourceId());
+        }
+
+        TransferState transfer = transferState(context, transferId, true);
+        if (!transfer.status().equals("IN_TRANSIT") || transfer.version() != expectedVersion) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        lockSkuScope(context, transfer.skuId().toString());
+        requireActiveWarehouse(context, transfer.destinationWarehouseId());
+        requireActiveZone(context, transfer.destinationWarehouseId(), transfer.destinationZoneId());
+        TransferLot source = loadTransferLot(context, transfer.sourceLotId(), false);
+        String destinationStatus = transfer.sourceStatusAtDispatch();
+        if (!transfer.expirationDate().isAfter(LocalDate.now())) destinationStatus = "EXPIRED";
+
+        TransferLot destination = destinationLot(context, transfer.destinationWarehouseId(), transfer.skuId(),
+                transfer.batchNumber(), transfer.sourceLotId(), true);
+        if (destination != null && !destination.zoneUuid().equals(transfer.destinationZoneId())) {
+            throw error("INVALID_REQUEST", false);
+        }
+        if (destination != null && !destination.unit().equalsIgnoreCase(transfer.unit())) {
+            throw error("INVENTORY_UNIT_MISMATCH", false);
+        }
+        if (destination != null && !destination.status().equals(destinationStatus)
+                && !destination.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
+
+        Timestamp received = now();
+        UUID destinationLotId;
+        BigDecimal destinationBefore;
+        BigDecimal destinationAfter;
+        long destinationVersionAfter;
+        BigDecimal destinationReserved;
+        if (destination == null) {
+            destinationLotId = UUID.randomUUID();
+            destinationBefore = BigDecimal.ZERO;
+            destinationAfter = transfer.quantity();
+            destinationVersionAfter = 0;
+            destinationReserved = BigDecimal.ZERO;
+            checkUpdated(jdbc.update("insert into warehouse.inventory_lot"
+                            + "(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
+                            + "stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,temperature_value)"
+                            + " values (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)",
+                    destinationLotId, tenant(context), workspace(context), transfer.destinationWarehouseId(),
+                    transfer.destinationZoneId(), transfer.catalogItemId(), transfer.skuId(), transfer.batchNumber(),
+                    transfer.expirationDate(), Timestamp.from(source.receivedAt()), destinationAfter, transfer.unit(),
+                    destinationStatus, source.temperatureRangeSnapshot(), source.temperatureValue()),
+                    "transfer destination receipt insert");
+        } else {
+            destinationLotId = destination.id();
+            destinationBefore = destination.onHand();
+            destinationAfter = destination.onHand().add(transfer.quantity());
+            destinationVersionAfter = destination.version() + 1;
+            destinationReserved = destination.reserved();
+            String nextStatus = destination.status().equals("DEPLETED") ? destinationStatus : destination.status();
+            checkUpdated(jdbc.update("update warehouse.inventory_lot set stock_quantity=?,status=?,version=version+1"
+                            + " where tenant_id=? and workspace_id=? and id=? and version=?",
+                    destinationAfter, nextStatus, tenant(context), workspace(context), destination.id(), destination.version()),
+                    "transfer destination receipt", "CONCURRENCY_CONFLICT");
+        }
+        insertMovement(context, transfer.destinationWarehouseId(), transfer.destinationZoneId(), destinationLotId,
+                transfer.catalogItemId(), transfer.skuId(), "TRANSFER_IN", transfer.quantity(), transfer.unit(),
+                destinationBefore, destinationAfter, destinationReserved, destinationReserved, transfer.reason(),
+                correlationId, received);
+        String correlation = correlationId == null ? "unknown" : correlationId;
+        checkUpdated(jdbc.update("update warehouse.inventory_transfer set status='RECEIVED',destination_lot_id=?,"
+                        + "destination_quantity_before=?,destination_quantity_after=?,destination_version_after=?,"
+                        + "received_at=?,completed_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=?"
+                        + " and status='IN_TRANSIT' and version=?",
+                destinationLotId, destinationBefore, destinationAfter, destinationVersionAfter, received, received,
+                tenant(context), workspace(context), transfer.id(), expectedVersion),
+                "transfer receipt", "CONCURRENCY_CONFLICT");
+        appendHistory(context, transfer.id(), "IN_TRANSIT", "RECEIVED", expectedVersion + 1, correlation, received);
+        appendEvent(context, transfer.id(), "warehouse.inventory.transfer.received", "transfer", "RECEIVED", received);
+        saveIdempotency(context, operation, idempotencyKey, hash, transfer.id().toString());
+        return transfer(context, transfer.id().toString());
     }
 
     private TransferLot selectFefoSource(CurrentAccessContext context, UUID sourceWarehouseId, UUID skuId,
@@ -233,6 +351,24 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                                 + (lock ? " for update" : ""), (rs, row) -> transferLot(rs),
                         tenant(context), workspace(context), id)
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_LOT_NOT_FOUND", true));
+    }
+
+    private TransferState transferState(CurrentAccessContext context, String id, boolean lock) {
+        return jdbc.query("select id,status,version,source_warehouse_id,source_zone_id,source_lot_id,"
+                                + "destination_warehouse_id,destination_zone_id,sku_id,catalog_item_id,batch_number,"
+                                + "expiration_date,requested_quantity,unit,reason,source_lot_status_at_dispatch "
+                                + "from warehouse.inventory_transfer where tenant_id=? and workspace_id=? and id=?"
+                                + (lock ? " for update" : ""),
+                        (rs, row) -> new TransferState(rs.getObject("id", UUID.class), rs.getString("status"),
+                                rs.getLong("version"), rs.getObject("source_warehouse_id", UUID.class),
+                                rs.getObject("source_zone_id", UUID.class), rs.getObject("source_lot_id", UUID.class),
+                                rs.getObject("destination_warehouse_id", UUID.class),
+                                rs.getObject("destination_zone_id", UUID.class), rs.getObject("sku_id", UUID.class),
+                                rs.getString("catalog_item_id"), rs.getString("batch_number"),
+                                rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("requested_quantity"),
+                                rs.getString("unit"), rs.getString("reason"), rs.getString("source_lot_status_at_dispatch")),
+                        tenant(context), workspace(context), uuid(id))
+                .stream().findFirst().orElseThrow(() -> error("INVENTORY_TRANSFER_NOT_FOUND", true));
     }
 
     private TransferLot destinationLot(CurrentAccessContext context, UUID warehouseId, UUID skuId,
@@ -282,6 +418,15 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         return value == null ? BigDecimal.ZERO : value;
     }
 
+    private void appendHistory(CurrentAccessContext context, UUID transferId, String fromStatus, String toStatus,
+                               long version, String correlationId, Timestamp occurredAt) {
+        checkUpdated(jdbc.update("insert into warehouse.inventory_transfer_history"
+                        + "(id,tenant_id,workspace_id,transfer_id,from_status,to_status,transfer_version,"
+                        + "actor_membership_id,correlation_id,occurred_at) values (?,?,?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), tenant(context), workspace(context), transferId, fromStatus, toStatus, version,
+                context.membershipId().value(), correlationId, occurredAt), "transfer history insert");
+    }
+
     private void requireRead(CurrentAccessContext context) {
         context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_READ);
     }
@@ -319,23 +464,30 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     private static String transferSelect() {
         return "select id,source_warehouse_id,source_zone_id,source_lot_id,destination_warehouse_id,destination_zone_id,destination_lot_id,"
                 + "sku_id,catalog_item_id,batch_number,expiration_date,requested_quantity,transferred_quantity,unit,mode,status,reason,created_at,"
-                + "source_version_before,source_version_after,destination_version_after from warehouse.inventory_transfer";
+                + "source_version_before,source_version_after,destination_version_after,version,dispatched_at,received_at from warehouse.inventory_transfer";
     }
 
     private static WarehouseOperationsService.TransferSummary transfer(java.sql.ResultSet rs) throws java.sql.SQLException {
+        UUID destinationLotId = rs.getObject("destination_lot_id", UUID.class);
         return new WarehouseOperationsService.TransferSummary(rs.getObject("id").toString(),
                 rs.getObject("source_warehouse_id").toString(), rs.getObject("source_zone_id").toString(),
                 rs.getObject("source_lot_id").toString(), rs.getObject("destination_warehouse_id").toString(),
-                rs.getObject("destination_zone_id").toString(), rs.getObject("destination_lot_id").toString(),
+                rs.getObject("destination_zone_id").toString(), destinationLotId == null ? null : destinationLotId.toString(),
                 rs.getObject("sku_id").toString(), rs.getString("catalog_item_id"), rs.getString("batch_number"),
                 rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("requested_quantity"),
                 rs.getBigDecimal("transferred_quantity"), rs.getString("unit"), rs.getString("mode"),
                 rs.getString("status"), rs.getString("reason"), instant(rs, "created_at"),
-                rs.getLong("source_version_before"), rs.getLong("source_version_after"),
-                rs.getLong("destination_version_after"));
+                rs.getLong("source_version_before"), rs.getObject("source_version_after", Long.class),
+                rs.getObject("destination_version_after", Long.class), rs.getLong("version"), instant(rs, "dispatched_at"),
+                instant(rs, "received_at"));
     }
 
     private record SafetyStockRow(BigDecimal quantity, String unit) { }
+
+    private record TransferState(UUID id, String status, long version, UUID sourceWarehouseId, UUID sourceZoneId,
+                                 UUID sourceLotId, UUID destinationWarehouseId, UUID destinationZoneId, UUID skuId,
+                                 String catalogItemId, String batchNumber, LocalDate expirationDate,
+                                 BigDecimal quantity, String unit, String reason, String sourceStatusAtDispatch) { }
 
     private record TransferLot(UUID id, UUID warehouseUuid, UUID zoneUuid, String catalogItemId, UUID skuId,
                                String batchNumber, LocalDate expirationDate, java.time.Instant receivedAt,

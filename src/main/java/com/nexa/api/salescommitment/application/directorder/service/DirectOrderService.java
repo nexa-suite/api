@@ -1,6 +1,7 @@
 package com.nexa.api.salescommitment.application.directorder.service;
 
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
 import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
@@ -30,24 +31,32 @@ public class DirectOrderService implements DirectOrderUseCase {
     private final IdempotencyPersistencePort idempotency;
     private final ObjectMapper objectMapper;
     private final SellableSkuQuery sellableSkus;
+    private final CustomerAccountQuery customerAccounts;
 
     public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock) {
-        this(commitments, orders, clock, null, new ObjectMapper(), null);
+        this(commitments, orders, clock, null, new ObjectMapper(), null, null);
     }
 
     public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock,
                               IdempotencyPersistencePort idempotency, ObjectMapper objectMapper) {
-        this(commitments, orders, clock, idempotency, objectMapper, null);
+        this(commitments, orders, clock, idempotency, objectMapper, null, null);
     }
 
     public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock,
                               IdempotencyPersistencePort idempotency, ObjectMapper objectMapper, SellableSkuQuery sellableSkus) {
+        this(commitments, orders, clock, idempotency, objectMapper, sellableSkus, null);
+    }
+
+    public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock,
+                              IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
+                              SellableSkuQuery sellableSkus, CustomerAccountQuery customerAccounts) {
         this.commitments = commitments;
         this.orders = orders;
         this.clock = clock == null ? Clock.systemUTC() : clock;
         this.idempotency = idempotency;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.sellableSkus = sellableSkus;
+        this.customerAccounts = customerAccounts;
     }
 
     @Override
@@ -55,16 +64,26 @@ public class DirectOrderService implements DirectOrderUseCase {
     public SalesOrderView create(CurrentAccessContext context, String clientAccountId, String priority,
                                  java.time.LocalDate requestedDeliveryDate, String deliverySnapshot,
                                  String paymentOption, String notes, List<Line> lines, String idempotencyKey) {
-        if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Direct Order is internal sales-only");
-        context.requirePermission(Permission.SALES_WRITE);
-        if (clientAccountId == null || clientAccountId.isBlank() || lines == null || lines.isEmpty()) {
+        if (!context.hasRole(MembershipRole.BUYER)) {
+            throw new AccessPolicyViolation("Direct Order requires a Customer Buyer");
+        }
+        context.requirePermission(Permission.SALES_BUYER_WRITE);
+        if (lines == null || lines.isEmpty()) {
             throw new CommercialBusinessException("VALIDATION_ERROR");
         }
-        java.util.UUID clientAccount;
-        try {
-            clientAccount = java.util.UUID.fromString(clientAccountId.trim());
-        } catch (IllegalArgumentException exception) {
-            throw new CommercialBusinessException("VALIDATION_ERROR");
+        if (customerAccounts == null) throw new IllegalStateException("Buyer relationship lookup is not configured");
+        String tenantId = context.tenantId().toString();
+        String workspaceId = context.workspaceId().toString();
+        String buyerMembershipId = context.membershipId().toString();
+        java.util.UUID clientAccount = customerAccounts.findBuyerReference(tenantId, workspaceId, buyerMembershipId)
+                .filter(com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference::active)
+                .map(reference -> {
+                    try { return java.util.UUID.fromString(reference.id()); }
+                    catch (IllegalArgumentException exception) { throw new CommercialBusinessException("CLIENT_ACCOUNT_NOT_FOUND"); }
+                })
+                .orElseThrow(() -> new CommercialBusinessException("CLIENT_ACCOUNT_NOT_FOUND"));
+        if (clientAccountId != null && !clientAccountId.isBlank() && !clientAccount.toString().equals(clientAccountId.trim())) {
+            throw new CommercialBusinessException("CLIENT_ACCOUNT_NOT_FOUND");
         }
         PaymentOption payment = PaymentOption.from(paymentOption);
         if (payment == null) throw new CommercialBusinessException("VALIDATION_ERROR");

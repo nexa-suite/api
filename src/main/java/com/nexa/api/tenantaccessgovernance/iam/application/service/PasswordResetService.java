@@ -4,6 +4,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurity
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RequestPasswordResetCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ResetPasswordCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.CredentialPersistencePort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AccessContextTicketPersistencePort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordHashPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordResetPersistencePort;
@@ -42,6 +43,7 @@ public class PasswordResetService implements RequestPasswordResetCommand, ResetP
     private final PasswordVerificationPort verifier;
     private final PasswordHashPort hasher;
     private final RefreshSessionPersistencePort sessions;
+    private final AccessContextTicketPersistencePort accessContextTickets;
     private final SecurityAuditPort audit;
     private final SecurityNotificationOutboxPort outbox;
     private final Clock clock;
@@ -49,11 +51,13 @@ public class PasswordResetService implements RequestPasswordResetCommand, ResetP
 
     public PasswordResetService(PasswordResetPersistencePort resets, PasswordResetThrottlePort throttle,
             CredentialPersistencePort credentials, OpaqueSecurityTokenPort tokens, PasswordVerificationPort verifier,
-            PasswordHashPort hasher, RefreshSessionPersistencePort sessions, SecurityAuditPort audit,
+            PasswordHashPort hasher, RefreshSessionPersistencePort sessions,
+            AccessContextTicketPersistencePort accessContextTickets, SecurityAuditPort audit,
             SecurityNotificationOutboxPort outbox, Clock clock,
             @Value("${nexa.security.reset.ttl:PT30M}") Duration resetTtl) {
         this.resets = resets; this.throttle = throttle; this.credentials = credentials; this.tokens = tokens;
-        this.verifier = verifier; this.hasher = hasher; this.sessions = sessions; this.audit = audit; this.outbox = outbox;
+        this.verifier = verifier; this.hasher = hasher; this.sessions = sessions;
+        this.accessContextTickets = accessContextTickets; this.audit = audit; this.outbox = outbox;
         this.clock = clock; this.resetTtl = resetTtl;
     }
 
@@ -102,6 +106,8 @@ public class PasswordResetService implements RequestPasswordResetCommand, ResetP
                 .orElseThrow(() -> new IamSecurityException("RESET_INVALID"));
         credentials.updateCredentialHash(credential.userId(), hasher.encode(newPassword), now);
         sessions.revokeAllForUser(credential.userId(), null);
+        accessContextTickets.invalidatePendingForUser(
+                new com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId(credential.userId().toString()), now);
         resets.save(record);
         audit.append(new SecurityAuditPort.Event("PASSWORD_RESET_COMPLETED", null, credential.userId(), null, null,
                 record.surface(), valueOrUnknown(correlationId), valueOrUnknown(traceId), now, Map.of("sessionsRevoked", true)));

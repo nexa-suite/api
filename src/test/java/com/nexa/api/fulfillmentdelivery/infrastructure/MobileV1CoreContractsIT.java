@@ -44,9 +44,9 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     void resolvesIdentifiersAndRejectsUnsafePhysicalPickingScans() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
 
-        PhysicalFlow flow = createPickingFlow(warehouse, sales, "identifier-scan-" + uuid(), "2");
+        PhysicalFlow flow = createPickingFlow(warehouse, buyer, "identifier-scan-" + uuid(), "2");
         String skuCode = jdbc.queryForObject("select sku_code from catalog_management.sellable_sku where id=?", String.class, flow.skuId());
         String batchNumber = jdbc.queryForObject("select batch_number from warehouse.inventory_lot where id=?", String.class, flow.lotId());
         StockSnapshot beforeResolution = stock(flow.lotId());
@@ -173,8 +173,8 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     void concurrentPhysicalPickingHasOneWinnerAndOneConflict() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
-        PhysicalFlow flow = createPickingFlow(warehouse, sales, "picking-race-" + uuid(), "1");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        PhysicalFlow flow = createPickingFlow(warehouse, buyer, "picking-race-" + uuid(), "1");
         String body = pickingBody(flow, "1");
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -204,8 +204,8 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     void physicalPickingAcceptsAFullSplitAllocationAcrossMultipleLots() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
-        PhysicalFlow flow = createPickingFlow(warehouse, sales, "picking-split-" + uuid(), "2");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        PhysicalFlow flow = createPickingFlow(warehouse, buyer, "picking-split-" + uuid(), "2");
         UUID secondLot = insertAlternativeLot(flow, "SPLIT-" + uuid(), "1");
         PhysicalLine second = splitAllocation(flow, secondLot);
 
@@ -230,9 +230,8 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     void fefoOverrideRequiresReasonAndRebindsOnlyAValidSameWarehouseLot() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        PhysicalFlow flow = createPickingFlow(warehouse, sales, "override-" + uuid(), "1");
+        PhysicalFlow flow = createPickingFlow(warehouse, buyer, "override-" + uuid(), "1");
         UUID alternativeLot = insertAlternativeLot(flow, "OVERRIDE-" + uuid(), "5");
         StockSnapshot beforeOverride = stock(flow.lotId());
         String bodyWithoutReason = pickingBody(flow, alternativeLot, true, null, "1");
@@ -290,10 +289,10 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     void deliveryHandoffAndBuyerReceiptRemainSeparateAndRetrySafe() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        PhysicalFlow flow = createPickingFlow(warehouse, sales, "handoff-" + uuid(), "2");
+        PhysicalFlow flow = createPickingFlow(warehouse, buyer, "handoff-" + uuid(), "2");
         String pickedEtag = pick(flow, warehouse, "handoff-pick-" + uuid());
         String fulfillmentEtag = pickedEtag;
         MvcResult packed = transition(flow.fulfillmentId(), "/packing", warehouse, fulfillmentEtag, "handoff-pack-" + uuid());
@@ -472,13 +471,13 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 UUID.fromString(subscriptionId))).isEqualTo("UNREGISTERED");
     }
 
-    private PhysicalFlow createPickingFlow(String warehouse, String sales, String key, String quantity) throws Exception {
+    private PhysicalFlow createPickingFlow(String warehouse, String buyer, String key, String quantity) throws Exception {
         String orderBody = "{\"clientAccountId\":\"" + buyerClientAccountId()
                 + "\",\"priority\":\"NORMAL\",\"requestedDeliveryDate\":\"2099-12-31\","
                 + "\"deliveryProfileSnapshot\":\"Mobile V1 delivery\",\"paymentOption\":\"IMMEDIATE\","
                 + "\"comment\":\"Mobile V1 contract matrix\",\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":"
                 + quantity + ",\"unit\":\"UNIT\"}]}";
-        MvcResult order = mockMvc.perform(post("/api/v1/direct-orders").header("Authorization", "Bearer " + sales)
+        MvcResult order = mockMvc.perform(post("/api/v1/direct-orders").header("Authorization", "Bearer " + buyer)
                         .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(orderBody))
                 .andExpect(status().isCreated()).andReturn();
         String orderId = json(order).get("id").asText();

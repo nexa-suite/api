@@ -70,6 +70,7 @@ public final class ApiProblemDetailFactory {
 			case ORGANIZATION_NOT_FOUND -> "Organization not found";
 			case WORKSPACE_NOT_FOUND -> "Workspace not found";
 			case MEMBERSHIP_NOT_FOUND -> "Membership not found";
+			case MEMBERSHIP_REVOKED -> "Membership revoked";
 			case LAST_ACTIVE_OWNER_REQUIRED -> "Last active owner required";
 			case LAST_USABLE_ADMINISTRATIVE_WORKSPACE_REQUIRED -> "Last usable administrative workspace required";
 			case WORKSPACE_SLUG_CONFLICT -> "Workspace slug conflict";

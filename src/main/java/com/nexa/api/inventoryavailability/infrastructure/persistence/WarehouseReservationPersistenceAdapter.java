@@ -190,8 +190,20 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     public void expireReservations() {
-        List<WorkspaceScope> scopes = jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
-                (rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+        if (transactionTemplate == null) {
+            throw new IllegalStateException("Workspace enumeration requires a transaction manager");
+        }
+        List<WorkspaceScope> scopes;
+        RlsRequestScope.enableCrossScopeWorkspaceScan();
+        try {
+            scopes = transactionTemplate.execute(status -> {
+                jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
+                return jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
+                        (rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+            });
+        } finally {
+            RlsRequestScope.clearCrossScopeWorkspaceScan();
+        }
         for (WorkspaceScope scope : scopes) {
             RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
             try {

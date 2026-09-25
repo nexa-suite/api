@@ -36,14 +36,16 @@ class SalesDomainPrimitivesTests {
 		assertThat(PurchaseRequestStatus.values()).containsExactly(
 			PurchaseRequestStatus.DRAFT,
 			PurchaseRequestStatus.SUBMITTED,
+			PurchaseRequestStatus.CHANGES_PROPOSED,
+			PurchaseRequestStatus.CONVERTED,
+			PurchaseRequestStatus.REJECTED,
+			PurchaseRequestStatus.WITHDRAWN,
+			PurchaseRequestStatus.EXPIRED,
 			PurchaseRequestStatus.IN_REVIEW,
 			PurchaseRequestStatus.NEEDS_ADJUSTMENT,
 			PurchaseRequestStatus.APPROVED,
-			PurchaseRequestStatus.REJECTED,
 			PurchaseRequestStatus.CANCELLED,
-			PurchaseRequestStatus.CONVERTED_TO_ORDER,
-			PurchaseRequestStatus.EXPIRED,
-			PurchaseRequestStatus.WITHDRAWN);
+			PurchaseRequestStatus.CONVERTED_TO_ORDER);
 		assertThat(SalesOrderStatus.values()).containsExactly(
 			SalesOrderStatus.PENDING,
 			SalesOrderStatus.CONFIRMED,
@@ -54,6 +56,15 @@ class SalesDomainPrimitivesTests {
 			SalesOrderStatus.COMPLETED,
 			SalesOrderStatus.REJECTED,
 			SalesOrderStatus.CANCELLED);
+	}
+
+	@Test
+	void legacyPurchaseRequestProjectionPreservesCancellationAndProjectsDeprecatedWorkflowStates() {
+		assertThat(PurchaseRequestStatus.IN_REVIEW.currentApiValue()).isEqualTo(PurchaseRequestStatus.SUBMITTED);
+		assertThat(PurchaseRequestStatus.NEEDS_ADJUSTMENT.currentApiValue()).isEqualTo(PurchaseRequestStatus.SUBMITTED);
+		assertThat(PurchaseRequestStatus.APPROVED.currentApiValue()).isEqualTo(PurchaseRequestStatus.SUBMITTED);
+		assertThat(PurchaseRequestStatus.CONVERTED_TO_ORDER.currentApiValue()).isEqualTo(PurchaseRequestStatus.CONVERTED);
+		assertThat(PurchaseRequestStatus.CANCELLED.currentApiValue()).isEqualTo(PurchaseRequestStatus.CANCELLED);
 	}
 
 	@Test

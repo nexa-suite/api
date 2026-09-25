@@ -54,13 +54,13 @@ public class SalesRuntimeConfiguration {
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 				ChangeEventPersistencePort changeFeed, com.nexa.api.salescommitment.application.port.CommercialCommitmentPort commitments,
-				Clock clock, ObjectMapper objectMapper) {
-		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, objectMapper);
+				Clock clock, ObjectMapper objectMapper, com.nexa.api.salescommitment.application.purchaserequest.port.MaterialChangePersistencePort materialChanges) {
+		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, objectMapper, materialChanges);
 	}
 	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, CustomerAccountQuery accounts, IdempotencyPersistencePort idempotency, ObjectMapper objectMapper) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence, idempotency, objectMapper); }
 	@Bean DirectOrderUseCase directOrderUseCase(com.nexa.api.salescommitment.application.port.CommercialCommitmentPort commitments,
 			SalesOrderPersistencePort orders, Clock clock, IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
-			SellableSkuQuery sellableSkus) {
-		return new DirectOrderService(commitments, orders, clock, idempotency, objectMapper, sellableSkus);
+			SellableSkuQuery sellableSkus, CustomerAccountQuery customerAccounts) {
+		return new DirectOrderService(commitments, orders, clock, idempotency, objectMapper, sellableSkus, customerAccounts);
 	}
 }

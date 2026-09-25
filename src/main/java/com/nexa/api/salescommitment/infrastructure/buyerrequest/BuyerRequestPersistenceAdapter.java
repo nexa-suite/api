@@ -62,7 +62,7 @@ public class BuyerRequestPersistenceAdapter implements BuyerRequestPersistencePo
                     String id = rs.getObject(1).toString();
                     var snapshot = read(rs.getString(8), com.nexa.api.salescommitment.domain.model.buyerrequest.BuyerRequestSnapshot.class);
                     List<PurchaseRequestLineView> lines = jdbc.query("select id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,"
-                                    + "unit_price_amount,unit_price_currency,notes,version from sales.purchase_request_line where purchase_request_id=? order by created_at,id",
+									+ "unit_price_amount,unit_price_currency,notes,version from sales.purchase_request_line where purchase_request_id=? and superseded_at is null order by created_at,id",
                             (line, row) -> new PurchaseRequestLineView(line.getObject(1).toString(), line.getString(2), line.getString(3),
                                     line.getString(4), line.getBigDecimal(5), line.getString(6), line.getBigDecimal(7),
                                     line.getString(8), line.getString(9), line.getLong(10)), uuid(id));

@@ -29,6 +29,8 @@ public interface OrganizationAdministrationUseCase {
 			Set<String> roleDefinitionIds, long expectedVersion, String correlationId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> suspendMembership(CurrentAccessContext context, String membershipId,
 			long expectedVersion, String correlationId);
+	OrganizationAdministrationResult<WorkspaceMembershipSummary> revokeMembership(CurrentAccessContext context, String membershipId,
+			long expectedVersion, String correlationId);
 	OrganizationAdministrationResult<WorkspaceMembershipSummary> reactivateMembership(CurrentAccessContext context, String membershipId,
 			long expectedVersion, String correlationId);
 }

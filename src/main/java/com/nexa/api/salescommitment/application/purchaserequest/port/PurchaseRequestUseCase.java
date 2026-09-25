@@ -4,6 +4,7 @@ import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestFilter;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestEventView;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestView;
+import com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.math.BigDecimal;
@@ -22,5 +23,11 @@ public interface PurchaseRequestUseCase {
 	PurchaseRequestView updateLine(CurrentAccessContext context, String id, String lineId, BigDecimal quantity, String notes, long version);
 	PurchaseRequestView deleteLine(CurrentAccessContext context, String id, String lineId, long version);
 	PurchaseRequestView transition(CurrentAccessContext context, String id, String action, String reviewNote, long version, String idempotencyKey);
+	MaterialChangeProposalView currentMaterialChange(CurrentAccessContext context, String id);
+	MaterialChangeProposalView proposeMaterialChange(CurrentAccessContext context, String id, long version,
+			String reason, String priority, LocalDate deliveryDate, String deliveryProfile, String paymentOption,
+			String comment, List<RequestedLine> lines, String idempotencyKey);
+	PurchaseRequestView acceptMaterialChange(CurrentAccessContext context, String id, String proposalId,
+			long version, String idempotencyKey);
 	record RequestedLine(String catalogItemId, BigDecimal quantity, String unit, String notes) { }
 }

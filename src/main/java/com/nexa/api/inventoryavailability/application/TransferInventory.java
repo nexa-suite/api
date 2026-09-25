@@ -36,4 +36,20 @@ public class TransferInventory {
         WarehouseApplicationAuthorization.write(context);
         return persistence.transfer(context, command, expectedSourceVersion, idempotencyKey, correlationId);
     }
+
+    @Transactional
+    public WarehouseOperationsService.TransferSummary dispatch(
+            CurrentAccessContext context, String transferId, long expectedVersion,
+            String idempotencyKey, String correlationId) {
+        WarehouseApplicationAuthorization.write(context);
+        return persistence.dispatch(context, transferId, expectedVersion, idempotencyKey, correlationId);
+    }
+
+    @Transactional
+    public WarehouseOperationsService.TransferSummary receive(
+            CurrentAccessContext context, String transferId, long expectedVersion,
+            String idempotencyKey, String correlationId) {
+        WarehouseApplicationAuthorization.write(context);
+        return persistence.receive(context, transferId, expectedVersion, idempotencyKey, correlationId);
+    }
 }

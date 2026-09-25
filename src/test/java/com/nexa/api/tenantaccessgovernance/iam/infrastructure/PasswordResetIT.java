@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class PasswordResetIT extends NexaWorkflowIntegrationSupport {
     private static final String RESET_TOKEN = "integration-reset-token-2026";
+    private static final String RAW_CONTEXT_TICKET = "pending-reset-context-ticket";
 
     @BeforeEach
     void clearResetThrottle() { jdbc.update("delete from iam.password_reset_throttle_bucket"); }
@@ -29,6 +30,7 @@ class PasswordResetIT extends NexaWorkflowIntegrationSupport {
         jdbc.update("update iam.password_credential set password_hash=?,algorithm='bcrypt',changed_at=current_timestamp where user_id=(select id from iam.user_account where normalized_email=?)",
                 new BCryptPasswordEncoder(12).encode(TEST_PASSWORD), BUYER_EMAIL);
         jdbc.update("delete from iam.password_reset_request where normalized_email=?", BUYER_EMAIL);
+        jdbc.update("delete from iam.access_context_selection_ticket where ticket_hash=?", sha256(RAW_CONTEXT_TICKET));
     }
 
     @Test
@@ -40,10 +42,22 @@ class PasswordResetIT extends NexaWorkflowIntegrationSupport {
         String hash = sha256(RESET_TOKEN);
         jdbc.update("insert into iam.password_reset_request (id,normalized_email,surface,token_hash,status,attempts,expires_at,created_at) values (gen_random_uuid(),?,'PORTAL',?,'PENDING',0,?,?)",
                 BUYER_EMAIL, hash, java.sql.Timestamp.from(Instant.now().plusSeconds(1800)), java.sql.Timestamp.from(Instant.now()));
+        String contextTicketHash = sha256(RAW_CONTEXT_TICKET);
+        java.util.UUID userId = jdbc.queryForObject("select id from iam.user_account where normalized_email=?", java.util.UUID.class, BUYER_EMAIL);
+        jdbc.update("insert into iam.access_context_selection_ticket (ticket_hash,user_id,surface,issued_at,expires_at,consumed_at) "
+                        + "values (?,?, 'PORTAL', current_timestamp, current_timestamp + interval '5 minutes', null)",
+                contextTicketHash, userId);
         mockMvc.perform(post("/api/v1/auth/password-resets").header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"" + RESET_TOKEN + "\",\"newPassword\":\"integration-reset-password-2026\"}"))
                 .andExpect(status().isNoContent());
         assertThat(jdbc.queryForObject("select status from iam.password_reset_request where token_hash=?", String.class, hash)).isEqualTo("CONSUMED");
+        assertThat(jdbc.queryForObject("select revoked_at from iam.access_context_selection_ticket where ticket_hash=?",
+                java.sql.Timestamp.class, contextTicketHash)).isNotNull();
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/me/access-contexts")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .header("X-Nexa-Surface", "PORTAL")
+                        .header("X-Nexa-Context-Ticket", RAW_CONTEXT_TICKET))
+                .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/v1/auth/password-resets").header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"" + RESET_TOKEN + "\",\"newPassword\":\"integration-reset-password-2026\"}"))
                 .andExpect(status().isBadRequest());

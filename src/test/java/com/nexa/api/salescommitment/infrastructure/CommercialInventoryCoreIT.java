@@ -20,26 +20,53 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
 
     @Test
+    void buyerAvailabilityReflectsCommercialBackingAndRemainsStableAfterPhysicalAllocation() throws Exception {
+        ensureCommercialInventory();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        BigDecimal before = buyerSellableAvailability(buyer);
+
+        MvcResult order = directOrder(buyer, "buyer-availability-" + uuid(), directBody("IMMEDIATE", "2"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andReturn();
+        BigDecimal backed = buyerSellableAvailability(buyer);
+        assertThat(before.subtract(backed)).isEqualByComparingTo("2");
+
+        mockMvc.perform(post("/api/v1/sales-orders/" + json(order).get("id").asText() + "/fulfillments")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", order.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "buyer-availability-allocation-" + uuid()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("ALLOCATED"));
+        assertThat(buyerSellableAvailability(buyer)).isEqualByComparingTo(backed);
+    }
+
+    @Test
     void directOrderConfirmsWithoutSyntheticPurchaseRequestAndReplaysExactly() throws Exception {
         ensureCommercialInventory();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String key = "direct-confirm-" + uuid();
         String body = directBody("IMMEDIATE", "2");
 
-        MvcResult created = directOrder(sales, key, body)
+        directOrder(sales, "direct-sales-forbidden-" + uuid(), body)
+                .andExpect(status().isForbidden());
+
+        MvcResult created = directOrder(buyer, key, body)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.originType").value("DIRECT_ORDER"))
                 .andReturn();
         String orderId = json(created).get("id").asText();
 
-        MvcResult replay = directOrder(sales, key, body)
+        MvcResult replay = directOrder(buyer, key, body)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(orderId))
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andReturn();
 
-        directOrder(sales, key, directBody("IMMEDIATE", "3"))
+        directOrder(buyer, key, directBody("IMMEDIATE", "3"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
 
@@ -50,6 +77,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
         assertThat(jdbc.queryForObject("select source_purchase_request_id from sales.sales_order where id=?", Object.class, order)).isNull();
         assertThat(jdbc.queryForObject("select order_source from sales.sales_order where id=?", String.class, order)).isEqualTo("DIRECT_ORDER");
         assertThat(jdbc.queryForObject("select origin_type from sales.sales_order where id=?", String.class, order)).isEqualTo("DIRECT_ORDER");
+        assertThat(jdbc.queryForObject("select buyer_membership_id::text from sales.sales_order where id=?", String.class, order)).isEqualTo(membershipId(BUYER_EMAIL));
         assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, UUID.fromString(commitmentId))).isEqualTo("CONVERTED");
         assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_backing where commercial_commitment_id=? and status='BACKED'", Integer.class, UUID.fromString(commitmentId))).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where event_type='SALES_ORDER_CONFIRMED' and aggregate_id=?", Integer.class, order)).isEqualTo(1);
@@ -59,10 +87,10 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
     @Test
     void canonicalFulfillmentCarriesPhysicalLotLineageIntoDeliveryTemperatureEvidence() throws Exception {
         ensureCommercialInventory();
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
-        MvcResult order = directOrder(sales, "canonical-fulfillment-" + uuid(), directBody("IMMEDIATE", "2"))
+        MvcResult order = directOrder(buyer, "canonical-fulfillment-" + uuid(), directBody("IMMEDIATE", "2"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andReturn();
@@ -179,8 +207,8 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
     @Test
     void creditLineConfirmationPostsReceivableAndConsumesReservation() throws Exception {
         ensureCommercialInventory();
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
-        MvcResult created = directOrder(sales, "direct-credit-success-" + uuid(), directBody("CREDIT_LINE", "1"))
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        MvcResult created = directOrder(buyer, "direct-credit-success-" + uuid(), directBody("CREDIT_LINE", "1"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andReturn();
@@ -262,8 +290,9 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
     @Test
     void prepaidDirectOrderStaysPendingUntilPaymentConfirmation() throws Exception {
         ensureCommercialInventory();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
-        MvcResult pending = directOrder(sales, "direct-prepaid-" + uuid(), directBody("PREPAID", "1"))
+        MvcResult pending = directOrder(buyer, "direct-prepaid-" + uuid(), directBody("PREPAID", "1"))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andReturn();
@@ -291,7 +320,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
     @Test
     void insufficientSellableAvailabilityRollsBackCommitmentOrderBackingAndOutbox() throws Exception {
         ensureCommercialInventory();
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String tenant = tenantId();
         String workspace = workspaceId();
         int commitmentsBefore = jdbc.queryForObject("select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace);
@@ -299,7 +328,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
         int backingBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid", Integer.class, tenant, workspace);
         int outboxBefore = jdbc.queryForObject("select count(*) from integration.outbox_event where tenant_id=?::uuid and workspace_id=?::uuid and event_type='SALES_ORDER_CONFIRMED'", Integer.class, tenant, workspace);
 
-        directOrder(sales, "direct-short-" + uuid(), directBody("IMMEDIATE", "1000000"))
+        directOrder(buyer, "direct-short-" + uuid(), directBody("IMMEDIATE", "1000000"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_SELLABLE_AVAILABILITY"));
 
@@ -339,7 +368,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
     @Test
     void insufficientCreditRollsBackInventoryBackingAndCommercialRows() throws Exception {
         ensureCommercialInventory();
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         UUID client = UUID.fromString(buyerClientAccountId());
@@ -357,7 +386,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
             jdbc.update("update payments.credit_account set credit_limit=0,credit_exposure=0,reserved_exposure=0,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                     tenant, workspace, client);
 
-            directOrder(sales, "direct-credit-short-" + uuid(), directBody("CREDIT_LINE", "1"))
+            directOrder(buyer, "direct-credit-short-" + uuid(), directBody("CREDIT_LINE", "1"))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.code").value("INSUFFICIENT_CREDIT"));
 
@@ -384,6 +413,13 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
 
     private String directBody(String paymentOption, String quantity) {
         return "{\"clientAccountId\":\"" + buyerClientAccountId() + "\",\"priority\":\"NORMAL\",\"requestedDeliveryDate\":\"2099-12-31\",\"deliveryProfileSnapshot\":\"Direct order delivery\",\"paymentOption\":\"" + paymentOption + "\",\"comment\":\"v0.14 direct order\",\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":" + quantity + ",\"unit\":\"UNIT\"}]}";
+    }
+
+    private BigDecimal buyerSellableAvailability(String token) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/catalog-items/CAT-0002")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn();
+        return json(result).get("sellableAvailability").decimalValue();
     }
 
     private record CreditAccountState(BigDecimal limit, BigDecimal exposure, BigDecimal reserved, String status) { }
