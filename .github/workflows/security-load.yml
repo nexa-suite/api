@@ -190,9 +190,6 @@ jobs:
         with:
           name: api-security-load-${{ github.run_id }}
           path: |
-            api-runtime.log
-            zap-report.html
-            zap-authenticated/**/*
             k6-summary.json
             k6-business-summary.json
           if-no-files-found: ignore

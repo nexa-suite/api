@@ -10,8 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import java.util.Objects;
 
 @Component
-public final class BCryptPasswordVerifier implements PasswordVerificationPort, PasswordHashPort,
-		com.nexa.api.shared.application.port.out.PasswordVerificationPort {
+public final class BCryptPasswordVerifier implements PasswordVerificationPort, PasswordHashPort {
 	private final BCryptPasswordEncoder encoder;
 
 	public BCryptPasswordVerifier() {

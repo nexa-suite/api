@@ -17,7 +17,7 @@ import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureRea
 import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureReadingStatus;
 import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureScale;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -38,10 +38,14 @@ import org.springframework.jdbc.core.ResultSetExtractor;
 @Repository
 @Profile("!test")
 public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport implements DispatchCommandPersistencePort {
+    private final CanonicalOutboxPort canonicalOutbox;
+
     public DispatchCommandPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                              WarehouseLogisticsFulfillmentPort warehouseFulfillment,
-                                             OperationalHandoffNotificationPort handoffNotifications) {
+                                             OperationalHandoffNotificationPort handoffNotifications,
+                                             CanonicalOutboxPort canonicalOutbox) {
         super(jdbc, changeFeed, warehouseFulfillment, handoffNotifications);
+        this.canonicalOutbox = canonicalOutbox;
     }
 
     @Override
@@ -326,7 +330,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         touch(tenant, workspace, row, now);
         appendEvent(tenant, workspace, id, "logistics.delivery.attempt-failed", row.status(), row.status(), actor,
                 true, "Delivery attempt failed", now, row.clientAccountId());
-        CanonicalOutbox.append(jdbc, "DELIVERY_FAILED", "DispatchOrder", id, tenant, workspace,
+        canonicalOutbox.append("DELIVERY_FAILED", "DispatchOrder", id, tenant, workspace,
                 Instant.ofEpochMilli(now), "delivery-attempt-" + attempt.id(), null, "1.0", attempt.id().toString(), Map.of(
                         "deliveryId", id, "attemptId", attempt.id(), "status", "FAILED"));
         saveIdempotency(tenant, workspace, "delivery-attempt-failed", key, requestHash, id, now);
@@ -371,10 +375,10 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         updateDeliveryStatus(tenant, workspace, id, "IN_TRANSIT", "PARTIAL", null, now);
         appendEvent(tenant, workspace, id, "logistics.delivery.continuation-created", row.status(), "PARTIAL", actor,
                 true, "Continuation delivery required", now, row.clientAccountId());
-        CanonicalOutbox.append(jdbc, "DELIVERY_PARTIALLY_COMPLETED", "DispatchOrder", id, tenant, workspace,
+        canonicalOutbox.append("DELIVERY_PARTIALLY_COMPLETED", "DispatchOrder", id, tenant, workspace,
                 Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", attempt.id().toString(), Map.of(
                         "deliveryId", id, "attemptId", attempt.id(), "status", "PARTIAL", "continuationDeliveryId", continuationId));
-        CanonicalOutbox.append(jdbc, "CONTINUATION_REQUIRED", "ContinuationDelivery", continuationId, tenant, workspace,
+        canonicalOutbox.append("CONTINUATION_REQUIRED", "ContinuationDelivery", continuationId, tenant, workspace,
                 Instant.ofEpochMilli(now), "delivery-partial-" + attempt.id(), null, "1.0", continuationId.toString(), Map.of(
                         "continuationDeliveryId", continuationId, "sourceDeliveryId", id, "salesOrderId", row.salesOrderId(),
                         "status", "OPEN"));
@@ -421,13 +425,13 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                 pod.status().name(), timestamp(now));
         appendEvent(tenant, workspace, id, "logistics.pod.completed", row.status(), "DELIVERED", actor, true, null,
                 now, row.clientAccountId());
-        CanonicalOutbox.append(jdbc, "DISPATCH_DELIVERED", "DispatchOrder", id, tenant, workspace,
+        canonicalOutbox.append("DISPATCH_DELIVERED", "DispatchOrder", id, tenant, workspace,
                 Instant.ofEpochMilli(now), "dispatch-" + id, null, "1.0", Map.of(
                         "dispatchOrderId", id, "salesOrderId", row.salesOrderId(), "podId", podId, "podStatus", "COMPLETED"));
-        CanonicalOutbox.append(jdbc, "DELIVERY_COMPLETED", "DispatchOrder", id, tenant, workspace,
+        canonicalOutbox.append("DELIVERY_COMPLETED", "DispatchOrder", id, tenant, workspace,
                 Instant.ofEpochMilli(now), "dispatch-" + id, null, "1.0", Map.of(
                         "dispatchOrderId", id, "salesOrderId", row.salesOrderId(), "podId", podId, "status", "DELIVERED"));
-        CanonicalOutbox.append(jdbc, "POD_COMPLETED", "ProofOfDelivery", podId, tenant, workspace,
+        canonicalOutbox.append("POD_COMPLETED", "ProofOfDelivery", podId, tenant, workspace,
                 Instant.ofEpochMilli(now), "dispatch-" + id, null, "1.0", Map.of(
                         "dispatchOrderId", id, "salesOrderId", row.salesOrderId(), "podId", podId, "status", "COMPLETED"));
         saveIdempotency(tenant, workspace, "dispatch-delivery", key, requestHash, id, now);

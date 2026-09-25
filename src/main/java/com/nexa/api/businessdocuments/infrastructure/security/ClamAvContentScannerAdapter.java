@@ -1,7 +1,7 @@
 package com.nexa.api.businessdocuments.infrastructure.security;
 
 import com.nexa.api.businessdocuments.application.port.ContentScannerPort;
-import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
+import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
@@ -27,21 +27,21 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
     private final Mode mode;
     private final int connectTimeoutMs;
     private final int readTimeoutMs;
-    private final TechnicalMetrics metrics;
+    private final TechnicalMetricsPort metrics;
 
     private enum Mode { NETWORK, DETERMINISTIC_LOCAL }
 
     @Autowired
     public ClamAvContentScannerAdapter(org.springframework.core.env.Environment environment,
-                                       ObjectProvider<TechnicalMetrics> metrics) {
+                                       ObjectProvider<TechnicalMetricsPort> metrics) {
         this(environment, metrics == null ? null : metrics.getIfAvailable());
     }
 
     public ClamAvContentScannerAdapter(org.springframework.core.env.Environment environment) {
-        this(environment, (TechnicalMetrics) null);
+        this(environment, (TechnicalMetricsPort) null);
     }
 
-    private ClamAvContentScannerAdapter(org.springframework.core.env.Environment environment, TechnicalMetrics metrics) {
+    private ClamAvContentScannerAdapter(org.springframework.core.env.Environment environment, TechnicalMetricsPort metrics) {
         this.host = environment.getProperty("nexa.clamav.host", "").trim();
         this.port = Integer.parseInt(environment.getProperty("nexa.clamav.port", "3310"));
         this.mode = parseMode(environment.getProperty("nexa.clamav.mode", "network"), environment);
@@ -51,7 +51,7 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
     }
 
     @Override public ScanResult scan(InputStream input) {
-        TechnicalMetrics.TimerSample timer = start("scan");
+        TechnicalMetricsPort.TimerSample timer = start("scan");
         try {
             ScanResult result = scanBytes(readBounded(input, 10485760));
             record(timer, outcome(result));
@@ -138,8 +138,8 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
         if (parsed <= 0) throw new IllegalStateException("ClamAV " + label + " must be positive");
         return parsed;
     }
-    private TechnicalMetrics.TimerSample start(String operation) { return metrics == null ? null : metrics.start("scanner", operation); }
-    private void record(TechnicalMetrics.TimerSample timer, String outcome) {
+    private TechnicalMetricsPort.TimerSample start(String operation) { return metrics == null ? null : metrics.start("scanner", operation); }
+    private void record(TechnicalMetricsPort.TimerSample timer, String outcome) {
         if (metrics != null) {
             metrics.count("scanner", "scan", outcome);
             if (timer != null) timer.stop(outcome);

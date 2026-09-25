@@ -12,6 +12,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -39,7 +40,7 @@ public class PurchaseRequestQueryController {
 	@GetMapping
 	@Operation(operationId = "listPurchaseRequests")
 	public PurchaseRequestPageResponse list(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
-			@RequestParam(required = false) @Pattern(regexp = "(?i)DRAFT|SUBMITTED|IN_REVIEW|NEEDS_ADJUSTMENT|APPROVED|REJECTED|CANCELLED|CONVERTED_TO_ORDER") String status,
+			@RequestParam(required = false) @Parameter(description = "Canonical lifecycle states: DRAFT, SUBMITTED, CHANGES_PROPOSED, CONVERTED, REJECTED, WITHDRAWN, EXPIRED. Legacy values select historical persisted records only.") @Pattern(regexp = "(?i)DRAFT|SUBMITTED|CHANGES_PROPOSED|CONVERTED|REJECTED|WITHDRAWN|EXPIRED|IN_REVIEW|NEEDS_ADJUSTMENT|APPROVED|CANCELLED|CONVERTED_TO_ORDER") String status,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)NORMAL|HIGH|URGENT") String priority, @RequestParam(required = false) String search,
 			@RequestParam(required = false) LocalDate createdFrom, @RequestParam(required = false) LocalDate createdTo,
 			@RequestParam(defaultValue = "0") @Min(0) int page, @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
@@ -58,5 +59,19 @@ public class PurchaseRequestQueryController {
 	@Operation(operationId = "listPurchaseRequestEvents")
 	public List<com.nexa.api.salescommitment.presentation.purchaserequest.response.PurchaseRequestEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
 		return sales.events(context, id).stream().map(mapper::event).toList();
+	}
+
+	@GetMapping("/{id}/material-changes/current")
+	@Operation(operationId = "getCurrentPurchaseRequestMaterialChange")
+	public com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView currentMaterialChange(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
+		return sales.currentMaterialChange(context, id);
+	}
+
+	@GetMapping("/{id}/material-changes")
+	@Operation(operationId = "listPurchaseRequestMaterialChanges")
+	public List<com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView> materialChangeHistory(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
+		return sales.materialChangeHistory(context, id);
 	}
 }

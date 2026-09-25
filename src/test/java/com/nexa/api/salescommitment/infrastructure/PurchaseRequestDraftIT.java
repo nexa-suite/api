@@ -20,6 +20,35 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
     @Test
+    void buyerCannotReadOrChangeDraftAfterAccountBecomesInactive() throws Exception {
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String accountId = buyerClientAccountId();
+        MvcResult created = mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts")
+                        .header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientAccountId\":\"" + accountId + "\",\"requestedDeliveryDate\":\"2099-12-31\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String draftId = json(created).get("id").asText();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        try {
+            jdbc.update("update sales.client_account set status='INACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+                    tenant, workspace, UUID.fromString(accountId));
+            mockMvc.perform(get("/api/v1/buyer/purchase-request-drafts/" + draftId)
+                            .header("Authorization", "Bearer " + buyer))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/submissions")
+                            .header("Authorization", "Bearer " + buyer)
+                            .header("If-Match", created.getResponse().getHeader("ETag"))
+                            .header("Idempotency-Key", "inactive-account-" + uuid()))
+                    .andExpect(status().isForbidden());
+        } finally {
+            jdbc.update("update sales.client_account set status='ACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+                    tenant, workspace, UUID.fromString(accountId));
+        }
+    }
+
+    @Test
     void replacingLinesInvalidatesSnapshotsAndBlocksSubmissionUntilRouteIsRecalculated() throws Exception {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
@@ -67,6 +96,13 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                 .andExpect(status().isCreated()).andExpect(header().string("ETag", "\"0\""))
                 .andReturn();
         String draftId = json(created).get("id").asText();
+        MvcResult discovered = mockMvc.perform(get("/api/v1/buyer/purchase-request-drafts")
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.items[0].lineCount").exists())
+                .andReturn();
+        assertThat(json(discovered).path("items").findValues("id").stream()
+                .map(tools.jackson.databind.JsonNode::asText).toList()).contains(draftId);
 
         MvcResult lines = mockMvc.perform(put("/api/v1/buyer/purchase-request-drafts/" + draftId + "/lines")
                         .header("Authorization", "Bearer " + buyer).header("If-Match", "\"0\"")
@@ -119,6 +155,11 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                         .header("Idempotency-Key", "valid-submit-" + uuid()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUBMITTED"))
                 .andReturn();
+        MvcResult afterSubmit = mockMvc.perform(get("/api/v1/buyer/purchase-request-drafts")
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(afterSubmit).path("items").findValues("id").stream()
+                .map(tools.jackson.databind.JsonNode::asText).toList()).doesNotContain(draftId);
         assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request where id=?", Integer.class, UUID.fromString(draftId))).isEqualTo(1);
         assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where tenant_id=? and workspace_id=? and purchase_request_id=?",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(draftId))).isEqualTo("ACTIVE");

@@ -14,7 +14,12 @@ public record CatalogPricingView(
 		BigDecimal discountAmount,
 		String currency,
 		List<AppliedPromotion> appliedPromotions,
-		Instant pricingAsOf) {
+		Instant pricingAsOf,
+		boolean buyerView) {
+	public CatalogPricingView(BigDecimal basePrice, BigDecimal effectivePrice, BigDecimal discountAmount,
+			String currency, List<AppliedPromotion> appliedPromotions, Instant pricingAsOf) {
+		this(basePrice, effectivePrice, discountAmount, currency, appliedPromotions, pricingAsOf, false);
+	}
 	public CatalogPricingView {
 		basePrice = nonNegative(Objects.requireNonNullElse(basePrice, BigDecimal.ZERO), "Base price");
 		effectivePrice = nonNegative(Objects.requireNonNullElse(effectivePrice, basePrice), "Effective price");

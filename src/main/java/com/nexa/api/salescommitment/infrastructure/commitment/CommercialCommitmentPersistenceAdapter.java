@@ -7,7 +7,7 @@ import com.nexa.api.creditreceivables.application.publicapi.CreditReservationCom
 import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryBackingCommands;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.salescommitment.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
 import org.springframework.context.annotation.Profile;
@@ -30,6 +30,7 @@ import java.util.UUID;
 @Profile("!test")
 public class CommercialCommitmentPersistenceAdapter implements CommercialCommitmentPort {
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final SellableSkuQuery sellableSkus;
     private final CustomerAccountQuery customers;
     private final CreditReservationCommands creditReservations;
@@ -42,8 +43,10 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
     public CommercialCommitmentPersistenceAdapter(
             JdbcTemplate jdbc, SellableSkuQuery sellableSkus, CustomerAccountQuery customers,
             CreditReservationCommands creditReservations, InventoryBackingCommands inventoryBacking,
-            PaymentConfirmationQuery paymentConfirmations, ReceivableCommands receivables, Clock clock) {
+            PaymentConfirmationQuery paymentConfirmations, ReceivableCommands receivables, Clock clock,
+            CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
+        this.canonicalOutbox = canonicalOutbox;
         this.sellableSkus = sellableSkus;
         this.customers = customers;
         this.creditReservations = creditReservations;
@@ -56,14 +59,15 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
     public CommercialCommitmentPersistenceAdapter(
             JdbcTemplate jdbc, SellableSkuQuery sellableSkus, CustomerAccountQuery customers,
             CreditReservationCommands creditReservations, InventoryBackingCommands inventoryBacking,
-            PaymentConfirmationQuery paymentConfirmations, Clock clock) {
-        this(jdbc, sellableSkus, customers, creditReservations, inventoryBacking, paymentConfirmations, null, clock);
+            PaymentConfirmationQuery paymentConfirmations, Clock clock, CanonicalOutboxPort canonicalOutbox) {
+        this(jdbc, sellableSkus, customers, creditReservations, inventoryBacking, paymentConfirmations, null, clock, canonicalOutbox);
     }
 
     public CommercialCommitmentPersistenceAdapter(
             JdbcTemplate jdbc, SellableSkuQuery sellableSkus, CustomerAccountQuery customers,
-            CreditReservationCommands creditReservations, InventoryBackingCommands inventoryBacking, Clock clock) {
-        this(jdbc, sellableSkus, customers, creditReservations, inventoryBacking, null, null, clock);
+            CreditReservationCommands creditReservations, InventoryBackingCommands inventoryBacking, Clock clock,
+            CanonicalOutboxPort canonicalOutbox) {
+        this(jdbc, sellableSkus, customers, creditReservations, inventoryBacking, null, null, clock, canonicalOutbox);
     }
 
     @Override
@@ -98,7 +102,7 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
         UUID activeCommitmentId = commitmentId;
         List<CommitmentLine> lines = jdbc.query("select l.id,l.sku_id,l.sku_code_snapshot,l.catalog_item_id,l.quantity,l.unit,l.unit_price_amount,l.unit_price_currency "
                         + "from sales.purchase_request_line l join sales.purchase_request r on r.id=l.purchase_request_id "
-                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by l.created_at,l.id",
+                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? and l.superseded_at is null order by l.created_at,l.id",
                 (rs, n) -> new CommitmentLine(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getString(3),
                         rs.getString(4), rs.getBigDecimal(5), rs.getString(6), rs.getBigDecimal(7), rs.getString(8)),
                 tenantId, workspaceId, purchaseRequestId);
@@ -321,7 +325,7 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
         }
         jdbc.update("insert into sales.sales_order_event(id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,to_status,reason,occurred_at) values (?,?,?,?,?,'DIRECT_ORDER_CONFIRMED','CONFIRMED','Direct Order',?)",
                 UUID.randomUUID(), pending.salesOrderId(), tenant, workspace, actor, Timestamp.from(now));
-        CanonicalOutbox.append(jdbc, "SALES_ORDER_CONFIRMED", "SalesOrder", pending.salesOrderId(), tenant, workspace,
+        canonicalOutbox.append("SALES_ORDER_CONFIRMED", "SalesOrder", pending.salesOrderId(), tenant, workspace,
                 now, "direct-order-" + pending.salesOrderId(), null, "1.0", "confirmed", Map.of("salesOrderId", pending.salesOrderId(), "salesOrderVersion", 1, "originType", "DIRECT_ORDER"));
         return new DirectOrderResult(pending.commitmentId(), pending.salesOrderId(), pending.orderNumber(), 1);
     }
@@ -348,7 +352,7 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
 
     private AmountRow amount(UUID purchaseRequestId) {
         AmountRow amount = jdbc.query("select coalesce(sum(quantity * unit_price_amount),0),max(unit_price_currency) "
-                        + "from sales.purchase_request_line where purchase_request_id=?",
+                        + "from sales.purchase_request_line where purchase_request_id=? and superseded_at is null",
                 (rs, n) -> new AmountRow(rs.getBigDecimal(1), rs.getString(2)), purchaseRequestId).stream()
                 .findFirst().orElse(new AmountRow(java.math.BigDecimal.ZERO, null));
         if (amount.amount().signum() <= 0 || amount.currency() == null) throw new IllegalStateException("Credit commitment requires priced lines");

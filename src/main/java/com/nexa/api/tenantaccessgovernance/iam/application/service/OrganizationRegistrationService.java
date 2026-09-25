@@ -20,7 +20,7 @@ import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.Passwo
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.PasswordResetRequest;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.PasswordResetRequestId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.passwordreset.PasswordResetTokenHash;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.FounderIdentity;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.OrganizationRegistration;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.OrganizationRegistrationId;

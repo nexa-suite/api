@@ -1,3 +1,4 @@
 package com.nexa.api.tenantaccessgovernance.iam.application.port.out;
 
-public interface PasswordVerificationPort extends com.nexa.api.shared.application.port.out.PasswordVerificationPort { }
+/** Stable IAM application port name retained for existing adapters. */
+public interface PasswordVerificationPort extends PasswordVerificationPortContract { }

@@ -13,7 +13,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessio
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AccessPolicyPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AuthenticationTokenPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SessionPort;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 
 import java.time.Clock;
 import java.time.Instant;

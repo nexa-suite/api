@@ -9,10 +9,15 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitat
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.InvitationTokenHash;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.OrganizationInvitation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.shared.context.RlsRequestScope;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Timestamp;
 import java.nio.charset.StandardCharsets;
@@ -23,14 +28,27 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Repository
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePort {
+	private static final AtomicInteger NEXT_EXPIRY_SCOPE = new AtomicInteger();
 	private final JdbcTemplate jdbc;
+	private final TransactionTemplate workspaceScanTransaction;
 
-	public JdbcInvitationPersistenceAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+	public JdbcInvitationPersistenceAdapter(JdbcTemplate jdbc) {
+		this.jdbc = jdbc;
+		this.workspaceScanTransaction = null;
+	}
+
+	@Autowired
+	public JdbcInvitationPersistenceAdapter(JdbcTemplate jdbc, PlatformTransactionManager transactionManager) {
+		this.jdbc = jdbc;
+		this.workspaceScanTransaction = new TransactionTemplate(transactionManager);
+		this.workspaceScanTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+	}
 
 	@Override
 	public Optional<InvitationSnapshot> find(String tenantId, String workspaceId, UUID invitationId) {
@@ -91,13 +109,54 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 	@Override
 	public int expirePending(Instant now, int batchSize) {
 		int safeBatch = Math.max(1, Math.min(1000, batchSize));
-		return jdbc.update("with expired as (select id from tenant_management.organization_invitation where status='PENDING' and expires_at<=? order by expires_at,id for update skip locked limit ?) update tenant_management.organization_invitation i set status='EXPIRED',updated_at=?,version=version+1 from expired where i.id=expired.id and i.status='PENDING'",
-				Timestamp.from(now), safeBatch, Timestamp.from(now));
+		if (workspaceScanTransaction == null) {
+			throw new IllegalStateException("Workspace enumeration requires a transaction manager");
+		}
+		RlsRequestScope.Scope previous = RlsRequestScope.current();
+		try {
+			RlsRequestScope.clear();
+			List<WorkspaceScope> scopes;
+			RlsRequestScope.enableCrossScopeWorkspaceScan();
+			try {
+				scopes = workspaceScanTransaction.execute(status -> {
+					jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
+					return jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
+							(rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+				});
+			} finally {
+				RlsRequestScope.clearCrossScopeWorkspaceScan();
+			}
+			if (scopes == null || scopes.isEmpty()) return 0;
+			int start = Math.floorMod(NEXT_EXPIRY_SCOPE.getAndIncrement(), scopes.size());
+			int changed = 0;
+			for (int offset = 0; offset < scopes.size() && changed < safeBatch; offset++) {
+				int scopesRemaining = scopes.size() - offset;
+				int perScopeLimit = Math.max(1, (safeBatch - changed + scopesRemaining - 1) / scopesRemaining);
+				WorkspaceScope scope = scopes.get((start + offset) % scopes.size());
+				RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
+				try {
+					Integer scopeChanged = workspaceScanTransaction.execute(status -> jdbc.update("with expired as (select id from tenant_management.organization_invitation where tenant_id=? and workspace_id=? and status='PENDING' and expires_at<=? order by expires_at,id for update skip locked limit ?) update tenant_management.organization_invitation i set status='EXPIRED',updated_at=?,version=version+1 from expired where i.id=expired.id and i.tenant_id=? and i.workspace_id=? and i.status='PENDING'",
+							scope.tenantId(), scope.workspaceId(), Timestamp.from(now), perScopeLimit, Timestamp.from(now), scope.tenantId(), scope.workspaceId()));
+					changed += scopeChanged == null ? 0 : scopeChanged;
+				} finally {
+					RlsRequestScope.clear();
+				}
+			}
+			return changed;
+		} finally {
+			if (previous == null) RlsRequestScope.clear();
+			else RlsRequestScope.set(previous.tenantId(), previous.workspaceId());
+		}
 	}
 
 	@Override
 	public Optional<InvitationSnapshot> findForUpdateByTokenHash(String tokenHash) {
-		return querySnapshot("select id,tenant_id,workspace_id,email,display_name,token_hash,status,expires_at,created_by_membership_id,version,created_at from tenant_management.organization_invitation where token_hash=? for update", tokenHash);
+		jdbc.queryForObject("select set_config('app.invitation_accept_token_hash', ?, true)", String.class, tokenHash);
+		Optional<InvitationSnapshot> snapshot = querySnapshot("select id,tenant_id,workspace_id,email,display_name,token_hash,status,expires_at,created_by_membership_id,version,created_at from tenant_management.organization_invitation where token_hash=? and status='PENDING' for update", tokenHash);
+		snapshot.ifPresent(value -> jdbc.queryForObject(
+				"select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true)",
+				String.class, value.invitation().tenantId().toString(), value.invitation().workspaceId().toString()));
+		return snapshot;
 	}
 
 	@Override
@@ -167,5 +226,6 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 		String base = value.length() > 53 ? value.substring(0, 53) : value;
 		return base + "_" + suffix;
 	}
+	private record WorkspaceScope(UUID tenantId, UUID workspaceId) { }
 	private static UUID uuid(String value) { return UUID.fromString(value); }
 }

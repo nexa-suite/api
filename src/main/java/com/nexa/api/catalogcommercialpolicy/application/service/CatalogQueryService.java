@@ -67,10 +67,43 @@ public final class CatalogQueryService implements ListCatalogItemsUseCase, GetCa
 	}
 
 	@Override
+	public java.util.Optional<CatalogItemSnapshot> findActive(String catalogItemId, java.util.UUID tenantId,
+			java.util.UUID workspaceId, java.util.UUID customerAccountId) {
+		return findActive(catalogItemId, tenantId, workspaceId, customerAccountId, java.math.BigDecimal.ONE);
+	}
+
+	@Override
+	public java.util.Optional<CatalogItemSnapshot> findActive(String catalogItemId, java.util.UUID tenantId,
+			java.util.UUID workspaceId, java.util.UUID customerAccountId, java.math.BigDecimal quantity) {
+		CatalogScope scope = new CatalogScope(tenantId, workspaceId, false, customerAccountId);
+		CatalogItemDetail detail = queryPort.findByCatalogItemId(scope, new CatalogItemId(catalogItemId), quantity).orElse(null);
+		return detail == null ? java.util.Optional.empty() : java.util.Optional.of(new CatalogItemSnapshot(
+				detail.catalogItemId(), detail.itemName(), detail.presentation(), detail.unitPriceAmount(), detail.unitPriceCurrency()));
+	}
+
+	@Override
 	public java.util.List<CatalogItemSnapshot> findActive(java.util.List<String> catalogItemIds, java.util.UUID tenantId, java.util.UUID workspaceId) {
 		if (catalogItemIds == null || catalogItemIds.isEmpty()) return java.util.List.of();
 		return queryPort.findByCatalogItemIds(new com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope(tenantId, workspaceId),
 				catalogItemIds.stream().filter(id -> id != null && !id.isBlank()).distinct().map(CatalogItemId::new).toList()).stream()
+				.map(detail -> new CatalogItemSnapshot(detail.catalogItemId(), detail.itemName(), detail.presentation(), detail.unitPriceAmount(), detail.unitPriceCurrency()))
+				.toList();
+	}
+
+	@Override
+	public java.util.List<CatalogItemSnapshot> findActive(java.util.List<String> catalogItemIds, java.util.UUID tenantId,
+			java.util.UUID workspaceId, java.util.UUID customerAccountId) {
+		return findActive(catalogItemIds, tenantId, workspaceId, customerAccountId, java.util.Map.of());
+	}
+
+	@Override
+	public java.util.List<CatalogItemSnapshot> findActive(java.util.List<String> catalogItemIds, java.util.UUID tenantId,
+			java.util.UUID workspaceId, java.util.UUID customerAccountId,
+			java.util.Map<String, java.math.BigDecimal> quantitiesByCatalogItemId) {
+		if (catalogItemIds == null || catalogItemIds.isEmpty()) return java.util.List.of();
+		return queryPort.findByCatalogItemIds(new CatalogScope(tenantId, workspaceId, false, customerAccountId),
+				catalogItemIds.stream().filter(id -> id != null && !id.isBlank()).distinct().map(CatalogItemId::new).toList(),
+				quantitiesByCatalogItemId).stream()
 				.map(detail -> new CatalogItemSnapshot(detail.catalogItemId(), detail.itemName(), detail.presentation(), detail.unitPriceAmount(), detail.unitPriceCurrency()))
 				.toList();
 	}

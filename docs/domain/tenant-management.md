@@ -1,5 +1,11 @@
 # Tenant Management Domain
 
+> Historical foundation note: this document records API-era domain analysis,
+> not current Product, Domain or implementation authority. See the [Nexa
+> Blueprint](https://github.com/nexa-suite/blueprint) for accepted meaning and
+> the [current API module map](../architecture/bounded-context-module-map.md)
+> for implementation ownership.
+
 ## Purpose
 
 Tenant Management owns the identity and access scope that ties a user to a tenant and workspace. It does not authenticate credentials, parse JWTs, persist memberships or expose REST endpoints in this foundation.

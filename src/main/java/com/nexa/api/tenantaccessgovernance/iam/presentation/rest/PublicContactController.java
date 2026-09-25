@@ -1,8 +1,8 @@
 package com.nexa.api.tenantaccessgovernance.iam.presentation.rest;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SubmitPublicContactRequestCommand;
-import com.nexa.api.shared.infrastructure.security.TrustedClientAddressResolver;
-import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
+import com.nexa.api.shared.context.ClientAddressResolver;
+import com.nexa.api.shared.context.RequestMetadata;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,9 +27,9 @@ import java.util.UUID;
 @Tag(name = "Public contact")
 public final class PublicContactController {
     private final SubmitPublicContactRequestCommand submit;
-    private final TrustedClientAddressResolver clientAddressResolver;
+    private final ClientAddressResolver clientAddressResolver;
 
-    public PublicContactController(SubmitPublicContactRequestCommand submit, TrustedClientAddressResolver clientAddressResolver) {
+    public PublicContactController(SubmitPublicContactRequestCommand submit, ClientAddressResolver clientAddressResolver) {
         this.submit = submit;
         this.clientAddressResolver = clientAddressResolver;
     }
@@ -38,13 +38,14 @@ public final class PublicContactController {
     @Operation(operationId = "submitPublicContactRequest", summary = "Submit a public contact or demo request")
     public ResponseEntity<ReceiptResponse> submit(HttpServletRequest httpRequest, @Valid @RequestBody Request request) {
         var receipt = submit.submit(new SubmitPublicContactRequestCommand.Command(request.requestType(), request.name(),
-                        request.email(), request.companyName(), request.message()), clientAddressResolver.resolve(httpRequest),
+                        request.email(), request.companyName(), request.message()),
+                clientAddressResolver.resolve(httpRequest.getRemoteAddr(), httpRequest.getHeader("X-Forwarded-For")),
                 correlation(httpRequest), trace(httpRequest));
         return ResponseEntity.accepted().body(new ReceiptResponse(receipt.requestId(), receipt.requestType(), receipt.status(), receipt.receivedAt()));
     }
 
     private static String correlation(HttpServletRequest request) {
-        Object value = request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME);
+        Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE);
         return value == null ? "unknown" : value.toString();
     }
 

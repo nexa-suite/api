@@ -24,5 +24,9 @@ public final class IamSecurityRetentionJob {
         jdbc.update("delete from iam.password_reset_throttle_bucket where ctid in (select ctid from iam.password_reset_throttle_bucket where updated_at < current_timestamp - interval '1 day' order by updated_at asc limit ?)", batchSize);
         jdbc.update("update iam.security_notification_outbox set payload_ciphertext='',version=version+1 where id in (select id from iam.security_notification_outbox where status in ('SENT','DEAD_LETTER') and created_at < current_timestamp - (? * interval '1 day') order by created_at asc limit ?)", retentionDays, batchSize);
         jdbc.update("delete from iam.password_reset_request where id in (select id from iam.password_reset_request where status in ('CONSUMED','EXPIRED','REVOKED') and created_at < current_timestamp - (? * interval '1 day') order by created_at asc limit ?)", retentionDays, batchSize);
+        jdbc.update("delete from iam.access_context_selection_ticket where ticket_hash in "
+                + "(select ticket_hash from iam.access_context_selection_ticket "
+                + "where coalesce(consumed_at, revoked_at, expires_at) < current_timestamp - (? * interval '1 day') "
+                + "order by coalesce(consumed_at, revoked_at, expires_at) asc limit ?)", retentionDays, batchSize);
     }
 }

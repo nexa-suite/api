@@ -119,6 +119,10 @@ public class SalesOrderService implements SalesOrderUseCase {
 		SalesOrder aggregate = aggregatePersistence.findForUpdate(scope(context), workspace(context), id)
 				.orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("sales-order"));
 		if (aggregate.version() != expectedVersion) throw new com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException();
+		if ("confirm".equals(normalized) && aggregate.status() == com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderStatus.CONFIRMED) {
+			return persistence.find(scope(context), workspace(context), buyerAccount(context), id)
+					.orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("sales-order"));
+		}
 		Instant at = java.time.Instant.ofEpochMilli(now());
 		switch (normalized) {
 			case "confirm" -> aggregate.confirm(at);

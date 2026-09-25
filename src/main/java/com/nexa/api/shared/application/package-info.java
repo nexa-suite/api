@@ -1,4 +1,2 @@
-/**
- * Cross-cutting concepts shared by bounded contexts. Layer responsibility: application.
- */
+/** Framework-neutral technical contracts reused across business modules. */
 package com.nexa.api.shared.application;

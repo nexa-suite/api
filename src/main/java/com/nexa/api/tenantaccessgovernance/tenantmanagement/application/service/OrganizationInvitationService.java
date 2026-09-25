@@ -1,12 +1,12 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service;
 
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
-import com.nexa.api.shared.application.port.out.OpaqueSecurityTokenPort;
-import com.nexa.api.shared.application.port.out.PasswordHashPort;
-import com.nexa.api.shared.application.port.out.PasswordVerificationPort;
-import com.nexa.api.shared.application.port.out.SecurityNotificationOutboxPort;
-import com.nexa.api.shared.domain.model.password.PasswordPolicy;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordHashPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordVerificationPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityNotificationOutboxPort;
+import com.nexa.api.tenantaccessgovernance.iam.domain.model.password.PasswordPolicyRules;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.InvitationModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.InvitationUseCase;
@@ -160,7 +160,7 @@ public class OrganizationInvitationService implements InvitationUseCase {
 		OrganizationInvitation invitation = snapshot.invitation();
 		if (!invitation.hasTokenHash(presentedHash)) throw new InvitationInvalidException();
 		var settings = configuration.findTenantSecuritySettings(invitation.tenantId().toString()).orElseThrow(InvitationInvalidException::new);
-		if (!PasswordPolicy.isValid(password, settings.passwordMinLength())) throw new InvitationInvalidException();
+		if (!PasswordPolicyRules.isValid(password, settings.passwordMinLength())) throw new InvitationInvalidException();
 		try {
 			invitation.accept(clock);
 		} catch (TenantManagementInvariantViolation exception) {

@@ -13,6 +13,26 @@ public interface CatalogItemSnapshotLookupPort {
 	default Optional<CatalogItemSnapshot> findActive(String catalogItemId, UUID tenantId, UUID workspaceId) {
 		return findActive(catalogItemId);
 	}
+	default Optional<CatalogItemSnapshot> findActive(String catalogItemId, UUID tenantId, UUID workspaceId,
+			String customerAccountId) {
+		return findActive(catalogItemId, tenantId, workspaceId);
+	}
+	default Optional<CatalogItemSnapshot> findActive(String catalogItemId, UUID tenantId, UUID workspaceId,
+			String customerAccountId, java.math.BigDecimal quantity) {
+		return findActive(catalogItemId, tenantId, workspaceId, customerAccountId);
+	}
+	default List<CatalogItemSnapshot> findActive(List<String> catalogItemIds, UUID tenantId, UUID workspaceId,
+			String customerAccountId) {
+		return findActive(catalogItemIds, tenantId, workspaceId);
+	}
+	default List<CatalogItemSnapshot> findActive(List<String> catalogItemIds, UUID tenantId, UUID workspaceId,
+			String customerAccountId, Map<String, java.math.BigDecimal> quantitiesByCatalogItemId) {
+		return catalogItemIds == null ? List.of() : catalogItemIds.stream()
+				.filter(id -> id != null && !id.isBlank()).distinct()
+				.map(id -> findActive(id, tenantId, workspaceId, customerAccountId,
+						quantitiesByCatalogItemId == null ? null : quantitiesByCatalogItemId.get(id)).orElse(null))
+				.filter(java.util.Objects::nonNull).toList();
+	}
 
 	default List<CatalogItemSnapshot> findActive(List<String> catalogItemIds, UUID tenantId, UUID workspaceId) {
 		return catalogItemIds == null ? List.of() : catalogItemIds.stream()
@@ -26,6 +46,22 @@ public interface CatalogItemSnapshotLookupPort {
 	default Map<String, CatalogItemSnapshot> findActiveById(List<String> catalogItemIds, UUID tenantId, UUID workspaceId) {
 		Map<String, CatalogItemSnapshot> result = new LinkedHashMap<>();
 		for (CatalogItemSnapshot snapshot : findActive(catalogItemIds, tenantId, workspaceId)) {
+			result.put(snapshot.catalogItemId(), snapshot);
+		}
+		return Map.copyOf(result);
+	}
+
+	default Map<String, CatalogItemSnapshot> findActiveById(List<String> catalogItemIds, UUID tenantId,
+			UUID workspaceId, String customerAccountId) {
+		return findActiveById(catalogItemIds, tenantId, workspaceId, customerAccountId, Map.of());
+	}
+
+	default Map<String, CatalogItemSnapshot> findActiveById(List<String> catalogItemIds, UUID tenantId,
+			UUID workspaceId, String customerAccountId,
+			Map<String, java.math.BigDecimal> quantitiesByCatalogItemId) {
+		Map<String, CatalogItemSnapshot> result = new LinkedHashMap<>();
+		for (CatalogItemSnapshot snapshot : findActive(catalogItemIds, tenantId, workspaceId, customerAccountId,
+				quantitiesByCatalogItemId)) {
 			result.put(snapshot.catalogItemId(), snapshot);
 		}
 		return Map.copyOf(result);

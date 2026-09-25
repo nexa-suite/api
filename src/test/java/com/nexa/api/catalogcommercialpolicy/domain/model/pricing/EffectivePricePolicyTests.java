@@ -77,7 +77,7 @@ class EffectivePricePolicyTests {
     }
 
     @Test
-    void comparesExclusiveAgainstCombinedStackableAndUsesFixedOrder() {
+    void selectsOneBestEligiblePromotionRegardlessOfStackingDeclaration() {
         PromotionCandidate exclusive = candidate("41", Promotion.DiscountType.PERCENTAGE, "30", null,
                 Promotion.StackingPolicy.EXCLUSIVE, "EXCLUSIVE", 0, BigDecimal.ONE, PromotionStatus.ACTIVE);
         PromotionCandidate fixed = candidate("42", Promotion.DiscountType.FIXED_AMOUNT, "15", "PEN",
@@ -88,10 +88,10 @@ class EffectivePricePolicyTests {
         EffectivePricePolicy.Result result = new EffectivePricePolicy().calculate(new BigDecimal("100"), "PEN", BigDecimal.ONE,
                 List.of(exclusive, fixed, percentage), NOW);
 
-        assertThat(result.effectivePrice()).isEqualByComparingTo("65");
-        assertThat(result.discountAmount()).isEqualByComparingTo("35");
+        assertThat(result.effectivePrice()).isEqualByComparingTo("70");
+        assertThat(result.discountAmount()).isEqualByComparingTo("30");
         assertThat(result.appliedPromotions()).extracting(EffectivePricePolicy.AppliedPromotion::id)
-                .containsExactly(percentage.id(), fixed.id());
+                .containsExactly(exclusive.id());
     }
 
     @Test

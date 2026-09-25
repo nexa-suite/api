@@ -2,6 +2,7 @@ package com.nexa.api.salescommitment.domain.model.salesorder;
 
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
+import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
@@ -45,7 +46,8 @@ public final class ManualSalesOrder {
         if (snapshot.payment().amount().compareTo(total) != 0) {
             throw new SalesOrderInvariantViolation("Manual sales order total does not match payment snapshot");
         }
-        this.status = SalesOrderStatus.PENDING;
+        this.status = snapshot.payment().option() == PaymentOption.PREPAID
+                ? SalesOrderStatus.PENDING : SalesOrderStatus.CONFIRMED;
         this.version = 0;
     }
 

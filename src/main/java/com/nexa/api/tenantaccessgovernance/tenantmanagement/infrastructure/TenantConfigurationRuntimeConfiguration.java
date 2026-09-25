@@ -1,9 +1,9 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure;
 
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.TenantConfigurationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.InvitationUseCase;
-import com.nexa.api.shared.application.port.out.PasswordVerificationPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordVerificationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.InvitationPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.OrganizationAdministrationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
@@ -29,9 +29,9 @@ public class TenantConfigurationRuntimeConfiguration {
 
 	@Bean
 	InvitationUseCase invitationUseCase(InvitationPersistencePort invitations, TenantConfigurationPort configuration,
-			com.nexa.api.shared.application.port.out.OpaqueSecurityTokenPort tokens,
-			com.nexa.api.shared.application.port.out.PasswordHashPort hasher,
-			com.nexa.api.shared.application.port.out.SecurityNotificationOutboxPort outbox,
+			com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort tokens,
+			com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordHashPort hasher,
+			com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityNotificationOutboxPort outbox,
 			SecurityAuditPort audit, Clock clock,
 				PasswordVerificationPort passwordVerifier,
 			PlatformTransactionManager transactionManager) {

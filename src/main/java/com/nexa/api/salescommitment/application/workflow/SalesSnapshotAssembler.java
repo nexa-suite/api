@@ -74,7 +74,7 @@ public final class SalesSnapshotAssembler {
                                String warehouseId, String routeProvider, PaymentOption paymentOption,
                                List<com.nexa.api.salescommitment.application.buyerrequest.model.CreateBuyerRequestCommand.Line> requestedLines) {
         String accountId = resolveAccountIdForBuyer(context, clientAccountId);
-        List<PurchaseRequestLine> lines = buyerLines(requestedLines, context);
+        List<PurchaseRequestLine> lines = buyerLines(requestedLines, context, accountId);
         BigDecimal total = total(lines);
         BaseAssembly base = base(context, accountId, addressId, manualAddress, requestedDate, deliveryNotes,
                 warehouseId, routeProvider, paymentOption, total, lines.isEmpty() ? "PEN" : lines.getFirst().catalogItem().price().currency());
@@ -88,7 +88,7 @@ public final class SalesSnapshotAssembler {
                                  com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority priority,
                                  String currency, List<com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line> requestedLines) {
         String accountId = resolveAccountIdForSales(context, clientAccountId);
-        List<com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderLine> lines = manualLines(requestedLines, currency, context);
+        List<com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderLine> lines = manualLines(requestedLines, currency, context, accountId);
         BigDecimal total = lines.stream().map(com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderLine::lineSubtotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BaseAssembly base = base(context, accountId, addressId, manualAddress, requestedDate, deliveryNotes,
@@ -161,12 +161,16 @@ public final class SalesSnapshotAssembler {
     }
 
     private List<PurchaseRequestLine> buyerLines(List<com.nexa.api.salescommitment.application.buyerrequest.model.CreateBuyerRequestCommand.Line> requested,
-                                                 CurrentAccessContext context) {
+                                                 CurrentAccessContext context, String customerAccountId) {
         List<PurchaseRequestLine> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         List<com.nexa.api.salescommitment.application.buyerrequest.model.CreateBuyerRequestCommand.Line> safeLines = requested == null ? List.of() : requested;
+        Map<String, BigDecimal> quantities = safeLines.stream().filter(line -> line != null && line.catalogItemId() != null)
+                .collect(java.util.stream.Collectors.toMap(line -> line.catalogItemId().trim(),
+                        com.nexa.api.salescommitment.application.buyerrequest.model.CreateBuyerRequestCommand.Line::quantity,
+                        (left, right) -> left));
         Map<String, CatalogItemSnapshot> snapshots = catalog.findActiveById(safeLines.stream().map(line -> line == null ? null : line.catalogItemId()).toList(),
-                context.tenantId().value(), context.workspaceId().value());
+                context.tenantId().value(), context.workspaceId().value(), customerAccountId, quantities);
         for (var line : safeLines) {
             if (line == null || line.catalogItemId() == null || !seen.add(line.catalogItemId().trim())) {
                 throw new SalesInvariantViolation("Buyer request line is duplicated or invalid");
@@ -183,19 +187,30 @@ public final class SalesSnapshotAssembler {
 
     private List<com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderLine> manualLines(
             List<com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line> requested,
-            String requestedCurrency, CurrentAccessContext context) {
+            String requestedCurrency, CurrentAccessContext context, String customerAccountId) {
         List<com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderLine> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         String currency = normalizeCurrency(requestedCurrency);
         List<com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line> safeLines = requested == null ? List.of() : requested;
+        Map<UUID, BigDecimal> skuQuantities = safeLines.stream().filter(line -> line != null && line.skuId() != null)
+                .collect(java.util.stream.Collectors.toMap(
+                        com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line::skuId,
+                        com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line::quantity,
+                        (left, right) -> left));
         Map<UUID, com.nexa.api.salescommitment.application.purchaserequest.port.SellableSkuSnapshotLookupPort.Snapshot> skuSnapshots = sellableSkus == null
                 ? Map.of()
-                : sellableSkus.findActive(safeLines.stream().map(line -> line == null ? null : line.skuId()).toList(),
-                        context.tenantId().value(), context.workspaceId().value());
+                : sellableSkus.findActive(skuQuantities, context.tenantId().value(), context.workspaceId().value(),
+                        UUID.fromString(customerAccountId));
+        Map<String, BigDecimal> catalogQuantities = safeLines.stream()
+                .filter(line -> line != null && line.skuId() == null && line.catalogItemId() != null)
+                .collect(java.util.stream.Collectors.toMap(
+                        com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line::catalogItemId,
+                        com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line::quantity,
+                        (left, right) -> left));
         Map<String, CatalogItemSnapshot> catalogSnapshots = catalog.findActiveById(safeLines.stream()
                         .filter(line -> line != null && line.skuId() == null)
                         .map(com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand.Line::catalogItemId).toList(),
-                context.tenantId().value(), context.workspaceId().value());
+                context.tenantId().value(), context.workspaceId().value(), customerAccountId, catalogQuantities);
         for (var line : safeLines) {
             String identity = line == null ? null : line.skuId() != null ? "SKU:" + line.skuId() : line.catalogItemId();
             if (line == null || (line.skuId() == null && (line.catalogItemId() == null || line.catalogItemId().isBlank())) || !seen.add(identity.trim())) {

@@ -1,6 +1,6 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOutboxPort;
@@ -19,13 +19,17 @@ import static com.nexa.api.inventoryavailability.infrastructure.persistence.Ware
 @Profile("!test")
 public class WarehouseOutboxPersistenceAdapter implements WarehouseOutboxPort {
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
 
-    public WarehouseOutboxPersistenceAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public WarehouseOutboxPersistenceAdapter(JdbcTemplate jdbc, CanonicalOutboxPort canonicalOutbox) {
+        this.jdbc = jdbc;
+        this.canonicalOutbox = canonicalOutbox;
+    }
 
     @Override
     public void fulfillmentReady(CurrentAccessContext context, WarehouseOperationsService.ReservationDetail reservation,
                                  String correlationId) {
-        CanonicalOutbox.append(jdbc, "FULFILLMENT_READY", "InventoryReservation",
+        canonicalOutbox.append("FULFILLMENT_READY", "InventoryReservation",
                 java.util.UUID.fromString(reservation.id()), tenant(context), workspace(context), Instant.now(),
                 correlationId == null ? "reservation-" + reservation.id() : correlationId, null, "1.0",
                 Map.of("reservationId", java.util.UUID.fromString(reservation.id()),

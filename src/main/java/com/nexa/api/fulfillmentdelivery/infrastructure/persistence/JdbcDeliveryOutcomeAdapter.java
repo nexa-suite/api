@@ -17,7 +17,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort.TransitionRequest;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 import com.nexa.api.inventoryavailability.application.publicapi.ColdChainPolicyQuery;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -42,12 +42,15 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final ColdChainPolicyQuery coldChain;
     private final ObjectMapper mapper;
     private final Clock clock;
 
-    public JdbcDeliveryOutcomeAdapter(JdbcTemplate jdbc, ColdChainPolicyQuery coldChain, ObjectMapper mapper, Clock clock) {
+    public JdbcDeliveryOutcomeAdapter(JdbcTemplate jdbc, ColdChainPolicyQuery coldChain, ObjectMapper mapper,
+                                      Clock clock, CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
+        this.canonicalOutbox = canonicalOutbox;
         this.coldChain = coldChain;
         this.mapper = mapper;
         this.clock = Objects.requireNonNull(clock, "Clock is required");
@@ -205,7 +208,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         insertDeliveryEvent(request.tenantId(), request.workspaceId(), request.deliveryId(), "DELIVERY_ATTEMPT_RECORDED",
                 request.actorMembershipId(), bounded(request.failureReason()), attemptedAt);
         if ("DELIVERED".equals(targetDeliveryStatus)) {
-            CanonicalOutbox.append(jdbc, "DeliveryCompleted.v1", "Delivery", request.deliveryId(), request.tenantId(),
+            canonicalOutbox.append("DeliveryCompleted.v1", "Delivery", request.deliveryId(), request.tenantId(),
                     request.workspaceId(), attemptedAt, request.idempotencyKey(), null, "1.0", request.idempotencyKey(),
                     Map.of("deliveryId", request.deliveryId(), "fulfillmentId", fulfillment.id(), "attemptId", attemptId));
         }
@@ -385,7 +388,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                         UUID.randomUUID(), request.tenantId(), request.workspaceId(), continuationId, line.catalogItemId(),
                         line.quantity(), line.unit(), line.fulfillmentLineId(), line.skuId(), Timestamp.from(now));
             }
-            CanonicalOutbox.append(jdbc, "ContinuationDeliveryCreated.v1", "ContinuationDelivery", continuationId,
+            canonicalOutbox.append("ContinuationDeliveryCreated.v1", "ContinuationDelivery", continuationId,
                     request.tenantId(), request.workspaceId(), now, request.idempotencyKey(), null, "1.0",
                     request.idempotencyKey(), Map.of("continuationDeliveryId", continuationId, "sourceDeliveryId", request.deliveryId(),
                             "remainingLines", remaining));

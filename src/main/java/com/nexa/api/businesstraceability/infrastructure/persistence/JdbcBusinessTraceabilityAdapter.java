@@ -1,7 +1,7 @@
 package com.nexa.api.businesstraceability.infrastructure.persistence;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,10 +23,12 @@ import java.util.UUID;
 public class JdbcBusinessTraceabilityAdapter implements BusinessTraceabilityCommands {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
+    private final CanonicalOutboxPort canonicalOutbox;
 
-    public JdbcBusinessTraceabilityAdapter(JdbcTemplate jdbc, ObjectMapper mapper) {
+    public JdbcBusinessTraceabilityAdapter(JdbcTemplate jdbc, ObjectMapper mapper, CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
         this.mapper = mapper;
+        this.canonicalOutbox = canonicalOutbox;
     }
 
     @Override
@@ -45,7 +47,7 @@ public class JdbcBusinessTraceabilityAdapter implements BusinessTraceabilityComm
         } catch (Exception exception) {
             throw new IllegalStateException("Business traceability could not be persisted", exception);
         }
-        CanonicalOutbox.append(jdbc, "BusinessFactTraced.v1", "BusinessTraceabilityRecord", auditId,
+        canonicalOutbox.append("BusinessFactTraced.v1", "BusinessTraceabilityRecord", auditId,
                 request.tenantId(), request.workspaceId(), request.occurredAt(), request.correlationId(),
                 null, "1.0", request.occurrenceKey(), Map.of(
                         "traceId", auditId,

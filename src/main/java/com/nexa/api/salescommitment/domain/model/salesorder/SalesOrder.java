@@ -49,7 +49,7 @@ public final class SalesOrder {
 		this.lines = List.copyOf(snapshot.lines()); this.currency = snapshot.currency(); this.totalSnapshot = snapshot.totalSnapshot();
 		this.priority = snapshot.priority(); this.requestedDeliveryDate = snapshot.requestedDeliveryDate();
 		this.deliverySnapshot = snapshot.deliverySnapshot(); this.paymentOption = snapshot.paymentOption(); this.notes = snapshot.notes();
-		this.createdAt = Objects.requireNonNull(createdAt); this.status = SalesOrderStatus.PENDING; this.version = 0;
+		this.createdAt = Objects.requireNonNull(createdAt); this.status = SalesOrderStatus.CONFIRMED; this.confirmedAt = createdAt; this.version = 1;
 	}
 
 	public static SalesOrder fromApprovedSnapshot(ApprovedPurchaseRequestSnapshot snapshot, SalesOrderId id,

@@ -2,7 +2,7 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
 import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
+import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
@@ -190,8 +190,20 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     public void expireReservations() {
-        List<WorkspaceScope> scopes = jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
-                (rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+        if (transactionTemplate == null) {
+            throw new IllegalStateException("Workspace enumeration requires a transaction manager");
+        }
+        List<WorkspaceScope> scopes;
+        RlsRequestScope.enableCrossScopeWorkspaceScan();
+        try {
+            scopes = transactionTemplate.execute(status -> {
+                jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
+                return jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
+                        (rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+            });
+        } finally {
+            RlsRequestScope.clearCrossScopeWorkspaceScan();
+        }
         for (WorkspaceScope scope : scopes) {
             RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
             try {

@@ -15,8 +15,8 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RevokeOtherSe
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RevokeOwnSessionCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SubmitOrganizationRegistrationCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.UpdateOwnProfileCommand;
-import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
-import com.nexa.api.shared.infrastructure.security.TrustedClientAddressResolver;
+import com.nexa.api.shared.context.ClientAddressResolver;
+import com.nexa.api.shared.context.RequestMetadata;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -66,14 +66,14 @@ public final class IamSecurityController {
 	private final GetOrganizationRegistrationStatusQuery registrationStatus;
 	private final ActivateOrganizationRegistrationCommand activateRegistration;
 	private final RejectOrganizationRegistrationCommand rejectRegistration;
-	private final TrustedClientAddressResolver clientAddressResolver;
+	private final ClientAddressResolver clientAddressResolver;
 
 	public IamSecurityController(GetOwnProfileQuery profile, UpdateOwnProfileCommand updateProfile,
 			ChangeOwnPasswordCommand changePassword, ListOwnSessionsQuery sessions, RevokeOwnSessionCommand revokeSession,
 			RevokeOtherSessionsCommand revokeOtherSessions, RequestPasswordResetCommand requestReset,
 			ResetPasswordCommand resetPassword, SubmitOrganizationRegistrationCommand submitRegistration,
 			GetOrganizationRegistrationStatusQuery registrationStatus, ActivateOrganizationRegistrationCommand activateRegistration,
-			RejectOrganizationRegistrationCommand rejectRegistration, TrustedClientAddressResolver clientAddressResolver) {
+			RejectOrganizationRegistrationCommand rejectRegistration, ClientAddressResolver clientAddressResolver) {
 		this.profile = profile; this.updateProfile = updateProfile; this.changePassword = changePassword;
 		this.sessions = sessions; this.revokeSession = revokeSession; this.revokeOtherSessions = revokeOtherSessions;
 		this.requestReset = requestReset; this.resetPassword = resetPassword; this.submitRegistration = submitRegistration;
@@ -136,7 +136,9 @@ public final class IamSecurityController {
 	@PostMapping("/auth/password-reset-requests")
 	@Operation(summary = "Request a generic password reset response")
 	public ResetResponse requestReset(HttpServletRequest httpRequest, @Valid @RequestBody ResetRequest request) {
-		return new ResetResponse(requestReset.request(request.email(), request.surface(), clientAddressResolver.resolve(httpRequest), correlation(httpRequest), trace(httpRequest)));
+		return new ResetResponse(requestReset.request(request.email(), request.surface(),
+				clientAddressResolver.resolve(httpRequest.getRemoteAddr(), httpRequest.getHeader("X-Forwarded-For")),
+				correlation(httpRequest), trace(httpRequest)));
 	}
 
 	@PostMapping("/auth/password-resets")
@@ -197,7 +199,7 @@ public final class IamSecurityController {
 		catch (NumberFormatException exception) { throw new IamSecurityException("PROFILE_PRECONDITION_REQUIRED"); }
 	}
 	private static String etag(long version) { return "\"" + version + "\""; }
-	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
+	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
 	private static String trace(HttpServletRequest request) { String value = request.getHeader("X-Trace-ID"); return value == null || value.isBlank() ? correlation(request) : value; }
 	private static ProfileResponse toResponse(IamSecurityModels.Profile value) { return new ProfileResponse(value.userId(), value.email(), value.displayName(), value.phone(), value.preferredLanguage(), value.timezone(), value.version()); }
 	private static SessionItem toResponse(IamSecurityModels.Session value) { return new SessionItem(value.id(), value.surface(), value.createdAt(), value.lastSeenAt(), value.expiresAt(), value.current(), value.deviceLabel(), value.coarseIp()); }

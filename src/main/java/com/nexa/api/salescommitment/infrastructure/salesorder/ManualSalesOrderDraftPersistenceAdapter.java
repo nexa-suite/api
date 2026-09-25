@@ -166,7 +166,8 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                     || (command.skuId() == null && blank(command.catalogItemId()))) {
                 throw new IllegalArgumentException("Manual order SKU line is invalid");
             }
-            SkuRow sku = findSku(context, command).orElseThrow(() -> new IllegalArgumentException("SKU is inactive or has no current price"));
+            SkuRow sku = findSku(context, command, draft.clientAccountId())
+                    .orElseThrow(() -> new IllegalArgumentException("SKU is inactive or has no current price"));
             if (!resolvedIds.add(sku.id())) throw new IllegalArgumentException("Manual order cannot contain duplicate SKU lines");
             BigDecimal available = availability(context, sku.id());
             String availability = available.compareTo(command.quantity()) >= 0
@@ -319,10 +320,13 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                 .map(value -> clientRow(context, value, currency));
     }
 
-    private Optional<SkuRow> findSku(CurrentAccessContext context, ManualSalesOrderDraftModels.LineCommand command) {
+    private Optional<SkuRow> findSku(CurrentAccessContext context, ManualSalesOrderDraftModels.LineCommand command,
+                                     UUID customerAccountId) {
         var reference = command.skuId() != null
-                ? sellableSkus.findActive(tenant(context), workspace(context), command.skuId())
-                : sellableSkus.findActiveByLegacyCatalogItemId(tenant(context), workspace(context), command.catalogItemId().trim());
+                ? sellableSkus.findActive(tenant(context), workspace(context), customerAccountId, command.skuId(),
+                        command.quantity())
+                : sellableSkus.findActiveByLegacyCatalogItemId(tenant(context), workspace(context), customerAccountId,
+                        command.catalogItemId().trim());
         return reference.map(sku -> new SkuRow(sku.skuId(),
                 blank(sku.legacyCatalogItemId()) ? sku.skuCode() : sku.legacyCatalogItemId(),
                 sku.familyId(), sku.familyCode(), sku.familyName(), sku.skuCode(), sku.presentation(),

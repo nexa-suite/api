@@ -1,12 +1,16 @@
 # Nexa canonical bounded-context map
 
-Status: canonical for API v0.16.1.  The `BC-*` identifiers and names below
-match the Blueprint directories exactly.
+Status: API implementation mapping. The `BC-*` identifiers and names below
+follow the canonical Blueprint context map; Java package roots remain AS-IS
+implementation evidence.
 
-Nexa has exactly eleven business bounded contexts.  `bootstrap` and `shared`
-are technical composition modules, not bounded contexts.  Database schema
-names such as `warehouse`, `logistics` and `payments` are legacy physical
-storage names and do not define domain ownership.
+Nexa has exactly eleven business bounded contexts. `edge`, `bootstrap` and
+`shared` are technical modules, not bounded contexts. `edge` owns inbound HTTP,
+security, Problem Details and streaming composition. `bootstrap.runtime` owns
+runtime-wide configuration and worker composition; `bootstrap.local` owns
+local-only bootstrap. `shared` contains framework-neutral technical contracts
+and primitives. Database schema names such as `warehouse`, `logistics` and
+`payments` are physical storage names and do not define domain ownership.
 
 | Canonical context | API module root | Current physical schema(s) | Ownership boundary |
 |---|---|---|---|
@@ -35,8 +39,8 @@ Important boundaries:
 - BC-11 is not Security Audit.  Security events remain in the BC-01 IAM
   security boundary (`iam.security_audit_event`); business facts use the
   BC-11 traceability boundary.
-- `shared` may provide framework/error primitives and transport composition;
-  it must not become a business aggregate owner.
+- `shared` provides named, framework-neutral error, context, event and runtime
+  metrics contracts; it owns no business aggregate or infrastructure adapter.
 
 All v0.16 source changes must name the canonical context in its module root,
 package documentation, public contract and test owner.  Existing HTTP paths,

@@ -3,6 +3,45 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.18.0] - 2026-09-25
+
+Consumer-stable API closure for native access-context selection and the
+accepted cross-client backend contracts.
+
+### Added
+
+- Native identity-first sign-in, bounded access-context discovery and
+  single-use context selection while preserving workspace-scoped Web sign-in.
+- Direct Tenant/Workspace RLS closure through V105 and V107, plus current
+  table inventory and runtime-scope evidence.
+- Warehouse Transfer lifecycle, Buyer Material Change rejection/history and
+  immutable Business Document replacement links.
+- Canonical BC-03 Buyer pricing from Base Price, permitted Price List and
+  Customer Terms, followed by at most one eligible Promotion.
+- Buyer-safe Sellable Availability, resumable Buyer drafts and scoped credit
+  exposure projection.
+
+### Preserved
+
+- BC-06 logistics `TemperatureEvidence` and `TemperatureExcursion`; the
+  experimental BC-05 V106 stock-temperature model is excluded.
+- Existing v0.17.1 API compatibility, legacy Purchase Request cancellation
+  as a deprecated compatibility operation, and separate Web and Operations
+  Mobile acceptance status.
+
+### Database
+
+- Official additive migrations are V101–V105 and V107. V106 is intentionally
+  absent from the supported release line.
+- The supported migration path is the published v0.17.1/V100 database to the
+  v0.18.0 schema.
+
+### Scope
+
+- This API release does not claim complete Nexa System Acceptance, full-system
+  Production Readiness, Buyer Mobile completion or Web/Mobile Product
+  acceptance.
+
 ## Historical lineage
 
 `v0.5.0` and `v0.7.0` were internal preparation states, not published
