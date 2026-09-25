@@ -18,6 +18,28 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         var result = mockMvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         var document = json(result);
         assertThat(document.get("openapi").asText()).isEqualTo("3.1.0");
+        assertThat(document.get("paths").has("/api/v1/authentication/identity-sign-in")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/me/access-contexts")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/me/access-context-selections")).isTrue();
+        assertRequiredHeader(document, "/api/v1/authentication/identity-sign-in", "post", "X-Nexa-Client");
+        assertHeaderRequired(document, "/api/v1/me/access-contexts", "get", "X-Nexa-Client", false);
+        assertRequiredHeader(document, "/api/v1/me/access-contexts", "get", "X-Nexa-Surface");
+        assertHeaderRequired(document, "/api/v1/me/access-context-selections", "post", "X-Nexa-Client", false);
+        assertRequiredHeader(document, "/api/v1/me/access-context-selections", "post", "X-Nexa-Surface");
+        assertHeaderRequired(document, "/api/v1/me/access-contexts", "get", "X-Nexa-Context-Ticket", false);
+        assertHeaderRequired(document, "/api/v1/me/access-context-selections", "post", "X-Nexa-Context-Ticket", false);
+        assertThat(document.at("/components/securitySchemes/contextTicket/type").asText()).isEqualTo("apiKey");
+        assertThat(document.at("/components/securitySchemes/contextTicket/in").asText()).isEqualTo("header");
+        assertThat(document.at("/components/securitySchemes/contextTicket/name").asText()).isEqualTo("X-Nexa-Context-Ticket");
+        assertAuthorityAlternatives(document, "/api/v1/me/access-contexts", "get");
+        assertAuthorityAlternatives(document, "/api/v1/me/access-context-selections", "post");
+        assertThat(document.get("paths").get("/api/v1/me/access-context-selections").get("post")
+                .get("responses").has("409")).isTrue();
+        assertThat(document.at("/components/schemas/IdentitySignInResponse/properties").has("accessContextTicket")).isFalse();
+        assertThat(document.at("/components/schemas/IdentitySignInResponse/properties/outcome/description").asText())
+                .contains("SESSION_ESTABLISHED", "CONTEXT_SELECTION_REQUIRED", "NO_WORK_CONTEXT");
+        assertThat(document.get("paths").get("/api/v1/authentication/identity-sign-in").get("post")
+                .get("responses").get("200").get("headers").has("X-Nexa-Context-Ticket")).isTrue();
         assertThat(document.get("paths").has("/api/v1/warehouses/{warehouseId}/zones/{zoneId}")).isTrue();
         assertThat(document.get("paths").has("/api/v1/warehouses/{id}/profile")).isTrue();
         assertThat(document.get("paths").has("/api/v1/warehouses/{id}/location")).isTrue();
@@ -83,8 +105,11 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
             }
         }));
 
-        var committed = tools.jackson.databind.json.JsonMapper.shared()
-                .readTree(Files.readString(Path.of("docs/openapi/openapi.json")));
+        Path snapshotPath = Path.of("docs/openapi/openapi.json");
+        if (Boolean.getBoolean("nexa.openapi.write-snapshot")) {
+            Files.writeString(snapshotPath, document.toString() + System.lineSeparator());
+        }
+        var committed = tools.jackson.databind.json.JsonMapper.shared().readTree(Files.readString(snapshotPath));
         assertThat(canonical(document)).as("runtime OpenAPI must equal committed canonical snapshot")
                 .isEqualTo(canonical(committed));
     }
@@ -110,12 +135,25 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
 
     private static void assertRequiredHeader(tools.jackson.databind.JsonNode document, String path,
                                              String method, String name) {
+        assertHeaderRequired(document, path, method, name, true);
+    }
+
+    private static void assertHeaderRequired(tools.jackson.databind.JsonNode document, String path,
+                                             String method, String name, boolean expectedRequired) {
         boolean required = false;
         for (tools.jackson.databind.JsonNode parameter : document.get("paths").get(path).get(method).get("parameters")) {
             if (name.equals(parameter.get("name").asText()) && "header".equals(parameter.get("in").asText())) {
                 required = parameter.get("required").asBoolean();
             }
         }
-        assertThat(required).as("%s %s must require header %s in OpenAPI", method, path, name).isTrue();
+        assertThat(required).as("%s %s header %s required=%s in OpenAPI", method, path, name, expectedRequired)
+                .isEqualTo(expectedRequired);
+    }
+
+    private static void assertAuthorityAlternatives(tools.jackson.databind.JsonNode document, String path, String method) {
+        var security = document.get("paths").get(path).get(method).get("security");
+        assertThat(security).hasSize(2);
+        assertThat(security.get(0).has("contextTicket") || security.get(1).has("contextTicket")).isTrue();
+        assertThat(security.get(0).has("bearerAuth") || security.get(1).has("bearerAuth")).isTrue();
     }
 }
