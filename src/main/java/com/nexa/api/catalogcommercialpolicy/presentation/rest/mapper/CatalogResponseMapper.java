@@ -16,28 +16,32 @@ public final class CatalogResponseMapper {
 		return new CatalogItemSummaryResponse(item.catalogItemId(), item.productId(), item.itemName(), item.brandName(),
 				item.categoryName(), item.presentation(), money(item.unitPriceAmount(), item.unitPriceCurrency()),
 				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()), item.status(),
-				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel(), money(item.pricing().basePrice(), item.pricing().currency()),
+				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel(),
+				item.pricing().buyerView() ? null : money(item.pricing().basePrice(), item.pricing().currency()),
 				money(item.pricing().effectivePrice(), item.pricing().currency()), money(item.pricing().discountAmount(), item.pricing().currency()),
 				item.pricing().currency(), item.pricing().appliedPromotions().stream()
 						.map(promotion -> new com.nexa.api.catalogcommercialpolicy.presentation.rest.response.CatalogAppliedPromotionResponse(
 								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf(),
 				item.productFamilyId(), item.productFamilyCode(), item.productFamilyName(), item.sellableSkuId(), item.skuCode(),
 				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf(),
-				item.productVariantCode(), item.productVariantName());
+				item.productVariantCode(), item.productVariantName(), item.sellableAvailability(),
+				item.pricing().buyerView() ? money(item.pricing().effectivePrice(), item.pricing().currency()) : null);
 	}
 
 	public CatalogItemDetailResponse toDetail(CatalogItemDetail item) {
 		return new CatalogItemDetailResponse(item.catalogItemId(), item.productId(), item.itemName(), item.brandName(),
 				item.categoryName(), item.description(), item.presentation(), money(item.unitPriceAmount(), item.unitPriceCurrency()),
 				item.coldChainRequirement(), new CatalogMediaResponse(item.imageUrl(), item.imageFileName()), item.status(),
-				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel(), money(item.pricing().basePrice(), item.pricing().currency()),
+				item.availabilityStatus(), item.nearExpiry(), item.promotionLabel(),
+				item.pricing().buyerView() ? null : money(item.pricing().basePrice(), item.pricing().currency()),
 				money(item.pricing().effectivePrice(), item.pricing().currency()), money(item.pricing().discountAmount(), item.pricing().currency()),
 				item.pricing().currency(), item.pricing().appliedPromotions().stream()
 						.map(promotion -> new com.nexa.api.catalogcommercialpolicy.presentation.rest.response.CatalogAppliedPromotionResponse(
 								promotion.id(), promotion.name(), promotion.discountType(), promotion.discountAmount())).toList(), item.pricing().pricingAsOf(),
 				item.productFamilyId(), item.productFamilyCode(), item.productFamilyName(), item.sellableSkuId(), item.skuCode(),
 				item.unitOfMeasure(), item.packagingType(), item.netWeight(), item.grossWeight(), item.availabilityAsOf(),
-				item.productVariantCode(), item.productVariantName());
+				item.productVariantCode(), item.productVariantName(), item.sellableAvailability(),
+				item.pricing().buyerView() ? money(item.pricing().effectivePrice(), item.pricing().currency()) : null);
 	}
 
 	public CatalogPageResponse toPage(CatalogPage<CatalogItemSummary> page) {

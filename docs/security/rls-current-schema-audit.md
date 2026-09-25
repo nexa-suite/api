@@ -1,54 +1,60 @@
-# Current-schema RLS audit — V100
+# Current-schema RLS audit — V107
 
-Status: technical inventory, **coverage open**. This audit does not approve an
-exception or certify production isolation.
+Status: **inventory and direct-scope closure verified on a fresh PostgreSQL
+18.4 schema**. This evidence classifies the API schema; it does not certify
+production isolation or imply that every application table has its own RLS
+policy.
 
-The [table inventory](./rls-table-inventory-v100.tsv) classifies all 165
-application and Flyway tables produced by a clean PostgreSQL 18.4 migration
-through V100. A separate read-only query against the local V100 database
-matched the table and RLS counts. No existing database was modified for this
-audit.
+The [V107 table inventory](./rls-table-inventory-v107.tsv) classifies every
+one of the 171 application tables produced by the current migration line.
+`ModernPostgresRlsClosureMigrationTests` compares the inventory against live
+PostgreSQL table names, scope columns, and RLS flags after applying the current
+migrations from an empty schema. The result has 135 directly Tenant/Workspace
+scoped tables, all with RLS enabled and forced; there are no unclassified
+tables and no `APPROVED_EXCEPTION` rows.
 
-| Category | Meaning | Tables | With forced RLS | Without own RLS |
-| --- | --- | ---: | ---: | ---: |
-| A | Direct Tenant and Workspace business scope | 122 | 91 | 31 |
-| B | Tenant scope, including Tenant and Workspace identity rows | 8 | 0 | 8 |
-| C | Scope inherited through a parent or Workspace reference | 11 | 0 | 11 |
-| D | Global reference or configuration | 5 | 0 | 5 |
-| E | Global identity, security, or pre-context technical state | 13 | 0 | 13 |
-| F | Cross-scope technical/provider queues | 6 | 0 | 6 |
-| G | Other intentional exclusion | 0 | 0 | 0 |
-| **Total** | | **165** | **91** | **74** |
+| Classification | Tables | RLS enabled and forced |
+| --- | ---: | ---: |
+| `FORCED_RLS_DIRECT_SCOPE` | 135 | 135 |
+| `INHERITED_SCOPE_JUSTIFIED` | 11 | 0 |
+| `GLOBAL_REFERENCE` | 5 | 0 |
+| `GLOBAL_IDENTITY_SECURITY` | 7 | 0 |
+| `TECHNICAL_GLOBAL` | 7 | 0 |
+| `CROSS_SCOPE_WORKER` | 6 | 0 |
+| `APPROVED_EXCEPTION` | 0 | 0 |
+| **Total** | **171** | **135** |
 
-All 91 protected tables have `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL
-SECURITY`, and at least one policy with `USING` and `WITH CHECK`. The local
-`nexa_runtime` login is neither superuser nor `BYPASSRLS`, does not own the
-application tables, and cannot create roles or databases. The `nexa` migrator
-owns all 165 tables and is privileged; it is not an ordinary runtime login.
-The integration suite's `RlsRuntimeDatabaseIsolationIT` exercises the
-restricted role, missing/mismatched scope, and pooled-connection cleanup.
+The fresh-schema test also verifies that every directly scoped table has an
+explicit policy and that each two-key Tenant/Workspace policy has both
+`USING` and `WITH CHECK` predicates. The V103 transfer-history, V104 material
+change, and V107 pricing tables have individual scope evidence in
+[`rls-direct-scope-evidence-v107.tsv`](./rls-direct-scope-evidence-v107.tsv).
+Historical V100 and V102 inventories remain unchanged as point-in-time
+evidence.
 
-## Coverage decisions still needed
+The reviewed pre-context policies remain narrowly capability-bound:
 
-The 31 unprotected category A tables include 19 `catalog_management` tables,
-`audit.event`, two Sales command/sequence tables, and nine Tenant Governance
-tables. Categories B and C add 19 rows with Tenant or inherited Workspace
-scope but no own policy. The inventory names every row. Parent constraints and
-application predicates are useful controls; they do not turn an unprotected
-table into RLS evidence.
+- Tenant and Workspace discovery uses a configured bootstrap slug, requested
+  workspace slug, verified membership, authenticated identity, or an explicit
+  transaction-local worker scan setting.
+- Invitation acceptance reads one pending row by the presented opaque token
+  hash; writes occur only after Tenant/Workspace resolution.
+- Public registration access requires the row ID plus opaque status-token
+  hash, or the authorized operator path naming one registration ID.
+- Global role templates are readable; runtime role-definition writes are
+  limited to Tenant/Workspace-scoped custom roles.
 
-Category F contains `integration` outbox/inbox/change queues,
-`payments.stripe_event_inbox`,
-`business_documents.document_generation_request`, and
-`iam.security_notification_outbox`. Their workers need cross-scope claiming
-followed by explicit scoped effects. Category E includes identity and
-pre-context state; `iam.security_audit_event` also carries Tenant and Workspace
-columns. These technical classifications require explicit Security/Data
-review before any permanent RLS exclusion. Category D covers four immutable
-reference tables and the permission definition registry.
+`RlsRuntimeDatabaseIsolationIT` passed 13 PostgreSQL integration tests for
+scope isolation, lookup capabilities, transaction and pooled-connection
+cleanup, worker scope, rollback, and runtime privileges. The restricted test
+login is verified as non-superuser, non-`BYPASSRLS`, not the object owner, and
+without database-creation or role-creation authority. V107 additionally
+grants that role `SELECT` only on the new Price List, Price List Item, and
+Customer Terms tables. These are test-environment results; deployed database
+credentials and provider configuration still require environment-specific
+verification.
 
-An additive migration should follow a reviewed per-table policy and worker
-access design, with non-owner runtime tests for read, write, absent scope,
-cross-Tenant IDs, rollback, pool reuse, and stale worker claims. The current
-Blueprint records complete RLS coverage proof as open. No policy or historical
-migration was changed in this audit.
+The six `CROSS_SCOPE_WORKER` tables deliberately support technical queue
+claiming. Their workers must resolve and apply each business effect under an
+explicit Tenant/Workspace scope. Classification alone is not authorization;
+worker behavior remains covered by the runtime isolation suite.

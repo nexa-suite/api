@@ -32,7 +32,22 @@ public record CatalogItemDetail(
 		BigDecimal grossWeight,
 		Instant availabilityAsOf,
 		String productVariantCode,
-		String productVariantName) {
+		String productVariantName,
+		BigDecimal sellableAvailability) {
+	public CatalogItemDetail(String catalogItemId, String productId, String itemName, String brandName,
+			String categoryName, String description, String presentation, BigDecimal unitPriceAmount,
+			String unitPriceCurrency, String coldChainRequirement, String imageUrl, String imageFileName,
+			String status, String availabilityStatus, boolean nearExpiry, String promotionLabel,
+			CatalogPricingView pricing, String productFamilyId, String productFamilyCode, String productFamilyName,
+			String sellableSkuId, String skuCode, String unitOfMeasure, String packagingType,
+			BigDecimal netWeight, BigDecimal grossWeight, Instant availabilityAsOf,
+			String productVariantCode, String productVariantName) {
+		this(catalogItemId, productId, itemName, brandName, categoryName, description, presentation,
+				unitPriceAmount, unitPriceCurrency, coldChainRequirement, imageUrl, imageFileName, status,
+				availabilityStatus, nearExpiry, promotionLabel, pricing, productFamilyId, productFamilyCode,
+				productFamilyName, sellableSkuId, skuCode, unitOfMeasure, packagingType, netWeight, grossWeight,
+				availabilityAsOf, productVariantCode, productVariantName, null);
+	}
 	public CatalogItemDetail(String catalogItemId, String productId, String itemName, String brandName,
 			String categoryName, String description, String presentation, BigDecimal unitPriceAmount,
 			String unitPriceCurrency, String coldChainRequirement, String imageUrl, String imageFileName,

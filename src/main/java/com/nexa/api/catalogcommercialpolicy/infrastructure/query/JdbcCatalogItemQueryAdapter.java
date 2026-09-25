@@ -8,14 +8,10 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSearchCriteria;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSortField;
 import com.nexa.api.catalogcommercialpolicy.application.model.SortDirection;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.AuthoritativeOfferQuery;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogItemQueryPort;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.ProductAvailabilityPort;
 import com.nexa.api.catalogcommercialpolicy.domain.model.catalogitem.CatalogItemId;
-import com.nexa.api.catalogcommercialpolicy.domain.model.pricing.EffectivePricePolicy;
-import com.nexa.api.catalogcommercialpolicy.domain.model.pricing.PromotionCandidate;
-import com.nexa.api.catalogcommercialpolicy.domain.model.pricing.PromotionCandidate.PromotionRule;
-import com.nexa.api.catalogcommercialpolicy.domain.model.promotion.Promotion;
-import com.nexa.api.catalogcommercialpolicy.domain.model.promotion.PromotionStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
@@ -26,7 +22,6 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,17 +34,26 @@ import java.util.stream.Collectors;
 public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
     private final JdbcTemplate jdbc;
     private final ProductAvailabilityPort availability;
+    private final AuthoritativeOfferQuery offers;
     private final Clock clock;
-    private final EffectivePricePolicy pricing = new EffectivePricePolicy();
 
     @Autowired
+    public JdbcCatalogItemQueryAdapter(JdbcTemplate jdbc, ProductAvailabilityPort availability, AuthoritativeOfferQuery offers) {
+        this(jdbc, availability, offers, Clock.systemUTC());
+    }
+
     public JdbcCatalogItemQueryAdapter(JdbcTemplate jdbc, ProductAvailabilityPort availability) {
-        this(jdbc, availability, Clock.systemUTC());
+        this(jdbc, availability, new JdbcAuthoritativeOfferQuery(jdbc), Clock.systemUTC());
     }
 
     public JdbcCatalogItemQueryAdapter(JdbcTemplate jdbc, ProductAvailabilityPort availability, Clock clock) {
+        this(jdbc, availability, new JdbcAuthoritativeOfferQuery(jdbc), clock);
+    }
+
+    public JdbcCatalogItemQueryAdapter(JdbcTemplate jdbc, ProductAvailabilityPort availability, AuthoritativeOfferQuery offers, Clock clock) {
         this.jdbc = jdbc;
         this.availability = availability;
+        this.offers = offers;
         this.clock = clock;
     }
 
@@ -89,26 +93,43 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
     @Override
     public Optional<CatalogItemDetail> findByCatalogItemId(CatalogScope scope, CatalogItemId id) {
+        return findByCatalogItemId(scope, id, BigDecimal.ONE);
+    }
+
+    @Override
+    public Optional<CatalogItemDetail> findByCatalogItemId(CatalogScope scope, CatalogItemId id, BigDecimal quantity) {
         String predicate = " where s.tenant_id=? and s.workspace_id=? and s.legacy_catalog_item_id=? and s.status='ACTIVE' and s.visible=true"
-                + (scope.buyerView() ? " and pv.buyer_visible=true" : "");
+                + buyerVisibility(scope);
         List<Row> rows = jdbc.query(selectSql() + fromClause() + predicate, this::row,
                 scope.tenantId(), scope.workspaceId(), id.value());
         if (rows.isEmpty()) return Optional.empty();
-        return Optional.of(detail(rows.getFirst(), enrich(scope, rows)));
+        return Optional.of(detail(rows.getFirst(), enrich(scope, rows,
+                Map.of(rows.getFirst().sellableSkuId(), quantity == null ? BigDecimal.ONE : quantity))));
     }
 
     @Override
     public List<CatalogItemDetail> findByCatalogItemIds(CatalogScope scope, List<CatalogItemId> ids) {
+        return findByCatalogItemIds(scope, ids, Map.of());
+    }
+
+    @Override
+    public List<CatalogItemDetail> findByCatalogItemIds(CatalogScope scope, List<CatalogItemId> ids,
+                                                         Map<String, BigDecimal> quantitiesByCatalogItemId) {
         if (ids == null || ids.isEmpty()) return List.of();
         List<String> values = ids.stream().filter(java.util.Objects::nonNull).map(CatalogItemId::value).distinct().toList();
         if (values.isEmpty()) return List.of();
         String placeholders = values.stream().map(ignored -> "?").collect(Collectors.joining(","));
         String predicate = " where s.tenant_id=? and s.workspace_id=? and s.legacy_catalog_item_id in (" + placeholders + ")"
-                + " and s.status='ACTIVE' and s.visible=true" + (scope.buyerView() ? " and pv.buyer_visible=true" : "");
+                + " and s.status='ACTIVE' and s.visible=true" + buyerVisibility(scope);
         List<Object> parameters = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
         parameters.addAll(values);
         List<Row> rows = jdbc.query(selectSql() + fromClause() + predicate, this::row, parameters.toArray());
-        Enrichment enrichment = enrich(scope, rows);
+        Map<UUID, BigDecimal> quantities = new java.util.HashMap<>();
+        for (Row row : rows) {
+            BigDecimal quantity = quantitiesByCatalogItemId == null ? null : quantitiesByCatalogItemId.get(row.catalogItemId());
+            quantities.put(row.sellableSkuId(), quantity == null ? BigDecimal.ONE : quantity);
+        }
+        Enrichment enrichment = enrich(scope, rows, quantities);
         return rows.stream().map(row -> detail(row, enrichment)).toList();
     }
 
@@ -122,7 +143,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(), label, value,
                 string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
                 row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
-                row.variantCode(), row.variantName());
+                row.variantCode(), row.variantName(), available.sellableAvailability());
     }
 
     private CatalogItemDetail detail(Row row, Enrichment enrichment) {
@@ -135,82 +156,50 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 row.temperature(), row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(),
                 label, value, string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
                 row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
-                row.variantCode(), row.variantName());
+                row.variantCode(), row.variantName(), available.sellableAvailability());
     }
 
     private String promotionLabel(String catalogItemId, Enrichment enrichment) {
-        return enrichment.promotions().getOrDefault(catalogItemId, List.of()).stream()
-                .map(PromotionCandidate::name).filter(name -> !name.isBlank()).collect(Collectors.joining(", "));
+        return enrichment.pricing().getOrDefault(catalogItemId,
+                        CatalogPricingView.base(BigDecimal.ZERO, "PEN", clock.instant()))
+                .appliedPromotions().stream().map(CatalogPricingView.AppliedPromotion::name)
+                .filter(name -> name != null && !name.isBlank()).collect(Collectors.joining(", "));
     }
 
     private Enrichment enrich(CatalogScope scope, List<Row> rows) {
-        if (rows.isEmpty()) return new Enrichment(Map.of(), Map.of(), Map.of());
+        return enrich(scope, rows, Map.of());
+    }
+
+    private Enrichment enrich(CatalogScope scope, List<Row> rows, Map<UUID, BigDecimal> requestedQuantities) {
+        if (rows.isEmpty()) return new Enrichment(Map.of(), Map.of());
         List<String> catalogItemIds = rows.stream().map(Row::catalogItemId)
                 .filter(value -> value != null && !value.isBlank()).distinct().toList();
         Map<String, ProductAvailabilityPort.Snapshot> availabilityById = catalogItemIds.isEmpty() ? Map.of()
                 : availability.find(scope, catalogItemIds).stream().collect(Collectors.toMap(
                         ProductAvailabilityPort.Snapshot::catalogItemId, value -> value, (left, right) -> left));
-        Map<String, List<PromotionCandidate>> promotionsById = batchPromotions(scope, rows);
         Instant asOf = clock.instant();
-        Map<String, CatalogPricingView> prices = new HashMap<>();
-        for (Row row : rows) {
-            List<PromotionCandidate> candidates = scope.buyerView()
-                    ? promotionsById.getOrDefault(row.catalogItemId(), List.of()) : List.of();
-            EffectivePricePolicy.Result result = pricing.calculate(row.amount(), row.currency(), BigDecimal.ONE,
-                    scope.clientAccountSegment(), scope.buyerTier(), candidates, asOf);
-            prices.put(row.catalogItemId(), new CatalogPricingView(result.basePrice(), result.effectivePrice(),
-                    result.discountAmount(), row.currency(), result.appliedPromotions().stream()
-                            .map(value -> new CatalogPricingView.AppliedPromotion(value.id().toString(), value.name(),
-                                    value.discountType(), value.discountAmount())).toList(), asOf));
-        }
-        return new Enrichment(availabilityById, promotionsById, prices);
-    }
-
-    private Map<String, List<PromotionCandidate>> batchPromotions(CatalogScope scope, List<Row> rows) {
         List<UUID> skuIds = rows.stream().map(Row::sellableSkuId).filter(java.util.Objects::nonNull).distinct().toList();
-        if (skuIds.isEmpty()) return Map.of();
-        String placeholders = skuIds.stream().map(value -> "?").collect(Collectors.joining(","));
-        List<Object> parameters = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
-        parameters.addAll(skuIds);
-        if (scope.clientAccountId() != null) parameters.add(scope.clientAccountId());
-        String clientPredicate = scope.clientAccountId() == null
-                ? " and not exists (select 1 from catalog_management.promotion_client_account pca0 where pca0.tenant_id=pr.tenant_id and pca0.workspace_id=pr.workspace_id and pca0.promotion_id=pr.id)"
-                : " and (not exists (select 1 from catalog_management.promotion_client_account pca0 where pca0.tenant_id=pr.tenant_id and pca0.workspace_id=pr.workspace_id and pca0.promotion_id=pr.id) or exists (select 1 from catalog_management.promotion_client_account pca1 where pca1.tenant_id=pr.tenant_id and pca1.workspace_id=pr.workspace_id and pca1.promotion_id=pr.id and pca1.client_account_id=?))";
-        String sql = "select s.legacy_catalog_item_id,pr.id,pr.name,pr.slug,pr.discount_type,pr.discount_value,pr.currency,pr.starts_at,pr.ends_at,pr.minimum_quantity,pr.stacking_policy,pr.status,pr.priority "
-                + "from catalog_management.sellable_sku s join catalog_management.product_family f on f.tenant_id=s.tenant_id and f.workspace_id=s.workspace_id and f.id=s.family_id "
-                + "join catalog_management.promotion pr on pr.tenant_id=s.tenant_id and pr.workspace_id=s.workspace_id "
-                + "where s.tenant_id=? and s.workspace_id=? and s.id in (" + placeholders + ") and pr.status='ACTIVE' "
-                + "and (pr.starts_at is null or pr.starts_at<=current_timestamp) and (pr.ends_at is null or pr.ends_at>current_timestamp) "
-                + "and (exists (select 1 from catalog_management.promotion_sku ps where ps.tenant_id=pr.tenant_id and ps.workspace_id=pr.workspace_id and ps.promotion_id=pr.id and ps.sku_id=s.id) "
-                + "or exists (select 1 from catalog_management.promotion_category ppc where ppc.tenant_id=pr.tenant_id and ppc.workspace_id=pr.workspace_id and ppc.promotion_id=pr.id and ppc.category_id=f.category_id))"
-                + clientPredicate + " order by s.legacy_catalog_item_id,pr.id";
-        Map<String, List<PromotionCandidate>> result = new HashMap<>();
-        jdbc.query(sql, (rs, row) -> {
-            String itemId = rs.getString(1);
-            PromotionCandidate candidate = new PromotionCandidate(rs.getObject(2, UUID.class), rs.getString(3), rs.getString(4),
-                    Promotion.DiscountType.valueOf(rs.getString(5)), rs.getBigDecimal(6), rs.getString(7),
-                    instant(rs.getTimestamp(8)), instant(rs.getTimestamp(9)), rs.getBigDecimal(10),
-                    Promotion.StackingPolicy.valueOf(rs.getString(11)), PromotionStatus.valueOf(rs.getString(12)), rs.getInt(13), List.of(), List.of());
-            result.computeIfAbsent(itemId, ignored -> new ArrayList<>()).add(candidate);
-            return null;
-        }, parameters.toArray());
-        if (result.isEmpty()) return result;
-        String promotionPlaceholders = result.values().stream().flatMap(List::stream).map(value -> "?").collect(Collectors.joining(","));
-        List<Object> ruleParameters = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
-        ruleParameters.addAll(result.values().stream().flatMap(List::stream).map(PromotionCandidate::id).toList());
-        Map<UUID, List<PromotionRule>> rules = new HashMap<>();
-        jdbc.query("select promotion_id,rule_type,rule_value from catalog_management.promotion_rule where tenant_id=? and workspace_id=? and promotion_id in (" + promotionPlaceholders + ") order by promotion_id,rule_type,rule_value",
-                (rs, row) -> {
-                    rules.computeIfAbsent(rs.getObject(1, UUID.class), ignored -> new ArrayList<>()).add(new PromotionRule(rs.getString(2), rs.getString(3)));
-                    return null;
-                }, ruleParameters.toArray());
-        for (Map.Entry<String, List<PromotionCandidate>> entry : result.entrySet()) {
-            entry.setValue(entry.getValue().stream().map(candidate -> new PromotionCandidate(candidate.id(), candidate.name(), candidate.stableCode(),
-                    candidate.discountType(), candidate.discountValue(), candidate.currency(), candidate.startsAt(), candidate.endsAt(),
-                    candidate.minimumQuantity(), candidate.stackingPolicy(), candidate.status(), candidate.priority(), candidate.clientAccountIds(),
-                    rules.getOrDefault(candidate.id(), List.of()))).toList());
+        Map<UUID, BigDecimal> quantities = skuIds.stream().collect(Collectors.toUnmodifiableMap(id -> id,
+                id -> requestedQuantities.getOrDefault(id, BigDecimal.ONE)));
+        Map<UUID, AuthoritativeOfferQuery.Offer> resolved = offers.resolve(scope.tenantId(), scope.workspaceId(), skuIds,
+                scope.clientAccountId(), scope.clientAccountSegment(), scope.buyerTier(), quantities, asOf);
+        Map<String, CatalogPricingView> prices = new java.util.HashMap<>();
+        for (Row row : rows) {
+            AuthoritativeOfferQuery.Offer offer = resolved.get(row.sellableSkuId());
+            if (offer == null) {
+                if (scope.buyerView() || scope.clientAccountId() != null) {
+                    throw new IllegalStateException("Authoritative offer is unavailable for the customer account");
+                }
+                prices.put(row.catalogItemId(), new CatalogPricingView(row.amount(), row.amount(), BigDecimal.ZERO,
+                        row.currency(), List.of(), asOf, scope.buyerView()));
+                continue;
+            }
+            prices.put(row.catalogItemId(), new CatalogPricingView(offer.basePrice(), offer.effectivePrice(),
+                    offer.discountAmount(), offer.currency(), offer.appliedPromotions().stream()
+                    .map(value -> new CatalogPricingView.AppliedPromotion(value.id().toString(), value.name(),
+                            value.discountType(), value.discountAmount())).toList(), offer.effectiveAt(), scope.buyerView()));
         }
-        return result;
+        return new Enrichment(availabilityById, prices);
     }
 
     private String selectSql() {
@@ -235,12 +224,18 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
     private String predicate(CatalogScope scope, CatalogSearchCriteria criteria) {
         StringBuilder sql = new StringBuilder(" where s.tenant_id=? and s.workspace_id=? and s.status='ACTIVE' and s.visible=true");
-        if (scope.buyerView()) sql.append(" and pv.buyer_visible=true");
+        sql.append(buyerVisibility(scope));
         if (criteria.query() != null && !criteria.query().isBlank()) sql.append(" and (lower(f.name) like lower(?) or lower(coalesce(v.name,'')) like lower(?) or lower(coalesce(p.name,'')) like lower(?) or lower(coalesce(p.description,'')) like lower(?) or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or lower(coalesce(s.legacy_catalog_item_id,'')) like lower(?))");
         if (criteria.brand() != null) sql.append(" and lower(b.name) like lower(?)");
         if (criteria.category() != null) sql.append(" and lower(c.name) like lower(?)");
         if (criteria.coldChainRequirement() != null) sql.append(" and f.storage_family=?");
         return sql.toString();
+    }
+
+    private static String buyerVisibility(CatalogScope scope) {
+        return scope.buyerView()
+                ? " and pv.buyer_visible=true and f.status='ACTIVE' and (s.legacy_product_id is null or p.status='ACTIVE')"
+                : "";
     }
 
     private List<Object> args(CatalogScope scope, CatalogSearchCriteria criteria) {
@@ -278,6 +273,5 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                        BigDecimal netWeight, BigDecimal grossWeight, String imagePath, String imageFileName) { }
 
     private record Enrichment(Map<String, ProductAvailabilityPort.Snapshot> availability,
-                              Map<String, List<PromotionCandidate>> promotions,
                               Map<String, CatalogPricingView> pricing) { }
 }

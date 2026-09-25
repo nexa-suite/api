@@ -17,6 +17,7 @@ public class PurchaseRequestDraftServiceFacade {
     private final PurchaseRequestDraftPort port;
     public PurchaseRequestDraftServiceFacade(PurchaseRequestDraftPort port) { this.port = port; }
     public PurchaseRequestDraftModels.DraftView create(CurrentAccessContext c, UUID clientAccountId, LocalDate date) { return port.create(c, clientAccountId, date); }
+    public PurchaseRequestDraftModels.DraftPage list(CurrentAccessContext c, int page, int size) { return port.list(c, page, size); }
     public PurchaseRequestDraftModels.DraftView get(CurrentAccessContext c, UUID id) { return port.get(c, id); }
     public PurchaseRequestDraftModels.DraftView replaceLines(CurrentAccessContext c, UUID id, long version, List<LineCommand> lines) { return port.replaceLines(c, id, version, lines.stream().map(line -> new PurchaseRequestDraftPort.LineCommand(line.skuId(), line.quantity(), line.unit(), line.notes())).toList()); }
     public PurchaseRequestDraftModels.DraftView setDestination(CurrentAccessContext c, UUID id, long version, UUID addressId) { return port.setDestination(c, id, version, addressId); }

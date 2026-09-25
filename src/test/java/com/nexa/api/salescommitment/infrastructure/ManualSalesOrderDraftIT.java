@@ -1,5 +1,7 @@
 package com.nexa.api.salescommitment.infrastructure;
 
+import java.util.UUID;
+
 import com.nexa.api.support.PostgresIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -9,6 +11,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -99,6 +102,9 @@ class ManualSalesOrderDraftIT extends PostgresIntegrationSupport {
                 .andReturn();
         String orderId = json(submitted).get("id").asText();
         String orderNumber = json(submitted).get("number").asText();
+        UUID persistedOrder = UUID.fromString(orderId);
+        assertThat(jdbc.queryForObject("select buyer_membership_id is null from sales.sales_order where id=?", Boolean.class, persistedOrder)).isTrue();
+        assertThat(jdbc.queryForObject("select created_by_membership_id::text from sales.sales_order where id=?", String.class, persistedOrder)).isEqualTo(membershipId(SALES_EMAIL));
 
         mockMvc.perform(get("/api/v1/sales-orders?search=" + orderNumber)
                         .header("Authorization", "Bearer " + token))

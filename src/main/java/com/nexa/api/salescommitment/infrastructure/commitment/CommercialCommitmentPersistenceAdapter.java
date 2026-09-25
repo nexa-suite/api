@@ -102,7 +102,7 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
         UUID activeCommitmentId = commitmentId;
         List<CommitmentLine> lines = jdbc.query("select l.id,l.sku_id,l.sku_code_snapshot,l.catalog_item_id,l.quantity,l.unit,l.unit_price_amount,l.unit_price_currency "
                         + "from sales.purchase_request_line l join sales.purchase_request r on r.id=l.purchase_request_id "
-                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? order by l.created_at,l.id",
+                        + "where r.tenant_id=? and r.workspace_id=? and r.id=? and l.superseded_at is null order by l.created_at,l.id",
                 (rs, n) -> new CommitmentLine(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getString(3),
                         rs.getString(4), rs.getBigDecimal(5), rs.getString(6), rs.getBigDecimal(7), rs.getString(8)),
                 tenantId, workspaceId, purchaseRequestId);
@@ -352,7 +352,7 @@ public class CommercialCommitmentPersistenceAdapter implements CommercialCommitm
 
     private AmountRow amount(UUID purchaseRequestId) {
         AmountRow amount = jdbc.query("select coalesce(sum(quantity * unit_price_amount),0),max(unit_price_currency) "
-                        + "from sales.purchase_request_line where purchase_request_id=?",
+                        + "from sales.purchase_request_line where purchase_request_id=? and superseded_at is null",
                 (rs, n) -> new AmountRow(rs.getBigDecimal(1), rs.getString(2)), purchaseRequestId).stream()
                 .findFirst().orElse(new AmountRow(java.math.BigDecimal.ZERO, null));
         if (amount.amount().signum() <= 0 || amount.currency() == null) throw new IllegalStateException("Credit commitment requires priced lines");

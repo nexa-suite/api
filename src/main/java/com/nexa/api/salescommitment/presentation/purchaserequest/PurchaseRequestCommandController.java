@@ -90,11 +90,44 @@ public class PurchaseRequestCommandController {
 	@Operation(operationId = "rejectPurchaseRequest")
 	public ResponseEntity<PurchaseRequestDetailResponse> reject(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @Valid @RequestBody(required = false) RejectPurchaseRequestRequest request) { return transition(context, id, "reject", request == null ? null : request.reviewNote(), ifMatch, key); }
 	@PostMapping("/{id}/cancellations")
-	@Operation(operationId = "cancelPurchaseRequest")
+	@Operation(operationId = "cancelPurchaseRequest", deprecated = true,
+			description = "Legacy compatibility operation. Use Buyer withdrawal for canonical Purchase Request termination.")
 	public ResponseEntity<PurchaseRequestDetailResponse> cancel(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key) { return transition(context, id, "cancel", null, ifMatch, key); }
 	@PostMapping("/{id}/withdrawals")
 	@Operation(operationId = "withdrawPurchaseRequest")
 	public ResponseEntity<PurchaseRequestDetailResponse> withdraw(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key) { return transition(context, id, "withdraw", null, ifMatch, key); }
+	@PostMapping("/{id}/material-changes")
+	@Operation(operationId = "proposePurchaseRequestMaterialChange")
+	public ResponseEntity<com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView> proposeMaterialChange(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
+			@RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String key,
+			@Valid @RequestBody ProposeMaterialChangeRequest request) {
+		var value = sales.proposeMaterialChange(context, id, SalesHttpHeaders.requireVersion(ifMatch), request.reason(),
+				request.priority(), request.requestedDeliveryDate(), request.deliveryProfileSnapshot(), request.paymentOption(),
+				request.comment(), mapper.requestedLines(request), key);
+		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.requestVersion())).body(value);
+	}
+	@PostMapping("/{id}/material-changes/{proposalId}/acceptances")
+	@Operation(operationId = "acceptPurchaseRequestMaterialChange")
+	public ResponseEntity<PurchaseRequestDetailResponse> acceptMaterialChange(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
+			@PathVariable String proposalId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String key) {
+		var value = sales.acceptMaterialChange(context, id, proposalId, SalesHttpHeaders.requireVersion(ifMatch), key);
+		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	}
+
+	@PostMapping("/{id}/material-changes/{proposalId}/rejections")
+	@Operation(operationId = "rejectPurchaseRequestMaterialChange")
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Material change rejected", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "400", description = "Idempotency-Key required"), @ApiResponse(responseCode = "409", description = "Stale If-Match or concurrent decision")})
+	public ResponseEntity<PurchaseRequestDetailResponse> rejectMaterialChange(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
+			@PathVariable String proposalId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
+			@RequestHeader(name = "Idempotency-Key", required = false) String key) {
+		var value = sales.rejectMaterialChange(context, id, proposalId, SalesHttpHeaders.requireVersion(ifMatch), key);
+		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	}
 
 	private ResponseEntity<PurchaseRequestDetailResponse> transition(CurrentAccessContext context, String id, String action, String note, String ifMatch, String key) {
 		var value = sales.transition(context, id, action, note, SalesHttpHeaders.requireVersion(ifMatch), key); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));

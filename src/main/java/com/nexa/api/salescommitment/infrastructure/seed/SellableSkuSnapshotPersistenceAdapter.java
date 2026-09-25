@@ -27,13 +27,40 @@ public class SellableSkuSnapshotPersistenceAdapter implements SellableSkuSnapsho
     }
 
     @Override
+    public Optional<Snapshot> findActive(UUID skuId, UUID tenantId, UUID workspaceId, UUID customerAccountId) {
+        return catalog.findActive(tenantId, workspaceId, customerAccountId, skuId)
+                .map(SellableSkuSnapshotPersistenceAdapter::snapshot);
+    }
+
+    @Override
+    public Optional<Snapshot> findActive(UUID skuId, UUID tenantId, UUID workspaceId, UUID customerAccountId,
+                                        java.math.BigDecimal quantity) {
+        return catalog.findActive(tenantId, workspaceId, customerAccountId, skuId, quantity)
+                .map(SellableSkuSnapshotPersistenceAdapter::snapshot);
+    }
+
+    @Override
     public Map<UUID, Snapshot> findActive(List<UUID> skuIds, UUID tenantId, UUID workspaceId) {
         return catalog.findActive(tenantId, workspaceId, skuIds).entrySet().stream()
                 .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> snapshot(entry.getValue())));
     }
 
+    @Override
+    public Map<UUID, Snapshot> findActive(List<UUID> skuIds, UUID tenantId, UUID workspaceId, UUID customerAccountId) {
+        return catalog.findActive(tenantId, workspaceId, customerAccountId, skuIds).entrySet().stream()
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> snapshot(entry.getValue())));
+    }
+
+    @Override
+    public Map<UUID, Snapshot> findActive(Map<UUID, java.math.BigDecimal> quantities, UUID tenantId,
+                                          UUID workspaceId, UUID customerAccountId) {
+        return catalog.findActive(tenantId, workspaceId, customerAccountId, quantities).entrySet().stream()
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, entry -> snapshot(entry.getValue())));
+    }
+
     private static Snapshot snapshot(SellableSkuQuery.SellableSkuReference value) {
         return new Snapshot(value.skuId(), value.familyId(), value.familyCode(), value.skuCode(),
-                value.legacyCatalogItemId(), value.familyName(), value.presentation(), value.price(), value.currency());
+                value.legacyCatalogItemId(), value.familyName(), value.presentation(), value.price(), value.currency(),
+                value.basePrice(), value.discountAmount(), value.pricingAsOf());
     }
 }
