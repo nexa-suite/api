@@ -50,6 +50,9 @@ public final class BusinessDocumentController {
     @PostMapping("/business-documents/{documentId}/regenerations")
     @Operation(operationId = "regenerateBusinessDocument")
     public ResponseEntity<BusinessDocumentModels.GenerationRequestView> regenerate(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId, @RequestHeader("Idempotency-Key") String key) { var value = service.regenerate(context, documentId, key); return ResponseEntity.accepted().location(URI.create("/api/v1/business-documents/" + value.documentId())).body(value); }
+    @PostMapping("/business-documents/{documentId}/replacements")
+    @Operation(operationId = "replaceBusinessDocument", description = "Requests a new immutable document version linked to an issued original. The original remains available for verification.")
+    public ResponseEntity<BusinessDocumentModels.GenerationRequestView> replace(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId, @RequestHeader("Idempotency-Key") String key) { var value = service.replace(context, documentId, key); return ResponseEntity.accepted().location(URI.create("/api/v1/business-documents/" + value.documentId())).body(value); }
     @GetMapping("/business-documents/{documentId}/downloads")
     @Operation(operationId = "downloadBusinessDocument")
     public ResponseEntity<StreamingResponseBody> download(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId) { return stream(service.download(context, documentId)); }
