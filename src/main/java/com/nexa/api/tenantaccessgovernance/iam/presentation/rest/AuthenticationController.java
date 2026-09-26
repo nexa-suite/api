@@ -5,11 +5,20 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.AuthenticationR
 import com.nexa.api.tenantaccessgovernance.iam.application.model.CurrentSession;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.CurrentSessionQuery;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.LoginIdentifier;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.IdentitySignInCommand;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.IdentitySignInResult;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.MissingAccessContextAuthorityException;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.AccessContextTicketQuery;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.AccessContextOption;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.SelectAccessContextCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.RefreshSessionCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SignInCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SignOutCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.CurrentSessionUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.IdentitySignInUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ListAccessContextsUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessionUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SelectAccessContextUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignInUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignOutUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.WorkspacePreviewUseCase;
@@ -17,8 +26,8 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.WorkspacePrevie
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
-import com.nexa.api.shared.infrastructure.security.CookieOriginGuardFilter;
-import com.nexa.api.shared.infrastructure.observability.SecurityMetrics;
+import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.AuthenticationTransport;
+import com.nexa.api.shared.application.port.out.SecurityMetricsPort;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -60,6 +69,7 @@ import java.util.Locale;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -69,18 +79,26 @@ public class AuthenticationController {
 	private static final String PLATFORM_COOKIE = "NEXA_PLATFORM_REFRESH";
 	private static final String PORTAL_COOKIE = "NEXA_PORTAL_REFRESH";
 	private final SignInUseCase signIn;
+	private final IdentitySignInUseCase identitySignIn;
+	private final ListAccessContextsUseCase listAccessContexts;
+	private final SelectAccessContextUseCase selectAccessContext;
 	private final RefreshSessionUseCase refresh;
 	private final SignOutUseCase signOut;
 	private final CurrentSessionUseCase currentSession;
 	private final WorkspacePreviewUseCase workspacePreview;
 	private final boolean secureCookie;
 	private final Clock clock;
-	private final ObjectProvider<SecurityMetrics> securityMetrics;
+	private final ObjectProvider<SecurityMetricsPort> securityMetrics;
 
-	public AuthenticationController(SignInUseCase signIn, RefreshSessionUseCase refresh, SignOutUseCase signOut,
+	public AuthenticationController(SignInUseCase signIn, IdentitySignInUseCase identitySignIn,
+			ListAccessContextsUseCase listAccessContexts, SelectAccessContextUseCase selectAccessContext,
+			RefreshSessionUseCase refresh, SignOutUseCase signOut,
 			CurrentSessionUseCase currentSession, WorkspacePreviewUseCase workspacePreview, @Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie,
-			Environment environment, Clock clock, ObjectProvider<SecurityMetrics> securityMetrics) {
+			Environment environment, Clock clock, ObjectProvider<SecurityMetricsPort> securityMetrics) {
 		this.signIn = signIn;
+		this.identitySignIn = identitySignIn;
+		this.listAccessContexts = listAccessContexts;
+		this.selectAccessContext = selectAccessContext;
 		this.refresh = refresh;
 		this.signOut = signOut;
 		this.currentSession = currentSession;
@@ -107,13 +125,82 @@ public class AuthenticationController {
 			@ApiResponse(responseCode = "403", description = "Origin not allowed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
 	public AuthenticationResponse signIn(@Valid @RequestBody SignInRequest request,
 			@Parameter(description = "Set to NATIVE for the explicit non-browser session transport")
-			@RequestHeader(name = CookieOriginGuardFilter.NATIVE_CLIENT_HEADER, required = false) String clientTransport,
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER, required = false) String clientTransport,
 			HttpServletRequest httpRequest,
 			HttpServletResponse response) {
-		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(httpRequest);
+		boolean nativeTransport = isNativeSessionTransport(httpRequest);
 		AuthenticationResult result = signIn.signIn(new SignInCommand(new LoginIdentifier(request.identifier()), request.password(),
 				request.workspaceSlug(), request.surface(), clientFingerprint(httpRequest)));
 		writeRefreshTransport(response, result, nativeTransport);
+		return AuthenticationResponse.from(result);
+	}
+
+	@PostMapping("/authentication/identity-sign-in")
+	@Operation(summary = "Authenticate a native client as a Human Identity and resolve eligible access contexts",
+			description = "Zero eligible contexts returns NO_WORK_CONTEXT. One eligible context establishes a scoped session. Two or more contexts return a short-lived ticket for explicit selection.")
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Zero eligible contexts returns NO_WORK_CONTEXT; one establishes a scoped session; two or more return a short-lived selection ticket",
+			headers = {@Header(name = "X-Nexa-Refresh-Token", description = "Returned only when a scoped session is established"),
+				@Header(name = "X-Nexa-Context-Ticket", description = "Returned only for CONTEXT_SELECTION_REQUIRED; never included in the response body")}),
+			@ApiResponse(responseCode = "401", description = "Authentication failed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "403", description = "Native transport required", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
+	public IdentitySignInResponse identitySignIn(@Valid @RequestBody IdentitySignInRequest request,
+			@Parameter(description = "Required native transport marker", required = true)
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER) String clientTransport,
+			HttpServletRequest httpRequest, HttpServletResponse response) {
+		IdentitySignInResult result = identitySignIn.identitySignIn(new IdentitySignInCommand(
+				new LoginIdentifier(request.identifier()), request.password(), request.surface(), clientFingerprint(httpRequest)));
+		if (result.authentication() != null) writeRefreshTransport(response, result.authentication(), true);
+		if (result.outcome() == IdentitySignInResult.Outcome.CONTEXT_SELECTION_REQUIRED) {
+			response.setHeader(AuthenticationTransport.ACCESS_CONTEXT_TICKET_HEADER, result.accessContextTicket());
+		}
+		return IdentitySignInResponse.from(result);
+	}
+
+	@GetMapping("/me/access-contexts")
+	@Operation(summary = "List current eligible access contexts",
+			description = "Provide exactly one authority: an opaque pre-context ticket in X-Nexa-Context-Ticket or a Bearer access session. Ticket authority requires X-Nexa-Client: NATIVE. Listing does not establish a scoped session.")
+	@SecurityRequirements({@SecurityRequirement(name = "contextTicket"), @SecurityRequirement(name = "bearerAuth")})
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Eligible access contexts returned"),
+			@ApiResponse(responseCode = "400", description = "Both authority modes were supplied", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "401", description = "Authority is missing or invalid", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "403", description = "Ticket authority requires native transport", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
+	public AccessContextsResponse accessContexts(
+			@Parameter(description = "PLATFORM or PORTAL", required = true) @RequestHeader("X-Nexa-Surface") String surface,
+			@Parameter(description = "Opaque five-minute pre-context ticket; mutually exclusive with Authorization: Bearer", required = false)
+			@RequestHeader(name = AuthenticationTransport.ACCESS_CONTEXT_TICKET_HEADER, required = false) String accessContextTicket,
+			@Parameter(description = "Required for ticket authority; mutually exclusive with Authorization: Bearer", required = false)
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER, required = false) String clientTransport,
+			@Parameter(description = "Bearer access session; mutually exclusive with X-Nexa-Context-Ticket", required = false)
+			@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+		List<AccessContextOption> options = listAccessContexts.listAccessContexts(
+				contextQuery(accessContextTicket, authorization, parseSurface(surface)));
+		return new AccessContextsResponse(options.stream().map(AccessContextResponse::from).toList());
+	}
+
+	@PostMapping("/me/access-context-selections")
+	@Operation(summary = "Select and establish one current access context",
+			description = "Provide exactly one authority: an opaque pre-context ticket in X-Nexa-Context-Ticket or a Bearer access session. Ticket authority requires X-Nexa-Client: NATIVE. Revalidates current identity, membership and scope. Successful selection consumes a ticket or revokes the invoking session family.")
+	@SecurityRequirements({@SecurityRequirement(name = "contextTicket"), @SecurityRequirement(name = "bearerAuth")})
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Scoped session established",
+			headers = @Header(name = "X-Nexa-Refresh-Token", description = "Returned only for the explicit native transport")),
+			@ApiResponse(responseCode = "400", description = "Both authority modes were supplied", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "401", description = "Authority is missing or invalid", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "403", description = "Ticket authority requires native transport", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "409", description = "Selected access context is unavailable", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
+	public AuthenticationResponse selectAccessContext(@Valid @RequestBody SelectAccessContextRequest request,
+			@Parameter(description = "PLATFORM or PORTAL", required = true) @RequestHeader("X-Nexa-Surface") String surface,
+			@Parameter(description = "Opaque five-minute pre-context ticket; mutually exclusive with Authorization: Bearer", required = false)
+			@RequestHeader(name = AuthenticationTransport.ACCESS_CONTEXT_TICKET_HEADER, required = false) String accessContextTicket,
+			@Parameter(description = "Required for ticket authority; mutually exclusive with Authorization: Bearer", required = false)
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER, required = false) String clientTransport,
+			@Parameter(description = "Bearer access session; mutually exclusive with X-Nexa-Context-Ticket", required = false)
+			@RequestHeader(name = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+			HttpServletRequest httpRequest,
+			HttpServletResponse response) {
+		var authority = contextAuthority(accessContextTicket, authorization);
+		var result = selectAccessContext.selectAccessContext(new SelectAccessContextCommand(authority.ticket(),
+				authority.accessToken(), parseSurface(surface), request.membershipId()));
+		writeRefreshTransport(response, result, isNativeSessionTransport(httpRequest));
 		return AuthenticationResponse.from(result);
 	}
 
@@ -132,7 +219,7 @@ public class AuthenticationController {
 			@CookieValue(name = PLATFORM_COOKIE, required = false) String platformRefresh,
 			@CookieValue(name = PORTAL_COOKIE, required = false) String portalRefresh,
 			HttpServletRequest request, HttpServletResponse response) {
-		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(request);
+		boolean nativeTransport = isNativeSessionTransport(request);
 		ClientSurface requestedSurface = parseSurface(surface);
 		String refreshToken = nativeTransport ? nativeRefreshToken
 				: requestedSurface == ClientSurface.PLATFORM ? platformRefresh : portalRefresh;
@@ -149,14 +236,14 @@ public class AuthenticationController {
 	public ResponseEntity<Void> signOut(Authentication authentication,
 			@RequestHeader(name = "X-Nexa-Surface", required = false) String surface,
 			HttpServletRequest request, HttpServletResponse response) {
-		boolean nativeTransport = CookieOriginGuardFilter.isNativeSessionTransport(request);
+		boolean nativeTransport = isNativeSessionTransport(request);
 		if (authentication instanceof JwtAuthenticationToken jwtAuthentication) {
 			var jwt = jwtAuthentication.getToken();
 			try {
 				signOut.signOut(new SignOutCommand(new SessionId(required(jwt.getClaimAsString("sid"))),
 						new UserAccountId(required(jwt.getSubject())), parseSurface(required(jwt.getClaimAsString("surface")))));
 			} catch (RuntimeException exception) {
-				SecurityMetrics metric = securityMetrics.getIfAvailable();
+				SecurityMetricsPort metric = securityMetrics.getIfAvailable();
 				if (metric != null) metric.increment("authentication.signout.failure");
 				throw exception;
 			}
@@ -183,6 +270,11 @@ public class AuthenticationController {
 		writeRefreshCookie(response, result.surface(), result.refreshToken(), result.refreshTokenExpiresAt());
 	}
 
+	private static boolean isNativeSessionTransport(HttpServletRequest request) {
+		return AuthenticationTransport.isNativeSessionTransport(request.getHeader("Origin"),
+				request.getHeader(AuthenticationTransport.NATIVE_CLIENT_HEADER), request.getRequestURI());
+	}
+
 	private void writeRefreshCookie(HttpServletResponse response, ClientSurface surface, String value, java.time.Instant expiresAt) {
 		String name = cookieName(surface);
 		ResponseCookie cookie = ResponseCookie.from(name, value).httpOnly(true).secure(secureCookie).sameSite("Strict")
@@ -204,6 +296,21 @@ public class AuthenticationController {
 		catch (RuntimeException exception) { throw new IllegalArgumentException("Surface is invalid"); }
 	}
 
+	private static AccessContextTicketQuery contextQuery(String ticket, String authorization, ClientSurface surface) {
+		var authority = contextAuthority(ticket, authorization);
+		return new AccessContextTicketQuery(authority.ticket(), authority.accessToken(), surface);
+	}
+
+	private static ContextAuthority contextAuthority(String ticket, String authorization) {
+		boolean hasTicket = ticket != null && !ticket.isBlank();
+		boolean hasBearer = authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)
+				&& !authorization.substring(7).isBlank();
+		if (hasTicket && hasBearer) throw new IllegalArgumentException("Exactly one access context authority is required");
+		if (!hasTicket && !hasBearer) throw new MissingAccessContextAuthorityException();
+		return hasTicket ? new ContextAuthority(ticket, null)
+				: new ContextAuthority(null, authorization.substring(7).trim());
+	}
+
 	private static String required(String value) {
 		if (value == null || value.isBlank()) throw new IllegalArgumentException("Verified claim is required");
 		return value;
@@ -221,6 +328,27 @@ public class AuthenticationController {
 
 	public record SignInRequest(@NotBlank String identifier, @NotBlank String password, @NotBlank String workspaceSlug,
 			@NotNull ClientSurface surface) {}
+	public record IdentitySignInRequest(@NotBlank String identifier, @NotBlank String password, @NotNull ClientSurface surface) {}
+	public record SelectAccessContextRequest(@NotBlank String membershipId) {}
+	@Schema(description = "Identity-first result. SESSION_ESTABLISHED contains a scoped session; CONTEXT_SELECTION_REQUIRED returns its opaque ticket only in X-Nexa-Context-Ticket; NO_WORK_CONTEXT contains neither session nor ticket.")
+	public record IdentitySignInResponse(
+			@Schema(description = "SESSION_ESTABLISHED, CONTEXT_SELECTION_REQUIRED, or NO_WORK_CONTEXT") String outcome,
+			@Schema(description = "Scoped session, present only for SESSION_ESTABLISHED") AuthenticationResponse session,
+			@Schema(description = "Expiry time of the pre-context ticket") java.time.Instant ticketExpiresAt) {
+		static IdentitySignInResponse from(IdentitySignInResult result) {
+			return new IdentitySignInResponse(result.outcome().name(),
+					result.authentication() == null ? null : AuthenticationResponse.from(result.authentication()),
+					result.ticketExpiresAt());
+		}
+	}
+	public record AccessContextsResponse(List<AccessContextResponse> accessContexts) {}
+	public record AccessContextResponse(String membershipId, String tenantId, String tenantName, String tenantSlug,
+			String workspaceId, String workspaceName, String workspaceSlug) {
+		static AccessContextResponse from(AccessContextOption option) {
+			return new AccessContextResponse(option.membershipId(), option.tenantId(), option.tenantName(), option.tenantSlug(),
+					option.workspaceId(), option.workspaceName(), option.workspaceSlug());
+		}
+	}
 	public record WorkspacePreviewRequest(@NotBlank @Size(min = 3, max = 80) @Pattern(regexp = "[a-zA-Z0-9-]+") String workspaceSlug) {}
 	public record WorkspacePreviewResponse(boolean recognized, String displayName, String workspaceUrl, String logoUrl, boolean loginAvailable) {}
 
@@ -239,8 +367,8 @@ public class AuthenticationController {
 		static SessionResponse from(CurrentSession session) {
 			return new SessionResponse(
 					new SessionUser(session.userAccountId().value(), session.displayName(), session.email().value(), session.preferredLanguage()),
-					new TenantContext(session.tenantId(), session.tenantSlug()),
-					new WorkspaceContext(session.workspaceId(), session.workspaceSlug()),
+					new TenantContext(session.tenantId(), session.tenantSlug(), session.tenantName()),
+					new WorkspaceContext(session.workspaceId(), session.workspaceSlug(), session.workspaceName()),
 					new MembershipContext(session.membershipId(), session.roles(), session.permissions(), session.roleDefinitionIds(), session.authorizationVersion()),
 					session.surface().name());
 		}
@@ -252,8 +380,10 @@ public class AuthenticationController {
 				long authorizationVersion, String surface) {}
 
 	public record SessionUser(String userId, String displayName, String email, String preferredLanguage) {}
-	public record TenantContext(String tenantId, String tenantSlug) {}
-	public record WorkspaceContext(String workspaceId, String workspaceSlug) {}
+	public record TenantContext(String tenantId, String tenantSlug, String tenantName) {}
+	public record WorkspaceContext(String workspaceId, String workspaceSlug, String workspaceName) {}
 	public record MembershipContext(String membershipId, java.util.Set<String> roles, java.util.Set<String> permissions,
 			java.util.Set<String> roleDefinitionIds, long authorizationVersion) {}
+
+	private record ContextAuthority(String ticket, String accessToken) { }
 }

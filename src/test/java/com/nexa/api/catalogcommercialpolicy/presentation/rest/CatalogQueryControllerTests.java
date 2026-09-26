@@ -46,7 +46,7 @@ class CatalogQueryControllerTests {
 		CatalogQueryController controller = new CatalogQueryController(listUseCase, getUseCase, new CatalogResponseMapper());
 
 		assertThatThrownBy(() -> controller.getById("CAT-9999"))
-				.isInstanceOf(com.nexa.api.shared.presentation.error.ApiResourceNotFoundException.class);
+				.isInstanceOf(com.nexa.api.shared.application.error.ApiResourceNotFoundException.class);
 	}
 
 	private static CatalogItemSummary summary() {

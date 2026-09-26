@@ -1,5 +1,11 @@
 # Warehouse Domain Foundation
 
+> Historical foundation note: this document records API-era domain analysis,
+> not current Product, Domain or implementation authority. See the [Nexa
+> Blueprint](https://github.com/nexa-suite/blueprint) for accepted meaning and
+> the [current API module map](../architecture/bounded-context-module-map.md)
+> for implementation ownership.
+
 ## Scope
 
 Warehouse owns physical storage identity and inventory quantities. It is the
@@ -19,10 +25,10 @@ continues to own the commercial catalog definition.
 - `InventoryStatus` exposes `AVAILABLE`, `RESERVED`, `QUARANTINED`, `EXPIRED`
   and `DEPLETED`.
 
-The current API has no warehouse aggregate or lifecycle implementation. The
-inventory status members and all transitions, reservation semantics, lot
-expiry policy and unit vocabulary remain unresolved until that model is
-approved. The enums do not authorize state changes.
+At the time this foundation was recorded, the API had no warehouse aggregate
+or lifecycle implementation. The inventory status members and all transitions,
+reservation semantics, lot expiry policy and unit vocabulary remain unresolved
+until that model is approved. The enums do not authorize state changes.
 
 ## Deliberate exclusions
 

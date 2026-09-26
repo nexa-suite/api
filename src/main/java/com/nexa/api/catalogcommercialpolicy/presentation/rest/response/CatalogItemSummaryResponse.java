@@ -12,7 +12,37 @@ public record CatalogItemSummaryResponse(String catalogItemId, String productId,
 			Instant pricingAsOf, String productFamilyId, String productFamilyCode, String productFamilyName,
 			String sellableSkuId, String skuCode, String unitOfMeasure, String packagingType,
 			java.math.BigDecimal netWeight, java.math.BigDecimal grossWeight, Instant availabilityAsOf,
-			String productVariantCode, String productVariantName) {
+			String productVariantCode, String productVariantName, java.math.BigDecimal sellableAvailability,
+			MoneyResponse currentOfferPrice) {
+	public CatalogItemSummaryResponse(String catalogItemId, String productId, String itemName, String brandName,
+			String categoryName, String presentation, MoneyResponse unitPrice, String coldChainRequirement,
+			CatalogMediaResponse image, String status, String availabilityStatus, boolean nearExpiry,
+			String promotionLabel, MoneyResponse basePrice, MoneyResponse effectivePrice, MoneyResponse discountAmount,
+			String currency, List<CatalogAppliedPromotionResponse> appliedPromotions, Instant pricingAsOf,
+			String productFamilyId, String productFamilyCode, String productFamilyName, String sellableSkuId,
+			String skuCode, String unitOfMeasure, String packagingType, java.math.BigDecimal netWeight,
+			java.math.BigDecimal grossWeight, Instant availabilityAsOf, String productVariantCode, String productVariantName) {
+		this(catalogItemId, productId, itemName, brandName, categoryName, presentation, unitPrice,
+				coldChainRequirement, image, status, availabilityStatus, nearExpiry, promotionLabel, basePrice,
+				effectivePrice, discountAmount, currency, appliedPromotions, pricingAsOf, productFamilyId,
+				productFamilyCode, productFamilyName, sellableSkuId, skuCode, unitOfMeasure, packagingType,
+				netWeight, grossWeight, availabilityAsOf, productVariantCode, productVariantName, null, null);
+	}
+	public CatalogItemSummaryResponse(String catalogItemId, String productId, String itemName, String brandName,
+			String categoryName, String presentation, MoneyResponse unitPrice, String coldChainRequirement,
+			CatalogMediaResponse image, String status, String availabilityStatus, boolean nearExpiry,
+			String promotionLabel, MoneyResponse basePrice, MoneyResponse effectivePrice, MoneyResponse discountAmount,
+			String currency, List<CatalogAppliedPromotionResponse> appliedPromotions, Instant pricingAsOf,
+			String productFamilyId, String productFamilyCode, String productFamilyName, String sellableSkuId,
+			String skuCode, String unitOfMeasure, String packagingType, java.math.BigDecimal netWeight,
+			java.math.BigDecimal grossWeight, Instant availabilityAsOf, String productVariantCode,
+			String productVariantName, java.math.BigDecimal sellableAvailability) {
+		this(catalogItemId, productId, itemName, brandName, categoryName, presentation, unitPrice, coldChainRequirement,
+				image, status, availabilityStatus, nearExpiry, promotionLabel, basePrice, effectivePrice, discountAmount,
+				currency, appliedPromotions, pricingAsOf, productFamilyId, productFamilyCode, productFamilyName,
+				sellableSkuId, skuCode, unitOfMeasure, packagingType, netWeight, grossWeight, availabilityAsOf,
+				productVariantCode, productVariantName, sellableAvailability, null);
+	}
 	public CatalogItemSummaryResponse(String catalogItemId, String productId, String itemName, String brandName,
 			String categoryName, String presentation, MoneyResponse unitPrice, String coldChainRequirement,
 			CatalogMediaResponse image, String status, String availabilityStatus, boolean nearExpiry,

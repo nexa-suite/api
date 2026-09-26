@@ -81,11 +81,12 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
         String snapshot = json(order.snapshot());
         jdbc.update("insert into sales.sales_order (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,"
                         + "buyer_membership_id,source_purchase_request_id,order_source,origin_type,priority,requested_delivery_date,delivery_snapshot,"
-                        + "payment_option,notes,currency,total_amount,status,created_at,updated_at,version,delivery_address_snapshot,route_snapshot,"
-                        + "warehouse_selection_snapshot,commercial_snapshot) values (?,?,?,?,?,?,?,null,'MANUAL','MANUAL',?,?,?,?,?,?,?,'PENDING',?,?,0,?::jsonb,?::jsonb,?::jsonb,?::jsonb)",
+                        + "payment_option,notes,currency,total_amount,confirmed_at,status,created_at,updated_at,version,delivery_address_snapshot,route_snapshot,"
+                        + "warehouse_selection_snapshot,commercial_snapshot) values (?,?,?,?,?,?,null,null,'MANUAL','MANUAL',?,?,?,?,?,?,?,?,?,?,?,0,?::jsonb,?::jsonb,?::jsonb,?::jsonb)",
                 id, order.tenantId().value(), order.workspaceId().value(), order.number().value(), uuid(order.clientAccountId().value()),
-                uuid(actorMembershipId), uuid(actorMembershipId), order.priority().name(), order.requestedDeliveryDate(), snapshot,
+                uuid(actorMembershipId), order.priority().name(), order.requestedDeliveryDate(), snapshot,
                 order.snapshot().payment().option().name(), order.snapshot().notes(), order.snapshot().payment().currency(), order.total(),
+                order.status() == SalesOrderStatus.CONFIRMED ? timestamp(nowEpochMillis) : null, order.status().name(),
                 timestamp(nowEpochMillis), timestamp(nowEpochMillis), json(order.snapshot().delivery().address()),
                 json(order.snapshot().delivery().route()), json(order.snapshot().delivery().warehouse()), json(order.snapshot().commercial()));
         for (var line : order.lines()) {
@@ -95,8 +96,9 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
                     line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), timestamp(nowEpochMillis));
         }
         jdbc.update("insert into sales.sales_order_event (id,sales_order_id,tenant_id,workspace_id,actor_membership_id,event_type,to_status,occurred_at) "
-                        + "values (?,?,?,?,?,'ORDER_CREATED','PENDING',?)",
-                UUID.randomUUID(), id, order.tenantId().value(), order.workspaceId().value(), uuid(actorMembershipId), timestamp(nowEpochMillis));
+                        + "values (?,?,?,?,?,'ORDER_CREATED',?,?)",
+                UUID.randomUUID(), id, order.tenantId().value(), order.workspaceId().value(), uuid(actorMembershipId),
+                order.status().name(), timestamp(nowEpochMillis));
         int inserted = jdbc.update("insert into sales.manual_order_idempotency (tenant_id,workspace_id,actor_membership_id,idempotency_key,request_hash,sales_order_id,created_at) "
                         + "values (?,?,?,?,?,?,?) on conflict (tenant_id,workspace_id,actor_membership_id,idempotency_key) do nothing",
                 order.tenantId().value(), order.workspaceId().value(), uuid(actorMembershipId), idempotencyKey, requestHash, id, timestamp(nowEpochMillis));

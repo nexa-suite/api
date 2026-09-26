@@ -12,5 +12,13 @@ import java.util.UUID;
 public interface CanonicalOutboxPort {
     UUID append(String eventType, String aggregateType, UUID aggregateId,
                 UUID tenantId, UUID workspaceId, Instant occurredAt, String correlationId,
-                UUID causationId, String schemaVersion, Map<String, Object> payload);
+                UUID causationId, String schemaVersion, String occurrenceKey,
+                Map<String, Object> payload);
+
+    default UUID append(String eventType, String aggregateType, UUID aggregateId,
+                        UUID tenantId, UUID workspaceId, Instant occurredAt, String correlationId,
+                        UUID causationId, String schemaVersion, Map<String, Object> payload) {
+        return append(eventType, aggregateType, aggregateId, tenantId, workspaceId, occurredAt,
+                correlationId, causationId, schemaVersion, null, payload);
+    }
 }

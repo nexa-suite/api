@@ -7,6 +7,11 @@ import java.util.List;
 
 public final class PurchaseRequestDraftModels {
     private PurchaseRequestDraftModels() { }
+    public record DraftSummaryView(String id, String status, long version, LocalDate requestedDeliveryDate,
+            int lineCount, Instant createdAt, Instant updatedAt) { }
+    public record DraftPage(List<DraftSummaryView> items, int page, int size, long totalItems, int totalPages) {
+        public DraftPage { items = List.copyOf(items == null ? List.of() : items); }
+    }
     public record DraftView(String id, String clientAccountId, String buyerMembershipId, String status, long version,
             LocalDate requestedDeliveryDate, String paymentPreference, String creditResult, String routeProvider,
             List<LineView> lines, DestinationView destination, RouteView route, WarehouseSelectionView warehouseSelection,

@@ -15,8 +15,8 @@ import com.nexa.api.businessdocuments.domain.model.businessdocument.BusinessDocu
 import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectReference;
 import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectSnapshot;
 import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectType;
-import com.nexa.api.shared.infrastructure.events.CanonicalOutbox;
-import com.nexa.api.shared.infrastructure.security.RlsRequestScope;
+import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
+import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
@@ -36,6 +36,7 @@ import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -48,6 +49,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private static final Logger LOGGER = LoggerFactory.getLogger(BusinessDocumentService.class);
     private static final String WORKER_LEASE = "current_timestamp + interval '10 minutes'";
     private final JdbcTemplate jdbc;
+    private final CanonicalOutboxPort canonicalOutbox;
     private final ObjectStoragePort storage;
     private final ContentScannerPort scanner;
     private final DocumentRendererPort renderer;
@@ -56,13 +58,20 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private final TransactionTemplate transactionTemplate;
 
     public BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner, DocumentRendererPort renderer,
-            DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections, PlatformTransactionManager transactionManager) {
+            DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections,
+            PlatformTransactionManager transactionManager, CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc; this.storage = storage; this.scanner = scanner; this.renderer = renderer; this.subjects = subjects; this.projections = projections;
+        this.canonicalOutbox = canonicalOutbox;
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
     }
 
     @Transactional
     public BusinessDocumentModels.GenerationRequestView request(CurrentAccessContext context, String subjectType, UUID subjectId, String documentType, String format, String idempotencyKey) {
+        return requestDocument(context, subjectType, subjectId, documentType, format, idempotencyKey, null);
+    }
+
+    private BusinessDocumentModels.GenerationRequestView requestDocument(CurrentAccessContext context, String subjectType,
+            UUID subjectId, String documentType, String format, String idempotencyKey, UUID replacementOfDocumentId) {
         requireGeneration(context);
         requireKey(idempotencyKey);
         DocumentSubjectType subject = parseSubject(subjectType); BusinessDocumentType type = parseType(documentType); BusinessDocumentFormat output = parseFormat(format);
@@ -70,7 +79,9 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(), new DocumentSubjectReference(subject, subjectId.toString()));
         if (!snapshot.subjectExists()) throw new IllegalArgumentException("Document subject not found");
         authorizeClientScope(context, snapshot.clientAccountId());
-        String requestHash = sha256(subject.name() + subjectId + type.name() + output.name());
+        String requestPayload = subject.name() + subjectId + type.name() + output.name();
+        String requestHash = sha256(replacementOfDocumentId == null
+                ? requestPayload : requestPayload + "|replacementOf=" + replacementOfDocumentId);
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (rs, n) -> rs.getObject(1),
                 tenant(context) + "|" + workspace(context) + "|document-version|" + subject.name() + "|" + subjectId + "|" + type + "|" + output);
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (rs, n) -> rs.getObject(1), tenant(context) + "|" + workspace(context) + "|document-generation|" + context.membershipId().value() + "|" + idempotencyKey);
@@ -82,9 +93,14 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         }
         int version = jdbc.queryForObject("select coalesce(max(version),0)+1 from business_documents.business_document where tenant_id=? and workspace_id=? and subject_type=? and subject_id=? and document_type=? and format=?", Integer.class, tenant(context), workspace(context), subject.name(), subjectId, type.name(), output.name());
         Instant now = Instant.now(); UUID documentId = UUID.randomUUID(); UUID requestId = UUID.randomUUID();
-        jdbc.update("insert into business_documents.business_document (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,format,created_at,updated_at) values (?,?,?,?,?,?,?,?,'REQUESTED',?,?,?)", documentId, tenant(context), workspace(context), uuid(snapshot.clientAccountId()), subject.name(), subjectId, type.name(), version, output.name(), Timestamp.from(now), Timestamp.from(now));
+        jdbc.update("insert into business_documents.business_document (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,format,replacement_of_document_id,created_at,updated_at) values (?,?,?,?,?,?,?,?,'REQUESTED',?,?,?,?)", documentId, tenant(context), workspace(context), uuid(snapshot.clientAccountId()), subject.name(), subjectId, type.name(), version, output.name(), replacementOfDocumentId, Timestamp.from(now), Timestamp.from(now));
         jdbc.update("insert into business_documents.document_generation_request (id,tenant_id,workspace_id,requested_by_membership_id,document_id,subject_type,subject_id,document_type,format,status,idempotency_key,request_hash,requested_at) values (?,?,?,?,?,?,?,?,?,'PENDING',?,?,?)", requestId, tenant(context), workspace(context), context.membershipId().value(), documentId, subject.name(), subjectId, type.name(), output.name(), idempotencyKey, requestHash, Timestamp.from(now));
-        outbox(context, "BUSINESS_DOCUMENT_GENERATION_REQUESTED", documentId, Map.of("documentId", documentId, "requestId", requestId, "subjectType", subject.name(), "subjectId", subjectId, "documentType", type.name(), "format", output.name()));
+        Map<String, Object> eventPayload = new HashMap<>();
+        eventPayload.put("documentId", documentId); eventPayload.put("requestId", requestId);
+        eventPayload.put("subjectType", subject.name()); eventPayload.put("subjectId", subjectId);
+        eventPayload.put("documentType", type.name()); eventPayload.put("format", output.name());
+        if (replacementOfDocumentId != null) eventPayload.put("replacementOfDocumentId", replacementOfDocumentId);
+        outbox(context, "BUSINESS_DOCUMENT_GENERATION_REQUESTED", documentId, eventPayload);
         return jdbc.query("select r.id,r.document_id,r.subject_type,r.subject_id,r.document_type,r.format,r.status,r.requested_at,r.completed_at from business_documents.document_generation_request r where r.id=?", (rs, n) -> requestView(rs), requestId).get(0);
     }
 
@@ -117,7 +133,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
                         + "values (?,?,?,?,?,?,?,?,?,'PENDING',?,?,?) on conflict do nothing",
                 requestId, tenantId, workspaceId, requestedByMembershipId, documentId, "PAYMENT", paymentId,
                 "PAYMENT_RECEIPT", "PDF", "payment-receipt-" + paymentId, sha256(eventKey), Timestamp.from(occurredAt));
-        CanonicalOutbox.append(jdbc, "BUSINESS_DOCUMENT_GENERATION_REQUESTED", "BusinessDocument", documentId,
+        canonicalOutbox.append("BUSINESS_DOCUMENT_GENERATION_REQUESTED", "BusinessDocument", documentId,
                 tenantId, workspaceId, occurredAt, "payment-receipt-" + paymentId, null, "1.0",
                 "payment-receipt-" + paymentId,
                 Map.of("documentId", documentId, "requestId", requestId, "subjectType", "PAYMENT",
@@ -139,14 +155,14 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         String where = whereBuilder.toString();
         long total = jdbc.queryForObject("select count(*) from business_documents.business_document d where " + where, Long.class, params.toArray());
         params.add(safeSize); params.add(safePage * safeSize);
-        List<BusinessDocumentModels.DocumentView> rows = jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at from business_documents.business_document d where " + where + " order by d.created_at desc,d.id limit ? offset ?", (rs, n) -> documentView(rs), params.toArray());
+        List<BusinessDocumentModels.DocumentView> rows = jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where " + where + " order by d.created_at desc,d.id limit ? offset ?", (rs, n) -> documentView(rs), params.toArray());
         return new BusinessDocumentModels.Page<>(rows, safePage, safeSize, total);
     }
 
     @Transactional(readOnly = true)
     public BusinessDocumentModels.DocumentView get(CurrentAccessContext context, UUID documentId) {
         read(context);
-        return jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().filter(value -> authorizedDocument(context, value.clientAccountId())).findFirst().orElseThrow(() -> new IllegalArgumentException("Business document not found"));
+        return jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().filter(value -> authorizedDocument(context, value.clientAccountId())).findFirst().orElseThrow(() -> new IllegalArgumentException("Business document not found"));
     }
 
     @Transactional(readOnly = true)
@@ -163,10 +179,26 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         return request(context, current.subjectType(), UUID.fromString(current.subjectId()), current.documentType(), current.format(), idempotencyKey);
     }
 
+    @Override
+    @Transactional
+    public BusinessDocumentModels.GenerationRequestView replace(CurrentAccessContext context, UUID documentId, String idempotencyKey) {
+        context.requirePermission(PermissionKey.DOCUMENT_GENERATE); requireKey(idempotencyKey);
+        BusinessDocumentModels.DocumentView original = get(context, documentId);
+        if (!(BusinessDocumentStatus.GENERATED.name().equals(original.status())
+                || BusinessDocumentStatus.SUPERSEDED.name().equals(original.status()))
+                || original.storageObjectKey() == null) {
+            throw new IllegalArgumentException("Only an issued business document can be replaced");
+        }
+        return requestDocument(context, original.subjectType(), UUID.fromString(original.subjectId()),
+                original.documentType(), original.format(), idempotencyKey, documentId);
+    }
+
     @Transactional(readOnly = true)
     public BusinessDocumentModels.Download download(CurrentAccessContext context, UUID documentId) {
         BusinessDocumentModels.DocumentView document = get(context, documentId);
-        if (!BusinessDocumentStatus.GENERATED.name().equals(document.status()) || document.storageObjectKey() == null) throw new IllegalArgumentException("Business document is not available");
+        if (!(BusinessDocumentStatus.GENERATED.name().equals(document.status())
+                || BusinessDocumentStatus.SUPERSEDED.name().equals(document.status()))
+                || document.storageObjectKey() == null) throw new IllegalArgumentException("Business document is not available");
         try {
             return new BusinessDocumentModels.Download(safeFilename(document), document.contentType(), storage.open(document.storageObjectKey()), document.byteSize(), document.checksumSha256());
         } catch (RuntimeException exception) { throw new IllegalStateException("Business document download failed", exception); }
@@ -280,8 +312,20 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
 
     @Scheduled(fixedDelayString = "${nexa.documents.worker-delay-ms:3000}")
     public void processPendingEvidenceScans() {
-        List<WorkspaceScope> scopes = jdbc.query("select tenant_id,id as workspace_id from tenant_management.workspace order by tenant_id,id",
-                (rs, n) -> new WorkspaceScope(rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
+        if (transactionTemplate == null) {
+            throw new IllegalStateException("Workspace enumeration requires a transaction manager");
+        }
+        List<WorkspaceScope> scopes;
+        RlsRequestScope.enableCrossScopeWorkspaceScan();
+        try {
+            scopes = transactionTemplate.execute(status -> {
+                jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
+                return jdbc.query("select tenant_id,id as workspace_id from tenant_management.workspace order by tenant_id,id",
+                        (rs, n) -> new WorkspaceScope(rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
+            });
+        } finally {
+            RlsRequestScope.clearCrossScopeWorkspaceScan();
+        }
         for (WorkspaceScope scope : scopes) withScope(scope, () -> {
             List<UUID> work = jdbc.query("select id from business_documents.evidence_object where tenant_id=? and workspace_id=? and lifecycle_status='SCANNING' and scan_attempt_count < 10 and next_scan_at <= current_timestamp and (lease_until is null or lease_until <= current_timestamp) order by created_at,id limit 10",
                     (rs, n) -> rs.getObject("id", UUID.class), scope.tenantId(), scope.workspaceId());
@@ -384,8 +428,13 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
             int generated = jdbc.update("update business_documents.business_document set status='GENERATED',storage_object_key=?,checksum_sha256=?,content_type=?,byte_size=?,generated_at=?,failure_code=null,failure_detail=null,updated_at=? where tenant_id=? and workspace_id=? and id=? and status='GENERATING' and exists(select 1 from business_documents.document_generation_request claim where claim.tenant_id=? and claim.workspace_id=? and claim.id=? and claim.status='PROCESSING' and claim.claim_token=? and claim.lease_until > current_timestamp)",
                     key, stored.checksumSha256(), stored.contentType(), stored.byteSize(), Timestamp.from(now), Timestamp.from(now), request.tenantId(), request.workspaceId(), request.documentId(), request.tenantId(), request.workspaceId(), request.id(), claimToken);
             if (generated != 1) throw new ClaimLostException();
-            jdbc.update("update business_documents.business_document old set status='SUPERSEDED',updated_at=current_timestamp where old.tenant_id=? and old.workspace_id=? and old.subject_type=? and old.subject_id=? and old.document_type=? and old.format=? and old.id<>? and old.status='GENERATED' and exists(select 1 from business_documents.document_generation_request claim where claim.tenant_id=? and claim.workspace_id=? and claim.id=? and claim.status='PROCESSING' and claim.claim_token=? and claim.lease_until > current_timestamp)",
-                    request.tenantId(), request.workspaceId(), request.subjectType(), request.subjectId(), request.documentType(), request.format(), request.documentId(), request.tenantId(), request.workspaceId(), request.id(), claimToken);
+            UUID replacementOfDocumentId = jdbc.queryForObject(
+                    "select replacement_of_document_id from business_documents.business_document where tenant_id=? and workspace_id=? and id=?",
+                    UUID.class, request.tenantId(), request.workspaceId(), request.documentId());
+            if (replacementOfDocumentId == null) {
+                jdbc.update("update business_documents.business_document old set status='SUPERSEDED',updated_at=current_timestamp where old.tenant_id=? and old.workspace_id=? and old.subject_type=? and old.subject_id=? and old.document_type=? and old.format=? and old.id<>? and old.status='GENERATED' and exists(select 1 from business_documents.document_generation_request claim where claim.tenant_id=? and claim.workspace_id=? and claim.id=? and claim.status='PROCESSING' and claim.claim_token=? and claim.lease_until > current_timestamp)",
+                        request.tenantId(), request.workspaceId(), request.subjectType(), request.subjectId(), request.documentType(), request.format(), request.documentId(), request.tenantId(), request.workspaceId(), request.id(), claimToken);
+            }
             int completed = jdbc.update("update business_documents.document_generation_request set status='COMPLETED',last_error=null,processing_started_at=null,lease_until=null,claim_token=null,completed_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
                     request.tenantId(), request.workspaceId(), request.id(), claimToken);
             if (completed != 1) throw new ClaimLostException();
@@ -414,7 +463,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     }
 
     private BusinessDocumentModels.GenerationRequestView requestView(java.sql.ResultSet rs) throws java.sql.SQLException { return new BusinessDocumentModels.GenerationRequestView(rs.getObject("id", UUID.class).toString(), rs.getObject("document_id", UUID.class) == null ? null : rs.getObject("document_id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("document_type"), rs.getString("format"), rs.getString("status"), rs.getTimestamp("requested_at").toInstant(), rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()); }
-    private BusinessDocumentModels.DocumentView documentView(java.sql.ResultSet rs) throws java.sql.SQLException { return new BusinessDocumentModels.DocumentView(rs.getObject("id", UUID.class).toString(), rs.getObject("client_account_id", UUID.class) == null ? null : rs.getObject("client_account_id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("document_type"), rs.getString("document_number"), rs.getInt("version"), rs.getString("status"), rs.getString("format"), rs.getString("storage_object_key"), rs.getString("checksum_sha256"), rs.getString("content_type"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("generated_at") == null ? null : rs.getTimestamp("generated_at").toInstant(), rs.getString("failure_code"), rs.getString("failure_detail"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()); }
+    private BusinessDocumentModels.DocumentView documentView(java.sql.ResultSet rs) throws java.sql.SQLException { UUID replacementOfDocumentId = rs.getObject("replacement_of_document_id", UUID.class); return new BusinessDocumentModels.DocumentView(rs.getObject("id", UUID.class).toString(), rs.getObject("client_account_id", UUID.class) == null ? null : rs.getObject("client_account_id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("document_type"), rs.getString("document_number"), rs.getInt("version"), rs.getString("status"), rs.getString("format"), rs.getString("storage_object_key"), rs.getString("checksum_sha256"), rs.getString("content_type"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("generated_at") == null ? null : rs.getTimestamp("generated_at").toInstant(), rs.getString("failure_code"), rs.getString("failure_detail"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(), replacementOfDocumentId == null ? null : replacementOfDocumentId.toString()); }
     private BusinessDocumentModels.EvidenceView evidenceView(java.sql.ResultSet rs) throws java.sql.SQLException { return new BusinessDocumentModels.EvidenceView(rs.getObject("id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("lifecycle_status"), rs.getString("declared_content_type"), rs.getString("detected_content_type"), rs.getString("original_filename"), rs.getString("checksum_sha256"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("scanned_at") == null ? null : rs.getTimestamp("scanned_at").toInstant(), rs.getString("failure_code"), rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant()); }
     private BusinessDocumentModels.EvidenceView evidenceView(EvidenceRow row) { return new BusinessDocumentModels.EvidenceView(row.id().toString(), row.subjectType(), row.subjectId().toString(), row.lifecycleStatus(), row.declaredContentType(), row.detectedContentType(), row.originalFilename(), row.checksumSha256(), row.byteSize(), row.createdAt(), row.scannedAt(), row.failureCode(), row.updatedAt()); }
     private String evidenceSelect() { return "select e.id,e.client_account_id,e.subject_type,e.subject_id,e.object_key,e.lifecycle_status,e.declared_content_type,e.detected_content_type,e.original_filename,e.checksum_sha256,e.byte_size,e.created_at,e.scanned_at,e.failure_code,e.updated_at from business_documents.evidence_object e"; }
@@ -453,7 +502,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private record EvidenceRow(UUID id, UUID clientAccountId, String subjectType, UUID subjectId, String objectKey, String lifecycleStatus,
             String declaredContentType, String detectedContentType, String originalFilename, String checksumSha256, long byteSize,
             Instant createdAt, Instant scannedAt, String failureCode, Instant updatedAt) { }
-    private void outbox(CurrentAccessContext context, String type, UUID aggregateId, Map<String, Object> payload) { CanonicalOutbox.append(jdbc, type, "BusinessDocument", aggregateId, tenant(context), workspace(context), Instant.now(), "document-" + aggregateId, null, "1.0", payload); }
+    private void outbox(CurrentAccessContext context, String type, UUID aggregateId, Map<String, Object> payload) { canonicalOutbox.append(type, "BusinessDocument", aggregateId, tenant(context), workspace(context), Instant.now(), "document-" + aggregateId, null, "1.0", payload); }
     private void read(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_READ); }
     private void requireGeneration(CurrentAccessContext context) { if (context.hasRole(MembershipRole.BUYER)) context.requirePermission(PermissionKey.DOCUMENT_READ); else context.requirePermission(PermissionKey.DOCUMENT_GENERATE); }
     private void authorizeClientScope(CurrentAccessContext context, String clientAccountId) { if (context.hasRole(MembershipRole.BUYER)) { if (clientAccountId == null || !Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?)", Boolean.class, tenant(context), workspace(context), uuid(clientAccountId), context.membershipId().value()))) throw new IllegalArgumentException("Document is outside buyer scope"); } }

@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -37,8 +38,32 @@ public class CatalogSkuPersistenceBootstrap {
     @Transactional
     public void reconcile() {
         Instant now = Instant.now();
-        jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.catalog_item_id,p.description,p.category_id,p.brand_id,p.storage_temperature,p.status,p.version,p.created_at,p.updated_at,pp.unit_of_measure,coalesce(pv.buyer_visible,true) visible from catalog_management.product p left join catalog_management.product_presentation pp on pp.product_id=p.id and pp.tenant_id=p.tenant_id and pp.workspace_id=p.workspace_id left join catalog_management.product_visibility pv on pv.product_id=p.id and pv.tenant_id=p.tenant_id and pv.workspace_id=p.workspace_id order by p.id",
-                (rs, row) -> { reconcileProduct(rs, now); return null; });
+        List<Workspace> workspaces;
+        try {
+            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
+            workspaces = jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
+                    (rs, row) -> new Workspace(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
+        } finally {
+            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', '', true)", String.class);
+        }
+        try {
+            for (Workspace workspace : workspaces) {
+                setTransactionScope(workspace);
+                jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.catalog_item_id,p.description,p.category_id,p.brand_id,p.storage_temperature,p.status,p.version,p.created_at,p.updated_at,pp.unit_of_measure,coalesce(pv.buyer_visible,true) visible from catalog_management.product p left join catalog_management.product_presentation pp on pp.product_id=p.id and pp.tenant_id=p.tenant_id and pp.workspace_id=p.workspace_id left join catalog_management.product_visibility pv on pv.product_id=p.id and pv.tenant_id=p.tenant_id and pv.workspace_id=p.workspace_id where p.tenant_id=? and p.workspace_id=? order by p.id",
+                        (rs, row) -> { reconcileProduct(rs, now); return null; }, workspace.tenantId(), workspace.workspaceId());
+            }
+        } finally {
+            clearTransactionScope();
+        }
+    }
+
+    private void setTransactionScope(Workspace workspace) {
+        jdbc.queryForObject("select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true)",
+                String.class, workspace.tenantId().toString(), workspace.workspaceId().toString());
+    }
+
+    private void clearTransactionScope() {
+        jdbc.queryForObject("select set_config('app.current_tenant_id', '', true) || set_config('app.current_workspace_id', '', true)", String.class);
     }
 
     private void reconcileProduct(ResultSet rs, Instant now) throws SQLException {
@@ -81,4 +106,6 @@ public class CatalogSkuPersistenceBootstrap {
         String value = rs.getString(name);
         return value == null ? fallback : value;
     }
+
+    private record Workspace(UUID tenantId, UUID workspaceId) { }
 }

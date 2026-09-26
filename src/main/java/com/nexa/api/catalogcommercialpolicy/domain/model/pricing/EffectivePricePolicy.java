@@ -12,13 +12,6 @@ import java.util.UUID;
 
 /** Applies deterministic promotion precedence while preserving non-negative money. */
 public final class EffectivePricePolicy {
-	private static final Comparator<PromotionCandidate> STACK_ORDER = Comparator
-			.comparingInt((PromotionCandidate candidate) -> candidate.discountType() == Promotion.DiscountType.PERCENTAGE ? 0 : 1)
-			.thenComparing(Comparator.comparingInt(PromotionCandidate::priority).reversed())
-			.thenComparing(EffectivePricePolicy::startTime)
-			.thenComparing(EffectivePricePolicy::stableCode)
-			.thenComparing(candidate -> candidate.id().toString());
-
 	private final PromotionEligibilityPolicy eligibility = new PromotionEligibilityPolicy();
 
 	public Result calculate(BigDecimal basePrice, String currency, BigDecimal quantity,
@@ -51,19 +44,9 @@ public final class EffectivePricePolicy {
 
 	private static Selection select(List<PromotionCandidate> eligible, BigDecimal base, String currency) {
 		if (eligible.isEmpty()) return emptySelection(base);
-		Selection bestExclusive = eligible.stream()
-				.filter(candidate -> candidate.stackingPolicy() == Promotion.StackingPolicy.EXCLUSIVE)
-				.map(candidate -> selection(base, currency, List.of(candidate)))
-				.min(EffectivePricePolicy::compareSelections)
-				.orElse(null);
-		List<PromotionCandidate> stackable = eligible.stream()
-				.filter(candidate -> candidate.stackingPolicy() == Promotion.StackingPolicy.STACKABLE)
-				.sorted(STACK_ORDER)
-				.toList();
-		Selection bestStackable = stackable.isEmpty() ? null : selection(base, currency, stackable);
-		if (bestExclusive == null) return bestStackable == null ? emptySelection(base) : bestStackable;
-		if (bestStackable == null) return bestExclusive;
-		return compareSelections(bestExclusive, bestStackable) <= 0 ? bestExclusive : bestStackable;
+		// BC-03 promotions do not stack: compare eligible candidates individually.
+		return eligible.stream().map(candidate -> selection(base, currency, List.of(candidate)))
+				.min(EffectivePricePolicy::compareSelections).orElseGet(() -> emptySelection(base));
 	}
 
 	private static Selection selection(BigDecimal base, String currency, List<PromotionCandidate> promotions) {

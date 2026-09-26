@@ -7,6 +7,7 @@ import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogClientAc
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.UUID;
 
@@ -22,13 +23,14 @@ public final class CatalogHttpSupport {
 
     public static CatalogScope scope(CurrentAccessContext context, ObjectProvider<CatalogClientAccountPort> clientAccounts) {
         boolean buyer = context.hasRole(MembershipRole.BUYER);
-        if (!buyer || clientAccounts == null) return scope(context);
+        if (!buyer) return scope(context);
+        if (clientAccounts == null) throw new AccessDeniedException("Active Buyer relationship is required");
         CatalogClientAccountPort resolver = clientAccounts.getIfAvailable();
-        if (resolver == null) return new CatalogScope(context.tenantId().value(), context.workspaceId().value(), true);
+        if (resolver == null) throw new AccessDeniedException("Active Buyer relationship is required");
         return resolver.findProfileForMembership(context.tenantId().value(), context.workspaceId().value(), context.membershipId().value())
                 .map(profile -> new CatalogScope(context.tenantId().value(), context.workspaceId().value(), true,
                         profile.id(), profile.segment(), profile.buyerTier()))
-                .orElseGet(() -> new CatalogScope(context.tenantId().value(), context.workspaceId().value(), true));
+                .orElseThrow(() -> new AccessDeniedException("Active Buyer relationship is required"));
     }
 
     public static long version(String value) {

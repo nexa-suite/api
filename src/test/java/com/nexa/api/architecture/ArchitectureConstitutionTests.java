@@ -42,8 +42,37 @@ class ArchitectureConstitutionTests {
                         "BC-03-catalog-commercial-policy", "BC-04-sales-commitment", "BC-05-inventory-availability",
                         "BC-06-fulfillment-delivery", "BC-07-credit-receivables", "BC-08-payments",
                         "BC-09-business-documents", "BC-10-notifications", "BC-11-business-traceability",
-                        "bootstrap", "shared");
+                        "bootstrap", "edge", "shared");
         assertDoesNotThrow(() -> modules.verify());
+    }
+
+    @Test
+    void edgeIsTechnicalAndSharedContainsOnlyFrameworkNeutralContracts() throws IOException {
+        String sharedModule = Files.readString(Path.of("src/main/java/com/nexa/api/shared/package-info.java"));
+        assertThat(sharedModule).contains("@org.springframework.modulith.ApplicationModule(id = \"shared\")")
+                .doesNotContain("Type.OPEN");
+        assertThat(Files.exists(Path.of("src/main/java/com/nexa/api/edge/package-info.java"))).isTrue();
+
+        List<String> sharedDependencies = CLASSES.stream()
+                .filter(type -> type.getPackageName().startsWith("com.nexa.api.shared."))
+                .filter(type -> !type.getSimpleName().equals("package-info"))
+                .flatMap(type -> type.getDirectDependenciesFromSelf().stream())
+                .map(dependency -> dependency.getTargetClass().getPackageName())
+                .filter(packageName -> packageName.startsWith("org.springframework.")
+                        || packageName.startsWith("io.micrometer.")
+                        || packageName.startsWith("jakarta.")
+                        || packageName.startsWith("java.sql.")
+                        || (packageName.startsWith("com.nexa.api.")
+                                && !packageName.startsWith("com.nexa.api.shared.")))
+                .distinct().toList();
+        assertThat(sharedDependencies).isEmpty();
+        assertThat(CLASSES.stream().map(type -> type.getPackageName()).filter(packageName ->
+                packageName.startsWith("com.nexa.api.shared.presentation.")
+                        || packageName.startsWith("com.nexa.api.shared.infrastructure.")
+                        || packageName.startsWith("com.nexa.api.shared.domain.")))
+                .isEmpty();
+        assertThat(TARGET_BOUNDED_CONTEXT_OWNERS.values().stream().flatMap(Set::stream))
+                .doesNotContain("com.nexa.api.edge");
     }
 
     @Test

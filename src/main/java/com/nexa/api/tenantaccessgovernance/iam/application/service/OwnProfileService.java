@@ -7,7 +7,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.IamSecurityMode
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.GetOwnProfileQuery;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.UpdateOwnProfileCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.UserProfilePersistencePort;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

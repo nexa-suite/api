@@ -3,7 +3,7 @@ package com.nexa.api.tenantaccessgovernance.iam.application.service;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SignOutCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignOutUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SessionPort;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 
 import java.time.Clock;
 import java.util.Objects;

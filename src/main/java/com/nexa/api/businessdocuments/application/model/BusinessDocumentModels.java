@@ -10,7 +10,7 @@ public final class BusinessDocumentModels {
     public record DocumentView(String id, String clientAccountId, String subjectType, String subjectId, String documentType,
             String documentNumber, int version, String status, String format, String storageObjectKey, String checksumSha256,
             String contentType, long byteSize, Instant generatedAt, String failureCode, String failureDetail,
-            Instant createdAt, Instant updatedAt) { }
+            Instant createdAt, Instant updatedAt, String replacementOfDocumentId) { }
     public record GenerationRequestView(String id, String documentId, String subjectType, String subjectId, String documentType,
             String format, String status, Instant requestedAt, Instant completedAt) { }
     public record DocumentEventView(String eventId, String eventType, String status, Instant occurredAt,

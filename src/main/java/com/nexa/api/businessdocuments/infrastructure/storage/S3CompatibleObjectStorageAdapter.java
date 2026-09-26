@@ -2,7 +2,7 @@ package com.nexa.api.businessdocuments.infrastructure.storage;
 
 import com.nexa.api.businessdocuments.application.port.ObjectStoragePort;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
-import com.nexa.api.shared.infrastructure.observability.TechnicalMetrics;
+import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
@@ -41,19 +41,19 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     private final String secretKey;
     private final String region;
     private final Duration timeout;
-    private final TechnicalMetrics metrics;
+    private final TechnicalMetricsPort metrics;
 
     @Autowired
     public S3CompatibleObjectStorageAdapter(org.springframework.core.env.Environment environment,
-                                            ObjectProvider<TechnicalMetrics> metrics) {
+                                            ObjectProvider<TechnicalMetricsPort> metrics) {
         this(environment, metrics == null ? null : metrics.getIfAvailable());
     }
 
     public S3CompatibleObjectStorageAdapter(org.springframework.core.env.Environment environment) {
-        this(environment, (TechnicalMetrics) null);
+        this(environment, (TechnicalMetricsPort) null);
     }
 
-    private S3CompatibleObjectStorageAdapter(org.springframework.core.env.Environment environment, TechnicalMetrics metrics) {
+    private S3CompatibleObjectStorageAdapter(org.springframework.core.env.Environment environment, TechnicalMetricsPort metrics) {
         this.endpoint = URI.create(required(environment.getProperty("nexa.object-storage.endpoint", ""), "endpoint").replaceAll("/$", ""));
         this.bucket = required(environment.getProperty("nexa.object-storage.bucket", ""), "bucket");
         this.accessKey = required(environment.getProperty("nexa.object-storage.access-key", ""), "access key");
@@ -68,7 +68,7 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     public StoredObject put(String objectKey, InputStream content, long contentLength, String contentType) {
         validateKey(objectKey);
         if (content == null || contentLength < 0 || contentLength > 52428800) throw new IllegalArgumentException("Object size is invalid");
-        TechnicalMetrics.TimerSample timer = start("put");
+        TechnicalMetricsPort.TimerSample timer = start("put");
         Path temporary = null;
         try {
             temporary = Files.createTempFile("nexa-object-", ".part");
@@ -112,7 +112,7 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     @Override
     public InputStream open(String objectKey) {
         validateKey(objectKey);
-        TechnicalMetrics.TimerSample timer = start("open");
+        TechnicalMetricsPort.TimerSample timer = start("open");
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
                 HttpResponse<InputStream> response = client.send(request("GET", objectKey, new byte[0], null, sha256(new byte[0])), HttpResponse.BodyHandlers.ofInputStream());
@@ -143,7 +143,7 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
     @Override
     public void delete(String objectKey) {
         validateKey(objectKey);
-        TechnicalMetrics.TimerSample timer = start("delete");
+        TechnicalMetricsPort.TimerSample timer = start("delete");
         try {
             HttpResponse<byte[]> response = sendBytes("DELETE", objectKey, new byte[0], null, sha256(new byte[0]));
             requireSuccess(response.statusCode(), response.body());
@@ -157,8 +157,8 @@ public final class S3CompatibleObjectStorageAdapter implements ObjectStoragePort
         }
     }
 
-    private TechnicalMetrics.TimerSample start(String operation) { return metrics == null ? null : metrics.start("storage_s3", operation); }
-    private void record(TechnicalMetrics.TimerSample timer, String outcome) { if (metrics != null) { metrics.count("storage_s3", "operation", outcome); if (timer != null) timer.stop(outcome); } }
+    private TechnicalMetricsPort.TimerSample start(String operation) { return metrics == null ? null : metrics.start("storage_s3", operation); }
+    private void record(TechnicalMetricsPort.TimerSample timer, String outcome) { if (metrics != null) { metrics.count("storage_s3", "operation", outcome); if (timer != null) timer.stop(outcome); } }
 
     private HttpResponse<byte[]> sendBytes(String method, String objectKey, byte[] content, String contentType, String hash) {
         for (int attempt = 1; attempt <= 2; attempt++) {

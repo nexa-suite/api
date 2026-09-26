@@ -1,5 +1,11 @@
 # Catalog Management Domain
 
+> Historical foundation note: this document records API-era domain analysis,
+> not current Product, Domain or implementation authority. See the [Nexa
+> Blueprint](https://github.com/nexa-suite/blueprint) for accepted meaning and
+> the [current API module map](../architecture/bounded-context-module-map.md)
+> for implementation ownership.
+
 ## Purpose
 
 Catalog Management owns the commercial product definition used to describe a sellable catalog item. It does not own physical inventory or tenant assignment.

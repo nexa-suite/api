@@ -4,12 +4,13 @@ import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurity
 import com.nexa.api.tenantaccessgovernance.iam.application.model.IamSecurityModels.Actor;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ChangeOwnPasswordCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.CredentialPersistencePort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AccessContextTicketPersistencePort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordHashPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordVerificationPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.RefreshSessionPersistencePort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityNotificationOutboxPort;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.password.PasswordPolicy;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,14 +27,17 @@ public class PasswordSecurityService implements ChangeOwnPasswordCommand {
     private final PasswordVerificationPort verifier;
     private final PasswordHashPort hasher;
     private final RefreshSessionPersistencePort sessions;
+    private final AccessContextTicketPersistencePort accessContextTickets;
     private final SecurityAuditPort audit;
     private final SecurityNotificationOutboxPort outbox;
     private final Clock clock;
 
     public PasswordSecurityService(CredentialPersistencePort credentials, PasswordVerificationPort verifier,
-            PasswordHashPort hasher, RefreshSessionPersistencePort sessions, SecurityAuditPort audit,
+            PasswordHashPort hasher, RefreshSessionPersistencePort sessions,
+            AccessContextTicketPersistencePort accessContextTickets, SecurityAuditPort audit,
             SecurityNotificationOutboxPort outbox, Clock clock) {
         this.credentials = credentials; this.verifier = verifier; this.hasher = hasher; this.sessions = sessions;
+        this.accessContextTickets = accessContextTickets;
         this.audit = audit; this.outbox = outbox; this.clock = clock;
     }
 
@@ -48,6 +52,8 @@ public class PasswordSecurityService implements ChangeOwnPasswordCommand {
         Instant now = clock.instant();
         credentials.updateCredentialHash(actor.userId(), hasher.encode(newPassword), now);
         int revoked = sessions.revokeAllForUser(actor.userId(), actor.sessionId());
+        accessContextTickets.invalidatePendingForUser(
+                new com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId(actor.userId().toString()), now);
         audit.append(new SecurityAuditPort.Event("PASSWORD_CHANGED", actor.userId(), actor.userId(), actor.tenantId(), actor.workspaceId(),
                 actor.surface(), valueOrUnknown(actor.correlationId()), valueOrUnknown(actor.traceId()), now,
                 Map.of("otherSessionsRevoked", true, "otherSessionsCount", revoked)));

@@ -32,9 +32,15 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 	private CatalogPersistenceBootstrap seed;
 	private UUID previewProduct;
 	private UUID previewPromotion;
+	private UUID buyerPriceList;
+	private UUID buyerPriceListItem;
+	private UUID buyerCustomerTerms;
 
 	@AfterEach
 	void removePreviewFixture() {
+		if (buyerCustomerTerms != null) jdbc.update("delete from catalog_management.customer_terms where terms_id=?", buyerCustomerTerms);
+		if (buyerPriceListItem != null) jdbc.update("delete from catalog_management.price_list_item where item_id=?", buyerPriceListItem);
+		if (buyerPriceList != null) jdbc.update("delete from catalog_management.price_list where price_list_id=?", buyerPriceList);
 		if (previewPromotion != null) {
 			jdbc.update("delete from catalog_management.promotion_product where promotion_id=?", previewPromotion);
 			jdbc.update("delete from catalog_management.promotion_category where promotion_id=?", previewPromotion);
@@ -62,9 +68,72 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
 			.andExpect(jsonPath("$.items").isNotEmpty())
 			.andExpect(jsonPath("$.items[0].unitPrice.currency").value("PEN"))
+			.andExpect(jsonPath("$.items[0].basePrice").value(org.hamcrest.Matchers.nullValue()))
+			.andExpect(jsonPath("$.items[0].currentOfferPrice.amount").exists())
+			.andExpect(jsonPath("$.items[0].sellableAvailability").isNumber())
 			.andExpect(jsonPath("$.items[0].availabilityStatus")
 					.value(org.hamcrest.Matchers.isIn(new String[] {"OUT_OF_STOCK", "LOW", "AVAILABLE"})))
 			.andExpect(jsonPath("$.items[0].status").value("ACTIVE"));
+
+		String platformToken = accessToken(OWNER_EMAIL, "PLATFORM");
+		mockMvc.perform(get("/api/v1/catalog-items")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + platformToken)
+				.param("page", "0")
+				.param("size", "5"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].basePrice.amount").exists())
+			.andExpect(jsonPath("$.items[0].currentOfferPrice").value(org.hamcrest.Matchers.nullValue()));
+	}
+
+	@Test
+	void buyerCatalogResolvesThePriceListPermittedByCurrentCustomerTerms() throws Exception {
+		UUID tenant = UUID.fromString(tenantId());
+		UUID workspace = UUID.fromString(workspaceId());
+		UUID account = UUID.fromString(buyerClientAccountId());
+		UUID sku = jdbc.queryForObject("select id from catalog_management.sellable_sku "
+				+ "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0001'",
+				UUID.class, tenant, workspace);
+		buyerPriceList = UUID.randomUUID();
+		buyerPriceListItem = UUID.randomUUID();
+		buyerCustomerTerms = UUID.randomUUID();
+		Timestamp startsAt = Timestamp.from(Instant.parse("2020-01-01T00:00:00Z"));
+		Timestamp endsAt = Timestamp.from(Instant.parse("2099-12-31T00:00:00Z"));
+		Timestamp createdAt = Timestamp.from(Instant.now());
+		jdbc.update("insert into catalog_management.price_list (price_list_id,tenant_id,workspace_id,code,name,currency,status,valid_from,valid_to,created_at,updated_at,version) "
+				+ "values (?,?,?,?,?,'PEN','ACTIVE',?,?,?, ?,0)", buyerPriceList, tenant, workspace,
+				"IT-" + buyerPriceList, "Buyer price list", startsAt, endsAt, createdAt, createdAt);
+		jdbc.update("insert into catalog_management.price_list_item (item_id,tenant_id,workspace_id,price_list_id,sku_id,unit_price,currency,valid_from,valid_to) "
+				+ "values (?,?,?,?,?,?,'PEN',?,?)", buyerPriceListItem, tenant, workspace,
+				buyerPriceList, sku, new java.math.BigDecimal("250.00"), startsAt, endsAt);
+		jdbc.update("insert into catalog_management.customer_terms (terms_id,tenant_id,workspace_id,customer_account_id,price_list_id,credit_days,currency,valid_from,valid_to,created_at,version) "
+				+ "values (?,?,?,?,?,0,'PEN',?,?,?,0)", buyerCustomerTerms, tenant, workspace, account,
+				buyerPriceList, startsAt, endsAt, createdAt);
+
+		mockMvc.perform(get("/api/v1/catalog-items/CAT-0001")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken(BUYER_EMAIL, "PORTAL")))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.currentOfferPrice.amount").value("250"))
+			.andExpect(jsonPath("$.currentOfferPrice.currency").value("PEN"))
+			.andExpect(jsonPath("$.pricingAsOf").isNotEmpty());
+	}
+
+	@Test
+	void inactiveCustomerAccountCannotReadBuyerCatalog() throws Exception {
+		String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+		UUID tenant = UUID.fromString(tenantId());
+		UUID workspace = UUID.fromString(workspaceId());
+		UUID account = UUID.fromString(buyerClientAccountId());
+		try {
+			jdbc.update("update sales.client_account set status='INACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+					tenant, workspace, account);
+			mockMvc.perform(get("/api/v1/catalog-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
+					.andExpect(status().isForbidden());
+			mockMvc.perform(get("/api/v1/catalog-items/CAT-0001").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
+					.andExpect(status().isForbidden());
+		} finally {
+			jdbc.update("update sales.client_account set status='ACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+					tenant, workspace, account);
+		}
 	}
 
 	@Test

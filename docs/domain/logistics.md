@@ -1,5 +1,11 @@
 # Logistics Domain Foundation
 
+> Historical foundation note: this document records API-era domain analysis,
+> not current Product, Domain or implementation authority. See the [Nexa
+> Blueprint](https://github.com/nexa-suite/blueprint) for accepted meaning and
+> the [current API module map](../architecture/bounded-context-module-map.md)
+> for implementation ownership.
+
 ## Scope
 
 Logistics owns shipment and dispatch identity, delivery timing and temperature
@@ -19,9 +25,10 @@ aggregate.
 - `DeliveryWindow` stores `startsAt` and `endsAt` and rejects null bounds or a
   zero/negative interval.
 
-The repository contains no implemented logistics workflow, carrier contract,
-temperature threshold or shipment transition policy. Status members,
-thresholds, scan cadence, carrier identity and failure/retry semantics remain
+At the time this foundation was recorded, the repository contained no
+implemented logistics workflow, carrier contract, temperature threshold or
+shipment transition policy. Status members, thresholds, scan cadence, carrier
+identity and failure/retry semantics remain
 unresolved and must not be inferred from these primitives.
 
 ## Deliberate exclusions

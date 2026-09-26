@@ -5,7 +5,6 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
 import com.nexa.api.notifications.application.model.NotificationModels.ProjectedNotification;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
-import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
@@ -21,7 +20,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import java.util.Locale;
 import java.util.Objects;
 
-public final class NotificationService implements NotificationUseCase, NotificationProjectionPort {
+public final class NotificationService implements NotificationUseCase {
 	private final NotificationInboxPersistencePort inbox;
 	private final NotificationPreferencePersistencePort preferences;
 	private final CustomerAccountQuery accounts;
@@ -103,7 +102,6 @@ public final class NotificationService implements NotificationUseCase, Notificat
 		return preferences(context);
 	}
 
-	@Override
 	public void project(NotificationProjection event) {
 		Objects.requireNonNull(event, "Notification projection event is required");
 		String category = category(event.eventType());
@@ -126,7 +124,6 @@ public final class NotificationService implements NotificationUseCase, Notificat
 		}
 	}
 
-	@Override
 	public void deliverPush(com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate candidate) {
 		Objects.requireNonNull(candidate, "Push notification candidate is required");
 		if (pushRouting != null) {

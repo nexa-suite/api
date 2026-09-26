@@ -13,4 +13,12 @@ public interface WarehouseTransferPersistencePort {
     WarehouseOperationsService.TransferSummary transfer(
             CurrentAccessContext context, WarehouseOperationsService.TransferCommand command,
             long expectedSourceVersion, String idempotencyKey, String correlationId);
+
+    WarehouseOperationsService.TransferSummary dispatch(
+            CurrentAccessContext context, String transferId, long expectedVersion,
+            String idempotencyKey, String correlationId);
+
+    WarehouseOperationsService.TransferSummary receive(
+            CurrentAccessContext context, String transferId, long expectedVersion,
+            String idempotencyKey, String correlationId);
 }

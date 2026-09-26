@@ -19,6 +19,32 @@ public class CatalogItemSnapshotPersistenceAdapter implements CatalogItemSnapsho
 	@Override public Optional<CatalogItemSnapshot> findActive(String catalogItemId, java.util.UUID tenantId, java.util.UUID workspaceId) {
 		return catalog.findActive(catalogItemId, tenantId, workspaceId).map(item -> new CatalogItemSnapshot(item.catalogItemId(), item.itemName(), item.presentation(), new PriceSnapshot(item.unitPriceAmount(), item.unitPriceCurrency())));
 	}
+	@Override public Optional<CatalogItemSnapshot> findActive(String catalogItemId, java.util.UUID tenantId,
+			java.util.UUID workspaceId, String customerAccountId) {
+		return findActive(catalogItemId, tenantId, workspaceId, customerAccountId, java.math.BigDecimal.ONE);
+	}
+	@Override public Optional<CatalogItemSnapshot> findActive(String catalogItemId, java.util.UUID tenantId,
+			java.util.UUID workspaceId, String customerAccountId, java.math.BigDecimal quantity) {
+		java.util.UUID account = customerAccountId == null || customerAccountId.isBlank()
+				? null : java.util.UUID.fromString(customerAccountId);
+		return catalog.findActive(catalogItemId, tenantId, workspaceId, account, quantity)
+				.map(item -> new CatalogItemSnapshot(item.catalogItemId(), item.itemName(), item.presentation(),
+						new PriceSnapshot(item.unitPriceAmount(), item.unitPriceCurrency())));
+	}
+	@Override public List<CatalogItemSnapshot> findActive(List<String> catalogItemIds, java.util.UUID tenantId,
+			java.util.UUID workspaceId, String customerAccountId) {
+		return findActive(catalogItemIds, tenantId, workspaceId, customerAccountId, java.util.Map.of());
+	}
+	@Override public List<CatalogItemSnapshot> findActive(List<String> catalogItemIds, java.util.UUID tenantId,
+			java.util.UUID workspaceId, String customerAccountId,
+			java.util.Map<String, java.math.BigDecimal> quantitiesByCatalogItemId) {
+		java.util.UUID account = customerAccountId == null || customerAccountId.isBlank()
+				? null : java.util.UUID.fromString(customerAccountId);
+		return catalog.findActive(catalogItemIds, tenantId, workspaceId, account, quantitiesByCatalogItemId).stream()
+				.map(item -> new CatalogItemSnapshot(item.catalogItemId(), item.itemName(), item.presentation(),
+						new PriceSnapshot(item.unitPriceAmount(), item.unitPriceCurrency())))
+				.toList();
+	}
 	@Override public List<CatalogItemSnapshot> findActive(List<String> catalogItemIds, java.util.UUID tenantId, java.util.UUID workspaceId) {
 		return catalog.findActive(catalogItemIds, tenantId, workspaceId).stream()
 				.map(item -> new CatalogItemSnapshot(item.catalogItemId(), item.itemName(), item.presentation(), new PriceSnapshot(item.unitPriceAmount(), item.unitPriceCurrency())))

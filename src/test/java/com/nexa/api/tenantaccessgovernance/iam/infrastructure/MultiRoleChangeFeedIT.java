@@ -1,8 +1,8 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure;
 
-import com.nexa.api.shared.application.changefeed.ChangeEventAudience;
-import com.nexa.api.shared.application.changefeed.ChangeEventView;
-import com.nexa.api.shared.application.changefeed.ChangeFeedQueryPort;
+import com.nexa.api.edge.streaming.ChangeEventAudience;
+import com.nexa.api.edge.streaming.ChangeEventView;
+import com.nexa.api.edge.streaming.ChangeFeedQueryPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.AfterEach;

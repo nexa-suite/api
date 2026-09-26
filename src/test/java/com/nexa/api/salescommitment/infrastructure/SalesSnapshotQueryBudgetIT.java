@@ -51,7 +51,8 @@ class SalesSnapshotQueryBudgetIT extends PostgresIntegrationSupport {
 
         assertThat(catalogQueryCounts).containsExactly(catalogQueryCounts.getFirst(), catalogQueryCounts.getFirst(), catalogQueryCounts.getFirst());
         assertThat(catalogQueryCounts.getFirst()).isLessThanOrEqualTo(4);
-        assertThat(skuQueryCounts).containsExactly(1, 1, 1);
+        // Metadata, authoritative Base Price and promotion candidates each remain one set-based lookup.
+        assertThat(skuQueryCounts).containsExactly(3, 3, 3);
     }
 
     private static final class CountingJdbcTemplate extends JdbcTemplate {

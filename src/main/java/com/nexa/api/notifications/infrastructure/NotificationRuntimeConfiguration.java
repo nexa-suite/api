@@ -1,7 +1,8 @@
 package com.nexa.api.notifications.infrastructure;
 
+import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
+import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
-import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
@@ -18,7 +19,7 @@ import org.springframework.context.annotation.Profile;
 @Profile("!test")
 public class NotificationRuntimeConfiguration {
 	@Bean
-	NotificationUseCase notificationUseCase(NotificationInboxPersistencePort inbox,
+	NotificationService notificationUseCase(NotificationInboxPersistencePort inbox,
 		NotificationPreferencePersistencePort preferences, CustomerAccountQuery accounts,
 				ObjectProvider<PushRoutingService> pushRouting, ApplicationEventPublisher eventPublisher,
 				ObjectProvider<PushNotificationOutboxPort> pushOutbox) {
@@ -27,7 +28,17 @@ public class NotificationRuntimeConfiguration {
 	}
 
 	@Bean
-	NotificationProjectionPort notificationProjectionPort(NotificationUseCase service) {
-		return (NotificationProjectionPort) service;
+	NotificationProjectionPort notificationProjectionPort(NotificationService service) {
+		return new NotificationProjectionPort() {
+			@Override
+			public void project(NotificationProjection event) {
+				service.project(event);
+			}
+
+			@Override
+			public void deliverPush(PushNotificationCandidate candidate) {
+				service.deliverPush(candidate);
+			}
+		};
 	}
 }

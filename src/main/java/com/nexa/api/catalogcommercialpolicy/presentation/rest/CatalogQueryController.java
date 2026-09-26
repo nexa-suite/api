@@ -3,9 +3,9 @@ package com.nexa.api.catalogcommercialpolicy.presentation.rest;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.GetCatalogItemUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.ListCatalogItemsUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
-import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogItemNotFoundException;
-import com.nexa.api.shared.presentation.error.ApiResourceNotFoundException;
+import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogClientAccountPort;
+import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.catalogcommercialpolicy.presentation.rest.mapper.CatalogResponseMapper;
 import com.nexa.api.catalogcommercialpolicy.presentation.rest.request.CatalogQueryParameters;
 import com.nexa.api.catalogcommercialpolicy.presentation.rest.response.CatalogItemDetailResponse;
@@ -27,7 +27,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
 import org.springframework.security.access.AccessDeniedException;
 
 @RestController
@@ -103,20 +102,6 @@ public class CatalogQueryController {
 	}
 
 	private CatalogScope scope(CurrentAccessContext context) {
-		boolean buyer = context.hasRole(MembershipRole.BUYER);
-		java.util.UUID clientAccountId = null;
-		if (buyer && clientAccounts != null) {
-			CatalogClientAccountPort resolver = clientAccounts.getIfAvailable();
-			if (resolver != null) {
-				CatalogClientAccountPort.ClientAccountProfile profile = resolver.findProfileForMembership(
-						context.tenantId().value(), context.workspaceId().value(), context.membershipId().value()).orElse(null);
-				if (profile != null) {
-					clientAccountId = profile.id();
-					return new CatalogScope(context.tenantId().value(), context.workspaceId().value(), true,
-							clientAccountId, profile.segment(), profile.buyerTier());
-				}
-			}
-		}
-		return new CatalogScope(context.tenantId().value(), context.workspaceId().value(), buyer, clientAccountId);
+		return CatalogHttpSupport.scope(context, clientAccounts);
 	}
 }

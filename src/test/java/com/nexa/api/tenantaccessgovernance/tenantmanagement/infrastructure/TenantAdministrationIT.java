@@ -249,11 +249,25 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
 
         MvcResult suspended = mockMvc.perform(get("/api/v1/workspace-memberships/" + membershipId).header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();
-        mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/reactivations").header("Authorization", "Bearer " + owner).header("If-Match", suspended.getResponse().getHeader("ETag")))
-                .andExpect(status().isOk());
+        MvcResult reactivated = mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/reactivations").header("Authorization", "Bearer " + owner).header("If-Match", suspended.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andReturn();
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + memberToken)).andExpect(status().isUnauthorized());
         String replacementToken = accessToken(email, "PLATFORM");
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + replacementToken)).andExpect(status().isOk());
+
+        MvcResult revoked = mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/revocations")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", reactivated.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REVOKED")).andReturn();
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.membership_admin_event where target_membership_id=? and event_type='MEMBERSHIP_REVOKED'",
+                Integer.class, UUID.fromString(membershipId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select status from tenant_management.workspace_membership where id=?",
+                String.class, UUID.fromString(membershipId))).isEqualTo("REVOKED");
+        mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + replacementToken)).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/workspace-memberships/" + membershipId + "/reactivations")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", revoked.getResponse().getHeader("ETag")))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MEMBERSHIP_REVOKED"));
     }
 
     @Test

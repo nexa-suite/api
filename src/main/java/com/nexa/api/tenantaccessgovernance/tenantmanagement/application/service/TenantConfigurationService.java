@@ -1,7 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service;
 
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
-import com.nexa.api.shared.application.port.out.SecurityAuditPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.TenantConfigurationModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.TenantConfigurationUseCase;

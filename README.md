@@ -18,12 +18,15 @@
 
 ## Overview
 
-Nexa API is a Spring Boot modular monolith for identity, tenant and workspace
-scope, commercial workflows, inventory, fulfillment, delivery, finance,
-documents, notifications and traceability. The current `v0.17.1` Git tag
-identifies the latest tagged repository baseline and provides selected
-contracts for Mobile integration; it does not claim a
-completed Mobile Product or Product Acceptance.
+Nexa API is the authoritative Spring Boot modular monolith for identity, tenant
+and workspace scope, commercial workflows, inventory, fulfillment, delivery,
+finance, documents, notifications and traceability. The `v0.18.0` Git tag is
+the consumer-stable API release. It does not claim complete Nexa System
+Acceptance or full-system Production Readiness.
+
+The v0.17.1 release remains the verified upgrade baseline. This repository
+retains the v0.17.0 release notes and has no historical v0.17.1 release-note
+file.
 
 The API remains the server authority for authorization, tenant isolation,
 business decisions and durable state. Java packages and Spring Modulith
@@ -123,9 +126,13 @@ code stays independent of Spring, persistence, JSON and SQL concerns where the
 architecture requires it. The canonical module map and ownership notes live in
 [`docs/architecture/bounded-context-module-map.md`](./docs/architecture/bounded-context-module-map.md).
 
-`bootstrap` and `shared` are technical composition modules, not Bounded
-Contexts. Client applications consume approved contracts; they do not become
-business or persistence authorities.
+`edge`, `bootstrap` and `shared` are technical modules, not Bounded Contexts.
+`edge` composes inbound HTTP, security, Problem Details and change-feed
+adapters. `bootstrap.runtime` contains runtime-wide wiring and workers;
+`bootstrap.local` contains local development bootstrap. `shared` retains
+framework-neutral technical contracts and primitives. Client applications
+consume approved contracts; they do not become business or persistence
+authorities.
 
 ## Technology Stack
 
@@ -164,21 +171,29 @@ adapter test doubles. A unit-test pass does not replace that gate.
 ## Repository Structure
 
 ```text
-src/main/java/com/nexa/api/       Application, domain and adapter packages
-src/main/resources/seed/catalog/  Canonical catalog seed and checksum
-src/test/java/com/nexa/api/       HTTP, domain, security and integrity tests
-docs/                              Domain, architecture, OpenAPI and releases
-ops/                               Local runtime and database composition
+src/main/java/com/nexa/api/       Eleven business context roots
+                                  plus edge/, bootstrap/ and shared/
+src/main/java/com/nexa/api/edge/  Inbound HTTP, security, errors and streaming
+src/main/java/com/nexa/api/bootstrap/{runtime,local}/ Runtime and local startup
+src/main/java/com/nexa/api/shared/ Framework-neutral technical primitives
+src/main/resources/               Migrations, seeds, schemas and configuration
+src/test/java/com/nexa/api/       Tests organized by source ownership
+docs/                              Implementation maps, contracts and evidence
+ops/                               Compose runtime and operational tooling
+scripts/                           Local setup, access checks and evidence
 ```
 
 ## Documentation
 
+- [Documentation index](./docs/README.md)
 - [OpenAPI instructions](./docs/openapi/README.md)
 - [Authentication contract](./docs/security/authentication.md)
 - [Runtime database role](./docs/security/runtime-database-role.md)
 - [Canonical bounded contexts](./docs/architecture/bounded-context-module-map.md)
 - [Release notes](./docs/releases/)
 - [Changelog](./CHANGELOG.md)
+- [Runtime operations](./ops/README.md)
+- [Developer scripts](./scripts/README.md)
 
 ## Nexa Engineering & Documentation
 

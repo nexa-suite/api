@@ -21,9 +21,18 @@ class PurchaseRequestInvariantTests {
 		assertThat(request.status()).isEqualTo(PurchaseRequestStatus.SUBMITTED);
 	}
 
-	@Test void aggregateProtectsEditableAndTerminalStates() {
+	@Test void reviewIsNotPersistedAndCanonicalProposalTransitionsRemainExplicit() {
 		var request = PurchaseRequest.draft(new PurchaseRequestId("PR-002"), "CLI-001", new BuyerMembershipId(UUID.randomUUID()));
-		request.addLine(line("1", "CAT-001")); request.submit(); request.startReview(); request.approve("approved");
+		request.addLine(line("1", "CAT-001"));
+		request.submit();
+		request.startReview();
+		assertThat(request.status()).isEqualTo(PurchaseRequestStatus.SUBMITTED);
+		request.proposeChanges("Revised quantity");
+		assertThat(request.status()).isEqualTo(PurchaseRequestStatus.CHANGES_PROPOSED);
+		request.acceptProposedChanges();
+		assertThat(request.status()).isEqualTo(PurchaseRequestStatus.SUBMITTED);
+		request.reject("Sales rejected the Purchase Request");
+		assertThat(request.status()).isEqualTo(PurchaseRequestStatus.REJECTED);
 		assertThat(request.status().isTerminal()).isTrue();
 		assertThatThrownBy(() -> request.cancel()).isInstanceOf(SalesInvariantViolation.class);
 		assertThatThrownBy(() -> request.addLine(line("2", "CAT-002"))).isInstanceOf(SalesInvariantViolation.class);

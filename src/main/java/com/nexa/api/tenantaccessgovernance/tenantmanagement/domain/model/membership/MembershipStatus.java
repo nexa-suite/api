@@ -7,7 +7,8 @@ import java.util.Locale;
 public enum MembershipStatus {
 	ACTIVE,
 	INVITED,
-	DISABLED;
+	DISABLED,
+	REVOKED;
 
 	public boolean isActive() {
 		return this == ACTIVE;

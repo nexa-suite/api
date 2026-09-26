@@ -1,5 +1,9 @@
 # AS-IS RLS scope classification
 
+For the current V100 table-by-table audit and unresolved coverage decisions,
+see [Current-schema RLS audit](./rls-current-schema-audit.md). This older
+registry records the v0.16.1 scope review and remains historical evidence.
+
 Status: API v0.16.1 implementation registry; runtime certification remains a PostgreSQL gate. This is the current API schema registry. Blueprint TARGET table names are not substituted for the AS-IS Flyway inventory.
 
 The executable inventory is `ModernPostgresMigrationTests.assertTenantWorkspaceRls(...)` plus the schema/table assertions in `flywayCreatesOnlyTheModernIdentityAndTenantSchemasWithRequiredTables`. A table is not considered protected merely because a repository adds a tenant predicate.

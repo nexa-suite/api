@@ -1,6 +1,6 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest;
 
-import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
+import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.InvitationModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.InvitationUseCase;
@@ -83,7 +83,7 @@ public final class OrganizationInvitationController {
 		try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new PreconditionRequiredException(); }
 	}
 	private static String etag(long version) { return "\"" + version + "\""; }
-	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
+	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
 
 	public record CreateInvitationRequest(String email, String displayName, Set<String> roles) { }
 	public record AcceptInvitationRequest(String token, String password, String displayName) { }

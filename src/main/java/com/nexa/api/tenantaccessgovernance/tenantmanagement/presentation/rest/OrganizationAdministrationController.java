@@ -1,6 +1,6 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest;
 
-import com.nexa.api.shared.presentation.http.CorrelationIdFilter;
+import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.*;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.OrganizationAdministrationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
@@ -78,12 +78,16 @@ public class OrganizationAdministrationController {
 	@PostMapping("/workspace-memberships/{membershipId}/suspensions")
 	public ResponseEntity<WorkspaceMembershipSummary> suspend(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.suspendMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 
+	@PostMapping("/workspace-memberships/{membershipId}/revocations")
+	@Operation(operationId = "revokeWorkspaceMembership")
+	public ResponseEntity<WorkspaceMembershipSummary> revoke(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.revokeMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
+
 	@PostMapping("/workspace-memberships/{membershipId}/reactivations")
 	public ResponseEntity<WorkspaceMembershipSummary> reactivate(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.reactivateMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 
 	private static long version(String value) { if (value == null || value.isBlank()) throw new PreconditionRequiredException(); try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new PreconditionRequiredException(); } }
 	private static String etag(long version) { return "\"" + version + "\""; }
-	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(CorrelationIdFilter.ATTRIBUTE_NAME); return value == null ? "unknown" : value.toString(); }
+	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
 	public record WorkspaceCreate(String name, String slug) { }
 	public record WorkspacePatch(String name,String slug,String status) { }
 	public record RolesPatch(Set<String> roles, Set<String> roleDefinitionIds) {

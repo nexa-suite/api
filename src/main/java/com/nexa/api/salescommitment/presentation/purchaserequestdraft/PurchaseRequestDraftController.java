@@ -11,6 +11,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +28,8 @@ import java.util.UUID;
 @RequestMapping("/api/v1/buyer/purchase-request-drafts")
 @Tag(name = "Canonical Purchase Request Drafts")
 @SecurityRequirement(name = "bearerAuth")
-public final class PurchaseRequestDraftController {
+@Validated
+public class PurchaseRequestDraftController {
     private static final String ACCESS = CatalogHttpSupport.ACCESS_CONTEXT;
     private final PurchaseRequestDraftServiceFacade service;
     public PurchaseRequestDraftController(PurchaseRequestDraftServiceFacade service) { this.service = service; }
@@ -35,6 +39,13 @@ public final class PurchaseRequestDraftController {
     public ResponseEntity<PurchaseRequestDraftModels.DraftView> create(@RequestAttribute(ACCESS) CurrentAccessContext context, @Valid @RequestBody CreateDraftRequest request) {
         PurchaseRequestDraftModels.DraftView value = service.create(context, request.clientAccountId(), request.requestedDeliveryDate());
         return ResponseEntity.created(URI.create("/api/v1/buyer/purchase-request-drafts/" + value.id())).eTag(etag(value.version())).body(value);
+    }
+    @GetMapping
+    @Operation(operationId = "listPurchaseRequestDrafts", summary = "List drafts available to the active Buyer relationship")
+    public PurchaseRequestDraftModels.DraftPage list(@RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return service.list(context, page, size);
     }
     @GetMapping("/{draftId}")
     @Operation(operationId = "getPurchaseRequestDraft")

@@ -1,6 +1,18 @@
-# Nexa dual runtime
+# Nexa local runtimes
 
-Modern y Legacy son aplicaciones Compose separadas. Ambos scripts usan el único archivo canónico `api/.env.local`.
+Modern is the current API runtime. Legacy remains available for comparison and
+compatibility. Both use the canonical `api/.env.local` file.
+
+Run the modern stack for current API work. `compare-up.sh` intentionally starts
+both Modern and Legacy for side-by-side comparison.
+
+```bash
+./ops/compose/scripts/modern-up.sh
+./ops/compose/scripts/status.sh
+./ops/compose/scripts/modern-down.sh
+```
+
+To run both stacks for comparison:
 
 ```bash
 ./ops/compose/scripts/compare-up.sh
