@@ -5,6 +5,7 @@ import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -40,7 +41,7 @@ public final class GoogleMapsHttpBoundaryAdapter implements GoogleMapsBoundaryPo
     public GoogleMapsHttpBoundaryAdapter(ObjectMapper mapper, Environment environment) {
         this(mapper,
                 required(environment, "nexa.maps.google.api-key", "NEXA_MAPS_GOOGLE_API_KEY"),
-                URI.create(environment.getProperty("nexa.maps.google.routes-base-url", "https://routes.googleapis.com")),
+                configuredRoutesBaseUrl(environment),
                 duration(environment, "nexa.maps.google.timeout-ms", 10_000L));
     }
 
@@ -143,6 +144,33 @@ public final class GoogleMapsHttpBoundaryAdapter implements GoogleMapsBoundaryPo
         } catch (RuntimeException exception) {
             throw new IllegalStateException("Invalid duration for " + key, exception);
         }
+    }
+
+    private static URI configuredRoutesBaseUrl(Environment environment) {
+        String value = environment.getProperty("nexa.maps.google.routes-base-url", "https://routes.googleapis.com").trim();
+        URI uri;
+        try {
+            uri = URI.create(value);
+        } catch (IllegalArgumentException exception) {
+            throw invalidRoutesBaseUrl();
+        }
+
+        String scheme = uri.getScheme();
+        String host = uri.getHost();
+        boolean validHttpUri = uri.isAbsolute() && host != null && !host.isBlank()
+                && uri.getRawUserInfo() == null
+                && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme));
+        if (!validHttpUri) throw invalidRoutesBaseUrl();
+
+        if (!environment.acceptsProfiles(Profiles.of("local", "test"))
+                && (!"https".equalsIgnoreCase(scheme) || !"routes.googleapis.com".equalsIgnoreCase(host))) {
+            throw new IllegalStateException("nexa.maps.google.routes-base-url must use the trusted HTTPS Google Routes endpoint");
+        }
+        return uri;
+    }
+
+    private static IllegalStateException invalidRoutesBaseUrl() {
+        return new IllegalStateException("nexa.maps.google.routes-base-url must be a valid absolute HTTP(S) URI without userinfo");
     }
 
     private static String required(Environment environment, String property, String envName) {
