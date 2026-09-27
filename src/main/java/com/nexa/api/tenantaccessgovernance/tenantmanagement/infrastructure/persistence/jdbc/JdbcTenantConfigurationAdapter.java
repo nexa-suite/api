@@ -4,7 +4,6 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Te
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantExternalConfigurationSource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.NotificationPreference;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationProfile;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.ReferencePlanAssignment;
@@ -118,12 +117,22 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 
 	@Override
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public List<NotificationPreference> findNotificationPreferences(String workspaceId) {
+	public List<TenantConfigurationModels.NotificationPreferenceView> findNotificationPreferences(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
 		return externalConfiguration.notificationPreferences(uuid(workspaceId)).stream()
-				.map(value -> new NotificationPreference(value.eventCategory(), value.channel(), value.enabled(),
-						value.version()))
+				.map(value -> new TenantConfigurationModels.NotificationPreferenceView(value.eventCategory(),
+						value.channel(), value.enabled(), value.version()))
 				.toList();
+	}
+
+	@Override
+	public TenantConfigurationModels.NotificationPreferenceView validateNotificationPreference(
+			TenantConfigurationModels.NotificationPreferenceView preference) {
+		TenantExternalConfigurationSource.Preference validated = externalConfiguration.validateNotificationPreference(
+				new TenantExternalConfigurationSource.Preference(preference.eventCategory(), preference.channel(),
+						preference.enabled(), preference.version()));
+		return new TenantConfigurationModels.NotificationPreferenceView(validated.eventCategory(), validated.channel(),
+				validated.enabled(), validated.version());
 	}
 
 	@Override
@@ -134,7 +143,8 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
-	public int updateNotificationPreference(String workspaceId, NotificationPreference preference) {
+	public int updateNotificationPreference(String workspaceId,
+			TenantConfigurationModels.NotificationPreferenceView preference) {
 		return externalConfiguration.updateNotificationPreference(uuid(workspaceId),
 				new TenantExternalConfigurationSource.Preference(preference.eventCategory(), preference.channel(),
 						preference.enabled(), preference.version()));

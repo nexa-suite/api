@@ -4,6 +4,7 @@ import com.nexa.api.NexaApiApplication;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountDetails;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CustomerTermsQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
+import com.nexa.api.notifications.application.publicapi.NotificationPreferenceAccess;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -221,6 +222,43 @@ class ArchitectureConstitutionTests {
                 .isEqualTo("com.nexa.api.catalogcommercialpolicy.application.publicapi");
         assertThat(CreditExposureQuery.class.getPackageName())
                 .isEqualTo("com.nexa.api.creditreceivables.application.publicapi");
+    }
+
+    @Test
+    void notificationPreferenceBusinessContractRemainsImplementedByItsOwner() {
+        List<String> foreignImplementations = CLASSES.stream()
+                .filter(type -> type.getInterfaces().stream().anyMatch(contract ->
+                        contract.toErasure().getName().equals(NotificationPreferenceAccess.class.getName())))
+                .filter(type -> !type.getPackageName().startsWith("com.nexa.api.notifications."))
+                .map(type -> "contract " + NotificationPreferenceAccess.class.getName()
+                        + "; canonical owner com.nexa.api.notifications; implementing package "
+                        + type.getPackageName() + "; foreign bounded contexts cannot implement this business contract")
+                .toList();
+        assertThat(foreignImplementations)
+                .as("BC-10 business contract ownership violations: %s", foreignImplementations)
+                .isEmpty();
+    }
+
+    @Test
+    void tenantConfigurationFacadeDoesNotOwnNotificationPreferenceRules() throws IOException {
+        Path root = Path.of("src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement");
+        String tenantManagementSources = sourcesUnder(root);
+
+        assertThat(tenantManagementSources).doesNotContain("\"TEMPERATURE_ALERT\"", "\"DOCUMENT_REMINDER\"",
+                "\"ORDER_STATUS\"", "\"INVITATION\"", "\"IN_APP\"", "\"EMAIL\"");
+        assertThat(CLASSES.stream()
+                .filter(type -> type.getPackageName().startsWith("com.nexa.api.tenantaccessgovernance.tenantmanagement"))
+                .filter(type -> type.getSimpleName().equals("NotificationPreference")))
+                .as("BC-01 must not own a NotificationPreference domain rule object")
+                .isEmpty();
+        assertThat(CLASSES.stream()
+                .filter(type -> type.getPackageName().startsWith("com.nexa.api.tenantaccessgovernance."))
+                .flatMap(type -> type.getDirectDependenciesFromSelf().stream())
+                .filter(dependency -> dependency.getTargetClass().getName()
+                        .equals(NotificationPreferenceAccess.class.getName()))
+                .map(Object::toString).toList())
+                .as("BC-01 preference compatibility must delegate through runtime composition")
+                .isEmpty();
     }
 
     @Test

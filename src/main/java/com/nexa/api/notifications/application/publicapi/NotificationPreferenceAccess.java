@@ -1,5 +1,7 @@
 package com.nexa.api.notifications.application.publicapi;
 
+import com.nexa.api.notifications.domain.model.NotificationPreference;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -13,5 +15,11 @@ public interface NotificationPreferenceAccess {
 
     void ensureNotificationDefaults(UUID workspaceId);
 
-    record Preference(String eventCategory, String channel, boolean enabled, long version) { }
+    record Preference(String eventCategory, String channel, boolean enabled, long version) {
+        public Preference {
+            NotificationPreference validated = new NotificationPreference(eventCategory, channel, enabled, version);
+            eventCategory = validated.eventCategory();
+            channel = validated.channel();
+        }
+    }
 }

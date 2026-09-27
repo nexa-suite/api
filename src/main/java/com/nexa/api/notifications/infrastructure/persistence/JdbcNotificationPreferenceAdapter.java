@@ -3,6 +3,7 @@ package com.nexa.api.notifications.infrastructure.persistence;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferenceView;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.publicapi.NotificationPreferenceAccess;
+import com.nexa.api.notifications.domain.model.NotificationPreference;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
@@ -85,8 +86,8 @@ public class JdbcNotificationPreferenceAdapter implements NotificationPreference
 
 	@Override
 	public void ensureNotificationDefaults(UUID workspaceId) {
-		for (String category : List.of("TEMPERATURE_ALERT", "DOCUMENT_REMINDER", "ORDER_STATUS", "INVITATION")) {
-			for (String channel : List.of("IN_APP", "EMAIL")) {
+		for (String category : NotificationPreference.eventCategories()) {
+			for (String channel : NotificationPreference.channels()) {
 				jdbc.update("insert into tenant_management.notification_preference (workspace_id,event_category,channel,enabled,version,updated_at) values (?,?,?,true,0,current_timestamp) on conflict (workspace_id,event_category,channel) do nothing",
 						workspaceId, category, channel);
 			}

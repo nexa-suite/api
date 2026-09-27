@@ -7,6 +7,8 @@ import java.util.UUID;
 public interface TenantExternalConfigurationSource {
     List<Preference> notificationPreferences(UUID workspaceId);
 
+    Preference validateNotificationPreference(Preference preference);
+
     long notificationVersion(UUID workspaceId);
 
     int updateNotificationPreference(UUID workspaceId, Preference preference);

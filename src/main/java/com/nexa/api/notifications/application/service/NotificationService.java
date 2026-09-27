@@ -9,6 +9,7 @@ import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
+import com.nexa.api.notifications.domain.model.NotificationPreference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
@@ -17,6 +18,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Per
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.context.ApplicationEventPublisher;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -86,7 +88,8 @@ public final class NotificationService implements NotificationUseCase {
 		context.requirePermission(PermissionKey.NOTIFICATION_READ);
 		String tenant = context.tenantId().toString();
 		String workspace = context.workspaceId().toString();
-		return new NotificationPreferencesView(preferences.find(tenant, workspace), preferences.version(tenant, workspace));
+		return new NotificationPreferencesView(preferences.find(tenant, workspace).stream()
+				.map(NotificationService::validatedPreference).toList(), preferences.version(tenant, workspace));
 	}
 
 	@Override
@@ -96,10 +99,19 @@ public final class NotificationService implements NotificationUseCase {
 		String tenant = context.tenantId().toString();
 		String workspace = context.workspaceId().toString();
 		if (preferences.version(tenant, workspace) != request.version()) throw new IllegalStateException("Notification preferences changed");
-		for (NotificationPreferenceView preference : request.preferences()) {
+		List<NotificationPreferenceView> validatedPreferences = request.preferences().stream()
+				.map(NotificationService::validatedPreference).toList();
+		for (NotificationPreferenceView preference : validatedPreferences) {
 			if (preferences.update(tenant, workspace, preference) != 1) throw new IllegalStateException("Notification preferences changed");
 		}
 		return preferences(context);
+	}
+
+	private static NotificationPreferenceView validatedPreference(NotificationPreferenceView preference) {
+		NotificationPreference validated = new NotificationPreference(preference.eventCategory(), preference.channel(),
+				preference.enabled(), preference.version());
+		return new NotificationPreferenceView(validated.eventCategory(), validated.channel(), validated.enabled(),
+				validated.version());
 	}
 
 	public void project(NotificationProjection event) {

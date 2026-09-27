@@ -27,15 +27,20 @@ public class TenantExternalConfigurationSourceConfiguration {
             }
 
             @Override
+            public Preference validateNotificationPreference(Preference preference) {
+                NotificationPreferenceAccess.Preference validated = preference(preference);
+                return new Preference(validated.eventCategory(), validated.channel(), validated.enabled(),
+                        validated.version());
+            }
+
+            @Override
             public long notificationVersion(UUID workspaceId) {
                 return notifications.notificationVersion(workspaceId);
             }
 
             @Override
             public int updateNotificationPreference(UUID workspaceId, Preference preference) {
-                return notifications.updateNotificationPreference(workspaceId,
-                        new NotificationPreferenceAccess.Preference(preference.eventCategory(), preference.channel(),
-                                preference.enabled(), preference.version()));
+                return notifications.updateNotificationPreference(workspaceId, preference(preference));
             }
 
             @Override
@@ -48,5 +53,11 @@ public class TenantExternalConfigurationSourceConfiguration {
                 return salesUsage.countTransactions(tenantId);
             }
         };
+    }
+
+    private static NotificationPreferenceAccess.Preference preference(
+            TenantExternalConfigurationSource.Preference preference) {
+        return new NotificationPreferenceAccess.Preference(preference.eventCategory(), preference.channel(),
+                preference.enabled(), preference.version());
     }
 }
