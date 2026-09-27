@@ -1,5 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service;
 
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.CustomFieldConflictException;
+
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -7,10 +9,10 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Te
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.TenantConfigurationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.OrganizationAdministrationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ConcurrencyConflictException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.TenantManagementInvariantViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.NotificationPreference;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
@@ -252,5 +254,5 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	}
 	private static String valueOrUnknown(String value) { return value == null || value.isBlank() ? "unknown" : value; }
 
-	public static final class CustomFieldConflictException extends RuntimeException { }
+
 }

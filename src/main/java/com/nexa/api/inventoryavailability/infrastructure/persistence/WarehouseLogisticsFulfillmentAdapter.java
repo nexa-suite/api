@@ -2,7 +2,8 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService.WarehouseException;
-import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLot;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLotStatus;
 import com.nexa.api.inventoryavailability.domain.model.inventoryreservation.InventoryReservation;
@@ -23,17 +24,26 @@ import java.util.UUID;
 public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsFulfillmentPort {
     private final JdbcTemplate jdbc;
     private final ChangeEventPersistencePort changeFeed;
+    private final InventoryCommercialSource commercialSource;
 
-    public WarehouseLogisticsFulfillmentAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed) {
+    public WarehouseLogisticsFulfillmentAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+                                                InventoryCommercialSource commercialSource) {
         this.jdbc = jdbc;
         this.changeFeed = changeFeed;
+        this.commercialSource = commercialSource;
     }
 
     @Override
     public DispatchReservationSnapshot loadReservedReservation(String tenantId, String workspaceId,
                                                                 String reservationId, long expectedVersion, Instant now) {
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), reservation = uuid(reservationId);
-        return jdbc.query("select r.id,r.sales_order_id,r.order_number,r.client_account_id,r.status,r.expires_at,r.version,o.delivery_snapshot,"
+        UUID salesOrderId = jdbc.query("select sales_order_id from warehouse.inventory_reservation "
+                        + "where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> rs.getObject(1, UUID.class), tenant, workspace, reservation).stream().findFirst()
+                .orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
+        InventoryCommercialSource.Snapshot order = commercialSource.claimCandidate(tenant, workspace, salesOrderId)
+                .orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
+        return jdbc.query("select r.id,r.sales_order_id,r.status,r.expires_at,r.version,"
                         + "(select min(z.temperature_min) from warehouse.inventory_reservation_allocation a "
                         + "join warehouse.inventory_reservation_line rl on rl.id=a.reservation_line_id "
                         + "join warehouse.inventory_lot l on l.id=a.lot_id and l.tenant_id=r.tenant_id and l.workspace_id=r.workspace_id "
@@ -44,8 +54,7 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
                         + "join warehouse.inventory_lot l on l.id=a.lot_id and l.tenant_id=r.tenant_id and l.workspace_id=r.workspace_id "
                         + "join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
                         + "where rl.reservation_id=r.id) temperature_max "
-                        + "from warehouse.inventory_reservation r join sales.sales_order o on o.tenant_id=r.tenant_id "
-                        + "and o.workspace_id=r.workspace_id and o.id=r.sales_order_id "
+                        + "from warehouse.inventory_reservation r "
                         + "where r.tenant_id=? and r.workspace_id=? and r.id=? for update",
                 rs -> {
                     if (!rs.next()) throw error("RESOURCE_NOT_FOUND", true);
@@ -54,9 +63,9 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
                     long version = rs.getLong("version");
                     if (version != expectedVersion) throw error("CONCURRENCY_CONFLICT", false);
                     if (!"RESERVED".equals(status) || !expires.isAfter(now)) throw error("RESERVATION_NOT_READY", false);
-                    return new DispatchReservationSnapshot(reservation, rs.getObject("sales_order_id", UUID.class),
-                            rs.getString("order_number"), rs.getObject("client_account_id", UUID.class), status,
-                            expires, version, rs.getString("delivery_snapshot"), rs.getBigDecimal("temperature_min"),
+                    return new DispatchReservationSnapshot(reservation, salesOrderId,
+                            order.number(), order.clientAccountId(), status,
+                            expires, version, order.destinationSnapshot(), rs.getBigDecimal("temperature_min"),
                             rs.getBigDecimal("temperature_max"), rs.getBigDecimal("temperature_min") == null ? null : "CELSIUS", "UNKNOWN");
                 }, tenant, workspace, reservation);
     }

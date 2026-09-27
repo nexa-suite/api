@@ -1,10 +1,10 @@
 package com.nexa.api.businessdocuments.infrastructure.rendering;
 
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.BusinessParty;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentLine;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentTotals;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DeliveryGuideDraftProjection;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.CommercialInvoiceDraftProjection;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.BusinessParty;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentLine;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentTotals;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DeliveryGuideDraftProjection;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.CommercialInvoiceDraftProjection;
 
 import javax.xml.XMLConstants;
 import javax.xml.transform.stream.StreamSource;

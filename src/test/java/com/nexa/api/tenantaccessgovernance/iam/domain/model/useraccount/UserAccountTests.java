@@ -1,5 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount;
 
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
+
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;

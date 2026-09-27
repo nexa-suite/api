@@ -452,7 +452,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 Integer.class, UUID.fromString(membershipId(BUYER_EMAIL)), installation)).isEqualTo(1);
 
         UUID eventId = UUID.randomUUID();
-        pushRouting.route(new NotificationModels.NotificationProjection(eventId.toString(), tenantId(), workspaceId(),
+        pushRouting.route(new com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection(eventId.toString(), tenantId(), workspaceId(),
                         buyerClientAccountId(), "SalesOrder", UUID.randomUUID().toString(), "SALES_ORDER_CONFIRMED", "CONFIRMED",
                         Instant.now(), Set.of(membershipId(BUYER_EMAIL))), "ORDER_STATUS", "Order confirmed", "Safe notification", "/sales-orders/1");
         assertThat(jdbc.queryForObject("select count(*) from notifications.push_delivery_attempt where subscription_id=? and event_id=?",

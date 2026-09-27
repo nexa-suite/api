@@ -4,18 +4,18 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.TenantM
 
 import java.util.UUID;
 
-final class UuidIdentitySupport {
+public final class UuidIdentitySupport {
 	private UuidIdentitySupport() {
 	}
 
-	static UUID required(UUID value, String label) {
+	public static UUID required(UUID value, String label) {
 		if (value == null) {
 			throw new TenantManagementInvariantViolation(label + " is required");
 		}
 		return value;
 	}
 
-	static UUID parse(String value, String label) {
+	public static UUID parse(String value, String label) {
 		if (value == null || value.isBlank()) {
 			throw new TenantManagementInvariantViolation(label + " is required");
 		}

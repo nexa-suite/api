@@ -9,7 +9,7 @@ import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRel
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.customerbuyerrelationships.domain.model.clientaccount.*;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -75,7 +75,7 @@ public class ClientAccountService implements ClientAccountUseCase {
 		new BusinessName(command.businessName()); new CommercialName(command.commercialName()); new ContactEmail(command.contactEmail());
 		new PhoneNumber(command.phone()); new PaymentCondition(command.paymentCondition());
 	}
-	private static void internal(CurrentAccessContext context, Permission permission) { if (context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole.BUYER)) throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation("Administrative sales access is not available to buyers"); context.requirePermission(permission); }
+	private static void internal(CurrentAccessContext context, Permission permission) { if (context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole.BUYER)) throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation("Administrative sales access is not available to buyers"); context.requirePermission(permission); }
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }
 	private static String workspace(CurrentAccessContext context) { return context.workspaceId().toString(); }
 	private static long now() { return System.currentTimeMillis(); }

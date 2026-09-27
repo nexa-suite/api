@@ -7,13 +7,13 @@ import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogSeedLoade
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogSkuPersistenceBootstrap;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogVariantMappingLoader;
 import com.nexa.api.shared.context.RlsRequestScope;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.AccessPolicy;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcAccessPolicyAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcWorkspacePreviewQueryAdapter;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.EffectiveAuthorization;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.WorkspacePreviewQueryPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcInvitationPersistenceAdapter;
 import com.zaxxer.hikari.HikariConfig;
@@ -581,9 +581,9 @@ class RlsRuntimeDatabaseIsolationIT {
             JdbcTemplate jdbc = new JdbcTemplate(scopedDataSource);
             TransactionTemplate transaction = new TransactionTemplate(new DataSourceTransactionManager(scopedDataSource));
             var mapper = JsonMapper.shared();
-            CatalogPersistenceBootstrap catalog = new CatalogPersistenceBootstrap(jdbc, new CatalogSeedLoader(mapper));
+            CatalogPersistenceBootstrap catalog = new CatalogPersistenceBootstrap(jdbc, new CatalogSeedLoader(mapper), new com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory(jdbc));
             CatalogSkuPersistenceBootstrap sku = new CatalogSkuPersistenceBootstrap(jdbc,
-                    new CatalogFamilySkuMappingLoader(mapper), new CatalogVariantMappingLoader(mapper));
+                    new CatalogFamilySkuMappingLoader(mapper), new CatalogVariantMappingLoader(mapper), new com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory(jdbc));
             SystemWorkflowActorBootstrap actor = new SystemWorkflowActorBootstrap(jdbc);
 
             transaction.executeWithoutResult(status -> catalog.importDeterministicSeed());

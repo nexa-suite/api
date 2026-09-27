@@ -107,7 +107,7 @@ public class PasswordResetService implements RequestPasswordResetCommand, ResetP
         credentials.updateCredentialHash(credential.userId(), hasher.encode(newPassword), now);
         sessions.revokeAllForUser(credential.userId(), null);
         accessContextTickets.invalidatePendingForUser(
-                new com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId(credential.userId().toString()), now);
+                new com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId(credential.userId().toString()), now);
         resets.save(record);
         audit.append(new SecurityAuditPort.Event("PASSWORD_RESET_COMPLETED", null, credential.userId(), null, null,
                 record.surface(), valueOrUnknown(correlationId), valueOrUnknown(traceId), now, Map.of("sessionsRevoked", true)));

@@ -47,6 +47,32 @@ class ArchitectureConstitutionTests {
     }
 
     @Test
+    void allElevenCanonicalBoundariesAreClosed() {
+        var modules = ApplicationModules.of(NexaApiApplication.class).stream()
+                .filter(module -> module.getIdentifier().toString().startsWith("BC-"))
+                .toList();
+        assertThat(modules).hasSize(11);
+        assertThat(modules).allSatisfy(module -> assertThat(module.isOpen())
+                .as("closed canonical module %s", module.getIdentifier()).isFalse());
+    }
+
+    @Test
+    void publicInterfacesDoNotExportPersistenceControllersOrInternalAggregates() {
+        Set<String> aggregates = Set.of("UserAccount", "AuthenticationSession", "Membership",
+                "OrganizationRegistration", "OrganizationInvitation", "SalesOrder", "PurchaseRequest",
+                "CommercialCommitment", "InventoryLot", "InventoryReservation", "DispatchOrder",
+                "BusinessDocument", "ProductFamily", "SellableSku");
+        var exported = ApplicationModules.of(NexaApiApplication.class).stream()
+                .filter(module -> module.getIdentifier().toString().startsWith("BC-"))
+                .flatMap(module -> module.getNamedInterfaces().stream())
+                .flatMap(named -> named.asJavaClasses()).distinct().toList();
+        assertThat(exported).noneSatisfy(type -> assertThat(type.getPackageName()).contains(".infrastructure."));
+        assertThat(exported).noneSatisfy(type -> assertThat(type.getSimpleName()).endsWith("Controller"));
+        assertThat(exported).allSatisfy(type -> assertThat(aggregates)
+                .as("internal aggregate exported: %s", type.getName()).doesNotContain(type.getSimpleName()));
+    }
+
+    @Test
     void edgeIsTechnicalAndSharedContainsOnlyFrameworkNeutralContracts() throws IOException {
         String sharedModule = Files.readString(Path.of("src/main/java/com/nexa/api/shared/package-info.java"));
         assertThat(sharedModule).contains("@org.springframework.modulith.ApplicationModule(id = \"shared\")")

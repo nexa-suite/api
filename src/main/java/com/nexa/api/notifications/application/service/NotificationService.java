@@ -4,7 +4,7 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferenceView;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
 import com.nexa.api.notifications.application.model.NotificationModels.ProjectedNotification;
-import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
 import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
@@ -13,8 +13,8 @@ import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAcc
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Locale;
@@ -116,7 +116,7 @@ public final class NotificationService implements NotificationUseCase {
 			}
 		}
 		if (pushRouting != null) {
-			var candidate = new com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate(
+			var candidate = new com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate(
 					event, category, title, body, deepLink);
 			if (pushOutbox != null) pushOutbox.enqueue(candidate);
 			else if (eventPublisher != null) eventPublisher.publishEvent(candidate);
@@ -124,7 +124,7 @@ public final class NotificationService implements NotificationUseCase {
 		}
 	}
 
-	public void deliverPush(com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate candidate) {
+	public void deliverPush(com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate candidate) {
 		Objects.requireNonNull(candidate, "Push notification candidate is required");
 		if (pushRouting != null) {
 			pushRouting.routeDurable(candidate.projection(), candidate.category(), candidate.title(), candidate.message(), candidate.deepLink());

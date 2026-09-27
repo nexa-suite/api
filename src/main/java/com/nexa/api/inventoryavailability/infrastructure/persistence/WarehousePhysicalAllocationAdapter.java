@@ -4,8 +4,9 @@ import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
-import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,28 +34,22 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     private final JdbcTemplate jdbc;
     private final CanonicalOutboxPort canonicalOutbox;
     private final BusinessTraceabilityCommands traceability;
-    private final SalesOrderFulfillmentQuery salesOrders;
+    private final InventoryCommercialSource commercialSource;
+    private final InventoryFulfillmentSource fulfillmentSource;
     private final SellableSkuQuery sellableSkus;
 
     @Autowired
     public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
-                                              SalesOrderFulfillmentQuery salesOrders, SellableSkuQuery sellableSkus,
+                                              InventoryCommercialSource commercialSource,
+                                              InventoryFulfillmentSource fulfillmentSource,
+                                              SellableSkuQuery sellableSkus,
                                               CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc;
         this.canonicalOutbox = canonicalOutbox;
         this.traceability = traceability;
-        this.salesOrders = salesOrders;
+        this.commercialSource = commercialSource;
+        this.fulfillmentSource = fulfillmentSource;
         this.sellableSkus = sellableSkus;
-    }
-
-    public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
-                                              SalesOrderFulfillmentQuery salesOrders, CanonicalOutboxPort canonicalOutbox) {
-        this(jdbc, traceability, salesOrders, null, canonicalOutbox);
-    }
-
-    public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
-                                              CanonicalOutboxPort canonicalOutbox) {
-        this(jdbc, traceability, null, null, canonicalOutbox);
     }
 
     @Override
@@ -123,9 +118,9 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
 
-        if (salesOrders == null) throw error("SALES_ORDER_NOT_FOUND", true);
-        SalesOrderFulfillmentQuery.Snapshot order = salesOrders.getForUpdate(
-                request.tenantId(), request.workspaceId(), request.salesOrderId());
+        InventoryCommercialSource.Snapshot order = commercialSource.claimCandidate(
+                        request.tenantId(), request.workspaceId(), request.salesOrderId())
+                .orElseThrow(() -> error("SALES_ORDER_NOT_FOUND", true));
         if (!"CONFIRMED".equals(order.status())) throw error("SALES_ORDER_NOT_CONFIRMED", false);
         if (!request.commercialCommitmentId().equals(order.commercialCommitmentId())) {
             throw error("BACKING_LINEAGE_INVALID", false);
@@ -137,8 +132,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         if (!"BACKED".equals(backing.status())) throw error("BACKING_NOT_READY", false);
         if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and sales_order_id=? and status not in ('RELEASED','EXPIRED','CANCELLED'))",
                 Boolean.class, request.tenantId(), request.workspaceId(), request.salesOrderId()))
-                || Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.dispatch_order where tenant_id=? and workspace_id=? and sales_order_id=? and status<>'CANCELLED')",
-                Boolean.class, request.tenantId(), request.workspaceId(), request.salesOrderId()))) {
+                || fulfillmentSource.hasActiveDispatch(request.tenantId(), request.workspaceId(), request.salesOrderId())) {
             throw error("CANONICAL_FULFILLMENT_CONFLICT", false);
         }
 
@@ -599,12 +593,15 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         List<LotSelector> selectors = positions.stream().map(value -> new LotSelector(value.skuId(), value.warehouseId(), value.catalogItemId(), value.unit()))
                 .distinct().sorted(Comparator.comparing((LotSelector value) -> value.skuId().toString()).thenComparing(value -> value.warehouseId().toString())).toList();
         if (selectors.isEmpty()) return List.of();
+        List<UUID> skuIds = selectors.stream().map(LotSelector::skuId).distinct().toList();
+        CatalogSkuSnapshots.Input catalogSnapshots = CatalogSkuSnapshots.of(tenant, workspace,
+                sellableSkus.findInventoryPolicies(tenant, workspace, skuIds));
         String predicate = selectors.stream().map(value -> "(l.sku_id=? and l.warehouse_id=? and l.catalog_item_id=? and l.unit=?)").collect(Collectors.joining(" or "));
         List<Object> args = new ArrayList<>(List.of(tenant, workspace));
         selectors.forEach(value -> { args.add(value.skuId()); args.add(value.warehouseId()); args.add(value.catalogItemId()); args.add(value.unit()); });
-        return jdbc.query("select l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.unit,l.expiration_date,l.received_at,l.stock_quantity,l.reserved_quantity,l.version,coalesce((select p.quantity from warehouse.safety_stock_policy p where p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.warehouse_id=l.warehouse_id and p.sku_id=l.sku_id),0) safety_stock "
+        return jdbc.query("with " + catalogSnapshots.cte() + " select l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.unit,l.expiration_date,l.received_at,l.stock_quantity,l.reserved_quantity,l.version,coalesce((select p.quantity from warehouse.safety_stock_policy p where p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.warehouse_id=l.warehouse_id and p.sku_id=l.sku_id),0) safety_stock "
                         + "from warehouse.inventory_lot l "
-                        + "join catalog_management.sellable_sku sku on sku.tenant_id=l.tenant_id and sku.workspace_id=l.workspace_id and sku.id=l.sku_id "
+                        + "join catalog_sku_snapshot sku on sku.tenant_id=l.tenant_id and sku.workspace_id=l.workspace_id and sku.id=l.sku_id "
                         + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
                         + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
                         + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
@@ -618,7 +615,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                         + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
                         + "and l.stock_quantity-l.reserved_quantity>0 and (" + predicate + ") "
                         + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
-                (rs, row) -> new LotRow(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getString("unit"), rs.getObject("expiration_date", LocalDate.class), rs.getTimestamp("received_at").toInstant(), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getLong("version"), rs.getBigDecimal("safety_stock")), args.toArray());
+                (rs, row) -> new LotRow(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getString("unit"), rs.getObject("expiration_date", LocalDate.class), rs.getTimestamp("received_at").toInstant(), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getLong("version"), rs.getBigDecimal("safety_stock")), catalogSnapshots.prepend(args.toArray()));
     }
 
     private List<SelectedLot> selectFefo(List<PhysicalAllocationCommands.RequestedLine> requested, List<BackingPosition> positions, List<LotRow> lots) {

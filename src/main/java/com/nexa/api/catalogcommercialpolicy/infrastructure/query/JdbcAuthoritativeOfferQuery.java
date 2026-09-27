@@ -1,6 +1,7 @@
 package com.nexa.api.catalogcommercialpolicy.infrastructure.query;
 
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.AuthoritativeOfferQuery;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.domain.model.pricing.AuthoritativePriceResolver;
 import com.nexa.api.catalogcommercialpolicy.domain.model.pricing.EffectivePricePolicy;
 import com.nexa.api.catalogcommercialpolicy.domain.model.pricing.PromotionCandidate;
@@ -26,10 +27,12 @@ import java.util.stream.Collectors;
 @Profile("!test")
 public class JdbcAuthoritativeOfferQuery implements AuthoritativeOfferQuery {
     private final JdbcTemplate jdbc;
+    private final CatalogClientAccountPort clientAccounts;
     private final AuthoritativePriceResolver resolver = new AuthoritativePriceResolver();
 
-    public JdbcAuthoritativeOfferQuery(JdbcTemplate jdbc) {
+    public JdbcAuthoritativeOfferQuery(JdbcTemplate jdbc, CatalogClientAccountPort clientAccounts) {
         this.jdbc = jdbc;
+        this.clientAccounts = clientAccounts;
     }
 
     @Override
@@ -41,8 +44,9 @@ public class JdbcAuthoritativeOfferQuery implements AuthoritativeOfferQuery {
         Objects.requireNonNull(effectiveAt, "Offer effective instant is required");
         List<UUID> ids = skuIds == null ? List.of() : skuIds.stream().filter(Objects::nonNull).distinct().toList();
         if (ids.isEmpty()) return Map.of();
-        String resolvedSegment = customerAccountId == null ? null
-                : activeClientSegment(tenantId, workspaceId, customerAccountId);
+        CatalogClientAccountPort.ClientAccountProfile activeProfile = customerAccountId == null ? null
+                : clientAccounts.findActiveProfile(tenantId, workspaceId, customerAccountId).orElse(null);
+        String resolvedSegment = activeProfile == null ? null : activeProfile.segment();
         if (customerAccountId != null && resolvedSegment == null) return Map.of();
 
         Map<UUID, BasePrice> basePrices = basePrices(tenantId, workspaceId, ids, effectiveAt);
@@ -212,12 +216,6 @@ public class JdbcAuthoritativeOfferQuery implements AuthoritativeOfferQuery {
                         accountIds.getOrDefault(candidate.id(), List.of()), rules.getOrDefault(candidate.id(), List.of())))
                 .toList()));
         return Map.copyOf(enriched);
-    }
-
-    private String activeClientSegment(UUID tenantId, UUID workspaceId, UUID customerAccountId) {
-        return jdbc.query("select segment from sales.client_account where tenant_id=? and workspace_id=? and id=? and status='ACTIVE'",
-                        (rs, ignored) -> rs.getString(1), tenantId, workspaceId, customerAccountId)
-                .stream().findFirst().orElse(null);
     }
 
     private static String placeholders(int count) {

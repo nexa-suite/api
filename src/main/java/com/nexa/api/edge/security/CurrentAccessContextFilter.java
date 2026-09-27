@@ -5,11 +5,11 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ValidateAccessSessionUseCase;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -96,8 +96,8 @@ final class CurrentAccessContextFilter extends OncePerRequestFilter {
 		RlsRequestScope.set(tenantId.value(), workspaceId.value());
 		try {
 		try {
-			accessSession.validate(new SessionId(sessionIdClaim), new com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId(jwt.getSubject()),
-					com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface.valueOf(surface.name()), authorizationVersionClaim);
+			accessSession.validate(new SessionId(sessionIdClaim), new com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId(jwt.getSubject()),
+					com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface.valueOf(surface.name()), authorizationVersionClaim);
 		} catch (RuntimeException exception) {
 			SecurityContextHolder.clearContext();
 			accessTokenInvalidEntryPoint.commence(request, response,

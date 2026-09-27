@@ -1,7 +1,7 @@
 package com.nexa.api.notifications.infrastructure;
 
-import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
-import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;

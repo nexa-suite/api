@@ -1,5 +1,7 @@
 package com.nexa.api.businessdocuments.domain.model.businessdocument;
 
+import com.nexa.api.businessdocuments.domain.publicapi.BusinessDocumentType;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;

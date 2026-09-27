@@ -2,7 +2,7 @@ package com.nexa.api.catalogcommercialpolicy.presentation.rest;
 
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPricingPreviewModels;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogPricingPreviewUseCase;
-import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogClientAccountPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;

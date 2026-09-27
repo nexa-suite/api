@@ -1,7 +1,7 @@
 package com.nexa.api.inventoryavailability.application;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 
 final class WarehouseApplicationAuthorization {
     private WarehouseApplicationAuthorization() { }

@@ -1,7 +1,7 @@
 package com.nexa.api.salescommitment.application.purchaserequest.model;
 
 import java.time.LocalDate;
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 
 public record PurchaseRequestFilter(String status, String priority, String search, LocalDate createdFrom,
 		LocalDate createdTo, int page, int size, String sort) {

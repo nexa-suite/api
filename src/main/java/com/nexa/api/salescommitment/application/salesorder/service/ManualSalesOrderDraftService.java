@@ -13,9 +13,9 @@ import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequest
 import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrderDraft;
 import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrderDraftStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;

@@ -1,5 +1,7 @@
 package com.nexa.api.salescommitment.domain.model.salesorder;
 
+import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
+
 import java.math.BigDecimal;
 import java.util.Objects;
 import java.util.UUID;

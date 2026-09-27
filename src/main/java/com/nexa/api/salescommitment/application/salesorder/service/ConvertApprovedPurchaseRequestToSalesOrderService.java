@@ -7,8 +7,8 @@ import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderConversionPersistencePort;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrder;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -38,7 +38,7 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
             throw new IllegalStateException("Sales order conversion persistence is not configured");
         }
         if (note != null && note.length() > 2000) {
-            throw new com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation("Conversion note is too long");
+            throw new com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation("Conversion note is too long");
         }
 
         String tenant = context.tenantId().toString();

@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.pers
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.TenantConfigurationModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantExternalConfigurationSource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.NotificationPreference;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
@@ -31,8 +32,13 @@ import java.util.UUID;
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	private final JdbcTemplate jdbc;
+	private final TenantExternalConfigurationSource externalConfiguration;
 
-	public JdbcTenantConfigurationAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+	public JdbcTenantConfigurationAdapter(JdbcTemplate jdbc,
+			TenantExternalConfigurationSource externalConfiguration) {
+		this.jdbc = jdbc;
+		this.externalConfiguration = externalConfiguration;
+	}
 
 	@Override
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -114,22 +120,24 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public List<NotificationPreference> findNotificationPreferences(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
-		return jdbc.query("select event_category,channel,enabled,version from tenant_management.notification_preference where workspace_id=? order by event_category,channel",
-				(rs, row) -> new NotificationPreference(rs.getString(1), rs.getString(2), rs.getBoolean(3), rs.getLong(4)), uuid(workspaceId));
+		return externalConfiguration.notificationPreferences(uuid(workspaceId)).stream()
+				.map(value -> new NotificationPreference(value.eventCategory(), value.channel(), value.enabled(),
+						value.version()))
+				.toList();
 	}
 
 	@Override
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public long notificationVersion(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
-		Long version = jdbc.queryForObject("select coalesce(max(version),0) from tenant_management.notification_preference where workspace_id=?", Long.class, uuid(workspaceId));
-		return version == null ? 0 : version;
+		return externalConfiguration.notificationVersion(uuid(workspaceId));
 	}
 
 	@Override
 	public int updateNotificationPreference(String workspaceId, NotificationPreference preference) {
-		return jdbc.update("update tenant_management.notification_preference set enabled=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and event_category=? and channel=? and version=?",
-				preference.enabled(), uuid(workspaceId), preference.eventCategory(), preference.channel(), preference.version());
+		return externalConfiguration.updateNotificationPreference(uuid(workspaceId),
+				new TenantExternalConfigurationSource.Preference(preference.eventCategory(), preference.channel(),
+						preference.enabled(), preference.version()));
 	}
 
 	@Override
@@ -201,8 +209,8 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 		ReferencePlanAssignment plan = findReferencePlan(tenantId).orElseThrow();
 		Integer activeUsers = jdbc.queryForObject("select count(*) from tenant_management.workspace_membership where workspace_id=? and status='ACTIVE'", Integer.class, uuid(workspaceId));
 		Integer workspaces = jdbc.queryForObject("select count(*) from tenant_management.workspace where tenant_id=? and status='ACTIVE'", Integer.class, uuid(tenantId));
-		Long transactions = jdbc.queryForObject("select (select count(*) from sales.purchase_request where tenant_id=?) + (select count(*) from sales.sales_order where tenant_id=?)", Long.class, uuid(tenantId), uuid(tenantId));
-		return new TenantConfigurationModels.PlanUsageView(plan.planCode(), plan.monthlyPrice(), plan.seatLimit(), plan.workspaceLimit(), plan.transactionLimit(), activeUsers == null ? 0 : activeUsers, workspaces == null ? 0 : workspaces, transactions == null ? 0 : transactions, plan.version());
+		long transactions = externalConfiguration.salesTransactionCount(uuid(tenantId));
+		return new TenantConfigurationModels.PlanUsageView(plan.planCode(), plan.monthlyPrice(), plan.seatLimit(), plan.workspaceLimit(), plan.transactionLimit(), activeUsers == null ? 0 : activeUsers, workspaces == null ? 0 : workspaces, transactions, plan.version());
 	}
 
 	private void ensureTenantDefaults(String tenantId) {
@@ -218,11 +226,7 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 		UUID workspace = uuid(workspaceId);
 		jdbc.update("insert into tenant_management.workspace_settings (workspace_id,version,updated_at) values (?,0,current_timestamp) on conflict (workspace_id) do nothing", workspace);
 		jdbc.update("insert into tenant_management.operational_settings (workspace_id,version,updated_at) values (?,0,current_timestamp) on conflict (workspace_id) do nothing", workspace);
-		for (String category : List.of("TEMPERATURE_ALERT", "DOCUMENT_REMINDER", "ORDER_STATUS", "INVITATION")) {
-			for (String channel : List.of("IN_APP", "EMAIL")) {
-				jdbc.update("insert into tenant_management.notification_preference (workspace_id,event_category,channel,enabled,version,updated_at) values (?,?,?,true,0,current_timestamp) on conflict (workspace_id,event_category,channel) do nothing", workspace, category, channel);
-			}
-		}
+		externalConfiguration.ensureNotificationDefaults(workspace);
 	}
 
 	private static TenantConfigurationModels.CustomFieldView customField(java.sql.ResultSet rs) throws java.sql.SQLException {

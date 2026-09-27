@@ -1,5 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount;
 
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
+
 /**
  * Identity account aggregate. Access policy, tenant membership and credentials are external concerns.
  */

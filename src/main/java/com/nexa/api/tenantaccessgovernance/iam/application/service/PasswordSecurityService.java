@@ -53,7 +53,7 @@ public class PasswordSecurityService implements ChangeOwnPasswordCommand {
         credentials.updateCredentialHash(actor.userId(), hasher.encode(newPassword), now);
         int revoked = sessions.revokeAllForUser(actor.userId(), actor.sessionId());
         accessContextTickets.invalidatePendingForUser(
-                new com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId(actor.userId().toString()), now);
+                new com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId(actor.userId().toString()), now);
         audit.append(new SecurityAuditPort.Event("PASSWORD_CHANGED", actor.userId(), actor.userId(), actor.tenantId(), actor.workspaceId(),
                 actor.surface(), valueOrUnknown(actor.correlationId()), valueOrUnknown(actor.traceId()), now,
                 Map.of("otherSessionsRevoked", true, "otherSessionsCount", revoked)));

@@ -11,7 +11,7 @@ import java.util.Optional;
  * owns the persistence port and domain value; consumers receive only this
  * immutable integration snapshot, never tenant-management SQL or entities.
  */
-public final class TenantOperationalSettingsIntegrationService {
+public final class TenantOperationalSettingsIntegrationService implements com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess {
     private final TenantConfigurationPort configuration;
 
     public TenantOperationalSettingsIntegrationService(TenantConfigurationPort configuration) {
@@ -40,8 +40,4 @@ public final class TenantOperationalSettingsIntegrationService {
                 value.thermalLogRequired(), value.version());
     }
 
-    public record Snapshot(String selectionPolicy, String orderCutoffPolicy, String fulfillmentDefaults,
-                           String inventoryVisibilityPolicy, String buyerAvailabilityPolicy,
-                           LocalTime startsAt, LocalTime endsAt, int orderCutoffMinutes,
-                           boolean thermalLogRequired, long version) { }
 }

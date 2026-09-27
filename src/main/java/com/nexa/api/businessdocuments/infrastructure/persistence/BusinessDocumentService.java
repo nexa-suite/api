@@ -3,23 +3,25 @@ package com.nexa.api.businessdocuments.infrastructure.persistence;
 import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentCommands;
 import com.nexa.api.businessdocuments.application.model.BusinessDocumentModels;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections;
 import com.nexa.api.businessdocuments.application.port.ContentScannerPort;
 import com.nexa.api.businessdocuments.application.port.DocumentRendererPort;
-import com.nexa.api.businessdocuments.application.port.DocumentProjectionLookupPort;
-import com.nexa.api.businessdocuments.application.port.DocumentSubjectLookupPort;
+import com.nexa.api.businessdocuments.application.publicapi.DocumentProjectionLookupPort;
+import com.nexa.api.businessdocuments.application.publicapi.DocumentSubjectLookupPort;
 import com.nexa.api.businessdocuments.application.port.ObjectStoragePort;
 import com.nexa.api.businessdocuments.domain.model.businessdocument.BusinessDocumentFormat;
 import com.nexa.api.businessdocuments.domain.model.businessdocument.BusinessDocumentStatus;
-import com.nexa.api.businessdocuments.domain.model.businessdocument.BusinessDocumentType;
-import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectReference;
-import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectSnapshot;
-import com.nexa.api.businessdocuments.domain.model.businessdocument.DocumentSubjectType;
+import com.nexa.api.businessdocuments.domain.publicapi.BusinessDocumentType;
+import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectReference;
+import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectSnapshot;
+import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectType;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.shared.context.RlsRequestScope;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -36,6 +38,7 @@ import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -55,12 +58,16 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private final DocumentRendererPort renderer;
     private final DocumentSubjectLookupPort subjects;
     private final DocumentProjectionLookupPort projections;
+    private final CustomerAccountQuery customerAccounts;
+    private final WorkspaceDirectory workspaces;
     private final TransactionTemplate transactionTemplate;
 
     public BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner, DocumentRendererPort renderer,
             DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections,
+            CustomerAccountQuery customerAccounts, WorkspaceDirectory workspaces,
             PlatformTransactionManager transactionManager, CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc; this.storage = storage; this.scanner = scanner; this.renderer = renderer; this.subjects = subjects; this.projections = projections;
+        this.customerAccounts = customerAccounts; this.workspaces = workspaces;
         this.canonicalOutbox = canonicalOutbox;
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
     }
@@ -148,10 +155,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         params.add(tenant(context)); params.add(workspace(context));
         if (type != null) { whereBuilder.append(" and d.document_type=?"); params.add(type); }
         if (state != null) { whereBuilder.append(" and d.status=?"); params.add(state); }
-        if (context.hasRole(MembershipRole.BUYER)) {
-            whereBuilder.append(" and exists(select 1 from sales.client_account_membership cam where cam.tenant_id=d.tenant_id and cam.workspace_id=d.workspace_id and cam.client_account_id=d.client_account_id and cam.workspace_membership_id=?)");
-            params.add(context.membershipId().value());
-        }
+        appendBuyerAccountFilter(whereBuilder, params, context, "d");
         String where = whereBuilder.toString();
         long total = jdbc.queryForObject("select count(*) from business_documents.business_document d where " + where, Long.class, params.toArray());
         params.add(safeSize); params.add(safePage * safeSize);
@@ -283,10 +287,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         params.add(tenant(context)); params.add(workspace(context));
         if (subjectType != null && !subjectType.isBlank()) { where.append(" and e.subject_type=?"); params.add(parseSubject(subjectType).name()); }
         if (subjectId != null) { where.append(" and e.subject_id=?"); params.add(subjectId); }
-        if (context.hasRole(MembershipRole.BUYER)) {
-            where.append(" and exists(select 1 from sales.client_account_membership cam where cam.tenant_id=e.tenant_id and cam.workspace_id=e.workspace_id and cam.client_account_id=e.client_account_id and cam.workspace_membership_id=?)");
-            params.add(context.membershipId().value());
-        }
+        appendBuyerAccountFilter(where, params, context, "e");
         long total = jdbc.queryForObject("select count(*) from business_documents.evidence_object e where " + where, Long.class, params.toArray());
         params.add(safeSize); params.add(safePage * safeSize);
         List<BusinessDocumentModels.EvidenceView> rows = jdbc.query(evidenceSelect() + " where " + where + " order by e.created_at desc,e.id limit ? offset ?",
@@ -319,9 +320,20 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         RlsRequestScope.enableCrossScopeWorkspaceScan();
         try {
             scopes = transactionTemplate.execute(status -> {
-                jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
-                return jdbc.query("select tenant_id,id as workspace_id from tenant_management.workspace order by tenant_id,id",
-                        (rs, n) -> new WorkspaceScope(rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
+                List<WorkspaceScope> discovered = new ArrayList<>();
+                UUID afterTenantId = null;
+                UUID afterWorkspaceId = null;
+                while (true) {
+                    List<WorkspaceDirectory.Scope> batch = workspaces.scanAfter(afterTenantId, afterWorkspaceId, 100);
+                    if (batch.isEmpty()) break;
+                    batch.stream().map(scope -> new WorkspaceScope(scope.tenantId(), scope.workspaceId()))
+                            .forEach(discovered::add);
+                    WorkspaceDirectory.Scope last = batch.get(batch.size() - 1);
+                    afterTenantId = last.tenantId();
+                    afterWorkspaceId = last.workspaceId();
+                    if (batch.size() < 100) break;
+                }
+                return discovered;
             });
         } finally {
             RlsRequestScope.clearCrossScopeWorkspaceScan();
@@ -505,8 +517,22 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private void outbox(CurrentAccessContext context, String type, UUID aggregateId, Map<String, Object> payload) { canonicalOutbox.append(type, "BusinessDocument", aggregateId, tenant(context), workspace(context), Instant.now(), "document-" + aggregateId, null, "1.0", payload); }
     private void read(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_READ); }
     private void requireGeneration(CurrentAccessContext context) { if (context.hasRole(MembershipRole.BUYER)) context.requirePermission(PermissionKey.DOCUMENT_READ); else context.requirePermission(PermissionKey.DOCUMENT_GENERATE); }
-    private void authorizeClientScope(CurrentAccessContext context, String clientAccountId) { if (context.hasRole(MembershipRole.BUYER)) { if (clientAccountId == null || !Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?)", Boolean.class, tenant(context), workspace(context), uuid(clientAccountId), context.membershipId().value()))) throw new IllegalArgumentException("Document is outside buyer scope"); } }
-    private boolean authorizedDocument(CurrentAccessContext context, String clientAccountId) { if (!context.hasRole(MembershipRole.BUYER)) return true; return clientAccountId != null && Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?)", Boolean.class, tenant(context), workspace(context), uuid(clientAccountId), context.membershipId().value())); }
+    private void authorizeClientScope(CurrentAccessContext context, String clientAccountId) { if (context.hasRole(MembershipRole.BUYER)) { if (clientAccountId == null || !customerAccounts.hasBuyerRelationship(tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString(), clientAccountId)) throw new IllegalArgumentException("Document is outside buyer scope"); } }
+    private boolean authorizedDocument(CurrentAccessContext context, String clientAccountId) { return !context.hasRole(MembershipRole.BUYER) || clientAccountId != null && customerAccounts.hasBuyerRelationship(tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString(), clientAccountId); }
+    private void appendBuyerAccountFilter(StringBuilder where, List<Object> params, CurrentAccessContext context, String alias) {
+        if (!context.hasRole(MembershipRole.BUYER)) return;
+        List<String> relatedIds = customerAccounts.findRelatedAccountIds(
+                tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString());
+        List<UUID> accountIds = relatedIds == null ? List.of()
+                : relatedIds.stream().map(BusinessDocumentService::uuid).distinct().toList();
+        if (accountIds.isEmpty()) {
+            where.append(" and false");
+            return;
+        }
+        where.append(" and ").append(alias).append(".client_account_id in (")
+                .append(String.join(",", Collections.nCopies(accountIds.size(), "?"))).append(")");
+        params.addAll(accountIds);
+    }
     private DocumentSubjectType parseSubject(String value) { try { return DocumentSubjectType.valueOf(value.trim().toUpperCase(Locale.ROOT)); } catch (Exception e) { throw new IllegalArgumentException("Document subject type is invalid", e); } }
     private BusinessDocumentType parseType(String value) { try { return BusinessDocumentType.valueOf(value.trim().toUpperCase(Locale.ROOT)); } catch (Exception e) { throw new IllegalArgumentException("Document type is invalid", e); } }
     private BusinessDocumentFormat parseFormat(String value) { try { return BusinessDocumentFormat.valueOf(value.trim().toUpperCase(Locale.ROOT)); } catch (Exception e) { throw new IllegalArgumentException("Document format is invalid", e); } }

@@ -8,7 +8,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Ro
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.RoleDefinitionUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionCatalog;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AssignableRolePolicy;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -85,9 +85,9 @@ public final class RoleDefinitionController {
 	}
 
 	private static long version(String value) {
-		if (value == null || value.isBlank()) throw new PreconditionRequiredException();
+		if (value == null || value.isBlank()) throw new OrganizationPreconditionRequiredException();
 		try { return Long.parseLong(value.replace("\"", "").trim()); }
-		catch (NumberFormatException exception) { throw new PreconditionRequiredException(); }
+		catch (NumberFormatException exception) { throw new OrganizationPreconditionRequiredException(); }
 	}
 	private static String etag(long version) { return "\"" + version + "\""; }
 }

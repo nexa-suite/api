@@ -26,6 +26,15 @@ public class JdbcBusinessEvidenceQuery implements BusinessEvidenceQuery {
     }
 
     @Override
+    public long countAvailableForSubject(UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId) {
+        Long count = jdbc.queryForObject("select count(*) from business_documents.evidence_object "
+                        + "where tenant_id=? and workspace_id=? and subject_type=? and subject_id=? "
+                        + "and lifecycle_status='AVAILABLE'",
+                Long.class, tenantId, workspaceId, subjectType, subjectId);
+        return count == null ? 0 : count;
+    }
+
+    @Override
     public boolean isAvailableForSubject(UUID tenantId, UUID workspaceId, UUID evidenceObjectId,
                                          UUID clientAccountId, String subjectType, UUID subjectId) {
         Boolean available = jdbc.query("select exists(select 1 from business_documents.evidence_object "

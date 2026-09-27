@@ -5,16 +5,16 @@ import com.nexa.api.notifications.application.port.out.NotificationInboxPersiste
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
 import com.nexa.api.notifications.application.service.NotificationService;
-import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
-import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.service.PushRoutingService;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

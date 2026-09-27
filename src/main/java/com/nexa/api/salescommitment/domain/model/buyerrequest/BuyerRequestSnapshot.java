@@ -24,7 +24,7 @@ public record BuyerRequestSnapshot(DeliverySnapshot delivery, CommercialSnapshot
         payment = Objects.requireNonNull(payment, "Payment snapshot is required");
         capturedAt = Objects.requireNonNull(capturedAt, "Snapshot capture time is required");
         if (comments != null && comments.length() > 2000) {
-            throw new com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation("Buyer request comments are too long");
+            throw new com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation("Buyer request comments are too long");
         }
         comments = comments == null || comments.isBlank() ? null : comments.trim();
     }

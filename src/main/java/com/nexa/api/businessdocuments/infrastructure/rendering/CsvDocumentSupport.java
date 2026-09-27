@@ -1,7 +1,7 @@
 package com.nexa.api.businessdocuments.infrastructure.rendering;
 
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentLine;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentProjection;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentLine;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentProjection;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;

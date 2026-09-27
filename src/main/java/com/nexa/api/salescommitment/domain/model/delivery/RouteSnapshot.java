@@ -1,6 +1,6 @@
 package com.nexa.api.salescommitment.domain.model.delivery;
 
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 
 import java.math.BigDecimal;
 import java.time.Instant;

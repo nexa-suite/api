@@ -16,9 +16,14 @@ import com.nexa.api.fulfillmentdelivery.domain.proofofdelivery.ProofOfDeliverySt
 import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureReading;
 import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureReadingStatus;
 import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureScale;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
-import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseEventContextQueryPort;
+import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -39,12 +44,20 @@ import org.springframework.jdbc.core.ResultSetExtractor;
 @Profile("!test")
 public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport implements DispatchCommandPersistencePort {
     private final CanonicalOutboxPort canonicalOutbox;
+    private final WarehouseEventContextQueryPort warehouseEvents;
+    private final WorkforceDirectory workforce;
 
     public DispatchCommandPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                              WarehouseLogisticsFulfillmentPort warehouseFulfillment,
+                                             WarehouseEventContextQueryPort warehouseEvents,
                                              OperationalHandoffNotificationPort handoffNotifications,
+                                             SalesOrderFulfillmentQuery salesOrders,
+                                             CustomerAccountQuery customerAccounts,
+                                             WorkforceDirectory workforce,
                                              CanonicalOutboxPort canonicalOutbox) {
-        super(jdbc, changeFeed, warehouseFulfillment, handoffNotifications);
+        super(jdbc, changeFeed, warehouseFulfillment, handoffNotifications, salesOrders, customerAccounts);
+        this.warehouseEvents = warehouseEvents;
+        this.workforce = workforce;
         this.canonicalOutbox = canonicalOutbox;
     }
 
@@ -63,15 +76,17 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         // Canonical fulfillment and legacy dispatch both mutate stock and can
         // create a delivery. Serialize on the Sales Order before touching the
         // reservation so the two paths cannot win the same order concurrently.
-        UUID salesOrderId = jdbc.query("select sales_order_id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and id=?",
-                        (rs, row) -> rs.getObject(1, UUID.class), tenant, workspace, reservation)
-                .stream().findFirst().orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
-        CanonicalOrderRow order = jdbc.query("select id,commercial_commitment_id from sales.sales_order where tenant_id=? and workspace_id=? and id=? for update",
-                        (rs, row) -> new CanonicalOrderRow(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)),
-                        tenant, workspace, salesOrderId).stream().findFirst()
+        UUID salesOrderId = warehouseEvents.findReservation(tenant, workspace, reservation)
+                .map(WarehouseEventContextQueryPort.ReservationSnapshot::salesOrderId)
                 .orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
+        try {
+            salesOrders.getForUpdate(tenant, workspace, salesOrderId);
+        } catch (CommercialBusinessException exception) {
+            if ("SALES_ORDER_NOT_FOUND".equals(exception.code())) throw error("RESOURCE_NOT_FOUND", true);
+            throw exception;
+        }
         if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.fulfillment where tenant_id=? and workspace_id=? and sales_order_id=?)",
-                Boolean.class, tenant, workspace, order.id()))) {
+                Boolean.class, tenant, workspace, salesOrderId))) {
             throw error("CANONICAL_FULFILLMENT_ALREADY_EXISTS", false);
         }
 
@@ -128,14 +143,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
-        String display = jdbc.query("select u.display_name from tenant_management.workspace_membership m " +
-                        "join tenant_management.workspace w on w.id=m.workspace_id " +
-                        "join iam.user_account u on u.id=m.user_id " +
-                        "join tenant_management.membership_role_definition a on a.membership_id=m.id " +
-                        "join tenant_management.role_definition r on r.id=a.role_id " +
-                        "where m.id=? and w.tenant_id=? and w.id=? and r.code='logistics' " +
-                        "and r.status='ACTIVE' and m.status='ACTIVE'",
-                rs -> rs.next() ? rs.getString(1) : null, membership, tenant, workspace);
+        String display = workforce.findAssignableLogisticsName(tenant, workspace, membership).orElse(null);
         if (display == null) throw error("RESPONSIBLE_MEMBERSHIP_INVALID", false);
         DispatchOrder aggregate = aggregate(row);
         aggregate.assign(new com.nexa.api.fulfillmentdelivery.domain.dispatchorder.TransportAssignment(
@@ -481,9 +489,11 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     private List<ObligationLine> obligations(UUID tenant, UUID workspace, UUID salesOrderId) {
-        return jdbc.query("select l.catalog_item_id,l.quantity,l.unit from sales.sales_order_line l join sales.sales_order o on o.id=l.sales_order_id and o.tenant_id=? and o.workspace_id=? where l.sales_order_id=? order by l.catalog_item_id",
-                (rs, row) -> new ObligationLine(rs.getString("catalog_item_id"), rs.getBigDecimal("quantity"), rs.getString("unit").toUpperCase(Locale.ROOT)),
-                tenant, workspace, salesOrderId);
+        return salesOrders.get(tenant, workspace, salesOrderId).lines().stream()
+                .sorted(java.util.Comparator.comparing(SalesOrderFulfillmentQuery.Line::catalogItemId))
+                .map(line -> new ObligationLine(line.catalogItemId(), line.quantity(),
+                        line.unit().toUpperCase(Locale.ROOT)))
+                .toList();
     }
 
     private Map<String, BigDecimal> deliveredQuantities(UUID tenant, UUID workspace, UUID deliveryId) {
@@ -615,8 +625,6 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                     ? TemperatureReadingStatus.WITHIN_RANGE : TemperatureReadingStatus.OUT_OF_RANGE;
         }
     }
-
-    private record CanonicalOrderRow(UUID id, UUID commercialCommitmentId) { }
 
     private record ObligationLine(String catalogItemId, BigDecimal quantity, String unit) { }
 }

@@ -2,6 +2,7 @@ package com.nexa.api.catalogcommercialpolicy.application.model;
 
 import java.math.BigDecimal;
 
+@org.springframework.modulith.NamedInterface("catalog-snapshots")
 public record CatalogItemSnapshot(String catalogItemId, String itemName, String presentation,
         BigDecimal unitPriceAmount, String unitPriceCurrency) {
     public CatalogItemSnapshot {

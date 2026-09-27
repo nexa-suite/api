@@ -35,7 +35,10 @@ class SalesSnapshotQueryBudgetIT extends PostgresIntegrationSupport {
         List<Integer> skuQueryCounts = new java.util.ArrayList<>();
         for (int lineCount : List.of(1, 10, 50)) {
             CountingJdbcTemplate catalogJdbc = new CountingJdbcTemplate(jdbc.getDataSource());
-            var catalogUseCase = new CatalogQueryService(new JdbcCatalogItemQueryAdapter(catalogJdbc, new CatalogProductAvailabilityAdapter(catalogJdbc)));
+            var catalogAccounts = new com.nexa.api.bootstrap.runtime.boundaries.CatalogClientAccountCompositionAdapter(
+                    new com.nexa.api.customerbuyerrelationships.infrastructure.persistence.ClientAccountPersistenceAdapter(catalogJdbc));
+            var offers = new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcAuthoritativeOfferQuery(catalogJdbc, catalogAccounts);
+            var catalogUseCase = new CatalogQueryService(new JdbcCatalogItemQueryAdapter(catalogJdbc, new CatalogProductAvailabilityAdapter(catalogJdbc, new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcSellableSkuQuery(catalogJdbc, offers)), offers));
             var catalogAdapter = new CatalogItemSnapshotPersistenceAdapter(catalogUseCase);
             assertThat(catalogAdapter.findActive(catalogIds.subList(0, lineCount), UUID.fromString(tenantId()), UUID.fromString(workspaceId())))
                     .hasSize(lineCount);
@@ -43,7 +46,10 @@ class SalesSnapshotQueryBudgetIT extends PostgresIntegrationSupport {
 
             CountingJdbcTemplate skuJdbc = new CountingJdbcTemplate(jdbc.getDataSource());
             var skuAdapter = new SellableSkuSnapshotPersistenceAdapter(
-                    new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcSellableSkuQuery(skuJdbc));
+                    new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcSellableSkuQuery(skuJdbc,
+                            new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcAuthoritativeOfferQuery(skuJdbc,
+                                    new com.nexa.api.bootstrap.runtime.boundaries.CatalogClientAccountCompositionAdapter(
+                                            new com.nexa.api.customerbuyerrelationships.infrastructure.persistence.ClientAccountPersistenceAdapter(skuJdbc)))));
             assertThat(skuAdapter.findActive(skuIds.subList(0, lineCount), UUID.fromString(tenantId()), UUID.fromString(workspaceId())))
                     .hasSize(lineCount);
             skuQueryCounts.add(skuJdbc.queryCount());

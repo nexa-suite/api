@@ -3,6 +3,7 @@ package com.nexa.api.salescommitment.application.publicapi;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Read-only Sales Commitment contract consumed by Fulfillment. */
@@ -11,6 +12,11 @@ public interface SalesOrderFulfillmentQuery {
 
     /** Same snapshot while holding the Sales Commitment aggregate row lock. */
     Snapshot getForUpdate(UUID tenantId, UUID workspaceId, UUID salesOrderId);
+
+    /** Batch header facts for owner-scoped fulfillment projections. */
+    Map<UUID, Header> findHeaders(UUID tenantId, UUID workspaceId, List<UUID> salesOrderIds);
+
+    record Header(UUID id, String number, UUID clientAccountId, String priority) { }
 
     record Snapshot(UUID id, String number, UUID clientAccountId, String status,
                     String paymentOption, UUID commercialCommitmentId,

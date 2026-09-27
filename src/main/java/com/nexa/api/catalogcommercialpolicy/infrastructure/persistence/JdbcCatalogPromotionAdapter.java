@@ -4,6 +4,7 @@ import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogConcurr
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogManagementModels;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogPromotionPort;
 import com.nexa.api.catalogcommercialpolicy.domain.model.catalogitem.Money;
 import com.nexa.api.catalogcommercialpolicy.domain.model.promotion.PromotionStatus;
@@ -32,10 +33,12 @@ import java.util.UUID;
 public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
     private static final int MAX_PAGE_SIZE = 100;
     private final JdbcTemplate jdbc;
+    private final CatalogClientAccountPort clientAccounts;
     private final CatalogCommandIdempotencySupport idempotency;
 
-    public JdbcCatalogPromotionAdapter(JdbcTemplate jdbc) {
+    public JdbcCatalogPromotionAdapter(JdbcTemplate jdbc, CatalogClientAccountPort clientAccounts) {
         this.jdbc = jdbc;
+        this.clientAccounts = clientAccounts;
         this.idempotency = new CatalogCommandIdempotencySupport(jdbc);
     }
 
@@ -276,8 +279,9 @@ public class JdbcCatalogPromotionAdapter implements CatalogPromotionPort {
     }
 
     private void requireClientAccount(CatalogScope scope, UUID id) {
-        if (jdbc.queryForObject("select count(*) from sales.client_account where tenant_id=? and workspace_id=? and id=? and status='ACTIVE'",
-                Integer.class, scope.tenantId(), scope.workspaceId(), id) != 1) throw new CatalogResourceNotFoundException("client account");
+        if (clientAccounts.findActiveProfile(scope.tenantId(), scope.workspaceId(), id).isEmpty()) {
+            throw new CatalogResourceNotFoundException("client account");
+        }
     }
 
     private static PromotionValues values(String discountType, BigDecimal discountValue, String currency, Instant startsAt,

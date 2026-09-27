@@ -1,7 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out;
 
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 
 /** Invalidates authorization snapshots after role-definition changes. */
 public interface AuthorizationVersionPort {

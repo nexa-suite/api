@@ -20,7 +20,7 @@ import com.nexa.api.salescommitment.application.purchaserequest.port.MaterialCha
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestEventPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.CatalogItemSnapshot;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.DeliveryProfileSnapshot;
@@ -38,9 +38,9 @@ import com.nexa.api.salescommitment.domain.model.purchaserequest.RequestedQuanti
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.shared.application.port.out.NoopChangeEventPersistence;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 

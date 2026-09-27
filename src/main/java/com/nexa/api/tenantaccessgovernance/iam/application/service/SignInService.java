@@ -18,7 +18,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.out.NoopAuthenti
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.AuthenticationSession;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.RefreshTokenFamilyId;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
 
 import java.time.Clock;
 import java.time.Instant;

@@ -1,6 +1,6 @@
 package com.nexa.api.tenantaccessgovernance.iam.application.model;
 
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 
 public record RefreshSessionCommand(String refreshToken, ClientSurface surface) {
 	public RefreshSessionCommand(String refreshToken) {

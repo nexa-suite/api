@@ -1,6 +1,10 @@
 package com.nexa.api.businessdocuments.domain;
 
 import com.nexa.api.businessdocuments.domain.model.businessdocument.*;
+import com.nexa.api.businessdocuments.domain.publicapi.BusinessDocumentType;
+import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectReference;
+import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectSnapshot;
+import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectType;
 import org.junit.jupiter.api.Test;
 
 import java.util.EnumSet;

@@ -4,6 +4,7 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationView;
 import com.nexa.api.notifications.application.model.NotificationModels.ProjectedNotification;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,8 +22,12 @@ import java.util.UUID;
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class JdbcNotificationInboxAdapter implements NotificationInboxPersistencePort {
 	private final JdbcTemplate jdbc;
+	private final WorkforceDirectory workforce;
 
-	public JdbcNotificationInboxAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+	public JdbcNotificationInboxAdapter(JdbcTemplate jdbc, WorkforceDirectory workforce) {
+		this.jdbc = jdbc;
+		this.workforce = workforce;
+	}
 
 	@Override
 	public NotificationPage find(String tenantId, String workspaceId, String recipientMembershipId,
@@ -69,15 +74,16 @@ public class JdbcNotificationInboxAdapter implements NotificationInboxPersistenc
 
 	@Override
 	public int insertIfAbsent(ProjectedNotification notification) {
+		UUID tenantId = uuid(notification.tenantId());
+		UUID workspaceId = uuid(notification.workspaceId());
+		UUID recipientMembershipId = uuid(notification.recipientMembershipId());
+		if (!workforce.membershipExists(tenantId, workspaceId, recipientMembershipId)) return 0;
 		return jdbc.update("insert into notifications.inbox_item (id,tenant_id,workspace_id,recipient_membership_id,event_id,category,title,message,deep_link,subject_type,subject_id,created_at,read_at) "
-				+ "select ?,?,?,?,?,?,?,?,?,?,?,?,null from tenant_management.workspace_membership m "
-				+ "join tenant_management.workspace w on w.id=m.workspace_id "
-				+ "where w.tenant_id=? and m.workspace_id=? and m.id=? "
+				+ "values (?,?,?,?,?,?,?,?,?,?,?,?,null) "
 				+ "on conflict (event_id,recipient_membership_id) do nothing",
-				UUID.randomUUID(), uuid(notification.tenantId()), uuid(notification.workspaceId()), uuid(notification.recipientMembershipId()),
+				UUID.randomUUID(), tenantId, workspaceId, recipientMembershipId,
 				uuid(notification.eventId()), notification.category(), notification.title(), notification.message(), notification.deepLink(),
-				notification.subjectType(), uuidOrNull(notification.subjectId()), Timestamp.from(notification.createdAt()),
-				uuid(notification.tenantId()), uuid(notification.workspaceId()), uuid(notification.recipientMembershipId()));
+				notification.subjectType(), uuidOrNull(notification.subjectId()), Timestamp.from(notification.createdAt()));
 	}
 
 	private NotificationView view(java.sql.ResultSet rs) throws java.sql.SQLException {

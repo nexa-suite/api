@@ -3,7 +3,7 @@ package com.nexa.api.notifications.application.service;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;

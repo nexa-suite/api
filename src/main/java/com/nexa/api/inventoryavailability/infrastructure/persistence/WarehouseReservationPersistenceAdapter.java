@@ -1,6 +1,9 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -33,16 +36,19 @@ import static com.nexa.api.inventoryavailability.infrastructure.persistence.Ware
 @Profile("!test")
 public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         implements WarehouseReservationPersistencePort {
+    private final WorkspaceDirectory workspaces;
     private static final Logger LOGGER = LoggerFactory.getLogger(WarehouseReservationPersistenceAdapter.class);
 
     @Autowired
     public WarehouseReservationPersistenceAdapter(
             JdbcTemplate jdbc,
             ChangeEventPersistencePort changeFeed,
-            CatalogItemSnapshotLookupPort catalog,
+            SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
-            WarehouseOperationalSettingsPort operationalSettings) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings);
+            WarehouseOperationalSettingsPort operationalSettings,
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource, WorkspaceDirectory workspaces) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
+        this.workspaces = workspaces;
     }
 
     @Transactional(readOnly = true)
@@ -68,8 +74,7 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         OrderData order = loadOrder(context, uuid(orderId), true);
         IdempotencyRecord afterLock = idempotent(context, "reservation", key);
         if (afterLock != null) { requireSamePayload(afterLock, hash); return loadReservation(context, uuid(afterLock.resourceId()), false); }
-        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.fulfillment where tenant_id=? and workspace_id=? and sales_order_id=?)",
-                Boolean.class, tenant(context), workspace(context), order.id()))) {
+        if (fulfillmentSource.hasFulfillment(tenant(context), workspace(context), order.id())) {
             throw error("CANONICAL_FULFILLMENT_ALREADY_EXISTS", false);
         }
         if (!order.status().equals("CONFIRMED")) throw error("FULFILLMENT_CANDIDATE_NOT_ELIGIBLE", false);
@@ -193,34 +198,45 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         if (transactionTemplate == null) {
             throw new IllegalStateException("Workspace enumeration requires a transaction manager");
         }
-        List<WorkspaceScope> scopes;
-        RlsRequestScope.enableCrossScopeWorkspaceScan();
         try {
-            scopes = transactionTemplate.execute(status -> {
-                jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
-                return jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
-                        (rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
-            });
-        } finally {
-            RlsRequestScope.clearCrossScopeWorkspaceScan();
-        }
-        for (WorkspaceScope scope : scopes) {
-            RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
-            try {
-                // Do not retain lot locks from one reservation while the batch
-                // advances to another. Each candidate claims its reservation
-                // row and releases every lot lock at the end of its own tx.
-                List<ScopeId> expired = jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100",
-                        (rs, row) -> new ScopeId(scope.tenantId(), scope.workspaceId(), rs.getObject(1, UUID.class)), scope.tenantId(), scope.workspaceId());
-                for (ScopeId candidate : expired) {
-                    if (transactionTemplate == null) expireOne(candidate);
-                    else transactionTemplate.executeWithoutResult(status -> expireOne(candidate));
+            UUID afterTenantId = null;
+            UUID afterWorkspaceId = null;
+            while (true) {
+                UUID pageAfterTenantId = afterTenantId;
+                UUID pageAfterWorkspaceId = afterWorkspaceId;
+                List<WorkspaceDirectory.Scope> scopes;
+                RlsRequestScope.enableCrossScopeWorkspaceScan();
+                try {
+                    scopes = transactionTemplate.execute(status -> workspaces.scanAfter(
+                            pageAfterTenantId, pageAfterWorkspaceId, 100));
+                } finally {
+                    RlsRequestScope.clearCrossScopeWorkspaceScan();
                 }
-            } catch (RuntimeException exception) {
-                LOGGER.error("Warehouse reservation expiration failed tenantId={} workspaceId={}", scope.tenantId(), scope.workspaceId(), exception);
-            } finally {
-                RlsRequestScope.clear();
+                if (scopes == null || scopes.isEmpty()) break;
+                for (WorkspaceDirectory.Scope scope : scopes) {
+                    RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
+                    try {
+                        // Do not retain lot locks from one reservation while the batch
+                        // advances to another. Each candidate claims its reservation
+                        // row and releases every lot lock at the end of its own tx.
+                        List<ScopeId> expired = jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100",
+                                (rs, row) -> new ScopeId(scope.tenantId(), scope.workspaceId(), rs.getObject(1, UUID.class)), scope.tenantId(), scope.workspaceId());
+                        for (ScopeId candidate : expired) {
+                            transactionTemplate.executeWithoutResult(status -> expireOne(candidate));
+                        }
+                    } catch (RuntimeException exception) {
+                        LOGGER.error("Warehouse reservation expiration failed tenantId={} workspaceId={}", scope.tenantId(), scope.workspaceId(), exception);
+                    } finally {
+                        RlsRequestScope.clear();
+                    }
+                }
+                WorkspaceDirectory.Scope last = scopes.get(scopes.size() - 1);
+                afterTenantId = last.tenantId();
+                afterWorkspaceId = last.workspaceId();
+                if (scopes.size() < 100) break;
             }
+        } finally {
+            RlsRequestScope.clear();
         }
     }
 
@@ -251,9 +267,8 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private UUID reservationId(WarehouseOperationsService.ReservationDetail reservation) { return uuid(reservation.id()); }
-    private void requireRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_READ); }
-    private void requireWrite(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_WRITE); }
-    private void requireFulfillmentRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.FULFILLMENT_READ); }
+    private void requireRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_READ); }
+    private void requireWrite(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_WRITE); }
+    private void requireFulfillmentRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.FULFILLMENT_READ); }
 
-    private record WorkspaceScope(UUID tenantId, UUID workspaceId) { }
 }

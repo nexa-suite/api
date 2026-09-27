@@ -1,6 +1,6 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.TenantOperationalSettingsIntegrationService;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -15,9 +15,9 @@ import java.util.Optional;
 @Component
 @Profile("!test")
 public final class TenantOperationalSettingsAdapter implements WarehouseOperationalSettingsPort {
-    private final TenantOperationalSettingsIntegrationService integration;
+    private final OperationalSettingsAccess integration;
 
-    public TenantOperationalSettingsAdapter(TenantOperationalSettingsIntegrationService integration) {
+    public TenantOperationalSettingsAdapter(OperationalSettingsAccess integration) {
         this.integration = integration;
     }
 

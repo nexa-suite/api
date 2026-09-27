@@ -42,14 +42,6 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         this(jdbc, availability, offers, Clock.systemUTC());
     }
 
-    public JdbcCatalogItemQueryAdapter(JdbcTemplate jdbc, ProductAvailabilityPort availability) {
-        this(jdbc, availability, new JdbcAuthoritativeOfferQuery(jdbc), Clock.systemUTC());
-    }
-
-    public JdbcCatalogItemQueryAdapter(JdbcTemplate jdbc, ProductAvailabilityPort availability, Clock clock) {
-        this(jdbc, availability, new JdbcAuthoritativeOfferQuery(jdbc), clock);
-    }
-
     public JdbcCatalogItemQueryAdapter(JdbcTemplate jdbc, ProductAvailabilityPort availability, AuthoritativeOfferQuery offers, Clock clock) {
         this.jdbc = jdbc;
         this.availability = availability;
@@ -175,7 +167,10 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         List<String> catalogItemIds = rows.stream().map(Row::catalogItemId)
                 .filter(value -> value != null && !value.isBlank()).distinct().toList();
         Map<String, ProductAvailabilityPort.Snapshot> availabilityById = catalogItemIds.isEmpty() ? Map.of()
-                : availability.find(scope, catalogItemIds).stream().collect(Collectors.toMap(
+                : availability.findWithPolicies(scope, catalogItemIds, rows.stream().map(row ->
+                        new com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery.InventorySkuSnapshot(
+                                row.sellableSkuId(), row.catalogItemId(), row.skuCode(), row.status(),
+                                row.temperatureMin(), row.temperatureMax())).toList()).stream().collect(Collectors.toMap(
                         ProductAvailabilityPort.Snapshot::catalogItemId, value -> value, (left, right) -> left));
         Instant asOf = clock.instant();
         List<UUID> skuIds = rows.stream().map(Row::sellableSkuId).filter(java.util.Objects::nonNull).distinct().toList();
@@ -207,7 +202,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 "coalesce(f.name,p.name) item_name,f.id family_id,f.family_code family_code,f.name family_name,v.variant_code variant_code,v.name variant_name,c.id category_id,c.name category_name," +
                 "b.name brand_name,s.presentation presentation,coalesce(p.description,f.description) description,f.storage_family temperature,s.status status," +
                 "coalesce(current_price.amount,0) amount,coalesce(current_price.currency,'PEN') currency,s.unit_of_measure unit_of_measure,s.packaging_type packaging_type," +
-                "s.net_weight net_weight,s.gross_weight gross_weight,asset.asset_path image_path,asset.file_name image_file_name ";
+                "s.net_weight net_weight,s.gross_weight gross_weight,asset.asset_path image_path,asset.file_name image_file_name,s.temperature_min,s.temperature_max ";
     }
 
     private String fromClause() {
@@ -258,7 +253,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 rs.getObject("category_id", UUID.class), rs.getString("category_name"), rs.getString("brand_name"),
                 rs.getString("presentation"), rs.getString("description"), rs.getString("temperature"), rs.getString("status"),
                 rs.getBigDecimal("amount"), rs.getString("currency"), rs.getString("unit_of_measure"), rs.getString("packaging_type"),
-                rs.getBigDecimal("net_weight"), rs.getBigDecimal("gross_weight"), rs.getString("image_path"), rs.getString("image_file_name"));
+                rs.getBigDecimal("net_weight"), rs.getBigDecimal("gross_weight"), rs.getString("image_path"), rs.getString("image_file_name"), rs.getBigDecimal("temperature_min"), rs.getBigDecimal("temperature_max"));
     }
 
     private static String string(UUID value) { return value == null ? null : value.toString(); }
@@ -270,7 +265,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                        UUID categoryId, String categoryName,
                        String brandName, String presentation, String description, String temperature, String status,
                        BigDecimal amount, String currency, String unitOfMeasure, String packagingType,
-                       BigDecimal netWeight, BigDecimal grossWeight, String imagePath, String imageFileName) { }
+                       BigDecimal netWeight, BigDecimal grossWeight, String imagePath, String imageFileName, BigDecimal temperatureMin, BigDecimal temperatureMax) { }
 
     private record Enrichment(Map<String, ProductAvailabilityPort.Snapshot> availability,
                               Map<String, CatalogPricingView> pricing) { }
