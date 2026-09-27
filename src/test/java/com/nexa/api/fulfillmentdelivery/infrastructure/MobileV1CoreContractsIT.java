@@ -48,7 +48,8 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
         PhysicalFlow flow = createPickingFlow(warehouse, sales, "identifier-scan-" + uuid(), "2");
         String skuCode = jdbc.queryForObject("select sku_code from catalog_management.sellable_sku where id=?", String.class, flow.skuId());
-        String batchNumber = jdbc.queryForObject("select batch_number from warehouse.inventory_lot where id=?", String.class, flow.lotId());
+        String originalBatchNumber = jdbc.queryForObject("select batch_number from warehouse.inventory_lot where id=?", String.class, flow.lotId());
+        String batchNumber = "B-RESOLUTION-" + uuid();
         StockSnapshot beforeResolution = stock(flow.lotId());
         int movementsBeforeResolution = jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?",
                 Integer.class, flow.lotId());
@@ -59,11 +60,34 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.outcome").value("RESOLVED"))
                 .andExpect(jsonPath("$.identifierType").value("SKU_CODE"))
                 .andExpect(jsonPath("$.skuId").value(flow.skuId().toString()));
-        mockMvc.perform(get("/api/v1/inventory/lots/resolve").param("batchNumber", batchNumber)
-                        .header("Authorization", "Bearer " + warehouse))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.outcome").value("RESOLVED"))
-                .andExpect(jsonPath("$.lotId").value(flow.lotId().toString()));
+        // FEFO can select a transferred lot whose batch also exists in another
+        // warehouse. Use a unique fixture batch for resolution, and explicitly
+        // verify that duplicate batches remain ambiguous rather than guessed.
+        assertThat(jdbc.update("update warehouse.inventory_lot set batch_number=? where tenant_id=? and workspace_id=? and id=?",
+                batchNumber, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), flow.lotId())).isEqualTo(1);
+        try {
+            mockMvc.perform(get("/api/v1/inventory/lots/resolve").param("batchNumber", batchNumber)
+                            .header("Authorization", "Bearer " + warehouse))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.outcome").value("RESOLVED"))
+                    .andExpect(jsonPath("$.candidateCount").value(1))
+                    .andExpect(jsonPath("$.lotId").value(flow.lotId().toString()));
+            UUID duplicateLot = insertDuplicateBatchInAnotherWarehouse(flow, batchNumber);
+            try {
+                mockMvc.perform(get("/api/v1/inventory/lots/resolve").param("batchNumber", batchNumber)
+                                .header("Authorization", "Bearer " + warehouse))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.outcome").value("AMBIGUOUS"))
+                        .andExpect(jsonPath("$.candidateCount").value(2))
+                        .andExpect(jsonPath("$.lotId").doesNotExist());
+            } finally {
+                assertThat(jdbc.update("delete from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?",
+                        UUID.fromString(tenantId()), UUID.fromString(workspaceId()), duplicateLot)).isEqualTo(1);
+            }
+        } finally {
+            assertThat(jdbc.update("update warehouse.inventory_lot set batch_number=? where tenant_id=? and workspace_id=? and id=?",
+                    originalBatchNumber, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), flow.lotId())).isEqualTo(1);
+        }
         assertThat(stock(flow.lotId())).isEqualTo(beforeResolution);
         assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class,
                 flow.lotId())).isEqualTo(movementsBeforeResolution);
@@ -538,6 +562,18 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                                 + "\",\"warehouseId\":\"" + warehouseId + "\",\"quantity\":" + quantity
                                 + ",\"unit\":\"UNIT\",\"allocationVersion\":" + version + "}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value(outcome));
+    }
+
+    private UUID insertDuplicateBatchInAnotherWarehouse(PhysicalFlow flow, String batchNumber) {
+        UUID zoneId = jdbc.queryForObject("select id from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id<>? order by id limit 1",
+                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), flow.warehouseId());
+        UUID id = UUID.randomUUID();
+        assertThat(jdbc.update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,version,sku_id) "
+                        + "select ?,l.tenant_id,l.workspace_id,z.warehouse_id,z.id,l.catalog_item_id,?,l.expiration_date,l.received_at,0,0,l.unit,'AVAILABLE',l.temperature_range_snapshot,0,l.sku_id "
+                        + "from warehouse.inventory_lot l join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
+                        + "where l.tenant_id=? and l.workspace_id=? and l.id=? and z.id=? and z.warehouse_id<>l.warehouse_id",
+                id, batchNumber, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), flow.lotId(), zoneId)).isEqualTo(1);
+        return id;
     }
 
     private UUID insertAlternativeLot(PhysicalFlow flow, String batchNumber, String quantity) {
