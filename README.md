@@ -24,6 +24,11 @@ finance, documents, notifications and traceability. The `v0.18.0` Git tag is
 the consumer-stable API release. It does not claim complete Nexa System
 Acceptance or full-system Production Readiness.
 
+The [v0.19.0 technical candidate](./docs/releases/v0.19.0.md) closes the eleven
+module and persistence boundaries and hardens configured external transports.
+It is release preparation, not a published tag or GitHub Release. Existing
+v0.18.0 consumer contracts remain compatible.
+
 The v0.17.1 release remains the verified upgrade baseline. This repository
 retains the v0.17.0 release notes and has no historical v0.17.1 release-note
 file.

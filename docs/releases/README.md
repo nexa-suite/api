@@ -2,6 +2,14 @@
 
 Release notes are scoped to the API repository and do not imply complete Nexa domain or migration parity.
 
+## Technical candidates
+
+| Candidate | Status |
+|---|---|
+| [v0.19.0](./v0.19.0.md) | UNRELEASED: boundary closure and external transport hardening; no tag or GitHub Release |
+
+## Published releases
+
 | Release | Summary |
 |---|---|
 | [v0.18.0](./v0.18.0.md) | Consumer-stable API closure and cross-client contracts |
