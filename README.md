@@ -25,6 +25,10 @@ identifies the latest tagged repository baseline and provides selected
 contracts for Mobile integration; it does not claim a
 completed Mobile Product or Product Acceptance.
 
+The current implementation candidate is `0.18.0` and is not a published
+release. The repository retains the v0.17.0 release notes; it has no historical
+v0.17.1 release-note file.
+
 The API remains the server authority for authorization, tenant isolation,
 business decisions and durable state. Java packages and Spring Modulith
 modules are implementation structure, not automatic Bounded Contexts.

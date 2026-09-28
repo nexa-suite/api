@@ -13,14 +13,23 @@ public record CurrentSession(SessionId sessionId, UserAccountId userAccountId, E
 		ClientSurface surface, Set<String> roles, Set<String> permissions, AuthenticationSessionStatus status,
 		Instant createdAt, Instant expiresAt, String displayName, String preferredLanguage,
 		String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
-		long authorizationVersion, Set<String> roleDefinitionIds) {
+		long authorizationVersion, Set<String> roleDefinitionIds, String tenantName, String workspaceName) {
+	public CurrentSession(SessionId sessionId, UserAccountId userAccountId, EmailAddress email,
+			ClientSurface surface, Set<String> roles, Set<String> permissions, AuthenticationSessionStatus status,
+			Instant createdAt, Instant expiresAt, String displayName, String preferredLanguage,
+			String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
+			long authorizationVersion, Set<String> roleDefinitionIds) {
+		this(sessionId, userAccountId, email, surface, roles, permissions, status, createdAt, expiresAt, displayName,
+				preferredLanguage, tenantId, tenantSlug, workspaceId, workspaceSlug, membershipId, authorizationVersion,
+				roleDefinitionIds, null, null);
+	}
 	public CurrentSession(SessionId sessionId, UserAccountId userAccountId, EmailAddress email,
 			ClientSurface surface, Set<String> roles, Set<String> permissions, AuthenticationSessionStatus status,
 			Instant createdAt, Instant expiresAt, String displayName, String preferredLanguage,
 			String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
 			long authorizationVersion) {
 		this(sessionId, userAccountId, email, surface, roles, permissions, status, createdAt, expiresAt, displayName,
-				preferredLanguage, tenantId, tenantSlug, workspaceId, workspaceSlug, membershipId, authorizationVersion, Set.of());
+				preferredLanguage, tenantId, tenantSlug, workspaceId, workspaceSlug, membershipId, authorizationVersion, Set.of(), null, null);
 	}
 	public static CurrentSession from(SessionRecord record) {
 		var policy = record.subject().policy();
@@ -28,6 +37,6 @@ public record CurrentSession(SessionId sessionId, UserAccountId userAccountId, E
 			record.subject().surface(), policy.roles(), policy.permissions(), record.session().status(),
 			record.session().createdAt(), record.session().expiresAt(), policy.displayName(), policy.preferredLanguage(),
 			policy.tenantId(), policy.tenantSlug(), policy.workspaceId(), policy.workspaceSlug(), policy.membershipId(),
-			policy.authorizationVersion(), policy.roleDefinitionIds());
+			policy.authorizationVersion(), policy.roleDefinitionIds(), policy.tenantName(), policy.workspaceName());
 	}
 }

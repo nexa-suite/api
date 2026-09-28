@@ -5,11 +5,19 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.AuthenticationR
 import com.nexa.api.tenantaccessgovernance.iam.application.model.CurrentSession;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.CurrentSessionQuery;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.LoginIdentifier;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.IdentitySignInCommand;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.IdentitySignInResult;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.AccessContextTicketQuery;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.AccessContextOption;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.SelectAccessContextCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.RefreshSessionCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SignInCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SignOutCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.CurrentSessionUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.IdentitySignInUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ListAccessContextsUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessionUseCase;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SelectAccessContextUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignInUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignOutUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.WorkspacePreviewUseCase;
@@ -60,6 +68,7 @@ import java.util.Locale;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -69,6 +78,9 @@ public class AuthenticationController {
 	private static final String PLATFORM_COOKIE = "NEXA_PLATFORM_REFRESH";
 	private static final String PORTAL_COOKIE = "NEXA_PORTAL_REFRESH";
 	private final SignInUseCase signIn;
+	private final IdentitySignInUseCase identitySignIn;
+	private final ListAccessContextsUseCase listAccessContexts;
+	private final SelectAccessContextUseCase selectAccessContext;
 	private final RefreshSessionUseCase refresh;
 	private final SignOutUseCase signOut;
 	private final CurrentSessionUseCase currentSession;
@@ -77,10 +89,15 @@ public class AuthenticationController {
 	private final Clock clock;
 	private final ObjectProvider<SecurityMetricsPort> securityMetrics;
 
-	public AuthenticationController(SignInUseCase signIn, RefreshSessionUseCase refresh, SignOutUseCase signOut,
+	public AuthenticationController(SignInUseCase signIn, IdentitySignInUseCase identitySignIn,
+			ListAccessContextsUseCase listAccessContexts, SelectAccessContextUseCase selectAccessContext,
+			RefreshSessionUseCase refresh, SignOutUseCase signOut,
 			CurrentSessionUseCase currentSession, WorkspacePreviewUseCase workspacePreview, @Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie,
 			Environment environment, Clock clock, ObjectProvider<SecurityMetricsPort> securityMetrics) {
 		this.signIn = signIn;
+		this.identitySignIn = identitySignIn;
+		this.listAccessContexts = listAccessContexts;
+		this.selectAccessContext = selectAccessContext;
 		this.refresh = refresh;
 		this.signOut = signOut;
 		this.currentSession = currentSession;
@@ -114,6 +131,60 @@ public class AuthenticationController {
 		AuthenticationResult result = signIn.signIn(new SignInCommand(new LoginIdentifier(request.identifier()), request.password(),
 				request.workspaceSlug(), request.surface(), clientFingerprint(httpRequest)));
 		writeRefreshTransport(response, result, nativeTransport);
+		return AuthenticationResponse.from(result);
+	}
+
+	@PostMapping("/authentication/identity-sign-in")
+	@Operation(summary = "Authenticate a native client as a Human Identity and resolve eligible access contexts",
+			description = "Zero eligible contexts returns NO_WORK_CONTEXT. One eligible context establishes a scoped session. Two or more contexts return a short-lived ticket for explicit selection.")
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "One context authenticated or a short-lived context-selection ticket returned",
+			headers = @Header(name = "X-Nexa-Refresh-Token", description = "Returned only when a scoped session is established")),
+			@ApiResponse(responseCode = "401", description = "Authentication failed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "403", description = "No eligible work context (NO_WORK_CONTEXT) or native transport required", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
+	public IdentitySignInResponse identitySignIn(@Valid @RequestBody IdentitySignInRequest request,
+			@Parameter(description = "Required native transport marker", required = true)
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER) String clientTransport,
+			HttpServletRequest httpRequest, HttpServletResponse response) {
+		IdentitySignInResult result = identitySignIn.identitySignIn(new IdentitySignInCommand(
+				new LoginIdentifier(request.identifier()), request.password(), request.surface(), clientFingerprint(httpRequest)));
+		if (result.authentication() != null) writeRefreshTransport(response, result.authentication(), true);
+		return IdentitySignInResponse.from(result);
+	}
+
+	@GetMapping("/me/access-contexts")
+	@Operation(summary = "List current eligible access contexts for a native pre-context ticket",
+			description = "Send the opaque pre-context ticket in X-Nexa-Access-Context-Ticket. Listing does not establish a scoped session.")
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Eligible access contexts returned"),
+			@ApiResponse(responseCode = "401", description = "Pre-context ticket invalid, expired, or consumed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "403", description = "Native transport required", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
+	public AccessContextsResponse accessContexts(
+			@Parameter(description = "PLATFORM or PORTAL", required = true) @RequestHeader("X-Nexa-Surface") String surface,
+			@Parameter(description = "Opaque five-minute pre-context ticket", required = true)
+			@RequestHeader("X-Nexa-Access-Context-Ticket") String accessContextTicket,
+			@Parameter(description = "Required native transport marker", required = true)
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER) String clientTransport) {
+		List<AccessContextOption> options = listAccessContexts.listAccessContexts(
+				new AccessContextTicketQuery(accessContextTicket, parseSurface(surface)));
+		return new AccessContextsResponse(options.stream().map(AccessContextResponse::from).toList());
+	}
+
+	@PostMapping("/me/access-context-selections")
+	@Operation(summary = "Select and establish one current access context using a one-use pre-context ticket",
+			description = "Revalidates current identity, membership and scope before establishing a scoped session. The ticket is single-use; if the client cannot determine the outcome, do not replay the request and restart identity sign-in.")
+	@ApiResponses({@ApiResponse(responseCode = "200", description = "Scoped session established",
+			headers = @Header(name = "X-Nexa-Refresh-Token", description = "Returned only for the explicit native transport")),
+			@ApiResponse(responseCode = "401", description = "Pre-context ticket invalid, expired, or consumed", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class))),
+			@ApiResponse(responseCode = "403", description = "Selected membership is not currently eligible", content = @Content(mediaType = "application/problem+json", schema = @Schema(implementation = org.springframework.http.ProblemDetail.class)))})
+	public AuthenticationResponse selectAccessContext(@Valid @RequestBody SelectAccessContextRequest request,
+			@Parameter(description = "PLATFORM or PORTAL", required = true) @RequestHeader("X-Nexa-Surface") String surface,
+			@Parameter(description = "Opaque five-minute pre-context ticket", required = true)
+			@RequestHeader("X-Nexa-Access-Context-Ticket") String accessContextTicket,
+			@Parameter(description = "Required native transport marker", required = true)
+			@RequestHeader(name = AuthenticationTransport.NATIVE_CLIENT_HEADER) String clientTransport,
+			HttpServletResponse response) {
+		var result = selectAccessContext.selectAccessContext(new SelectAccessContextCommand(accessContextTicket,
+				parseSurface(surface), request.membershipId()));
+		writeRefreshTransport(response, result, true);
 		return AuthenticationResponse.from(result);
 	}
 
@@ -226,6 +297,29 @@ public class AuthenticationController {
 
 	public record SignInRequest(@NotBlank String identifier, @NotBlank String password, @NotBlank String workspaceSlug,
 			@NotNull ClientSurface surface) {}
+	public record IdentitySignInRequest(@NotBlank String identifier, @NotBlank String password, @NotNull ClientSurface surface) {}
+	public record SelectAccessContextRequest(@NotBlank String membershipId) {}
+	@Schema(description = "Identity-first result. AUTHENTICATED contains a scoped session; ACCESS_CONTEXT_SELECTION_REQUIRED contains a short-lived ticket instead.")
+	public record IdentitySignInResponse(
+			@Schema(description = "AUTHENTICATED or ACCESS_CONTEXT_SELECTION_REQUIRED") String outcome,
+			@Schema(description = "Scoped session, present only for AUTHENTICATED") AuthenticationResponse session,
+			@Schema(description = "Opaque five-minute single-use credential. Send only in X-Nexa-Access-Context-Ticket; never place in a URL.")
+			String accessContextTicket,
+			@Schema(description = "Expiry time of the pre-context ticket") java.time.Instant ticketExpiresAt) {
+		static IdentitySignInResponse from(IdentitySignInResult result) {
+			return new IdentitySignInResponse(result.outcome().name(),
+					result.authentication() == null ? null : AuthenticationResponse.from(result.authentication()),
+					result.accessContextTicket(), result.ticketExpiresAt());
+		}
+	}
+	public record AccessContextsResponse(List<AccessContextResponse> accessContexts) {}
+	public record AccessContextResponse(String membershipId, String tenantId, String tenantName, String tenantSlug,
+			String workspaceId, String workspaceName, String workspaceSlug) {
+		static AccessContextResponse from(AccessContextOption option) {
+			return new AccessContextResponse(option.membershipId(), option.tenantId(), option.tenantName(), option.tenantSlug(),
+					option.workspaceId(), option.workspaceName(), option.workspaceSlug());
+		}
+	}
 	public record WorkspacePreviewRequest(@NotBlank @Size(min = 3, max = 80) @Pattern(regexp = "[a-zA-Z0-9-]+") String workspaceSlug) {}
 	public record WorkspacePreviewResponse(boolean recognized, String displayName, String workspaceUrl, String logoUrl, boolean loginAvailable) {}
 
@@ -244,8 +338,8 @@ public class AuthenticationController {
 		static SessionResponse from(CurrentSession session) {
 			return new SessionResponse(
 					new SessionUser(session.userAccountId().value(), session.displayName(), session.email().value(), session.preferredLanguage()),
-					new TenantContext(session.tenantId(), session.tenantSlug()),
-					new WorkspaceContext(session.workspaceId(), session.workspaceSlug()),
+					new TenantContext(session.tenantId(), session.tenantSlug(), session.tenantName()),
+					new WorkspaceContext(session.workspaceId(), session.workspaceSlug(), session.workspaceName()),
 					new MembershipContext(session.membershipId(), session.roles(), session.permissions(), session.roleDefinitionIds(), session.authorizationVersion()),
 					session.surface().name());
 		}
@@ -257,8 +351,8 @@ public class AuthenticationController {
 				long authorizationVersion, String surface) {}
 
 	public record SessionUser(String userId, String displayName, String email, String preferredLanguage) {}
-	public record TenantContext(String tenantId, String tenantSlug) {}
-	public record WorkspaceContext(String workspaceId, String workspaceSlug) {}
+	public record TenantContext(String tenantId, String tenantSlug, String tenantName) {}
+	public record WorkspaceContext(String workspaceId, String workspaceSlug, String workspaceName) {}
 	public record MembershipContext(String membershipId, java.util.Set<String> roles, java.util.Set<String> permissions,
 			java.util.Set<String> roleDefinitionIds, long authorizationVersion) {}
 }

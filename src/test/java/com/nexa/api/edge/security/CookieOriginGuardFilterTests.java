@@ -31,8 +31,12 @@ class CookieOriginGuardFilterTests {
 		assertNativeAllowed("/api/v1/authentication/sign-in");
 		assertNativeAllowed("/api/v1/authentication/refresh");
 		assertNativeAllowed("/api/v1/authentication/sign-out");
+		assertNativeAllowed("/api/v1/authentication/identity-sign-in");
+		assertNativeAllowed("/api/v1/me/access-context-selections");
+		assertNativeAllowed("/api/v1/me/access-contexts", "GET");
 		assertNativeRejected("/api/v1/auth/workspace-previews");
 		assertNativeRejected("/api/v1/authentication/password-resets");
+		assertNativeRejected("/api/v1/authentication/identity-sign-in", "https://app.example");
 	}
 
     private static void assertRejected(String path, String origin) throws Exception {
@@ -54,7 +58,11 @@ class CookieOriginGuardFilterTests {
 	}
 
 	private static void assertNativeAllowed(String path) throws Exception {
-		MockHttpServletRequest request = request("POST", path, null);
+		assertNativeAllowed(path, "POST");
+	}
+
+	private static void assertNativeAllowed(String path, String method) throws Exception {
+		MockHttpServletRequest request = request(method, path, null);
 		request.addHeader(CookieOriginGuardFilter.NATIVE_CLIENT_HEADER, "NATIVE");
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		MockFilterChain chain = new MockFilterChain();
@@ -64,7 +72,11 @@ class CookieOriginGuardFilterTests {
 	}
 
 	private static void assertNativeRejected(String path) throws Exception {
-		MockHttpServletRequest request = request("POST", path, null);
+		assertNativeRejected(path, null);
+	}
+
+	private static void assertNativeRejected(String path, String origin) throws Exception {
+		MockHttpServletRequest request = request("POST", path, origin);
 		request.addHeader(CookieOriginGuardFilter.NATIVE_CLIENT_HEADER, "NATIVE");
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		MockFilterChain chain = new MockFilterChain();

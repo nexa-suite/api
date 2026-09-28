@@ -2,6 +2,9 @@ package com.nexa.api.edge.problem;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidCredentialsException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidRefreshTokenException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidAccessContextTicketException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.NoWorkContextException;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.SelectedAccessContextUnavailableException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.SessionNotFoundException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.AuthenticationThrottledException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurityException;
@@ -158,6 +161,26 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler({InvalidRefreshTokenException.class, SessionNotFoundException.class})
 	public ResponseEntity<ProblemDetail> handleInvalidSession(RuntimeException exception, HttpServletRequest request) {
 		return response(HttpStatus.UNAUTHORIZED, ApiErrorCode.REFRESH_SESSION_INVALID, "Authentication session is invalid", request);
+	}
+
+	@ExceptionHandler(NoWorkContextException.class)
+	public ResponseEntity<ProblemDetail> handleNoWorkContext(NoWorkContextException exception, HttpServletRequest request) {
+		return response(HttpStatus.FORBIDDEN, ApiErrorCode.NO_WORK_CONTEXT,
+				"No eligible work context is available", request);
+	}
+
+	@ExceptionHandler(InvalidAccessContextTicketException.class)
+	public ResponseEntity<ProblemDetail> handleInvalidAccessContextTicket(InvalidAccessContextTicketException exception,
+			HttpServletRequest request) {
+		return response(HttpStatus.UNAUTHORIZED, ApiErrorCode.ACCESS_CONTEXT_TICKET_INVALID,
+				"Access context credential is invalid or expired", request);
+	}
+
+	@ExceptionHandler(SelectedAccessContextUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleUnavailableAccessContext(SelectedAccessContextUnavailableException exception,
+			HttpServletRequest request) {
+		return response(HttpStatus.FORBIDDEN, ApiErrorCode.ACCESS_CONTEXT_SELECTION_INVALID,
+				"Selected access context is unavailable", request);
 	}
 
 	@ExceptionHandler(AccessDeniedException.class)

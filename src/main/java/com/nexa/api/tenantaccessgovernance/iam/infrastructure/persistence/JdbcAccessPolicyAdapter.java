@@ -22,6 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.Locale;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -57,8 +59,8 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 			return Optional.empty();
 		}
 		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
-				+ "w.id workspace_id, w.slug workspace_slug, w.status workspace_status, "
-				+ "t.id tenant_id, t.slug tenant_slug, t.status tenant_status, "
+				+ "w.id workspace_id, w.slug workspace_slug, w.name workspace_name, w.status workspace_status, "
+				+ "t.id tenant_id, t.slug tenant_slug, t.name tenant_name, t.status tenant_status, "
 				+ "u.display_name, u.preferred_language "
 				+ "from tenant_management.workspace_membership m "
 				+ "join tenant_management.workspace w on w.id = m.workspace_id "
@@ -80,8 +82,8 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 			return Optional.empty();
 		}
 		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
-				+ "w.id workspace_id, w.slug workspace_slug, w.status workspace_status, "
-				+ "t.id tenant_id, t.slug tenant_slug, t.status tenant_status, "
+				+ "w.id workspace_id, w.slug workspace_slug, w.name workspace_name, w.status workspace_status, "
+				+ "t.id tenant_id, t.slug tenant_slug, t.name tenant_name, t.status tenant_status, "
 				+ "u.display_name, u.preferred_language "
 				+ "from tenant_management.workspace_membership m "
 				+ "join tenant_management.workspace w on w.id = m.workspace_id "
@@ -89,6 +91,36 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 				+ "join iam.user_account u on u.id = m.user_id "
 				+ "where m.user_id = ? and m.id = ?";
 		return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<Optional<AccessPolicy>>) rs -> resolveExactlyOne(rs, userId, surface), userId, membership);
+	}
+
+	@Override
+	public List<AccessPolicy> findAllFor(UserAccountId userAccountId, ClientSurface surface) {
+		final UUID userId;
+		try {
+			userId = UUID.fromString(userAccountId.value());
+		} catch (IllegalArgumentException exception) {
+			return List.of();
+		}
+		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
+				+ "w.id workspace_id, w.slug workspace_slug, w.name workspace_name, w.status workspace_status, "
+				+ "t.id tenant_id, t.slug tenant_slug, t.name tenant_name, t.status tenant_status, "
+				+ "u.display_name, u.preferred_language "
+				+ "from tenant_management.workspace_membership m "
+				+ "join tenant_management.workspace w on w.id = m.workspace_id "
+				+ "join tenant_management.tenant t on t.id = w.tenant_id "
+				+ "join iam.user_account u on u.id = m.user_id "
+				+ "where m.user_id = ? order by m.id";
+		return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<List<AccessPolicy>>) rs -> {
+			List<AccessPolicy> eligible = new ArrayList<>();
+			while (rs.next()) {
+				if (!"ACTIVE".equals(rs.getString("membership_status"))
+						|| !"ACTIVE".equals(rs.getString("workspace_status"))
+						|| !"ACTIVE".equals(rs.getString("tenant_status"))) continue;
+				AccessPolicy candidate = resolve(rs, userId, surface);
+				if (candidate != null) eligible.add(candidate);
+			}
+			return List.copyOf(eligible);
+		}, userId);
 	}
 
 	private Optional<AccessPolicy> resolveExactlyOne(java.sql.ResultSet rs, UUID userId, ClientSurface surface) throws java.sql.SQLException {
@@ -124,7 +156,8 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 				rs.getObject("tenant_id", UUID.class).toString(), rs.getString("tenant_slug"),
 				rs.getObject("workspace_id", UUID.class).toString(), rs.getString("workspace_slug"),
 				rs.getObject("membership_id", UUID.class).toString(), rs.getString("display_name"),
-				rs.getString("preferred_language"), effective.authorizationVersion(), effective.roleDefinitionIds());
+				rs.getString("preferred_language"), effective.authorizationVersion(), effective.roleDefinitionIds(),
+				rs.getString("tenant_name"), rs.getString("workspace_name"));
 	}
 
 	private Set<MembershipRole> roles(UUID membershipId, String membershipType) {

@@ -28,20 +28,30 @@ public final class CookieOriginGuardFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
+		if (AuthenticationTransport.requiresNativeAccessContextTransport(request.getRequestURI())
+				&& !isNativeSessionTransport(request)) {
+			writeProblem(response, ApiErrorCode.NATIVE_CLIENT_REQUIRED,
+					"This operation requires the native client transport", request);
+			return;
+		}
 		if (request.getMethod().equalsIgnoreCase("POST")
 				&& (request.getRequestURI().startsWith("/api/v1/authentication/")
 					|| request.getRequestURI().startsWith("/api/v1/auth/"))) {
 			String origin = request.getHeader("Origin");
 			if ((origin == null || !allowedOrigins.contains(origin)) && !isNativeSessionTransport(request)) {
-				var problem = ApiProblemDetailFactory.create(HttpStatus.FORBIDDEN, ApiErrorCode.ORIGIN_NOT_ALLOWED,
-						"Request origin is not allowed", request);
-				response.setStatus(HttpStatus.FORBIDDEN.value());
-				response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-				objectMapper.writeValue(response.getWriter(), problem);
+				writeProblem(response, ApiErrorCode.ORIGIN_NOT_ALLOWED, "Request origin is not allowed", request);
 				return;
 			}
 		}
 		filterChain.doFilter(request, response);
+	}
+
+	private void writeProblem(HttpServletResponse response, ApiErrorCode code, String detail, HttpServletRequest request)
+			throws IOException {
+		var problem = ApiProblemDetailFactory.create(HttpStatus.FORBIDDEN, code, detail, request);
+		response.setStatus(HttpStatus.FORBIDDEN.value());
+		response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+		objectMapper.writeValue(response.getWriter(), problem);
 	}
 
 	public static boolean isNativeSessionTransport(HttpServletRequest request) {

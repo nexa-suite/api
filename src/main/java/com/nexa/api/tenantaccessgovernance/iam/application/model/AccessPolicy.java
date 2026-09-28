@@ -11,19 +11,27 @@ import java.util.Set;
  */
 public record AccessPolicy(ClientSurface surface, Set<String> roles, Set<String> permissions,
 		String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
-		String displayName, String preferredLanguage, long authorizationVersion, Set<String> roleDefinitionIds) {
+		String displayName, String preferredLanguage, long authorizationVersion, Set<String> roleDefinitionIds,
+		String tenantName, String workspaceName) {
+	public AccessPolicy(ClientSurface surface, Set<String> roles, Set<String> permissions,
+			String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
+			String displayName, String preferredLanguage, long authorizationVersion, Set<String> roleDefinitionIds) {
+		this(surface, roles, permissions, tenantId, tenantSlug, workspaceId, workspaceSlug, membershipId,
+				displayName, preferredLanguage, authorizationVersion, roleDefinitionIds, null, null);
+	}
+
 	public AccessPolicy(ClientSurface surface, Set<String> roles, Set<String> permissions,
 			String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
 			String displayName, String preferredLanguage) {
 		this(surface, roles, permissions, tenantId, tenantSlug, workspaceId, workspaceSlug, membershipId,
-				displayName, preferredLanguage, 0, Set.of());
+				displayName, preferredLanguage, 0, Set.of(), null, null);
 	}
 
 	public AccessPolicy(ClientSurface surface, Set<String> roles, Set<String> permissions,
 			String tenantId, String tenantSlug, String workspaceId, String workspaceSlug, String membershipId,
 			String displayName, String preferredLanguage, long authorizationVersion) {
 		this(surface, roles, permissions, tenantId, tenantSlug, workspaceId, workspaceSlug, membershipId,
-				displayName, preferredLanguage, authorizationVersion, Set.of());
+				displayName, preferredLanguage, authorizationVersion, Set.of(), null, null);
 	}
 
 	public AccessPolicy {

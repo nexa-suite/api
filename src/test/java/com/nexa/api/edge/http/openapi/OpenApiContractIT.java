@@ -18,6 +18,16 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         var result = mockMvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         var document = json(result);
         assertThat(document.get("openapi").asText()).isEqualTo("3.1.0");
+        assertThat(document.get("paths").has("/api/v1/authentication/identity-sign-in")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/me/access-contexts")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/me/access-context-selections")).isTrue();
+        assertRequiredHeader(document, "/api/v1/authentication/identity-sign-in", "post", "X-Nexa-Client");
+        assertRequiredHeader(document, "/api/v1/me/access-contexts", "get", "X-Nexa-Client");
+        assertRequiredHeader(document, "/api/v1/me/access-contexts", "get", "X-Nexa-Surface");
+        assertRequiredHeader(document, "/api/v1/me/access-contexts", "get", "X-Nexa-Access-Context-Ticket");
+        assertRequiredHeader(document, "/api/v1/me/access-context-selections", "post", "X-Nexa-Client");
+        assertRequiredHeader(document, "/api/v1/me/access-context-selections", "post", "X-Nexa-Surface");
+        assertRequiredHeader(document, "/api/v1/me/access-context-selections", "post", "X-Nexa-Access-Context-Ticket");
         assertThat(document.get("paths").has("/api/v1/warehouses/{warehouseId}/zones/{zoneId}")).isTrue();
         assertThat(document.get("paths").has("/api/v1/warehouses/{id}/profile")).isTrue();
         assertThat(document.get("paths").has("/api/v1/warehouses/{id}/location")).isTrue();
