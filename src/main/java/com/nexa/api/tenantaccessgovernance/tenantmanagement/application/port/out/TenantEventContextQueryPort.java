@@ -7,6 +7,7 @@ import java.util.UUID;
  * Published-language read boundary for scoped memberships and the technical
  * principal used by asynchronous service workflows.
  */
+@org.springframework.modulith.NamedInterface(value = "access-contracts", propagate = false)
 public interface TenantEventContextQueryPort {
     String SYSTEM_WORKFLOW_MEMBERSHIP_TYPE = "SYSTEM_WORKFLOW";
     String SYSTEM_WORKFLOW_ROLE_CODE = "system_workflow";
@@ -17,6 +18,7 @@ public interface TenantEventContextQueryPort {
 
     Set<UUID> findActiveMembershipIdsByRoleCodes(UUID tenantId, UUID workspaceId, Set<String> roleCodes);
 
+@org.springframework.modulith.NamedInterface(value = "access-contracts", propagate = false)
     record WorkflowActor(UUID userId, UUID membershipId, String membershipType, String roleCode, String identity) {
         public WorkflowActor {
             if (userId == null || membershipId == null || membershipType == null || roleCode == null || identity == null) {

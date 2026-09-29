@@ -1,17 +1,17 @@
 package com.nexa.api.notifications.application;
 
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
-import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
 import com.nexa.api.notifications.application.port.out.PushProviderPort;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
 import com.nexa.api.notifications.application.service.PushRoutingService;
 import com.nexa.api.notifications.application.service.PushSubscriptionService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;

@@ -2,7 +2,7 @@ package com.nexa.api.fulfillmentdelivery.application.service;
 
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchRouteStartPort;
-import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchOrder;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchStatus;
 import org.springframework.transaction.annotation.Transactional;

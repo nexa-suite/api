@@ -5,15 +5,15 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.VerifiedMembershipResolutionPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.ResolveCurrentAccessContextService;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.Membership;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.VerifiedMembership;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.tenant.TenantStatus;
@@ -100,7 +100,9 @@ class CurrentAccessContextTests {
 					.filter(path -> !path.getFileName().toString().equals("package-info.java"))
 					.map(path -> {
 						try {
-							return java.nio.file.Files.readString(path);
+							return java.nio.file.Files.readString(path)
+                                // Modulith export metadata does not introduce a framework runtime dependency.
+                                .replaceAll("@org\\.springframework\\.modulith\\.NamedInterface\\([^)]*\\)", "");
 						} catch (java.io.IOException exception) {
 							throw new IllegalStateException(exception);
 						}

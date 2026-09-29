@@ -1,20 +1,24 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service;
 
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ConcurrencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.IdempotencyPayloadConflictException;
+
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.*;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.OrganizationAdministrationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.OrganizationAdministrationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.TenantManagementInvariantViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.administration.OrganizationAdministrationInvariantViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.OrganizationAdministrationInvariantViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AssignableRoleEnvelope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AssignableRolePolicy;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleCatalog;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinitionType;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.RoleDefinitionId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.workspace.WorkspaceSlug;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
@@ -171,7 +175,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 		if (AssignableRolePolicy.isCompanyOwner(context.roleCodes()) && !AssignableRolePolicy.isTenantAdmin(context.roleCodes())
 				&& (before.contains(MembershipRole.TENANT_ADMIN) || before.contains(MembershipRole.COMPANY_OWNER)
 						|| roles.contains(MembershipRole.TENANT_ADMIN) || roles.contains(MembershipRole.COMPANY_OWNER))) {
-			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation("COMPANY_OWNER cannot modify reserved technical assignments");
+			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation("COMPANY_OWNER cannot modify reserved technical assignments");
 		}
 		AssignableRoleEnvelope.internalMembership().requireAssignable(roles);
 		for (MembershipRole role : roles) AssignableRolePolicy.requireCanAssign(context.roleCodes(), context.permissionCodes(), RoleCatalog.definitionFor(role));
@@ -186,15 +190,15 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 	@Override
 	public OrganizationAdministrationResult<WorkspaceMembershipSummary> changeRoleDefinitions(CurrentAccessContext context,
 			String membershipId, Set<String> roleDefinitionIds, long expectedVersion, String correlationId) {
-		if (context.surface() != com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface.PLATFORM) {
-			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation("Role assignment is not allowed on this surface");
+		if (context.surface() != com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface.PLATFORM) {
+			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation("Role assignment is not allowed on this surface");
 		}
 		if (roleDefinitionIds == null || roleDefinitionIds.isEmpty()) throw new OrganizationAdministrationInvariantViolation("At least one role assignment is required");
 		WorkspaceMembershipSummary current = findMembership(context, membershipId);
 		List<RoleDefinition> targets = roleDefinitionIds.stream().map(id -> resolveRoleDefinition(context, id)).toList();
 		if (AssignableRolePolicy.isCompanyOwner(context.roleCodes()) && !AssignableRolePolicy.isTenantAdmin(context.roleCodes())
 				&& (containsRole(current, MembershipRole.TENANT_ADMIN) || containsRole(current, MembershipRole.COMPANY_OWNER))) {
-			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation("COMPANY_OWNER cannot modify reserved technical assignments");
+			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation("COMPANY_OWNER cannot modify reserved technical assignments");
 		}
 		for (RoleDefinition target : targets) {
 			AssignableRolePolicy.requireCanAssign(context.roleCodes(), context.permissionCodes(), target);
@@ -334,7 +338,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 	private static void read(CurrentAccessContext context) { context.requirePermission(Permission.TENANT_READ); }
 	private static void manageRoleAssignments(CurrentAccessContext context) {
 		if (!context.allows(PermissionKey.TENANT_ROLE_ASSIGN)) {
-			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation("Membership role assignment is not allowed");
+			throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation("Membership role assignment is not allowed");
 		}
 	}
 	private void audit(CurrentAccessContext context, String type, String targetMembershipId, String correlationId, java.util.Map<String, Object> metadata) {
@@ -350,9 +354,9 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 				eventType, publicStatus, Instant.now().toEpochMilli(), false);
 	}
 
-	public static final class ConcurrencyConflictException extends RuntimeException { }
-	public static final class IdempotencyKeyRequiredException extends RuntimeException { }
-	public static final class IdempotencyPayloadConflictException extends RuntimeException { }
+
+
+
 
 	private static String sha256(String value) {
 		try { return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }

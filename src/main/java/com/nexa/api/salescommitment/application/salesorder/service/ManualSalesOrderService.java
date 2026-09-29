@@ -10,10 +10,10 @@ import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrder;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;

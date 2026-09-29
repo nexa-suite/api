@@ -1,6 +1,8 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
@@ -35,10 +37,12 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
     public WarehouseInventoryPersistenceAdapter(
             JdbcTemplate jdbc,
             ChangeEventPersistencePort changeFeed,
-            CatalogItemSnapshotLookupPort catalog,
+            SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
-            com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings);
+            com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings,
+            InventoryCommercialSource commercialSource,
+            InventoryFulfillmentSource fulfillmentSource) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
     }
 
     @Transactional(readOnly = true)
@@ -110,9 +114,9 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         if (receipt.quantity() == null || receipt.quantity().signum() <= 0) throw error("INVALID_REQUEST", false);
         validateTemperature(receipt.temperatureReading());
         String notes = boundedNullable(receipt.notes(), "notes", 2000);
-        TemperatureRange skuRange = jdbc.query("select temperature_min,temperature_max from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
-                (rs, n) -> new TemperatureRange(rs.getBigDecimal(1), rs.getBigDecimal(2)), tenant(context), workspace(context), sku.id())
-                .stream().findFirst().orElse(new TemperatureRange(null, null));
+        TemperatureRange skuRange = catalog.findPhysicalValidationPolicy(tenant(context), workspace(context), sku.id())
+                .map(policy -> new TemperatureRange(policy.temperatureMin(), policy.temperatureMax()))
+                .orElse(new TemperatureRange(null, null));
         if (skuRange.hasBounds() && receipt.temperatureReading() == null) throw error("TEMPERATURE_REQUIRED", false);
         TemperatureRange range = jdbc.query("select temperature_min,temperature_max from warehouse.storage_zone where tenant_id=? and workspace_id=? and id=?",
                 (rs, n) -> new TemperatureRange(rs.getBigDecimal(1), rs.getBigDecimal(2)), tenant(context), workspace(context), zone)
@@ -268,13 +272,18 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
 
     @Transactional(readOnly = true)
     public List<WarehouseOperationsService.Availability> availability(CurrentAccessContext context, List<String> ids) {
-        if (!context.allows(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_READ)
-                && !context.allows(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.CATALOG_READ)) throw error("FORBIDDEN", false);
+        if (!context.allows(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_READ)
+                && !context.allows(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.CATALOG_READ)) throw error("FORBIDDEN", false);
         if (ids == null || ids.isEmpty() || ids.size() > MAX_PAGE_SIZE || ids.stream().anyMatch(id -> id == null || id.isBlank())) throw error("INVALID_REQUEST", false);
         List<String> normalized = ids.stream().map(id -> bounded(id, "catalogItemId", 64)).distinct().toList();
         String placeholders = normalized.stream().map(id -> "?").collect(Collectors.joining(","));
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context))); args.addAll(normalized);
-        List<AvailabilityQuantities> rows = jdbc.query("with active_backing as ("
+        List<UUID> skuIds = jdbc.query("select distinct sku_id from warehouse.inventory_lot where tenant_id=? and workspace_id=? "
+                        + "and catalog_item_id in (" + placeholders + ") and sku_id is not null",
+                (rs, row) -> rs.getObject(1, UUID.class), args.toArray());
+        CatalogSkuSnapshots.Input catalogSnapshots = CatalogSkuSnapshots.of(tenant(context), workspace(context),
+                catalog.findInventoryPolicies(tenant(context), workspace(context), skuIds));
+        List<AvailabilityQuantities> rows = jdbc.query("with " + catalogSnapshots.cte() + ", active_backing as ("
                         + "select line.tenant_id,line.workspace_id,line.catalog_item_id,position.warehouse_id,coalesce(sum(position.quantity),0) active_quantity "
                         + "from warehouse.inventory_backing_position position "
                         + "join warehouse.inventory_backing_line line on line.tenant_id=position.tenant_id and line.workspace_id=position.workspace_id and line.id=position.backing_line_id "
@@ -296,7 +305,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                         + "from warehouse.inventory_lot l "
                         + "join warehouse.warehouse w on w.id=l.warehouse_id and w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id "
                         + "join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
-                        + "join catalog_management.sellable_sku sku on sku.id=l.sku_id and sku.tenant_id=l.tenant_id and sku.workspace_id=l.workspace_id "
+                        + "join catalog_sku_snapshot sku on sku.id=l.sku_id and sku.tenant_id=l.tenant_id and sku.workspace_id=l.workspace_id "
                         + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
                         + "left join warehouse.safety_stock_policy ss on ss.tenant_id=l.tenant_id and ss.workspace_id=l.workspace_id "
                         + "and ss.warehouse_id=l.warehouse_id and ss.sku_id=l.sku_id "
@@ -306,7 +315,8 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                         + "group by l.catalog_item_id,l.warehouse_id",
                 (rs, row) -> new AvailabilityQuantities(rs.getString("catalog_item_id"),
                         rs.getBigDecimal("physical_quantity"), rs.getBigDecimal("eligible_quantity"),
-                        rs.getBigDecimal("safety_stock"), rs.getBigDecimal("active_backing_quantity")), args.toArray());
+                        rs.getBigDecimal("safety_stock"), rs.getBigDecimal("active_backing_quantity")),
+                catalogSnapshots.prepend(args.toArray()));
         Map<String, BigDecimal> physical = new java.util.HashMap<>();
         Map<String, BigDecimal> safety = new java.util.HashMap<>();
         Map<String, BigDecimal> sellable = new java.util.HashMap<>();
@@ -322,8 +332,8 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                 sellable.getOrDefault(id, BigDecimal.ZERO))).toList();
     }
 
-    private void requireRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_READ); }
-    private void requireWrite(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_WRITE); }
+    private void requireRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_READ); }
+    private void requireWrite(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_WRITE); }
 
     private record TemperatureRange(BigDecimal min, BigDecimal max) {
         String snapshot() { return (min == null ? "" : min) + ":" + (max == null ? "" : max); }

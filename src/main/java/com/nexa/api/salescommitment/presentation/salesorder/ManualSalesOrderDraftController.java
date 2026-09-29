@@ -1,6 +1,5 @@
 package com.nexa.api.salescommitment.presentation.salesorder;
 
-import com.nexa.api.catalogcommercialpolicy.presentation.rest.CatalogHttpSupport;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderDraftUseCase;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
@@ -31,7 +30,7 @@ import java.util.UUID;
 @Tag(name = "Manual Sales Order Drafts")
 @SecurityRequirement(name = "bearerAuth")
 public final class ManualSalesOrderDraftController {
-    private static final String ACCESS = CatalogHttpSupport.ACCESS_CONTEXT;
+    private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final ManualSalesOrderDraftUseCase drafts;
 
     public ManualSalesOrderDraftController(ManualSalesOrderDraftUseCase drafts) { this.drafts = drafts; }

@@ -1,6 +1,8 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
@@ -30,10 +32,11 @@ public class WarehouseSafetyStockPersistenceAdapter extends WarehouseJdbcSupport
     public WarehouseSafetyStockPersistenceAdapter(
             JdbcTemplate jdbc,
             ChangeEventPersistencePort changeFeed,
-            CatalogItemSnapshotLookupPort catalog,
+            SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
-            com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings);
+            com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings,
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
     }
 
     @Override
@@ -154,11 +157,11 @@ public class WarehouseSafetyStockPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private void requireRead(CurrentAccessContext context) {
-        context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_READ);
+        context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_READ);
     }
 
     private void requireWrite(CurrentAccessContext context) {
-        context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_WRITE);
+        context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_WRITE);
     }
 
     private static boolean isUuid(String value) {

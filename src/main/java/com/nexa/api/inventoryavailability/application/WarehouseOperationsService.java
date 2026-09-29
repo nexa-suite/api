@@ -210,11 +210,7 @@ public class WarehouseOperationsService {
     public record ReservationDetail(String id, String salesOrderId, String orderNumber, String status, Instant createdAt, Instant reservedAt, Instant expiresAt, long version, String clientAccountId, List<AllocationView> allocations) { }
     public record ReadinessCandidate(String reservationId, String salesOrderId, String orderNumber, String clientAccountId, int lineCount, BigDecimal totalReservedQuantity, Instant reservedAt, Instant expiresAt, String readinessStatus) { }
 
-    public static final class WarehouseException extends RuntimeException {
-        private final String code;
-        private final boolean notFound;
-        public WarehouseException(String code, boolean notFound) { super(code); this.code = code; this.notFound = notFound; }
-        public String code() { return code; }
-        public boolean notFound() { return notFound; }
+    public static final class WarehouseException extends com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationException {
+        public WarehouseException(String code, boolean notFound) { super(code, notFound); }
     }
 }

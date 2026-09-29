@@ -1,7 +1,5 @@
 package com.nexa.api.edge.security;
 
-import com.nexa.api.tenantaccessgovernance.iam.infrastructure.jwt.JwtAuthenticationTokenIssuer;
-import com.nexa.api.tenantaccessgovernance.iam.infrastructure.jwt.RsaKeyMaterial;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -61,12 +59,6 @@ public class JwtSecurityConfiguration {
 		return decoder;
 	}
 
-	@Bean
-	JwtAuthenticationTokenIssuer jwtAuthenticationTokenIssuer(JwtEncoder encoder, NexaSecurityProperties properties, SecureRandom random) {
-		return new JwtAuthenticationTokenIssuer(encoder,
-				properties.getIssuer(), properties.getAudience(), properties.getAccessTokenTtl(),
-				properties.getRefreshTokenTtl(), random);
-	}
 
 	@Bean
 	JwtAuthenticationConverter jwtAuthenticationConverter() {

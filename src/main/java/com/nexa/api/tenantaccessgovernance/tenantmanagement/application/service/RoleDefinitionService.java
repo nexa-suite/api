@@ -1,5 +1,11 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service;
 
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionNotFoundException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.DuplicateRoleDefinitionException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ImmutableRoleDefinitionException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ActiveRoleDefinitionAssignmentsException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionConcurrencyException;
+
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.RoleDefinitionModels.CreateCommand;
@@ -13,9 +19,9 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinitionType;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.RoleDefinitionId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -141,9 +147,9 @@ public final class RoleDefinitionService implements RoleDefinitionUseCase {
 				definition.id().toString(), eventType, definition.status().name(), clock.instant().toEpochMilli(), false);
 	}
 
-	public static final class RoleDefinitionNotFoundException extends RuntimeException { }
-	public static final class DuplicateRoleDefinitionException extends RuntimeException { }
-	public static final class ImmutableRoleDefinitionException extends RuntimeException { }
-	public static final class ActiveRoleDefinitionAssignmentsException extends RuntimeException { }
-	public static final class RoleDefinitionConcurrencyException extends RuntimeException { }
+
+
+
+
+
 }

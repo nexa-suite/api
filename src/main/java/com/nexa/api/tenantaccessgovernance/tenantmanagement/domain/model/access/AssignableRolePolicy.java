@@ -1,5 +1,9 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access;
 
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Set;

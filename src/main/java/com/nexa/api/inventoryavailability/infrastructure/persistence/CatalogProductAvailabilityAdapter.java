@@ -2,6 +2,7 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.ProductAvailabilityPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -19,21 +20,36 @@ import java.util.stream.Collectors;
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPort {
     private final JdbcTemplate jdbc;
+    private final SellableSkuQuery sellableSkus;
 
-    public CatalogProductAvailabilityAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public CatalogProductAvailabilityAdapter(JdbcTemplate jdbc, SellableSkuQuery sellableSkus) {
+        this.jdbc = jdbc;
+        this.sellableSkus = sellableSkus;
+    }
 
     @Override
     public List<Snapshot> find(CatalogScope scope, List<String> catalogItemIds) {
         List<String> ids = catalogItemIds == null ? List.of() : catalogItemIds.stream()
                 .filter(value -> value != null && !value.isBlank()).distinct().toList();
         if (ids.isEmpty()) return List.of();
+        return findWithPolicies(scope, ids,
+                sellableSkus.findInventoryPoliciesByLegacyIds(scope.tenantId(), scope.workspaceId(), ids));
+    }
+
+    @Override
+    public List<Snapshot> findWithPolicies(CatalogScope scope, List<String> catalogItemIds,
+                                          List<SellableSkuQuery.InventorySkuSnapshot> policies) {
+        List<String> ids = catalogItemIds == null ? List.of() : catalogItemIds.stream()
+                .filter(value -> value != null && !value.isBlank()).distinct().toList();
+        if (ids.isEmpty()) return List.of();
+        CatalogSkuSnapshots.Input catalogSnapshots = CatalogSkuSnapshots.of(scope.tenantId(), scope.workspaceId(), policies);
         String placeholders = ids.stream().map(value -> "?").collect(Collectors.joining(","));
         List<Object> args = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
         args.addAll(ids);
         Instant asOf = Instant.now();
-        List<Snapshot> found = jdbc.query("with scoped_sku as ("
+        List<Snapshot> found = jdbc.query("with " + catalogSnapshots.cte() + ", scoped_sku as ("
                         + "select id,legacy_catalog_item_id,temperature_min,temperature_max "
-                        + "from catalog_management.sellable_sku where tenant_id=? and workspace_id=? "
+                        + "from catalog_sku_snapshot where tenant_id=? and workspace_id=? "
                         + "and status='ACTIVE' and legacy_catalog_item_id in (" + placeholders + ")), "
                         + "eligible_lot as ("
                         + "select s.id sku_id,l.warehouse_id,l.expiration_date,l.stock_quantity-l.reserved_quantity quantity "
@@ -81,9 +97,9 @@ public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPor
                             : available.compareTo(BigDecimal.TEN) <= 0 ? "LOW" : "AVAILABLE";
                     return new Snapshot(rs.getString("legacy_catalog_item_id"), status, nearExpiry, asOf, available);
                 },
-                // The first two scope values select catalog SKUs; inventory and policy data
-                // are then constrained to the same request scope throughout the query.
-                mergeArgs(args, scope));
+                // After snapshot CTE parameters, scope values constrain SKU, inventory,
+                // and policy rows to the same request scope throughout the query.
+                catalogSnapshots.prepend(mergeArgs(args, scope)));
         Map<String, Snapshot> byId = found.stream().collect(Collectors.toMap(Snapshot::catalogItemId, Function.identity()));
         return ids.stream().map(id -> byId.getOrDefault(id,
                 new Snapshot(id, "OUT_OF_STOCK", false, asOf, BigDecimal.ZERO))).toList();

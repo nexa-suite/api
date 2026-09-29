@@ -12,7 +12,8 @@ class BusinessDocumentArchitectureTests {
 
     @Test void domainIsFrameworkFreeAndDoesNotDependOnInfrastructure() throws Exception {
         try (var paths = Files.walk(INVOICING_SOURCE.resolve("domain"))) {
-            for (Path path : paths.filter(Files::isRegularFile).filter(file -> file.toString().endsWith(".java")).toList()) {
+            for (Path path : paths.filter(Files::isRegularFile).filter(file -> file.toString().endsWith(".java"))
+                    .filter(file -> !file.getFileName().toString().equals("package-info.java")).toList()) {
                 assertThat(Files.readString(path)).doesNotContain("org.springframework", "jakarta.persistence", "jakarta.validation", "com.fasterxml.jackson", ".infrastructure");
             }
         }

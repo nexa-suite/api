@@ -145,8 +145,11 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
 
         for (int pageSize : List.of(1, 10, 25)) {
             CountingJdbcTemplate countedJdbc = new CountingJdbcTemplate(dataSource);
+            var catalogAccounts = new com.nexa.api.bootstrap.runtime.boundaries.CatalogClientAccountCompositionAdapter(
+                    new com.nexa.api.customerbuyerrelationships.infrastructure.persistence.ClientAccountPersistenceAdapter(countedJdbc));
+            var offers = new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcAuthoritativeOfferQuery(countedJdbc, catalogAccounts);
             JdbcCatalogItemQueryAdapter adapter = new JdbcCatalogItemQueryAdapter(
-                    countedJdbc, new CatalogProductAvailabilityAdapter(countedJdbc));
+                    countedJdbc, new CatalogProductAvailabilityAdapter(countedJdbc, new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcSellableSkuQuery(countedJdbc, offers)), offers);
             var page = adapter.search(scope, new CatalogSearchCriteria("", null, null, null, 0, pageSize,
                     CatalogSortField.ITEM_NAME, SortDirection.ASC));
 

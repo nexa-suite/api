@@ -1,6 +1,6 @@
 package com.nexa.api.businessdocuments.infrastructure.rendering;
 
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentProjection;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentProjection;
 import com.nexa.api.businessdocuments.application.port.DocumentRendererPort.RenderedDocument;
 import com.nexa.api.businessdocuments.domain.model.businessdocument.BusinessDocumentFormat;
 

@@ -1,9 +1,9 @@
 package com.nexa.api.businessdocuments.infrastructure.rendering;
 
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.BusinessParty;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentLine;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentProjection;
-import com.nexa.api.businessdocuments.application.model.BusinessDocumentProjections.DocumentTotals;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.BusinessParty;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentLine;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentProjection;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections.DocumentTotals;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;

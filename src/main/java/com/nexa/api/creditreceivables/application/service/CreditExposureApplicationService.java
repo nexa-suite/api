@@ -4,7 +4,7 @@ import com.nexa.api.creditreceivables.application.exception.CreditReceivableOper
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

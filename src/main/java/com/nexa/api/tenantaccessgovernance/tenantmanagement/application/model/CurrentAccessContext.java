@@ -1,16 +1,16 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model;
 
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionPolicy;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleSurfacePolicy;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.VerifiedMembership;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.tenant.TenantStatus;
@@ -24,6 +24,7 @@ import java.util.LinkedHashSet;
  * Application-facing access snapshot created only from a verified membership.
  * It is the source of tenant/workspace/surface scope for downstream use cases.
  */
+@org.springframework.modulith.NamedInterface(value = "access-contracts", propagate = false)
 public final class CurrentAccessContext implements AccessContext {
 	private final VerifiedMembership verifiedMembership;
 	private final Surface surface;

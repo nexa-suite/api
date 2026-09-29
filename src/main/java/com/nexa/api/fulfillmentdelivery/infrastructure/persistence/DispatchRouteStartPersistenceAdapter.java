@@ -4,8 +4,10 @@ import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchRouteStartPort;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchOrder;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchStatus;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,8 +21,10 @@ import java.util.UUID;
 @Profile("!test")
 public class DispatchRouteStartPersistenceAdapter extends DispatchJdbcSupport implements DispatchRouteStartPort {
     public DispatchRouteStartPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
-                                                WarehouseLogisticsFulfillmentPort warehouseFulfillment) {
-        super(jdbc, changeFeed, warehouseFulfillment);
+                                                WarehouseLogisticsFulfillmentPort warehouseFulfillment,
+                                                SalesOrderFulfillmentQuery salesOrders,
+                                                CustomerAccountQuery customerAccounts) {
+        super(jdbc, changeFeed, warehouseFulfillment, salesOrders, customerAccounts);
     }
 
     @Override

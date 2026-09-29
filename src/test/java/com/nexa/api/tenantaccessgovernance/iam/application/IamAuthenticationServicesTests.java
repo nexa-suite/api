@@ -22,14 +22,14 @@ import com.nexa.api.tenantaccessgovernance.iam.application.service.CurrentSessio
 import com.nexa.api.tenantaccessgovernance.iam.application.service.RefreshSessionService;
 import com.nexa.api.tenantaccessgovernance.iam.application.service.SignInService;
 import com.nexa.api.tenantaccessgovernance.iam.application.service.SignOutService;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.AuthenticationSession;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.RefreshTokenFamilyId;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.DisplayName;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.EmailAddress;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccount;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.Username;
 import org.junit.jupiter.api.Test;
 

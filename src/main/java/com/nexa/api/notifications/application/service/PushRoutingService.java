@@ -1,7 +1,7 @@
 package com.nexa.api.notifications.application.service;
 
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
-import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
 import com.nexa.api.notifications.application.port.out.PushProviderPort;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
 import org.springframework.beans.factory.annotation.Autowired;

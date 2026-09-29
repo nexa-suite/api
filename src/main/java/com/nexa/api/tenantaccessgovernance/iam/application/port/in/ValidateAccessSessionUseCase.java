@@ -1,10 +1,11 @@
 package com.nexa.api.tenantaccessgovernance.iam.application.port.in;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.model.ValidatedAccessSession;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 
+@org.springframework.modulith.NamedInterface(value = "access-contracts", propagate = false)
 public interface ValidateAccessSessionUseCase {
 	ValidatedAccessSession validate(SessionId sessionId, UserAccountId userId, ClientSurface surface);
 

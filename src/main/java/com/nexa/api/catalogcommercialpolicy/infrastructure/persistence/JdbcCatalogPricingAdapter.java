@@ -27,9 +27,11 @@ import java.util.UUID;
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class JdbcCatalogPricingAdapter implements CatalogPricingPort {
     private final JdbcTemplate jdbc;
+    private final com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.RegionalCurrencyQuery regionalCurrency;
     private final CatalogCommandIdempotencySupport idempotency;
 
-    public JdbcCatalogPricingAdapter(JdbcTemplate jdbc) {
+    public JdbcCatalogPricingAdapter(JdbcTemplate jdbc, com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.RegionalCurrencyQuery regionalCurrency) {
+        this.regionalCurrency = regionalCurrency;
         this.jdbc = jdbc;
         this.idempotency = new CatalogCommandIdempotencySupport(jdbc);
     }
@@ -138,8 +140,7 @@ public class JdbcCatalogPricingAdapter implements CatalogPricingPort {
     private String normalizedCurrency(CatalogScope scope, String value) {
         String normalized = value == null ? "" : value.strip().toUpperCase(Locale.ROOT);
         Money.from(BigDecimal.ZERO, normalized);
-        String configured = jdbc.query("select currency from tenant_management.regional_settings where tenant_id=?",
-                (rs, row) -> rs.getString(1), scope.tenantId()).stream().findFirst().orElse(null);
+        String configured = regionalCurrency.findCurrency(scope.tenantId()).orElse(null);
         if (configured != null && !normalized.equals(configured.strip().toUpperCase(Locale.ROOT))) {
             throw new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogConflictException("CATALOG_CURRENCY_MISMATCH");
         }

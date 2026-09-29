@@ -1,7 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.iam.application.model;
 
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 
 import java.time.Instant;
 import java.util.Objects;

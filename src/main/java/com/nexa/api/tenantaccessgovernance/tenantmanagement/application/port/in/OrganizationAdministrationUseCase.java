@@ -6,7 +6,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Wo
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.WorkspaceMembershipSummary;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.WorkspaceSummary;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 
 import java.util.List;

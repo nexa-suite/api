@@ -1,12 +1,10 @@
 @org.springframework.modulith.ApplicationModule(
         id = "BC-02-customer-buyer-relationships",
         allowedDependencies = {
-                "shared",
-                "shared :: shared-error-primitives",
+                "BC-01-tenant-access-governance :: access-contracts",
+                "BC-01-tenant-access-governance :: access-values",
+                "BC-01-tenant-access-governance :: governance-queries",
                 "BC-03-catalog-commercial-policy :: sales-catalog",
-                "BC-01-tenant-access-governance :: access",
-                "BC-01-tenant-access-governance :: access-context",
-                "BC-01-tenant-access-governance :: buyer-memberships",
-                "BC-01-tenant-access-governance :: membership"
+                "shared :: shared-error-primitives"
         })
 package com.nexa.api.customerbuyerrelationships;

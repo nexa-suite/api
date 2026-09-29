@@ -1,6 +1,6 @@
 package com.nexa.api.notifications.infrastructure;
 
-import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.service.PushRoutingService;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;

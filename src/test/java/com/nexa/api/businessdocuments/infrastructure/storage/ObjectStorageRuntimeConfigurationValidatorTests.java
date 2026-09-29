@@ -23,18 +23,56 @@ class ObjectStorageRuntimeConfigurationValidatorTests {
 
         assertThatThrownBy(() -> new ObjectStorageRuntimeConfigurationValidator(environment))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("nexa.object-storage.endpoint must be an absolute URI with a host");
+                .hasMessageContaining("nexa.object-storage.endpoint must be an absolute HTTPS URI with a host");
     }
 
     @Test
-    void acceptsExplicitMinioConfiguration() {
+    void rejectsInsecureHttpEndpointOutsideLocalAndTest() {
+        MockEnvironment environment = durableEnvironment();
+        environment.setProperty("nexa.object-storage.endpoint", "http://storage.example.net:9000");
+
+        assertThatThrownBy(() -> new ObjectStorageRuntimeConfigurationValidator(environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("HTTP is allowed only in local/test");
+    }
+
+    @Test
+    void rejectsEndpointWithUserInfo() {
+        MockEnvironment environment = durableEnvironment();
+        environment.setProperty("nexa.object-storage.endpoint", "https://user:password@storage.example.net");
+
+        assertThatThrownBy(() -> new ObjectStorageRuntimeConfigurationValidator(environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no userinfo");
+    }
+
+    @Test
+    void acceptsDurableHttpsEndpoint() {
         new ObjectStorageRuntimeConfigurationValidator(durableEnvironment());
+    }
+
+    @Test
+    void acceptsLocalHttpMinioFixture() {
+        MockEnvironment environment = durableEnvironment();
+        environment.setActiveProfiles("local", "minio");
+        environment.setProperty("nexa.object-storage.endpoint", "http://localhost:9000");
+
+        new ObjectStorageRuntimeConfigurationValidator(environment);
+    }
+
+    @Test
+    void acceptsHttpMinioFixtureInTestProfile() {
+        MockEnvironment environment = durableEnvironment();
+        environment.setActiveProfiles("test", "minio");
+        environment.setProperty("nexa.object-storage.endpoint", "http://localhost:9000");
+
+        new ObjectStorageRuntimeConfigurationValidator(environment);
     }
 
     private static MockEnvironment durableEnvironment() {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("minio");
-        environment.setProperty("nexa.object-storage.endpoint", "http://localhost:9000");
+        environment.setProperty("nexa.object-storage.endpoint", "https://storage.example.net");
         environment.setProperty("nexa.object-storage.bucket", "nexa-private");
         environment.setProperty("nexa.object-storage.access-key", "test-access");
         environment.setProperty("nexa.object-storage.secret-key", "test-secret");

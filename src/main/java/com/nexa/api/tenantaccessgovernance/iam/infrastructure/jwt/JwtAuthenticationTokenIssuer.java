@@ -3,7 +3,7 @@ package com.nexa.api.tenantaccessgovernance.iam.infrastructure.jwt;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.AuthenticationSubject;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.IssuedAuthenticationTokens;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AuthenticationTokenPort;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;

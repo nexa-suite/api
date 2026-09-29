@@ -1,6 +1,8 @@
 package com.nexa.api.salescommitment.infrastructure.events;
 
-import com.nexa.api.salescommitment.application.port.out.SalesEventContextQueryPort;
+import com.nexa.api.salescommitment.application.publicapi.SalesEventContextQueryPort;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerMembershipQuery;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -15,9 +17,14 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcSalesEventContextQueryAdapter implements SalesEventContextQueryPort {
     private final JdbcTemplate jdbc;
+    private final CustomerMembershipQuery customerMemberships;
+    private final WorkforceDirectory workforce;
 
-    public JdbcSalesEventContextQueryAdapter(JdbcTemplate jdbc) {
+    public JdbcSalesEventContextQueryAdapter(JdbcTemplate jdbc, CustomerMembershipQuery customerMemberships,
+                                             WorkforceDirectory workforce) {
         this.jdbc = jdbc;
+        this.customerMemberships = customerMemberships;
+        this.workforce = workforce;
     }
 
     @Override
@@ -56,13 +63,9 @@ public class JdbcSalesEventContextQueryAdapter implements SalesEventContextQuery
 
     @Override
     public Set<UUID> findBuyerMembershipIds(UUID tenantId, UUID workspaceId, UUID clientAccountId) {
-        return Set.copyOf(jdbc.query("select distinct cam.workspace_membership_id "
-                        + "from sales.client_account_membership cam "
-                        + "join tenant_management.workspace_membership m "
-                        + "on m.workspace_id=cam.workspace_id and m.id=cam.workspace_membership_id "
-                        + "where cam.tenant_id=? and cam.workspace_id=? and cam.client_account_id=? "
-                        + "and m.status='ACTIVE' and m.membership_type='BUYER'",
-                (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, clientAccountId));
+        List<UUID> relatedMembershipIds = customerMemberships.findMembershipIds(tenantId, workspaceId, clientAccountId);
+        if (relatedMembershipIds.isEmpty()) return Set.of();
+        return workforce.filterActiveBuyerMembershipIds(tenantId, workspaceId, relatedMembershipIds);
     }
 
     private static <T> Optional<T> uniqueOrEmpty(List<T> matches, String description) {

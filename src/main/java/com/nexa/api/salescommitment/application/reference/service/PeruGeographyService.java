@@ -6,8 +6,8 @@ import com.nexa.api.salescommitment.application.reference.port.PeruGeographyUseC
 import com.nexa.api.salescommitment.domain.model.reference.PeruGeographyLevel;
 import com.nexa.api.salescommitment.domain.model.reference.PeruGeographyPath;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 
 import java.util.List;
 import java.util.Optional;

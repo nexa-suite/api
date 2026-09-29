@@ -1,12 +1,14 @@
 package com.nexa.api.salescommitment.domain.model.salesorder;
 
+import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
+
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;

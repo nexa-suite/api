@@ -6,11 +6,11 @@ import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperati
 import com.nexa.api.fulfillmentdelivery.application.port.MobileDeliveryContractPort;
 import com.nexa.api.fulfillmentdelivery.application.service.MobileDeliveryContractService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -70,7 +70,7 @@ class MobileDeliveryContractServiceTests {
         CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
         BusinessTraceabilityCommands traceability = mock(BusinessTraceabilityCommands.class);
         CurrentAccessContext context = context();
-        when(context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole.BUYER))
+        when(context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole.BUYER))
                 .thenReturn(true);
 
         assertThatThrownBy(() -> service(persistence, accounts, traceability).recordReceipt(
@@ -94,7 +94,7 @@ class MobileDeliveryContractServiceTests {
         when(context.workspaceId()).thenReturn(new WorkspaceId(WORKSPACE));
         when(context.membershipId()).thenReturn(new MembershipId(MEMBERSHIP));
         when(context.userId()).thenReturn(new UserId(USER));
-        when(context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole.BUYER))
+        when(context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole.BUYER))
                 .thenReturn(false);
         return context;
     }

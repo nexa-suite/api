@@ -3,7 +3,7 @@ package com.nexa.api.creditreceivables.application.service;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

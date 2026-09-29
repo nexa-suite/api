@@ -13,7 +13,10 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Sales-owned snapshot and status adapter for the fulfillment boundary. */
@@ -33,6 +36,26 @@ public class SalesOrderFulfillmentPersistenceAdapter
     @Override
     public Snapshot getForUpdate(UUID tenantId, UUID workspaceId, UUID salesOrderId) {
         return load(tenantId, workspaceId, salesOrderId, true);
+    }
+
+    @Override
+    public Map<UUID, Header> findHeaders(UUID tenantId, UUID workspaceId, List<UUID> salesOrderIds) {
+        if (salesOrderIds == null || salesOrderIds.isEmpty()) return Map.of();
+        String placeholders = String.join(",", java.util.Collections.nCopies(salesOrderIds.size(), "?"));
+        List<Object> args = new ArrayList<>(salesOrderIds.size() + 2);
+        args.add(tenantId);
+        args.add(workspaceId);
+        args.addAll(salesOrderIds);
+        Map<UUID, Header> headers = new LinkedHashMap<>();
+        jdbc.query("select id,number,client_account_id,priority from sales.sales_order "
+                        + "where tenant_id=? and workspace_id=? and id in (" + placeholders + ")",
+                (rs, row) -> {
+                    Header header = new Header(rs.getObject("id", UUID.class), rs.getString("number"),
+                            rs.getObject("client_account_id", UUID.class), rs.getString("priority"));
+                    headers.put(header.id(), header);
+                    return null;
+                }, args.toArray());
+        return Map.copyOf(headers);
     }
 
     @Override

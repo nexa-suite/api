@@ -1,0 +1,173 @@
+# Provenance: accepted API v0.19 canonical SQL ownership specification; table inventory enumerated from published Flyway CREATE TABLE statements through V107.
+# Each table is listed explicitly. New migration tables require an ownership row before the fitness test passes.
+table	owner	evidence
+audit.event	BC11	V36__create_business_commerce_foundations.sql:352 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+business_documents.business_document	BC09	V42__create_business_documents_storage_and_canonical_outbox.sql:56 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+business_documents.document_generation_request	BC09	V42__create_business_documents_storage_and_canonical_outbox.sql:99 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+business_documents.evidence_object	BC09	V42__create_business_documents_storage_and_canonical_outbox.sql:128 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+business_documents.object_storage_object	BC09	V42__create_business_documents_storage_and_canonical_outbox.sql:43 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.brand	BC03	V30__create_catalog_management.sql:28 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.category	BC03	V30__create_catalog_management.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.command_idempotency	SHARED_TECHNICAL	V32__create_catalog_command_idempotency.sql:1 CREATE TABLE; explicit shared technical idempotency table.
+catalog_management.customer_terms	BC03	V107__add_canonical_price_lists_and_customer_terms.sql:46 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.price_list	BC03	V107__add_canonical_price_lists_and_customer_terms.sql:3 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.price_list_item	BC03	V107__add_canonical_price_lists_and_customer_terms.sql:26 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.product	BC03	V30__create_catalog_management.sql:48 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.product_asset_reference	BC03	V30__create_catalog_management.sql:99 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.product_family	BC03	V40__introduce_product_families_and_sellable_skus.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.product_presentation	BC03	V30__create_catalog_management.sql:82 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.product_price	BC03	V30__create_catalog_management.sql:132 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.product_variant	BC03	V65__introduce_canonical_product_variants.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.product_visibility	BC03	V30__create_catalog_management.sql:117 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.promotion	BC03	V30__create_catalog_management.sql:165 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.promotion_category	BC03	V30__create_catalog_management.sql:215 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.promotion_client_account	BC03	V30__create_catalog_management.sql:229 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.promotion_product	BC03	V30__create_catalog_management.sql:201 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.promotion_rule	BC03	V30__create_catalog_management.sql:243 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.promotion_sku	BC03	V40__introduce_product_families_and_sellable_skus.sql:114 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.seed_import_history	BC03	V34__create_catalog_seed_import_history.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.sellable_sku	BC03	V40__introduce_product_families_and_sellable_skus.sql:32 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+catalog_management.sku_price	BC03	V40__introduce_product_families_and_sellable_skus.sql:83 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.access_context_selection_ticket	BC01	V101__create_access_context_selection_ticket.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.authentication_failure	BC01	V7__create_authentication_throttle.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.password_credential	BC01	V3__create_iam_identity_tables.sql:15 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.password_reset_request	BC01	V24__create_password_reset_and_security_audit.sql:7 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.password_reset_throttle_bucket	BC01	V26__close_iam_security_boundaries.sql:14 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.public_contact_request	BC01	V70__create_public_contact_request_intake.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.public_contact_throttle_bucket	BC01	V70__create_public_contact_request_intake.sql:24 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.refresh_session	BC01	V5__create_refresh_session_tables.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.security_audit_event	BC01	V24__create_password_reset_and_security_audit.sql:23 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.security_notification_outbox	BC01	V26__close_iam_security_boundaries.sql:27 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.system_operator_throttle_bucket	BC01	V28__persist_system_operator_throttle.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.user_account	BC01	V3__create_iam_identity_tables.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+iam.workspace_preview_throttle_bucket	BC01	V44__harden_authorization_rls_and_preview_throttle.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+integration.change_event	SHARED_TECHNICAL	V14__create_secure_change_feed.sql:3 CREATE TABLE; explicit shared technical integration-event table.
+integration.inbox_event	SHARED_TECHNICAL	V42__create_business_documents_storage_and_canonical_outbox.sql:30 CREATE TABLE; explicit shared technical integration-event table.
+integration.outbox_event	SHARED_TECHNICAL	V42__create_business_documents_storage_and_canonical_outbox.sql:4 CREATE TABLE; explicit shared technical integration-event table.
+logistics.buyer_receipt_fact	BC06	V93__mobile_v1_core_contracts.sql:102 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.command_idempotency	SHARED_TECHNICAL	V18__create_logistics_dispatch.sql:72 CREATE TABLE; explicit shared technical idempotency table.
+logistics.continuation_delivery	BC06	V79__add_delivery_attempts_and_continuations.sql:54 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.continuation_delivery_line	BC06	V79__add_delivery_attempts_and_continuations.sql:77 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery	BC06	V91__fulfillment_financial_completion.sql:448 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_assignment	BC06	V91__fulfillment_financial_completion.sql:541 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_attempt	BC06	V79__add_delivery_attempts_and_continuations.sql:15 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_attempt_line	BC06	V79__add_delivery_attempts_and_continuations.sql:37 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_command_idempotency	SHARED_TECHNICAL	V91__fulfillment_financial_completion.sql:475 CREATE TABLE; explicit shared technical idempotency table.
+logistics.delivery_event	BC06	V91__fulfillment_financial_completion.sql:595 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_handoff_token	BC06	V93__mobile_v1_core_contracts.sql:44 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_incident	BC06	V19__create_logistics_tracking_and_evidence.sql:36 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_quantity_outcome	BC06	V91__fulfillment_financial_completion.sql:559 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.dispatch_event	BC06	V18__create_logistics_dispatch.sql:56 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.dispatch_number_counter	BC06	V18__create_logistics_dispatch.sql:3 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.dispatch_order	BC06	V18__create_logistics_dispatch.sql:14 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.fulfillment	BC06	V91__fulfillment_financial_completion.sql:173 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.fulfillment_command_idempotency	SHARED_TECHNICAL	V91__fulfillment_financial_completion.sql:250 CREATE TABLE; explicit shared technical idempotency table.
+logistics.fulfillment_event	BC06	V91__fulfillment_financial_completion.sql:273 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.fulfillment_line	BC06	V91__fulfillment_financial_completion.sql:204 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.operational_handoff_note	BC06	V36__create_business_commerce_foundations.sql:308 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.picking_discrepancy	BC06	V91__fulfillment_financial_completion.sql:333 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.picking_discrepancy_resolution	BC06	V91__fulfillment_financial_completion.sql:362 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.picking_result	BC06	V91__fulfillment_financial_completion.sql:290 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.picking_result_line	BC06	V91__fulfillment_financial_completion.sql:314 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.proof_of_delivery	BC06	V19__create_logistics_tracking_and_evidence.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.proof_of_delivery_addendum	BC06	V91__fulfillment_financial_completion.sql:688 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.temperature_evidence	BC06	V91__fulfillment_financial_completion.sql:610 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.temperature_excursion	BC06	V91__fulfillment_financial_completion.sql:635 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.temperature_reading	BC06	V19__create_logistics_tracking_and_evidence.sql:19 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+notifications.inbox_item	BC10	V36__create_business_commerce_foundations.sql:331 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+notifications.push_delivery_attempt	BC10	V94__native_push_subscription_foundation.sql:50 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+notifications.push_delivery_claim	BC10	V100__mobile_v1_push_delivery_claim_fencing.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+notifications.push_subscription	BC10	V94__native_push_subscription_foundation.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+notifications.push_subscription_command_idempotency	SHARED_TECHNICAL	V94__native_push_subscription_foundation.sql:34 CREATE TABLE; explicit shared technical idempotency table.
+payments.credit_account	BC07	V43__create_receivables_credit_and_payments.sql:3 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.credit_reservation	BC07	V43__create_receivables_credit_and_payments.sql:135 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.financial_adjustment	BC07	V91__fulfillment_financial_completion.sql:870 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.financial_ledger_entry	BC07	V91__fulfillment_financial_completion.sql:917 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.payment	BC08	V43__create_receivables_credit_and_payments.sql:58 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+payments.payment_attempt	BC08	V43__create_receivables_credit_and_payments.sql:102 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+payments.payment_event	BC08	V43__create_receivables_credit_and_payments.sql:178 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+payments.payment_reconciliation_case	BC08	V78__add_payment_reconciliation_cases.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+payments.receivable	BC07	V43__create_receivables_credit_and_payments.sql:27 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.receivable_allocation	BC07	V43__create_receivables_credit_and_payments.sql:119 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.receivable_application	BC07	V91__fulfillment_financial_completion.sql:973 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.reconciliation_refund_idempotency	SHARED_TECHNICAL	V88__durable_reconciliation_retry_idempotency.sql:3 CREATE TABLE; explicit shared technical idempotency table.
+payments.refund_credit_obligation	BC07	V91__fulfillment_financial_completion.sql:942 CREATE TABLE; explicit Credit & Receivables ownership exception.
+payments.stripe_event_inbox	BC08	V43__create_receivables_credit_and_payments.sql:158 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+reference_data.department	GLOBAL_REFERENCE	V36__create_business_commerce_foundations.sql:165 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+reference_data.district	GLOBAL_REFERENCE	V36__create_business_commerce_foundations.sql:180 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+reference_data.province	GLOBAL_REFERENCE	V36__create_business_commerce_foundations.sql:172 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+reference_data.road_type	GLOBAL_REFERENCE	V36__create_business_commerce_foundations.sql:189 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.client_account	BC02	V10__create_sales_client_accounts.sql:3 CREATE TABLE; explicit Customer & Buyer Relationships ownership exception.
+sales.client_account_address	BC02	V36__create_business_commerce_foundations.sql:200 CREATE TABLE; explicit Customer & Buyer Relationships ownership exception.
+sales.client_account_membership	BC02	V10__create_sales_client_accounts.sql:29 CREATE TABLE; explicit Customer & Buyer Relationships ownership exception.
+sales.commercial_commitment	BC04	V75__create_v1_commercial_commitments.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.commercial_commitment_line	BC04	V75__create_v1_commercial_commitments.sql:37 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.idempotency_record	SHARED_TECHNICAL	V11__create_purchase_requests.sql:58 CREATE TABLE; explicit shared technical idempotency table.
+sales.idempotency_response	SHARED_TECHNICAL	V90__close_v014_idempotency_upgrade_gaps.sql:11 CREATE TABLE; explicit shared technical idempotency table.
+sales.manual_order_idempotency	SHARED_TECHNICAL	V36__create_business_commerce_foundations.sql:258 CREATE TABLE; explicit shared technical idempotency table.
+sales.manual_sales_order_draft	BC04	V55__create_manual_sales_order_drafts.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.manual_sales_order_draft_idempotency	SHARED_TECHNICAL	V55__create_manual_sales_order_drafts.sql:88 CREATE TABLE; explicit shared technical idempotency table.
+sales.manual_sales_order_draft_line	BC04	V55__create_manual_sales_order_drafts.sql:51 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request	BC04	V11__create_purchase_requests.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_draft	BC04	V41__create_canonical_purchase_request_drafts.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_draft_destination	BC04	V41__create_canonical_purchase_request_drafts.sql:60 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_draft_idempotency	SHARED_TECHNICAL	V41__create_canonical_purchase_request_drafts.sql:107 CREATE TABLE; explicit shared technical idempotency table.
+sales.purchase_request_draft_line	BC04	V41__create_canonical_purchase_request_drafts.sql:32 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_draft_route	BC04	V41__create_canonical_purchase_request_drafts.sql:76 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_draft_warehouse_selection	BC04	V41__create_canonical_purchase_request_drafts.sql:91 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_event	BC04	V11__create_purchase_requests.sql:45 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_line	BC04	V11__create_purchase_requests.sql:27 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.purchase_request_material_change	BC04	V104__close_purchase_request_material_changes.sql:29 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.sales_order	BC04	V13__create_sales_orders.sql:11 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.sales_order_event	BC04	V13__create_sales_orders.sql:76 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.sales_order_line	BC04	V13__create_sales_orders.sql:59 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.sales_order_sequence	BC04	V13__create_sales_orders.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.custom_field_definition	BC01	V29__create_tenant_administration_configuration.sql:141 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.membership_admin_event	BC01	V9__create_membership_administration_events.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.membership_authorization_state	BC01	V36__create_business_commerce_foundations.sql:152 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.membership_role_assignment	BC01	V23__create_internal_membership_roles.sql:7 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.membership_role_definition	BC01	V36__create_business_commerce_foundations.sql:135 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.notification_preference	BC10	V29__create_tenant_administration_configuration.sql:109 CREATE TABLE; explicit Notifications ownership exception.
+tenant_management.operational_settings	BC01	V29__create_tenant_administration_configuration.sql:78 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.organization_invitation	BC01	V29__create_tenant_administration_configuration.sql:183 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.organization_invitation_idempotency	SHARED_TECHNICAL	V29__create_tenant_administration_configuration.sql:228 CREATE TABLE; explicit shared technical idempotency table.
+tenant_management.organization_invitation_role	BC01	V29__create_tenant_administration_configuration.sql:219 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.organization_registration	BC01	V25__create_organization_registration.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.organization_registration_draft_idempotency	SHARED_TECHNICAL	V86__create_organization_onboarding_drafts.sql:28 CREATE TABLE; explicit shared technical idempotency table.
+tenant_management.organization_settings	BC01	V29__create_tenant_administration_configuration.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.permission_definition	BC01	V36__create_business_commerce_foundations.sql:5 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.reference_plan_assignment	BC01	V29__create_tenant_administration_configuration.sql:168 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.regional_settings	BC01	V29__create_tenant_administration_configuration.sql:45 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.role_definition	BC01	V36__create_business_commerce_foundations.sql:77 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.role_permission	BC01	V36__create_business_commerce_foundations.sql:101 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.tenant	BC01	V4__create_tenant_workspace_tables.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.tenant_security_settings	BC01	V29__create_tenant_administration_configuration.sql:125 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.unit_preferences	BC01	V29__create_tenant_administration_configuration.sql:62 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.workspace	BC01	V4__create_tenant_workspace_tables.sql:11 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.workspace_creation_idempotency	SHARED_TECHNICAL	V29__create_tenant_administration_configuration.sql:240 CREATE TABLE; explicit shared technical idempotency table.
+tenant_management.workspace_membership	BC01	V4__create_tenant_workspace_tables.sql:25 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.workspace_settings	BC01	V29__create_tenant_administration_configuration.sql:15 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.command_idempotency	SHARED_TECHNICAL	V16__create_inventory_reservations.sql:31 CREATE TABLE; explicit shared technical idempotency table.
+warehouse.inventory_backing	BC05	V89__commercial_inventory_core.sql:158 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_backing_line	BC05	V89__commercial_inventory_core.sql:182 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_backing_position	BC05	V89__commercial_inventory_core.sql:206 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_event	BC05	V15__create_warehouse_inventory.sql:46 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_lot	BC05	V15__create_warehouse_inventory.sql:25 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_lot_disposition	BC05	V77__add_receiving_temperature_hold_and_disposition.sql:30 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_reservation	BC05	V16__create_inventory_reservations.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_reservation_allocation	BC05	V16__create_inventory_reservations.sql:18 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_reservation_line	BC05	V16__create_inventory_reservations.sql:10 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_temperature_evaluation	BC05	V77__add_receiving_temperature_hold_and_disposition.sql:9 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_transfer	BC05	V80__add_safety_stock_and_inventory_transfers.sql:31 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.inventory_transfer_history	BC05	V103__warehouse_transfer_lifecycle.sql:83 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.physical_allocation	BC05	V91__fulfillment_financial_completion.sql:51 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.physical_allocation_command_idempotency	SHARED_TECHNICAL	V91__fulfillment_financial_completion.sql:150 CREATE TABLE; explicit shared technical idempotency table.
+warehouse.physical_allocation_event	BC05	V91__fulfillment_financial_completion.sql:124 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.physical_allocation_line	BC05	V91__fulfillment_financial_completion.sql:89 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.reservation_shortage	BC05	V16__create_inventory_reservations.sql:26 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.safety_stock_policy	BC05	V80__add_safety_stock_and_inventory_transfers.sql:5 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.selection_snapshot	BC05	V36__create_business_commerce_foundations.sql:287 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.stock_movement	BC05	V15__create_warehouse_inventory.sql:36 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.storage_zone	BC05	V15__create_warehouse_inventory.sql:13 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.warehouse	BC05	V15__create_warehouse_inventory.sql:3 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+warehouse.warehouse_service_configuration	BC05	V36__create_business_commerce_foundations.sql:271 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.

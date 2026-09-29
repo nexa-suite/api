@@ -23,11 +23,13 @@ import java.util.UUID;
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class CatalogSkuPersistenceBootstrap {
     private final JdbcTemplate jdbc;
+    private final com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory;
     private final Map<String, CatalogFamilySkuMappingLoader.MappingItem> mappings;
     private final Map<String, CatalogVariantMappingLoader.MappingItem> variantMappings;
 
     public CatalogSkuPersistenceBootstrap(JdbcTemplate jdbc, CatalogFamilySkuMappingLoader mappingLoader,
-            CatalogVariantMappingLoader variantMappingLoader) {
+            CatalogVariantMappingLoader variantMappingLoader, com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory) {
+        this.workspaceDirectory = workspaceDirectory;
         this.jdbc = jdbc;
         this.mappings = mappingLoader.byLegacyCatalogItemId();
         this.variantMappings = variantMappingLoader.byLegacyCatalogItemId();
@@ -38,22 +40,33 @@ public class CatalogSkuPersistenceBootstrap {
     @Transactional
     public void reconcile() {
         Instant now = Instant.now();
-        List<Workspace> workspaces;
+        UUID cursorTenant = null, cursorWorkspace = null;
         try {
-            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
-            workspaces = jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
-                    (rs, row) -> new Workspace(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
-        } finally {
-            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', '', true)", String.class);
-        }
-        try {
-            for (Workspace workspace : workspaces) {
+            while (true) {
+                var scopes = workspacePage(cursorTenant, cursorWorkspace);
+                if (scopes.isEmpty()) break;
+                for (var scope : scopes) {
+                    Workspace workspace = new Workspace(scope.tenantId(), scope.workspaceId());
                 setTransactionScope(workspace);
                 jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.catalog_item_id,p.description,p.category_id,p.brand_id,p.storage_temperature,p.status,p.version,p.created_at,p.updated_at,pp.unit_of_measure,coalesce(pv.buyer_visible,true) visible from catalog_management.product p left join catalog_management.product_presentation pp on pp.product_id=p.id and pp.tenant_id=p.tenant_id and pp.workspace_id=p.workspace_id left join catalog_management.product_visibility pv on pv.product_id=p.id and pv.tenant_id=p.tenant_id and pv.workspace_id=p.workspace_id where p.tenant_id=? and p.workspace_id=? order by p.id",
                         (rs, row) -> { reconcileProduct(rs, now); return null; }, workspace.tenantId(), workspace.workspaceId());
             }
+                var last = scopes.getLast();
+                cursorTenant = last.tenantId(); cursorWorkspace = last.workspaceId();
+                if (scopes.size() < 100) break;
+            }
         } finally {
             clearTransactionScope();
+        }
+    }
+
+    private List<com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory.Scope> workspacePage(UUID tenant, UUID workspace) {
+        try {
+            com.nexa.api.shared.context.RlsRequestScope.enableCrossScopeWorkspaceScan();
+            return workspaceDirectory.scanAfter(tenant, workspace, 100);
+        } finally {
+            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', '', true)", String.class);
+            com.nexa.api.shared.context.RlsRequestScope.clear();
         }
     }
 

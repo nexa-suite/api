@@ -58,7 +58,7 @@ public final class RefreshSessionService implements RefreshSessionUseCase {
 				.orElseThrow(InvalidRefreshTokenException::new);
 		AuthenticationSubject subject = new AuthenticationSubject(current.subject().userAccountId(), current.subject().email(),
 				current.subject().surface(), policy);
-		var replacementSessionId = com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId.random();
+		var replacementSessionId = com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId.random();
 		IssuedAuthenticationTokens tokens = tokenIssuer.issue(subject, now, replacementSessionId);
 		var replacementSession = com.nexa.api.tenantaccessgovernance.iam.domain.model.session.AuthenticationSession.start(replacementSessionId,
 				current.session().userAccountId(), current.session().surface(), current.session().refreshTokenFamilyId(),

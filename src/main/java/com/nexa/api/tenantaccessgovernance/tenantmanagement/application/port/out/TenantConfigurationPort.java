@@ -2,7 +2,6 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.ou
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.TenantConfigurationModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.NotificationPreference;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationProfile;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.ReferencePlanAssignment;
@@ -25,9 +24,11 @@ public interface TenantConfigurationPort {
 	int updateOperationalSettings(String workspaceId, OperationalSettings settings);
 	Optional<TenantConfigurationModels.WorkspaceSettingsView> findWorkspaceSettings(String workspaceId);
 	int updateWorkspaceSettings(String workspaceId, String defaultBehavior, String warehouseStrategy, long expectedVersion);
-	List<NotificationPreference> findNotificationPreferences(String workspaceId);
+	List<TenantConfigurationModels.NotificationPreferenceView> findNotificationPreferences(String workspaceId);
+	TenantConfigurationModels.NotificationPreferenceView validateNotificationPreference(
+			TenantConfigurationModels.NotificationPreferenceView preference);
 	long notificationVersion(String workspaceId);
-	int updateNotificationPreference(String workspaceId, NotificationPreference preference);
+	int updateNotificationPreference(String workspaceId, TenantConfigurationModels.NotificationPreferenceView preference);
 	Optional<TenantSecuritySettings> findTenantSecuritySettings(String tenantId);
 	int updateTenantSecuritySettings(String tenantId, TenantSecuritySettings settings);
 	List<TenantConfigurationModels.CustomFieldView> findCustomFields(String tenantId, String workspaceId, String scope, boolean includeInactive);

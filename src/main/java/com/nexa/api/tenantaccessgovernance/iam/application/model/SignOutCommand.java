@@ -1,8 +1,8 @@
 package com.nexa.api.tenantaccessgovernance.iam.application.model;
 
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 
 public record SignOutCommand(String accessToken, SessionId sessionId, UserAccountId userId, ClientSurface surface) {
 	public SignOutCommand(String accessToken) {

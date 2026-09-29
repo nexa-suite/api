@@ -1,14 +1,14 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.InvitationPersistencePort;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.InvitationExpiry;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.InvitationStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.InvitationTokenHash;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.OrganizationInvitation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.shared.context.RlsRequestScope;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

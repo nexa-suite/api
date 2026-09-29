@@ -1,6 +1,8 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
@@ -31,10 +33,11 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
     public WarehouseConfigurationPersistenceAdapter(
             JdbcTemplate jdbc,
             ChangeEventPersistencePort changeFeed,
-            CatalogItemSnapshotLookupPort catalog,
+            SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
-            WarehouseOperationalSettingsPort operationalSettings) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings);
+            WarehouseOperationalSettingsPort operationalSettings,
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
     }
 
     @Transactional(readOnly = true)
@@ -146,7 +149,7 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
 
     @Transactional(readOnly = true)
     public List<WarehouseOperationsService.BuyerWarehouse> buyerWarehouses(CurrentAccessContext context) {
-        context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.TRACKING_BUYER_READ);
+        context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.TRACKING_BUYER_READ);
         WarehouseOperationalSettingsPort.Snapshot currentSettings = settings(context);
         List<WarehouseOperationsService.WarehouseSummary> summaries = jdbc.query(
                 "select id,code,name,address,status,version from warehouse.warehouse where tenant_id=? and workspace_id=? "
@@ -218,8 +221,8 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
                 .stream().findFirst().orElseThrow(() -> error("STORAGE_ZONE_NOT_FOUND", true));
     }
 
-    private void requireRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_READ); }
-    private void requireWrite(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission.WAREHOUSE_WRITE); }
+    private void requireRead(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_READ); }
+    private void requireWrite(CurrentAccessContext context) { context.requirePermission(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_WRITE); }
 
     private static void validateCoordinates(BigDecimal latitude, BigDecimal longitude) {
         if ((latitude == null) != (longitude == null)

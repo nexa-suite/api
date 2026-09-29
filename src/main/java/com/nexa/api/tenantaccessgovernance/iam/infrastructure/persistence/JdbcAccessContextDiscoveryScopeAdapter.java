@@ -1,7 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.AccessContextDiscoveryScopePort;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.useraccount.UserAccountId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;

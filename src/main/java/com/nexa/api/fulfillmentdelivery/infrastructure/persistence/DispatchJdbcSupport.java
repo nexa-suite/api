@@ -12,8 +12,11 @@ import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchStatus;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.InventoryReservationId;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.SalesOrderId;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.TransportAssignment;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountDetails;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
@@ -27,6 +30,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -42,19 +46,27 @@ abstract class DispatchJdbcSupport {
     protected final ChangeEventPersistencePort changeFeed;
     protected final WarehouseLogisticsFulfillmentPort warehouseFulfillment;
     protected final OperationalHandoffNotificationPort handoffNotifications;
+    protected final SalesOrderFulfillmentQuery salesOrders;
+    private final CustomerAccountQuery customerAccounts;
 
     protected DispatchJdbcSupport(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                   WarehouseLogisticsFulfillmentPort warehouseFulfillment,
-                                  OperationalHandoffNotificationPort handoffNotifications) {
+                                  OperationalHandoffNotificationPort handoffNotifications,
+                                  SalesOrderFulfillmentQuery salesOrders,
+                                  CustomerAccountQuery customerAccounts) {
         this.jdbc = jdbc;
         this.changeFeed = changeFeed;
         this.warehouseFulfillment = warehouseFulfillment;
         this.handoffNotifications = handoffNotifications;
+        this.salesOrders = salesOrders;
+        this.customerAccounts = customerAccounts;
     }
 
     protected DispatchJdbcSupport(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
-                                  WarehouseLogisticsFulfillmentPort warehouseFulfillment) {
-        this(jdbc, changeFeed, warehouseFulfillment, notification -> { });
+                                  WarehouseLogisticsFulfillmentPort warehouseFulfillment,
+                                  SalesOrderFulfillmentQuery salesOrders,
+                                  CustomerAccountQuery customerAccounts) {
+        this(jdbc, changeFeed, warehouseFulfillment, notification -> { }, salesOrders, customerAccounts);
     }
 
     protected DispatchRow locked(UUID tenant, UUID workspace, UUID id, UUID client) {
@@ -69,7 +81,9 @@ abstract class DispatchJdbcSupport {
             args.add(client);
         }
         if (lock) sql += " for update of d";
-        return jdbc.query(sql, rs -> rs.next() ? read(rs) : null, args.toArray());
+        DispatchRow row = jdbc.query(sql, rs -> rs.next() ? read(rs) : null, args.toArray());
+        if (row == null) return null;
+        return withSalesOrderHeaders(tenant, workspace, List.of(row)).getFirst();
     }
 
     protected LogisticsOperationsService.DispatchView detailView(String tenantId, String workspaceId,
@@ -86,9 +100,8 @@ abstract class DispatchJdbcSupport {
                 "d.delivery_area_snapshot,d.priority,d.delivery_window_start,d.delivery_window_end,d.eta," +
                 "d.responsible_membership_id,d.responsible_display_name_snapshot,d.vehicle_reference,d.route_name," +
                 "d.temperature_min,d.temperature_max,d.temperature_unit,d.temperature_status,d.version,d.updated_at," +
-                "p.id,p.status,o.number,a.id,a.attempt_number,a.status,a.failure_reason,a.occurred_at,c.id,c.status," +
+                "p.id,p.status,null::text,a.id,a.attempt_number,a.status,a.failure_reason,a.occurred_at,c.id,c.status," +
                 "d.tenant_id,d.workspace_id from logistics.dispatch_order d " +
-                "join sales.sales_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.sales_order_id " +
                 "left join logistics.proof_of_delivery p on p.tenant_id=d.tenant_id and p.workspace_id=d.workspace_id " +
                 "and p.dispatch_order_id=d.id " +
                 "left join lateral (select da.id,da.attempt_number,da.status,da.failure_reason,da.occurred_at " +
@@ -97,6 +110,17 @@ abstract class DispatchJdbcSupport {
                 "left join lateral (select cd.id,cd.status from logistics.continuation_delivery cd " +
                 "where cd.tenant_id=d.tenant_id and cd.workspace_id=d.workspace_id and cd.source_delivery_id=d.id " +
                 "order by cd.created_at desc,cd.id desc limit 1) c on true";
+    }
+
+    protected List<DispatchRow> withSalesOrderHeaders(UUID tenant, UUID workspace, List<DispatchRow> rows) {
+        if (rows.isEmpty()) return List.of();
+        List<UUID> salesOrderIds = rows.stream().map(DispatchRow::salesOrderId).distinct().toList();
+        Map<UUID, SalesOrderFulfillmentQuery.Header> headers = salesOrders.findHeaders(tenant, workspace,
+                salesOrderIds);
+        return rows.stream().map(row -> {
+            SalesOrderFulfillmentQuery.Header header = headers.get(row.salesOrderId());
+            return row.withSalesOrderNumber(header == null ? null : header.number());
+        }).toList();
     }
 
     protected DispatchRow read(ResultSet rs) throws java.sql.SQLException {
@@ -243,12 +267,15 @@ abstract class DispatchJdbcSupport {
     }
 
     protected BusinessCard businessCard(UUID tenant, UUID workspace, UUID salesOrderId, String destination) {
-        return jdbc.query("select c.code,coalesce(nullif(c.commercial_name,''),c.business_name),o.priority " +
-                        "from sales.sales_order o join sales.client_account c on c.tenant_id=o.tenant_id " +
-                        "and c.workspace_id=o.workspace_id and c.id=o.client_account_id " +
-                        "where o.tenant_id=? and o.workspace_id=? and o.id=?",
-                rs -> rs.next() ? new BusinessCard(rs.getString(1), rs.getString(2), rs.getString(3), destination) :
-                        new BusinessCard(null, null, "NORMAL", destination), tenant, workspace, salesOrderId);
+        SalesOrderFulfillmentQuery.Header order = salesOrders.findHeaders(tenant, workspace,
+                List.of(salesOrderId)).get(salesOrderId);
+        if (order == null) return new BusinessCard(null, null, "NORMAL", destination);
+        CustomerAccountDetails account = customerAccounts.findHistoricalDetails(tenant.toString(), workspace.toString(),
+                order.clientAccountId().toString()).orElse(null);
+        if (account == null) return new BusinessCard(null, null, "NORMAL", destination);
+        String name = account.commercialName() == null || account.commercialName().isEmpty()
+                ? account.businessName() : account.commercialName();
+        return new BusinessCard(account.code(), name, order.priority(), destination);
     }
 
     protected long nextDispatchNumber(UUID tenant, UUID workspace, int year) {
@@ -334,7 +361,16 @@ abstract class DispatchJdbcSupport {
                                  String podStatus, String salesOrderNumber, String lastAttemptId, int lastAttemptNumber,
                                  String lastAttemptStatus, String lastAttemptFailureReason, Instant lastAttemptOccurredAt,
                                  String continuationDeliveryId, String continuationDeliveryStatus, UUID tenantId,
-                                 UUID workspaceId) { }
+                                 UUID workspaceId) {
+        protected DispatchRow withSalesOrderNumber(String number) {
+            return new DispatchRow(id, dispatchNumber, reservationId, salesOrderId, clientAccountId, status,
+                    destination, clientCode, clientName, deliveryArea, priority, windowStart, windowEnd, eta,
+                    responsibleMembershipId, responsibleDisplayName, vehicleReference, routeName, temperatureMin,
+                    temperatureMax, temperatureUnit, temperatureStatus, version, updatedAt, podId, podStatus,
+                    number, lastAttemptId, lastAttemptNumber, lastAttemptStatus, lastAttemptFailureReason,
+                    lastAttemptOccurredAt, continuationDeliveryId, continuationDeliveryStatus, tenantId, workspaceId);
+        }
+    }
 
     protected record Idem(String resource, String hash) { }
 }

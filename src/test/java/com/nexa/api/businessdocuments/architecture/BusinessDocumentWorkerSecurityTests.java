@@ -24,7 +24,8 @@ class BusinessDocumentWorkerSecurityTests {
                 "recoverStaleGenerationRequests", "lease_until is null or lease_until <= current_timestamp");
         assertThat(source).contains("where tenant_id=? and workspace_id=? and id=? and lifecycle_status='SCANNING'");
         assertThat(source).contains("set lifecycle_status='DELETED',claim_token=null,lease_until=null,upload_claim_token=null,upload_lease_until=null");
-        assertThat(source).contains("select tenant_id,id as workspace_id from tenant_management.workspace", "RlsRequestScope.current()");
+        assertThat(source).contains("workspaces.scanAfter(afterTenantId, afterWorkspaceId, 100)", "RlsRequestScope.current()",
+                "RlsRequestScope.enableCrossScopeWorkspaceScan()", "RlsRequestScope.clearCrossScopeWorkspaceScan()");
         assertThat(source).doesNotContain("private EvidenceRow loadEvidenceRow(UUID evidenceId)");
     }
 
@@ -44,10 +45,14 @@ class BusinessDocumentWorkerSecurityTests {
         String support = Files.readString(WAREHOUSE_SUPPORT);
         String entrypoint = Files.readString(EXPIRY_ENTRYPOINT);
 
-        assertThat(adapter).contains("select tenant_id,id from tenant_management.workspace", "RlsRequestScope.set", "RlsRequestScope.clear");
+        assertThat(adapter).contains("workspaces.scanAfter(", "RlsRequestScope.set", "RlsRequestScope.clear",
+                "RlsRequestScope.enableCrossScopeWorkspaceScan()", "RlsRequestScope.clearCrossScopeWorkspaceScan()");
         assertThat(adapter).contains("where tenant_id=? and workspace_id=? and status='RESERVED'", "transactionTemplate.executeWithoutResult");
         assertThat(adapter).doesNotContain("limit 100 for update skip locked");
         assertThat(support).contains("PROPAGATION_REQUIRES_NEW");
+        assertThat(Files.readString(Path.of("src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceDirectory.java")))
+                .contains("select tenant_id,id from tenant_management.workspace", "(tenant_id,id) > (?,?)",
+                        "order by tenant_id,id limit ?", "Propagation.MANDATORY", "crossScopeWorkspaceScanEnabled()");
         assertThat(entrypoint).doesNotContain("@Transactional");
     }
 }

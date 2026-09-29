@@ -1,5 +1,7 @@
 package com.nexa.api.salescommitment.domain.model.salesorder;
 
+import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
+
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

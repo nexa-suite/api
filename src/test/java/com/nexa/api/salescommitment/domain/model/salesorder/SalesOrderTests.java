@@ -1,10 +1,12 @@
 package com.nexa.api.salescommitment.domain.model.salesorder;
 
+import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
+
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

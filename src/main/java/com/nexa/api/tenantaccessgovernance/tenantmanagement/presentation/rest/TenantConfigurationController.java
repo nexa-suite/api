@@ -4,9 +4,9 @@ import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.TenantConfigurationModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.TenantConfigurationUseCase;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionPolicy;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,7 +30,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
-import static com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -178,8 +178,8 @@ public final class TenantConfigurationController {
 	}
 
 	private static long version(String value) {
-		if (value == null || value.isBlank()) throw new PreconditionRequiredException();
-		try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new PreconditionRequiredException(); }
+		if (value == null || value.isBlank()) throw new OrganizationPreconditionRequiredException();
+		try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new OrganizationPreconditionRequiredException(); }
 	}
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }

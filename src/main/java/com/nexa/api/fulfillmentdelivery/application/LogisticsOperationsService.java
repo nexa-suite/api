@@ -7,10 +7,10 @@ import com.nexa.api.fulfillmentdelivery.application.service.StartDispatchRouteSe
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -177,5 +177,7 @@ public class LogisticsOperationsService {
         }
         return value;
     }
-    public static final class LogisticsException extends RuntimeException { private final String code; private final boolean notFound; public LogisticsException(String code, boolean notFound) { super(code); this.code = code; this.notFound = notFound; } public String code() { return code; } public boolean notFound() { return notFound; } }
+    public static final class LogisticsException extends com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperationException {
+        public LogisticsException(String code, boolean notFound) { super(code, notFound); }
+    }
 }

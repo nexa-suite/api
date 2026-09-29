@@ -35,4 +35,32 @@ class PaymentRuntimeConfigurationValidatorTests {
 
         new PaymentRuntimeConfigurationValidator(environment);
     }
+
+    @Test
+    void rejectsCustomStripeApiBaseOutsideLocalAndTest() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setProperty("nexa.payments.api-base-url", "https://stripe-proxy.example.net");
+
+        assertThatThrownBy(() -> new PaymentRuntimeConfigurationValidator(environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("nexa.payments.api-base-url must be unset outside local/test");
+    }
+
+    @Test
+    void acceptsCustomStripeApiBaseInLocalProfile() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("local");
+        environment.setProperty("nexa.payments.api-base-url", "http://localhost:12111");
+
+        new PaymentRuntimeConfigurationValidator(environment);
+    }
+
+    @Test
+    void acceptsCustomStripeApiBaseInTestProfile() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("test");
+        environment.setProperty("nexa.payments.api-base-url", "http://localhost:12111");
+
+        new PaymentRuntimeConfigurationValidator(environment);
+    }
 }

@@ -4,8 +4,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exceptio
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.RoleDefinitionPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.RoleDefinitionId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;

@@ -33,7 +33,8 @@ class CatalogApplicationPurityTests {
 
 	private String read(Path path) {
 		try {
-			return Files.readString(path);
+			return Files.readString(path)
+                                .replaceAll("@org\\.springframework\\.modulith\\.NamedInterface\\([^)]*\\)", "");
 		} catch (IOException exception) {
 			throw new IllegalStateException(exception);
 		}

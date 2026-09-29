@@ -3,8 +3,8 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest;
 import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.*;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.OrganizationAdministrationUseCase;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ConcurrencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.workspace.WorkspaceStatus;
 import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -85,7 +85,7 @@ public class OrganizationAdministrationController {
 	@PostMapping("/workspace-memberships/{membershipId}/reactivations")
 	public ResponseEntity<WorkspaceMembershipSummary> reactivate(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,@PathVariable String membershipId,@RequestHeader(name="If-Match",required=false) String ifMatch,HttpServletRequest request) { var result=administration.reactivateMembership(context,membershipId,version(ifMatch),correlation(request)); return ResponseEntity.ok().eTag(etag(result.value().version())).body(result.value()); }
 
-	private static long version(String value) { if (value == null || value.isBlank()) throw new PreconditionRequiredException(); try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new PreconditionRequiredException(); } }
+	private static long version(String value) { if (value == null || value.isBlank()) throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException(); try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException(); } }
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value=request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
 	public record WorkspaceCreate(String name, String slug) { }
@@ -99,5 +99,4 @@ public class OrganizationAdministrationController {
 		}
 	}
 	public record OrganizationResponse(String id,String name,String slug,String status,String currentWorkspaceId,String currentWorkspaceName,long version) { static OrganizationResponse from(OrganizationSummary value){ return new OrganizationResponse(value.id(),value.name(),value.slug(),value.status(),value.currentWorkspaceId(),value.currentWorkspaceName(),value.version()); } }
-	public static final class PreconditionRequiredException extends RuntimeException { }
 }
