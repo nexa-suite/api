@@ -52,6 +52,16 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
         assertThat(document.get("paths").has("/api/v1/skus/resolve")).isTrue();
         assertThat(document.get("paths").has("/api/v1/inventory/lots/resolve")).isTrue();
+        assertThat(document.at("/paths/~1api~1v1~1dispatch-readiness/get/operationId").asText())
+                .isEqualTo("listDispatchReadiness");
+        assertThat(document.at("/paths/~1api~1v1~1dispatch-readiness~1{fulfillmentId}/get/operationId").asText())
+                .isEqualTo("getDispatchReadiness");
+        assertThat(document.get("paths").get("/api/v1/dispatch-readiness").get("get")
+                .get("responses").get("200").get("content").get("*/*").get("schema").get("$ref").asText())
+                .isEqualTo("#/components/schemas/DispatchReadinessPage");
+        assertThat(document.get("paths").get("/api/v1/dispatch-readiness/{fulfillmentId}").get("get")
+                .get("responses").get("200").get("content").get("*/*").get("schema").get("$ref").asText())
+                .isEqualTo("#/components/schemas/DispatchReadiness");
         assertThat(document.get("paths").has("/api/v1/inventory/physical-allocation-scan-validations")).isTrue();
         assertThat(document.at("/paths/~1api~1v1~1warehouses~1{warehouseId}~1access-grants/get/operationId").asText())
                 .isEqualTo("listWarehouseAccessGrants");
