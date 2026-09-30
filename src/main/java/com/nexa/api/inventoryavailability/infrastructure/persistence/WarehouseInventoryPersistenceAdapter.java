@@ -6,6 +6,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfill
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseInventoryPersistencePort;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLot;
@@ -148,25 +149,34 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
 
     public WarehouseOperationsService.LotSummary adjust(CurrentAccessContext context, String lotId, BigDecimal quantity,
                                                          boolean inbound, String reason, long expected, String key, String correlation) {
-        return mutateStock(context, lotId, quantity, inbound ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT", reason, expected, key, correlation);
+        context.requirePermission(PermissionKey.INVENTORY_ADJUST);
+        return mutateStock(context, lotId, quantity, inbound ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT",
+                "adjustment", reason, expected, key, correlation);
     }
 
     public WarehouseOperationsService.LotSummary waste(CurrentAccessContext context, String lotId, BigDecimal quantity,
                                                         String reason, long expected, String key, String correlation) {
-        return mutateStock(context, lotId, quantity, "WASTE", reason, expected, key, correlation);
+        context.requirePermission(PermissionKey.INVENTORY_WASTE);
+        return mutateStock(context, lotId, quantity, "WASTE", "waste", reason, expected, key, correlation);
     }
 
     private WarehouseOperationsService.LotSummary mutateStock(CurrentAccessContext context, String lotId, BigDecimal quantity,
-                                                               String movementType, String reason, long expected, String key, String correlation) {
+                                                               String movementType, String operation, String reason, long expected,
+                                                               String key, String correlation) {
         requireWrite(context);
         requireIdempotency(key);
-        String operation = movementType.toLowerCase(java.util.Locale.ROOT);
         lockIdempotency(context, operation, key);
         if (quantity == null || quantity.signum() <= 0) throw error("INVALID_REQUEST", false);
         String normalizedReason = bounded(reason, "reason", 2000);
-        String hash = requestHash(operation, lotId, quantity, normalizedReason, expected);
+        String hash = operation.equals("adjustment")
+                ? requestHash(operation, movementType, lotId, quantity, normalizedReason, expected)
+                : requestHash(operation, lotId, quantity, normalizedReason, expected);
         IdempotencyRecord prior = idempotent(context, operation, key);
         if (prior != null) { requireSamePayload(prior, hash); return loadLot(context, uuid(prior.resourceId()), false); }
+        if (operation.equals("adjustment")) {
+            prior = legacyAdjustmentIdempotency(context, key, movementType, lotId, quantity, normalizedReason, expected);
+            if (prior != null) return loadLot(context, uuid(prior.resourceId()), false);
+        }
         UUID lotIdValue = uuid(lotId);
         WarehouseOperationsService.LotSummary lot = loadLot(context, lotIdValue, true);
         if (lot.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
@@ -198,10 +208,12 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     public WarehouseOperationsService.LotSummary quarantineLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) {
+        context.requirePermission(PermissionKey.INVENTORY_WASTE);
         return transitionLot(context, lotId, "QUARANTINED", "warehouse.lot.quarantined", reason, expected, key, correlation);
     }
 
     public WarehouseOperationsService.LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) {
+        context.requirePermission(PermissionKey.INVENTORY_RELEASE);
         return transitionLot(context, lotId, "AVAILABLE", "warehouse.lot.restored", reason, expected, key, correlation);
     }
 
@@ -211,15 +223,23 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         requireWrite(context);
         requireIdempotency(key);
         String normalized = enumValue(disposition, "disposition", "RELEASE", "HOLD", "WASTE", "RETURN_TO_SUPPLIER");
+        context.requirePermission(normalized.equals("RELEASE")
+                ? PermissionKey.INVENTORY_RELEASE : PermissionKey.INVENTORY_WASTE);
         String normalizedReason = bounded(reason, "reason", 2000);
-        String operation = "lot-disposition-" + normalized.toLowerCase(java.util.Locale.ROOT);
+        String operation = "lot-disposition";
         String hash = requestHash(operation, lotId, expected, normalized, normalizedReason);
         lockIdempotency(context, operation, key);
         IdempotencyRecord prior = idempotent(context, operation, key);
         if (prior != null) { requireSamePayload(prior, hash); return loadLot(context, uuid(prior.resourceId()), false); }
+        prior = legacyDispositionIdempotency(context, key, normalized, lotId, expected, normalizedReason);
+        if (prior != null) return loadLot(context, uuid(prior.resourceId()), false);
         UUID id = uuid(lotId);
         WarehouseOperationsService.LotSummary lot = loadLot(context, id, true);
-        if (lot.version() != expected || lot.reserved().signum() > 0) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
+        if (lot.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
+        if (lot.reserved().signum() > 0) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
+        int openTemperatureEvaluations = jdbc.queryForObject(
+                "select count(*) from warehouse.inventory_temperature_evaluation where tenant_id=? and workspace_id=? and lot_id=? and status='OPEN'",
+                Integer.class, tenant(context), workspace(context), id);
         String nextStatus = switch (normalized) {
             case "RELEASE" -> "AVAILABLE";
             case "HOLD" -> "HOLD";
@@ -236,11 +256,41 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
             insertMovement(context, uuid(lot.warehouseId()), uuid(lot.zoneId()), id, lot.catalogItemId(), uuidNullable(lot.skuId()),
                     "WASTE", lot.onHand(), lot.unit(), lot.onHand(), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, normalizedReason, correlation, now());
         }
-        jdbc.update("update warehouse.inventory_temperature_evaluation set status='RESOLVED',disposition=?,resolution_reason=?,resolved_at=current_timestamp where tenant_id=? and workspace_id=? and lot_id=? and status='OPEN'",
+        int resolvedTemperatureEvaluations = jdbc.update("update warehouse.inventory_temperature_evaluation set status='RESOLVED',disposition=?,resolution_reason=?,resolved_at=current_timestamp where tenant_id=? and workspace_id=? and lot_id=? and status='OPEN'",
                 normalized, normalizedReason, tenant(context), workspace(context), id);
+        if (resolvedTemperatureEvaluations != openTemperatureEvaluations) throw error("INVALID_REQUEST", false);
         appendEvent(context, id, "warehouse.lot.disposition-recorded", "lot", nextStatus, now());
         saveIdempotency(context, operation, key, hash, id.toString());
         return loadLot(context, id, false);
+    }
+
+    private IdempotencyRecord legacyAdjustmentIdempotency(CurrentAccessContext context, String key,
+                                                            String movementType, String lotId, BigDecimal quantity,
+                                                            String reason, long expected) {
+        String requestedOperation = movementType.toLowerCase(java.util.Locale.ROOT);
+        for (String legacyOperation : List.of("adjustment_in", "adjustment_out")) {
+            IdempotencyRecord prior = idempotent(context, legacyOperation, key);
+            if (prior == null) continue;
+            if (!legacyOperation.equals(requestedOperation)) throw error("IDEMPOTENCY_PAYLOAD_CONFLICT", false);
+            requireSamePayload(prior, requestHash(legacyOperation, lotId, quantity, reason, expected));
+            return prior;
+        }
+        return null;
+    }
+
+    private IdempotencyRecord legacyDispositionIdempotency(CurrentAccessContext context, String key,
+                                                             String disposition, String lotId, long expected,
+                                                             String reason) {
+        String requestedOperation = "lot-disposition-" + disposition.toLowerCase(java.util.Locale.ROOT);
+        for (String legacyDisposition : List.of("RELEASE", "HOLD", "WASTE", "RETURN_TO_SUPPLIER")) {
+            String legacyOperation = "lot-disposition-" + legacyDisposition.toLowerCase(java.util.Locale.ROOT);
+            IdempotencyRecord prior = idempotent(context, legacyOperation, key);
+            if (prior == null) continue;
+            if (!legacyOperation.equals(requestedOperation)) throw error("IDEMPOTENCY_PAYLOAD_CONFLICT", false);
+            requireSamePayload(prior, requestHash(legacyOperation, lotId, expected, disposition, reason));
+            return prior;
+        }
+        return null;
     }
 
     private WarehouseOperationsService.LotSummary transitionLot(CurrentAccessContext context, String lotId, String nextStatus,

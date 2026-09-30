@@ -19,7 +19,7 @@ public class RegisterWaste {
     public WarehouseOperationsService.LotSummary execute(CurrentAccessContext context, String lotId, BigDecimal quantity,
                                                           String reason, long expectedVersion, String idempotencyKey,
                                                           String correlationId) {
-        WarehouseApplicationAuthorization.write(context);
+        WarehouseApplicationAuthorization.waste(context);
         return persistence.waste(context, lotId, quantity, reason, expectedVersion, idempotencyKey, correlationId);
     }
 }

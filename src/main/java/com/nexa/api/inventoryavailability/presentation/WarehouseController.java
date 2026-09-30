@@ -226,7 +226,11 @@ public final class WarehouseController {
 
     @PostMapping("/inventory/adjustments")
     public ResponseEntity<LotResponse> adjust(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = lot(service.adjust(c, r.lotId(), r.quantity(), r.direction() == null || r.direction().equalsIgnoreCase("IN"), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
+        String direction = r == null || r.direction() == null ? "" : r.direction().trim();
+        if (!direction.equalsIgnoreCase("IN") && !direction.equalsIgnoreCase("OUT")) {
+            throw new WarehouseOperationsService.WarehouseException("INVALID_REQUEST", false);
+        }
+        var result = lot(service.adjust(c, r.lotId(), r.quantity(), direction.equalsIgnoreCase("IN"), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
