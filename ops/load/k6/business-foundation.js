@@ -108,7 +108,7 @@ function login(user, label) {
   if (!body.accessToken) {
     throw new Error(`${label} login did not return an access token`);
   }
-  return { ...user, token: body.accessToken };
+  return { ...user, token: body.accessToken, membershipId: body.session.membershipId };
 }
 
 function futureDate() {
@@ -361,6 +361,22 @@ function createState(index) {
 }
 
 export function setup() {
+  // The load fixture grants seeded Warehouse objects through real administration.
+  // Runtime bootstrap deliberately does not assign default operational grants.
+  const owner = login(users.owner, 'grant-admin');
+  const warehouse = login(users.warehouse, 'grant-warehouse');
+  const logistics = login(users.logistics, 'grant-logistics');
+  const warehouseIds = (__ENV.NEXA_LOAD_WAREHOUSE_IDS || '').split(',').filter(Boolean);
+  if (warehouseIds.length === 0) throw new Error('Explicit load fixture Warehouse IDs are required');
+  for (const warehouseId of warehouseIds) {
+    for (const member of [warehouse, logistics]) {
+      expectStatus(http.post(
+        url(`/api/v1/warehouses/${warehouseId}/access-grants`),
+        JSON.stringify({ membershipId: member.membershipId }),
+        requestParams(owner, true),
+      ), 200, 'explicit fixture Warehouse grant');
+    }
+  }
   const states = [];
   for (let index = 0; index < businessVus; index += 1) {
     states.push(createState(index));

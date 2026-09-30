@@ -73,7 +73,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                     .andExpect(jsonPath("$.outcome").value("RESOLVED"))
                     .andExpect(jsonPath("$.candidateCount").value(1))
                     .andExpect(jsonPath("$.lotId").value(flow.lotId().toString()));
-            UUID duplicateLot = insertDuplicateBatchInAnotherWarehouse(flow, batchNumber);
+            UUID duplicateLot = insertDuplicateBatchInAnotherWarehouse(flow, batchNumber, otherGrantedWarehouse);
             try {
                 mockMvc.perform(get("/api/v1/inventory/lots/resolve").param("batchNumber", batchNumber)
                                 .header("Authorization", "Bearer " + warehouse))
@@ -497,6 +497,40 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 UUID.fromString(subscriptionId))).isEqualTo("UNREGISTERED");
     }
 
+    @Override
+    protected void ensureCommercialInventory() throws Exception {
+        super.ensureCommercialInventory();
+        // Commercial backing spans workspace warehouses. This matrix explicitly
+        // grants its operator every eligible fixture warehouse, then supplies a
+        // whole earliest-expiry lot in each to isolate single-line scan scenarios.
+        // The separate split-line test constructs and verifies fragmented picks.
+        var locations = jdbc.query("select distinct on (w.id) w.id,z.id from warehouse.warehouse w "
+                        + "join warehouse.storage_zone z on z.warehouse_id=w.id and z.tenant_id=w.tenant_id and z.workspace_id=w.workspace_id "
+                        + "left join warehouse.warehouse_service_configuration service on service.warehouse_id=w.id and service.tenant_id=w.tenant_id and service.workspace_id=w.workspace_id "
+                        + "where w.tenant_id=? and w.workspace_id=? and w.status='ACTIVE' and z.status='ACTIVE' "
+                        + "and z.zone_type<>'QUARANTINE' and coalesce(service.service_status,'OPERATIONAL')='OPERATIONAL' order by w.id,z.id",
+                (rs, row) -> new String[]{rs.getString(1), rs.getString(2)},
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        for (String[] location : locations) {
+            mockMvc.perform(post("/api/v1/warehouses/" + location[0] + "/access-grants")
+                            .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                    .andExpect(status().isOk());
+        }
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        for (String[] location : locations) {
+            mockMvc.perform(post("/api/v1/inventory/inbound-receipts")
+                            .header("Authorization", "Bearer " + warehouse).header("Idempotency-Key", "scan-fixture-" + uuid())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"warehouseId\":\"" + location[0] + "\",\"zoneId\":\"" + location[1]
+                                    + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"SCAN-" + uuid()
+                                    + "\",\"expirationDate\":\"" + java.time.LocalDate.now(java.time.ZoneOffset.UTC).plusDays(1)
+                                    + "\",\"quantity\":1000,\"unit\":\"UNIT\"}"))
+                    .andExpect(status().isCreated());
+        }
+    }
+
     private PhysicalFlow createPickingFlow(String warehouse, String sales, String key, String quantity) throws Exception {
         String orderBody = "{\"clientAccountId\":\"" + buyerClientAccountId()
                 + "\",\"priority\":\"NORMAL\",\"requestedDeliveryDate\":\"2099-12-31\","
@@ -543,6 +577,11 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
                 .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones")
+                        .header("Authorization", "Bearer " + accessToken(WAREHOUSE_EMAIL, "PLATFORM"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"Z-SCAN-" + suffix + "\",\"name\":\"Granted scan comparison zone\",\"type\":\"AMBIENT\"}"))
+                .andExpect(status().isCreated());
         return warehouseId;
     }
 
@@ -583,9 +622,9 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value(outcome));
     }
 
-    private UUID insertDuplicateBatchInAnotherWarehouse(PhysicalFlow flow, String batchNumber) {
-        UUID zoneId = jdbc.queryForObject("select id from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id<>? order by id limit 1",
-                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), flow.warehouseId());
+    private UUID insertDuplicateBatchInAnotherWarehouse(PhysicalFlow flow, String batchNumber, UUID otherWarehouseId) {
+        UUID zoneId = jdbc.queryForObject("select id from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? order by id limit 1",
+                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), otherWarehouseId);
         UUID id = UUID.randomUUID();
         assertThat(jdbc.update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,version,sku_id) "
                         + "select ?,l.tenant_id,l.workspace_id,z.warehouse_id,z.id,l.catalog_item_id,?,l.expiration_date,l.received_at,0,0,l.unit,'AVAILABLE',l.temperature_range_snapshot,0,l.sku_id "

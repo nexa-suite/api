@@ -161,9 +161,12 @@ jobs:
           NEXA_LOAD_LOGISTICS_EMAIL: logistics@icisa.test
           NEXA_LOAD_LOGISTICS_PASSWORD: CI-Logistics-Password-2026!
         run: |
+          NEXA_LOAD_WAREHOUSE_IDS=$(docker exec ${{ job.services.postgres.id }} psql -U nexa -d nexa -Atc "select string_agg(w.id::text, ',') from warehouse.warehouse w join tenant_management.workspace s on s.id=w.workspace_id and s.tenant_id=w.tenant_id where s.slug='icisa' and w.code='ICISA-COLD-01' and w.status='ACTIVE'")
+          test -n "$NEXA_LOAD_WAREHOUSE_IDS"
           docker run --rm --network host --user "$(id -u):$(id -g)" \
             -e BASE_URL=http://127.0.0.1:8080 \
             -e NEXA_LOAD_WORKSPACE="$NEXA_LOAD_WORKSPACE" \
+            -e NEXA_LOAD_WAREHOUSE_IDS="$NEXA_LOAD_WAREHOUSE_IDS" \
             -e NEXA_LOAD_OWNER_EMAIL="$NEXA_LOAD_OWNER_EMAIL" \
             -e NEXA_LOAD_OWNER_PASSWORD="$NEXA_LOAD_OWNER_PASSWORD" \
             -e NEXA_LOAD_BUYER_EMAIL="$NEXA_LOAD_BUYER_EMAIL" \
