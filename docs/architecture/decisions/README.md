@@ -17,6 +17,8 @@ current implementation decisions from historical baselines.
 - [ADR-010: Access and refresh token strategy](./ADR-010-access-and-refresh-token-strategy.md)
 - [ADR-011: Fixed multi-role and operator boundary](./ADR-011-fixed-multi-role-and-operator-boundary.md)
 - [ADR-012: Row-level security pilot boundary](./ADR-012-row-level-security-pilot-boundary.md)
+- [ADR-013: Explicit Warehouse object access](./ADR-013-warehouse-object-access.md)
+  — accepted policy; implementation and verification pending.
 
 ## Historical baselines
 
