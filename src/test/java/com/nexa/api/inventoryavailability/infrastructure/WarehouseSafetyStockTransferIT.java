@@ -33,6 +33,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-SS-" + suffix, "Safety stock warehouse");
+        token = source.token();
         zone(token, source.warehouseId(), "Z-SS-" + suffix, "Ambient");
         MvcResult baselineAvailability = mockMvc.perform(get("/api/v1/inventory-availability")
                         .header("Authorization", "Bearer " + token)
@@ -89,6 +90,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                 .andExpect(status().isPreconditionFailed());
 
         WarehouseLocation destination = warehouse(token, "WH-SS-D-" + suffix, "Safety stock destination");
+        token = destination.token();
         String destinationZone = zone(token, destination.warehouseId(), "Z-SS-D-" + suffix, "Ambient");
         String lotId = json(receipt).get("id").asText();
         String transferBody = "{\"sourceLotId\":\"" + lotId + "\",\"sourceWarehouseId\":\""
@@ -109,8 +111,10 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-TR-" + suffix, "Transfer source");
+        token = source.token();
         String sourceZone = zone(token, source.warehouseId(), "Z-TR-" + suffix, "Ambient");
         WarehouseLocation destination = warehouse(token, "WH-TR-D-" + suffix, "Transfer destination");
+        token = destination.token();
         String destinationZone = zone(token, destination.warehouseId(), "Z-TR-D-" + suffix, "Ambient");
         MvcResult receipt = receive(token, source, "B-TR-" + suffix, "10", "tr-receipt-" + suffix);
         String lotId = json(receipt).get("id").asText();
@@ -241,8 +245,10 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-LIST-" + suffix, "Transfer listing source");
+        token = source.token();
         String sourceZone = zone(token, source.warehouseId(), "Z-LIST-" + suffix, "Ambient");
         WarehouseLocation destination = warehouse(token, "WH-LIST-D-" + suffix, "Transfer listing destination");
+        token = destination.token();
         String destinationZone = zone(token, destination.warehouseId(), "Z-LIST-D-" + suffix, "Ambient");
 
         mockMvc.perform(get("/api/v1/inventory/transfers")
@@ -298,7 +304,14 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"" + code + "\",\"name\":\"" + name + "\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
-        return new WarehouseLocation(json(result).get("id").asText());
+        String warehouseId = json(result).get("id").asText();
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                .andExpect(status().isOk());
+        return new WarehouseLocation(warehouseId, accessToken(WAREHOUSE_EMAIL, "PLATFORM"));
     }
 
     private String zone(String token, String warehouseId, String code, String name) throws Exception {
@@ -353,5 +366,5 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
-    private record WarehouseLocation(String warehouseId) { }
+    private record WarehouseLocation(String warehouseId, String token) { }
 }
