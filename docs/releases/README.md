@@ -2,16 +2,14 @@
 
 Release notes are scoped to the API repository and do not imply complete Nexa domain or migration parity.
 
-## Technical candidates
+## Release boundaries
 
-| Candidate | Status |
-|---|---|
-| [v0.19.0](./v0.19.0.md) | UNRELEASED: boundary closure and external transport hardening; no tag or GitHub Release |
-
-## Published releases
+Consumer support requires a verified signed tag and the corresponding published
+GitHub Release; a preparation branch alone is not released support.
 
 | Release | Summary |
 |---|---|
+| [v0.19.0](./v0.19.0.md) | Module/persistence boundary closure and transport/dependency hardening; verify [publication](https://github.com/nexa-suite/api/releases/tag/v0.19.0) before consumption |
 | [v0.18.0](./v0.18.0.md) | Consumer-stable API closure and cross-client contracts |
 | [v0.17.0](./v0.17.0.md) | Mobile V1 Core Contracts |
 | [v0.16.1](./v0.16.1.md) | Backend V1 Freeze-Closure Patch |

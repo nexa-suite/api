@@ -20,14 +20,16 @@
 
 Nexa API is the authoritative Spring Boot modular monolith for identity, tenant
 and workspace scope, commercial workflows, inventory, fulfillment, delivery,
-finance, documents, notifications and traceability. The `v0.18.0` Git tag is
-the consumer-stable API release. It does not claim complete Nexa System
-Acceptance or full-system Production Readiness.
+finance, documents, notifications and traceability. Consumer support is
+established by a verified signed Git tag and its corresponding GitHub Release.
+An API release does not claim complete Nexa System Acceptance or full-system
+Production Readiness.
 
-The [v0.19.0 technical candidate](./docs/releases/v0.19.0.md) closes the eleven
+The [v0.19.0 release boundary](./docs/releases/v0.19.0.md) closes the eleven
 module and persistence boundaries and hardens configured external transports.
-It is release preparation, not a published tag or GitHub Release. Existing
-v0.18.0 consumer contracts remain compatible.
+Its publication record is the verified `v0.19.0` tag and
+[GitHub Release](https://github.com/nexa-suite/api/releases/tag/v0.19.0).
+Existing v0.18.0 consumer contracts remain compatible.
 
 The v0.17.1 release remains the verified upgrade baseline. This repository
 retains the v0.17.0 release notes and has no historical v0.17.1 release-note

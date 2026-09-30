@@ -3,10 +3,10 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
-## [0.19.0] - UNRELEASED
+## [0.19.0] - 2026-09-30
 
-Technical candidate for canonical module and persistence boundary closure.
-No v0.19.0 tag or GitHub Release has been published.
+Technical release boundary for canonical module and persistence boundary closure.
+Consumer support requires the verified signed v0.19.0 tag and GitHub Release.
 
 ### Changed
 
