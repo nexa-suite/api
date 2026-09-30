@@ -4,16 +4,23 @@ import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuer
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureEvidenceView;
 import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
+import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureReadingStatus;
+import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureScale;
+import com.nexa.api.inventoryavailability.application.publicapi.ColdChainPolicyQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryBackingQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentCommands;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
@@ -53,6 +60,9 @@ public class FulfillmentLifecycleService {
     private final FinancialAdjustmentCommands financialAdjustments;
     private final BusinessEvidenceQuery businessEvidence;
     private final BusinessTraceabilityCommands traceability;
+    private final ColdChainPolicyQuery coldChain;
+    private final WarehouseSelectionQuery warehouseSelection;
+    private final WarehouseObjectAccess warehouseAccess;
     private final Clock clock;
 
     public FulfillmentLifecycleService(SalesOrderFulfillmentQuery salesOrders,
@@ -64,6 +74,9 @@ public class FulfillmentLifecycleService {
                                        FinancialAdjustmentCommands financialAdjustments,
                                        BusinessEvidenceQuery businessEvidence,
                                        BusinessTraceabilityCommands traceability,
+                                       ColdChainPolicyQuery coldChain,
+                                       WarehouseSelectionQuery warehouseSelection,
+                                       WarehouseObjectAccess warehouseAccess,
                                        Clock clock) {
         this.salesOrders = Objects.requireNonNull(salesOrders, "Sales Order query is required");
         this.salesOrderCommands = Objects.requireNonNull(salesOrderCommands, "Sales Order commands are required");
@@ -74,6 +87,9 @@ public class FulfillmentLifecycleService {
         this.financialAdjustments = Objects.requireNonNull(financialAdjustments, "Financial adjustment commands are required");
         this.businessEvidence = Objects.requireNonNull(businessEvidence, "Business evidence query is required");
         this.traceability = Objects.requireNonNull(traceability, "Business traceability is required");
+        this.coldChain = Objects.requireNonNull(coldChain, "Cold-chain policy query is required");
+        this.warehouseSelection = Objects.requireNonNull(warehouseSelection, "Warehouse selection query is required");
+        this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse access is required");
         this.clock = Objects.requireNonNull(clock, "Clock is required");
     }
 
@@ -481,6 +497,71 @@ public class FulfillmentLifecycleService {
         return result;
     }
 
+    @Transactional
+    public TemperatureEvidenceView recordTemperatureEvidence(CurrentAccessContext context, String idempotencyKey,
+                                                               TemperatureEvidenceCommand command) {
+        context.requirePermission(PermissionKey.INVENTORY_RECEIVE);
+        requireKey(idempotencyKey);
+        if (command == null || command.subjectType() == null || command.subjectType().isBlank()
+                || command.subjectId() == null || command.value() == null || command.unit() == null
+                || command.unit().isBlank() || command.occurredAt() == null) {
+            throw invalid("TEMPERATURE_EVIDENCE_REQUIRED");
+        }
+
+        String subjectType = command.subjectType().trim().toUpperCase(java.util.Locale.ROOT);
+        TemperatureScale scale;
+        BigDecimal celsius;
+        try {
+            scale = TemperatureScale.from(command.unit());
+            celsius = scale.toCelsius(command.value());
+        } catch (IllegalArgumentException exception) {
+            throw invalid("TEMPERATURE_VALUE_OR_UNIT_INVALID");
+        }
+
+        UUID lotId = null;
+        UUID warehouseId;
+        UUID zoneId = null;
+        java.util.Optional<ColdChainPolicyQuery.Range> range;
+        if ("LOT".equals(subjectType)) {
+            ColdChainPolicyQuery.LotTemperatureContext lot = coldChain.temperatureContextForLot(
+                            tenant(context), workspace(context), command.subjectId())
+                    .orElseThrow(() -> invalid("INVENTORY_LOT_NOT_FOUND"));
+            lotId = lot.lotId();
+            warehouseId = lot.warehouseId();
+            zoneId = lot.zoneId();
+            range = lot.range();
+        } else if ("WAREHOUSE".equals(subjectType)) {
+            warehouseId = command.subjectId();
+            if (!warehouseSelection.existsInScope(tenant(context), workspace(context), warehouseId)) {
+                throw invalid("WAREHOUSE_NOT_FOUND");
+            }
+            range = coldChain.commonTemperatureRangeForWarehouse(tenant(context), workspace(context), warehouseId);
+        } else {
+            throw invalid("TEMPERATURE_SUBJECT_INVALID");
+        }
+        if (!warehouseAccess.hasActiveGrant(context, warehouseId)) {
+            throw new AccessPolicyViolation("Membership has no active grant for the requested Warehouse");
+        }
+
+        String status = range.map(value -> celsius.compareTo(value.minimumCelsius()) >= 0
+                        && celsius.compareTo(value.maximumCelsius()) <= 0
+                ? TemperatureReadingStatus.WITHIN_RANGE.name() : TemperatureReadingStatus.OUT_OF_RANGE.name())
+                .orElse(TemperatureReadingStatus.UNKNOWN.name());
+        String requestHash = hash("temperature-evidence-v1|" + command.subjectType() + "|" + command.subjectId()
+                + "|" + command.value().toPlainString() + "|" + command.unit() + "|" + command.occurredAt());
+        TemperatureEvidenceView result = deliveries.recordTemperatureEvidence(new DeliveryPersistencePort.TemperatureEvidenceRequest(
+                tenant(context), workspace(context), subjectType, command.subjectId(), lotId, warehouseId, zoneId,
+                actor(context), idempotencyKey, requestHash, command.value(), celsius, scale.name(), status,
+                command.occurredAt()));
+        if (result.warehouseId() != null && !warehouseId.equals(result.warehouseId())
+                && !warehouseAccess.hasActiveGrant(context, result.warehouseId())) {
+            throw new AccessPolicyViolation("Membership has no active grant for the recorded Warehouse");
+        }
+        trace(context, "TEMPERATURE_EVIDENCE_RECORDED", "TemperatureEvidence", result.id(), idempotencyKey,
+                Map.of("subjectType", result.subjectType(), "subjectId", result.subjectId(), "status", result.status()));
+        return result;
+    }
+
     private FulfillmentModels.FulfillmentView transitionWithTrace(CurrentAccessContext context, UUID fulfillmentId,
                                                                     long expectedVersion, String idempotencyKey,
                                                                     String operation, String target, String reason,
@@ -580,7 +661,7 @@ public class FulfillmentLifecycleService {
 
     private static String temperatureCanonical(TemperatureCommand command) {
         return command.lotId() + "|" + command.temperatureCelsius() + "|" + command.unit() + "|"
-                + command.source() + "|" + command.recordedAt();
+                + command.source() + "|" + command.evidenceMetadata() + "|" + command.recordedAt();
     }
 
     private static String shortageResolutionCanonical(ShortageResolutionCommand command) {
@@ -702,4 +783,7 @@ public class FulfillmentLifecycleService {
 
     public record TemperatureCommand(UUID lotId, BigDecimal temperatureCelsius, String unit,
                                      String source, String evidenceMetadata, Instant recordedAt) { }
+
+    public record TemperatureEvidenceCommand(String subjectType, UUID subjectId, BigDecimal value,
+                                             String unit, Instant occurredAt) { }
 }

@@ -239,6 +239,18 @@ public final class FulfillmentController {
         return ResponseEntity.status(201).eTag(etag(value.deliveryVersion())).body(value);
     }
 
+    @PostMapping("/temperature-evidence")
+    @Operation(operationId = "recordStockTemperatureEvidence")
+    public ResponseEntity<FulfillmentModels.TemperatureEvidenceView> recordStockTemperatureEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody TemperatureEvidenceRequest request) {
+        FulfillmentModels.TemperatureEvidenceView value = service.recordTemperatureEvidence(context, idempotencyKey,
+                new FulfillmentLifecycleService.TemperatureEvidenceCommand(request.subjectType(), request.subjectId(),
+                        request.value(), request.unit(), request.occurredAt()));
+        return ResponseEntity.status(201).body(value);
+    }
+
     private static ResponseEntity<FulfillmentModels.FulfillmentView> fulfillmentMutation(FulfillmentModels.FulfillmentView value) {
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
@@ -311,4 +323,10 @@ public final class FulfillmentController {
     public record TemperatureRequest(UUID lotId, @NotNull BigDecimal temperatureCelsius,
                                      @Size(max = 16) String unit, @Size(max = 64) String source,
                                      @Size(max = 2000) String evidenceMetadata, Instant recordedAt) { }
+
+    public record TemperatureEvidenceRequest(@NotBlank @Size(max = 16) String subjectType,
+                                             @NotNull UUID subjectId,
+                                             @NotNull BigDecimal value,
+                                             @NotBlank @Size(max = 16) String unit,
+                                             @NotNull Instant occurredAt) { }
 }
