@@ -146,6 +146,7 @@ tenant_management.unit_preferences	BC01	V29__create_tenant_administration_config
 tenant_management.workspace	BC01	V4__create_tenant_workspace_tables.sql:11 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.workspace_creation_idempotency	SHARED_TECHNICAL	V29__create_tenant_administration_configuration.sql:240 CREATE TABLE; explicit shared technical idempotency table.
 tenant_management.workspace_membership	BC01	V4__create_tenant_workspace_tables.sql:25 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.warehouse_access_grant	BC01	V108__add_warehouse_access_grants.sql:1 CREATE TABLE; object authority owned by BC-01 under accepted ADR-013.
 tenant_management.workspace_settings	BC01	V29__create_tenant_administration_configuration.sql:15 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 warehouse.command_idempotency	SHARED_TECHNICAL	V16__create_inventory_reservations.sql:31 CREATE TABLE; explicit shared technical idempotency table.
 warehouse.inventory_backing	BC05	V89__commercial_inventory_core.sql:158 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.

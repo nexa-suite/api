@@ -3,6 +3,7 @@ package com.nexa.api.inventoryavailability.application.service;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -17,10 +18,13 @@ import java.util.Objects;
 public class PhysicalScanValidationService {
     private final PhysicalAllocationCommands allocations;
     private final Clock clock;
+    private final WarehouseObjectAccess warehouseAccess;
 
-    public PhysicalScanValidationService(PhysicalAllocationCommands allocations, Clock clock) {
+    public PhysicalScanValidationService(PhysicalAllocationCommands allocations, Clock clock,
+                                         WarehouseObjectAccess warehouseAccess) {
         this.allocations = Objects.requireNonNull(allocations, "Physical allocations are required");
         this.clock = Objects.requireNonNull(clock, "Clock is required");
+        this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse object access is required");
     }
 
     // The standalone HTTP contract is deliberately read-only. A FEFO
@@ -33,6 +37,9 @@ public class PhysicalScanValidationService {
         if (!context.tenantId().value().equals(request.tenantId())
                 || !context.workspaceId().value().equals(request.workspaceId())) {
             throw new WarehouseOperationsService.WarehouseException("FORBIDDEN", false);
+        }
+        if (request.warehouseId() == null || !warehouseAccess.hasActiveGrant(context, request.warehouseId())) {
+            throw new WarehouseOperationsService.WarehouseException("WAREHOUSE_NOT_FOUND", true);
         }
         return allocations.validatePickingScan(new PhysicalAllocationCommands.PickingScanValidationRequest(
                 request.tenantId(), request.workspaceId(), request.fulfillmentId(), request.physicalAllocationLineId(),

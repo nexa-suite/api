@@ -30,6 +30,12 @@ public class JdbcWarehouseSelectionQuery implements WarehouseSelectionQuery {
     }
 
     @Override
+    public boolean existsInScope(UUID tenantId, UUID workspaceId, UUID warehouseId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from warehouse.warehouse "
+                + "where tenant_id=? and workspace_id=? and id=?)", Boolean.class, tenantId, workspaceId, warehouseId));
+    }
+
+    @Override
     public Optional<WarehouseReference> findOperational(UUID tenantId, UUID workspaceId, UUID warehouseId) {
         return jdbc.query(SELECT + " and w.id=?", (rs, ignored) -> reference(rs), tenantId, workspaceId, warehouseId)
                 .stream().findFirst();

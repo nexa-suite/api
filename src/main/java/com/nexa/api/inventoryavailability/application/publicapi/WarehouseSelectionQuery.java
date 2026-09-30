@@ -8,6 +8,9 @@ import java.util.UUID;
 
 /** Read-only Inventory Availability contract for operational warehouse selection. */
 public interface WarehouseSelectionQuery {
+    /** Whether a Warehouse identity exists in the supplied tenant/workspace, regardless of operational state. */
+    boolean existsInScope(UUID tenantId, UUID workspaceId, UUID warehouseId);
+
     Optional<WarehouseReference> findOperational(UUID tenantId, UUID workspaceId, UUID warehouseId);
 
     Optional<WarehouseReference> findPrimaryOperational(UUID tenantId, UUID workspaceId);

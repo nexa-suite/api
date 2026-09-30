@@ -146,7 +146,8 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         }
         // Every fulfillment created since V91 has a physical allocation. Lock
         // it before the fulfillment row for one stable cross-context order.
-        physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
+                request.actorMembershipId());
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (!"PICKING".equals(current.status())) throw error("FULFILLMENT_PICKING_REQUIRED");
         List<FulfillmentLineRow> currentLines = lockLines(request.tenantId(), request.workspaceId(), request.fulfillmentId());
@@ -177,7 +178,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         Long allocationVersion = request.allocationVersion();
         if (!hasPhysicalPickingBinding(request) && current.physicalAllocationId() != null) {
             PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
-                    request.tenantId(), request.workspaceId(), request.fulfillmentId());
+                    request.tenantId(), request.workspaceId(), request.fulfillmentId(), request.actorMembershipId());
             effectiveLines = bindLegacyPicking(effectiveLines, allocation);
             requested = groupPickedLines(effectiveLines);
             allocationVersion = allocation.version();
@@ -189,7 +190,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         // per-line validation loop. The request line order is a presentation
         // detail and cannot define the cross-fulfillment lock order.
         physicalAllocations.lockLotsForPicking(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
-                pickingLotIds(effectiveLines));
+                request.actorMembershipId(), pickingLotIds(effectiveLines));
         Instant validationNow = clock.instant();
         boolean shortage = false;
         Set<UUID> physicalAllocationLineIds = new HashSet<>();
