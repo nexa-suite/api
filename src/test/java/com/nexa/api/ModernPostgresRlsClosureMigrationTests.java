@@ -38,7 +38,7 @@ class ModernPostgresRlsClosureMigrationTests {
                 .locations("classpath:db/migration").load().migrate();
 
         try (Connection connection = POSTGRES.createConnection("")) {
-            Map<String, InventoryEntry> inventory = readInventory("v107");
+            Map<String, InventoryEntry> inventory = readInventory("v108");
             assertHistoricalV102EvidenceRemainsConsistent();
             assertScopeEvidenceCoversV107ClosureDelta(inventory);
             Map<String, Long> categoryCounts = inventory.values().stream().collect(java.util.stream.Collectors.groupingBy(
@@ -158,11 +158,11 @@ class ModernPostgresRlsClosureMigrationTests {
                 "sales.purchase_request_material_change",
                 "warehouse.inventory_transfer_history",
                 "catalog_management.price_list", "catalog_management.price_list_item",
-                "catalog_management.customer_terms");
-        assertThat(newlyForced).as("V103, V104, and V107 add the scoped tables in the official line")
+                "catalog_management.customer_terms", "tenant_management.warehouse_access_grant");
+        assertThat(newlyForced).as("V103, V104, V107 and V108 add the scoped tables in the official line")
                 .containsExactlyInAnyOrderElementsOf(expectedNewlyForced);
 
-        List<String> evidenceLines = Files.readAllLines(Path.of("docs/security/rls-direct-scope-evidence-v107.tsv"));
+        List<String> evidenceLines = Files.readAllLines(Path.of("docs/security/rls-direct-scope-evidence-v108.tsv"));
         assertThat(evidenceLines.getFirst()).isEqualTo("table\tcategory\tscope_source\ttenant_id\tworkspace_id\tparent_derived\tread_write_paths\tworker_path\trls_required\tpolicy_shape\ttest\treason");
         Set<String> evidenced = new LinkedHashSet<>();
         for (String line : evidenceLines.subList(1, evidenceLines.size())) {

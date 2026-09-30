@@ -105,6 +105,7 @@ public class WarehouseOperationsService {
     public LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) { return restoreLot.execute(context, lotId, expected, reason, key, correlation); }
     public LotSummary disposeLot(CurrentAccessContext context, String lotId, String disposition, long expected, String reason, String key, String correlation) { return inventory.disposeLot(context, lotId, disposition, expected, reason, key, correlation); }
     public List<Availability> availability(CurrentAccessContext context, List<String> ids) { return queryAvailability.execute(context, ids); }
+    public List<Availability> warehouseAvailability(CurrentAccessContext context, String warehouseId, List<String> ids) { return queryAvailability.executeWarehouse(context, warehouseId, ids); }
     public Page<SafetyStockSummary> safetyStocks(CurrentAccessContext context, String warehouseId, String skuId, int page, int size) {
         return manageSafetyStock.list(context, warehouseId, skuId, page, size);
     }

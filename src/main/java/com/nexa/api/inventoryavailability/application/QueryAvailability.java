@@ -23,4 +23,10 @@ public class QueryAvailability {
         }
         return persistence.availability(context, ids);
     }
+    @Transactional(readOnly = true)
+    public List<WarehouseOperationsService.Availability> executeWarehouse(CurrentAccessContext context, String warehouseId, List<String> ids) {
+        context.requirePermission(Permission.WAREHOUSE_READ);
+        return persistence.warehouseAvailability(context, warehouseId, ids);
+    }
+
 }

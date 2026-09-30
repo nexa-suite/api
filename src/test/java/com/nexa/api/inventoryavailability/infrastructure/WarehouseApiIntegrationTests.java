@@ -108,6 +108,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         String warehouseId = createWarehouse(token, "WH-EXP-" + suffix);
+        token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String zoneId = createZone(token, warehouseId, "Z-EXP-" + suffix);
         String key = "inbound-expiry-" + suffix;
         String valid = receiptBody(warehouseId, zoneId, "B-EXP-" + suffix, "2.50");

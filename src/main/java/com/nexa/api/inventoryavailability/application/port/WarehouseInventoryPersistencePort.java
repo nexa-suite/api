@@ -18,4 +18,5 @@ public interface WarehouseInventoryPersistencePort {
     WarehouseOperationsService.LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation);
     WarehouseOperationsService.LotSummary disposeLot(CurrentAccessContext context, String lotId, String disposition, long expected, String reason, String key, String correlation);
     List<WarehouseOperationsService.Availability> availability(CurrentAccessContext context, List<String> ids);
+    List<WarehouseOperationsService.Availability> warehouseAvailability(CurrentAccessContext context, String warehouseId, List<String> ids);
 }

@@ -277,12 +277,26 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
     public List<WarehouseOperationsService.Availability> availability(CurrentAccessContext context, List<String> ids) {
         if (!context.allows(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.WAREHOUSE_READ)
                 && !context.allows(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission.CATALOG_READ)) throw error("FORBIDDEN", false);
+        return queryAvailability(context, ids, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WarehouseOperationsService.Availability> warehouseAvailability(CurrentAccessContext context, String warehouseId, List<String> ids) {
+        requireRead(context);
+        UUID warehouse = uuid(warehouseId);
+        requireActiveWarehouse(context, warehouse);
+        return queryAvailability(context, ids, warehouse);
+    }
+
+    private List<WarehouseOperationsService.Availability> queryAvailability(CurrentAccessContext context, List<String> ids, UUID warehouseId) {
         if (ids == null || ids.isEmpty() || ids.size() > MAX_PAGE_SIZE || ids.stream().anyMatch(id -> id == null || id.isBlank())) throw error("INVALID_REQUEST", false);
         List<String> normalized = ids.stream().map(id -> bounded(id, "catalogItemId", 64)).distinct().toList();
         String placeholders = normalized.stream().map(id -> "?").collect(Collectors.joining(","));
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context))); args.addAll(normalized);
+        String warehousePredicate = warehouseId == null ? "" : " and warehouse_id=?";
+        if (warehouseId != null) args.add(warehouseId);
         List<UUID> skuIds = jdbc.query("select distinct sku_id from warehouse.inventory_lot where tenant_id=? and workspace_id=? "
-                        + "and catalog_item_id in (" + placeholders + ") and sku_id is not null",
+                        + "and catalog_item_id in (" + placeholders + ") and sku_id is not null" + warehousePredicate,
                 (rs, row) -> rs.getObject(1, UUID.class), args.toArray());
         CatalogSkuSnapshots.Input catalogSnapshots = CatalogSkuSnapshots.of(tenant(context), workspace(context),
                 catalog.findInventoryPolicies(tenant(context), workspace(context), skuIds));
@@ -315,6 +329,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                         + "left join active_backing on active_backing.tenant_id=l.tenant_id and active_backing.workspace_id=l.workspace_id "
                         + "and active_backing.catalog_item_id=l.catalog_item_id and active_backing.warehouse_id=l.warehouse_id "
                         + "where l.tenant_id=? and l.workspace_id=? and l.catalog_item_id in (" + placeholders + ") "
+                        + (warehouseId == null ? "" : "and l.warehouse_id=? ")
                         + "group by l.catalog_item_id,l.warehouse_id",
                 (rs, row) -> new AvailabilityQuantities(rs.getString("catalog_item_id"),
                         rs.getBigDecimal("physical_quantity"), rs.getBigDecimal("eligible_quantity"),

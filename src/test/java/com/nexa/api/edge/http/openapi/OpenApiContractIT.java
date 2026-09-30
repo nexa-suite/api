@@ -113,6 +113,8 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
             }
         }));
 
+        assertThat(document.get("paths").has("/api/v1/warehouses/{warehouseId}/inventory-availability")).isTrue();
+
         Path snapshotPath = Path.of("docs/openapi/openapi.json");
         if (Boolean.getBoolean("nexa.openapi.write-snapshot")) {
             Files.writeString(snapshotPath, document.toString() + System.lineSeparator());

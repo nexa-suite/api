@@ -49,7 +49,7 @@ class ModernPostgresMigrationTests {
 			}
 			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management", "sales", "integration", "warehouse", "logistics", "catalog_management", "reference_data", "notifications", "audit", "business_documents", "payments");
 			assertThat(tables(connection, "iam")).containsExactlyInAnyOrder("user_account", "password_credential", "refresh_session", "authentication_failure", "password_reset_request", "security_audit_event", "password_reset_throttle_bucket", "security_notification_outbox", "system_operator_throttle_bucket", "workspace_preview_throttle_bucket", "public_contact_request", "public_contact_throttle_bucket", "access_context_selection_ticket");
-			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership", "membership_admin_event", "membership_role_assignment", "organization_registration", "organization_settings", "workspace_settings", "regional_settings", "unit_preferences", "operational_settings", "notification_preference", "tenant_security_settings", "custom_field_definition", "reference_plan_assignment", "organization_invitation", "organization_invitation_role", "organization_invitation_idempotency", "workspace_creation_idempotency", "permission_definition", "role_definition", "role_permission", "membership_role_definition", "membership_authorization_state", "organization_registration_draft_idempotency");
+			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership", "membership_admin_event", "membership_role_assignment", "organization_registration", "organization_settings", "workspace_settings", "regional_settings", "unit_preferences", "operational_settings", "notification_preference", "tenant_security_settings", "custom_field_definition", "reference_plan_assignment", "organization_invitation", "organization_invitation_role", "organization_invitation_idempotency", "warehouse_access_grant", "workspace_creation_idempotency", "permission_definition", "role_definition", "role_permission", "membership_role_definition", "membership_authorization_state", "organization_registration_draft_idempotency");
 			assertThat(tables(connection, "sales")).containsExactlyInAnyOrder("client_account", "client_account_membership", "client_account_address", "purchase_request", "purchase_request_line", "purchase_request_event", "idempotency_record", "idempotency_response", "manual_order_idempotency", "sales_order_sequence", "sales_order", "sales_order_line", "sales_order_event", "purchase_request_draft", "purchase_request_draft_line", "purchase_request_draft_destination", "purchase_request_draft_route", "purchase_request_draft_warehouse_selection", "purchase_request_draft_idempotency", "manual_sales_order_draft", "manual_sales_order_draft_line", "manual_sales_order_draft_idempotency", "commercial_commitment", "commercial_commitment_line", "purchase_request_material_change");
 			assertThat(tables(connection, "integration")).containsExactlyInAnyOrder("change_event", "outbox_event", "inbox_event");
 				assertThat(tables(connection, "warehouse")).containsExactlyInAnyOrder("warehouse", "storage_zone", "inventory_lot", "stock_movement", "inventory_event", "inventory_reservation", "inventory_reservation_line", "inventory_reservation_allocation", "reservation_shortage", "command_idempotency", "warehouse_service_configuration", "selection_snapshot", "inventory_temperature_evaluation", "inventory_lot_disposition", "safety_stock_policy", "inventory_transfer", "inventory_transfer_history", "inventory_backing", "inventory_backing_line", "inventory_backing_position", "physical_allocation", "physical_allocation_line", "physical_allocation_event", "physical_allocation_command_idempotency");
@@ -115,7 +115,7 @@ class ModernPostgresMigrationTests {
 	}
 
 	private static void assertCurrentSchemaRlsInventory(java.sql.Connection connection) throws Exception {
-		var lines = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v107.tsv"));
+		var lines = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v108.tsv"));
 		assertThat(lines.getFirst()).isEqualTo("table\tcategory\ttenant_id\tworkspace_id\trls_enabled\trls_forced\tpolicy");
 		assertThat(lines).isNotEmpty();
 		Map<String, List<String>> expected = new LinkedHashMap<>();
@@ -270,7 +270,7 @@ class ModernPostgresMigrationTests {
 	private static void assertTenantWorkspaceRls(java.sql.Connection connection) throws Exception {
 		Set<String> expectedTables = new java.util.HashSet<>();
 		Set<String> expectedTenantWorkspaceTables = new java.util.HashSet<>();
-		var inventory = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v107.tsv"));
+		var inventory = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v108.tsv"));
 		for (String line : inventory.subList(1, inventory.size())) {
 			String[] fields = line.split("\\t", -1);
 			assertThat(fields).hasSize(7);
@@ -302,7 +302,7 @@ class ModernPostgresMigrationTests {
 				}
 			}
 		}
-		assertThat(actualTables).as("forced RLS tables exactly match the V107 direct-scope inventory")
+		assertThat(actualTables).as("forced RLS tables exactly match the V108 direct-scope inventory")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
 		assertThat(policyTables).as("every forced direct-scope table has an explicit policy")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);

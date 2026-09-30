@@ -189,6 +189,12 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
                         .content("{\"code\":\"WH-RACE-" + suffix + "\",\"name\":\"Concurrency warehouse\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
         String warehouseId = json(createdWarehouse).get("id").asText();
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                .andExpect(status().isOk());
+        warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult createdZone = mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones")
                         .header("Authorization", "Bearer " + warehouse)
                         .contentType(MediaType.APPLICATION_JSON)

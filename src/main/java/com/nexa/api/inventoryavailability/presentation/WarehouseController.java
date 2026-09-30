@@ -266,6 +266,16 @@ public final class WarehouseController {
         return service.availability(c, catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : List.of(catalogItemId)).stream().map(this::availability).toList();
     }
 
+    @GetMapping("/warehouses/{warehouseId}/inventory-availability")
+    @Operation(operationId = "getWarehouseInventoryAvailability")
+    public List<AvailabilityResponse> warehouseAvailability(@RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String warehouseId, @RequestParam(required = false) String catalogItemId,
+            @RequestParam(required = false) List<String> catalogItemIds) {
+        return service.warehouseAvailability(c, warehouseId,
+                catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : java.util.Collections.singletonList(catalogItemId))
+                .stream().map(this::availability).toList();
+    }
+
     @GetMapping("/inventory/safety-stocks")
     @Operation(operationId = "listInventorySafetyStocks")
     public PageResponse<SafetyStockResponse> safetyStocks(@RequestAttribute(ACCESS) CurrentAccessContext c,

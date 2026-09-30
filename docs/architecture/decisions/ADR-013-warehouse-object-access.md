@@ -46,3 +46,9 @@ This decision establishes policy, not completed capability, Product Acceptance
 or Production Readiness. Existing fixtures must receive explicit grants where
 their scenario requires Warehouse access; broad legacy roles cannot bypass the
 new boundary.
+
+## Warehouse-scoped availability projection
+
+`GET /api/v1/warehouses/{warehouseId}/inventory-availability` exposes the existing availability quantities for one authorized, active Warehouse. It requires `warehouse.read` and the current WorkforceMembership grant before querying inventory. Both physical and sellable sums are filtered by Warehouse; the existing expiry, disposition, temperature, service, safety stock and active backing rules are unchanged. The Workspace-wide commercial projection remains unchanged. Missing or inaccessible Warehouses return the canonical not-found response.
+
+The V108 security inventories add the grant table while preserving the historical V107 artifacts. Integration fixtures assign explicit grants and obtain refreshed credentials after authorization-version changes; they do not introduce runtime defaults. Focused real PostgreSQL coverage checks the granted Warehouse quantity, denial of another Warehouse in the same Workspace, and invalid query handling.

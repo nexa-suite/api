@@ -933,7 +933,7 @@ class RlsRuntimeDatabaseIsolationIT {
         }
         assertThat(forceRlsTables)
                 .as("RLS must be enabled and forced for every table used by this isolation proof")
-                .containsExactlyInAnyOrder("business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
+                .containsExactlyInAnyOrder("tenant_management.warehouse_access_grant", "business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
                         "notifications.inbox_item", "notifications.push_subscription", "notifications.push_subscription_command_idempotency", "notifications.push_delivery_attempt", "notifications.push_delivery_claim",
                         "payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.reconciliation_refund_idempotency", "payments.receivable", "payments.receivable_allocation",
                         "warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation", "warehouse.physical_allocation", "warehouse.physical_allocation_line", "warehouse.physical_allocation_event", "warehouse.physical_allocation_command_idempotency",

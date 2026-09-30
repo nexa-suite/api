@@ -107,6 +107,19 @@ class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
                 Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
                 UUID.fromString(membershipId(WAREHOUSE_EMAIL))));
 
+        mockMvc.perform(get("/api/v1/warehouses/" + visibleWarehouse + "/inventory-availability")
+                        .param("catalogItemId", "CAT-0002").header("Authorization", "Bearer " + activeWarehouse))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].catalogItemId").value("CAT-0002"))
+                .andExpect(jsonPath("$[0].physicalQuantity").value(2))
+                .andExpect(jsonPath("$[0].sellableQuantity").value(2));
+        mockMvc.perform(get("/api/v1/warehouses/" + hiddenWarehouse + "/inventory-availability")
+                        .param("catalogItemId", "CAT-0002").header("Authorization", "Bearer " + activeWarehouse))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/warehouses/" + visibleWarehouse + "/inventory-availability")
+                        .header("Authorization", "Bearer " + activeWarehouse))
+                .andExpect(status().isBadRequest());
+
         mockMvc.perform(get("/api/v1/warehouses/" + hiddenWarehouse)
                         .header("Authorization", "Bearer " + activeWarehouse))
                 .andExpect(status().isNotFound());
