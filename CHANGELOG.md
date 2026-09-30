@@ -16,6 +16,8 @@ No v0.19.0 tag or GitHub Release has been published.
   semantic SQL ownership and SQL-free runtime boundary composition.
 - Validate configured SMTP, object storage, Google Routes and Stripe transport
   boundaries while retaining local/test fixture support.
+- Apply Jackson 2.21.6 and 3.1.6 BOM patches for CVE-2026-68497; retain both
+  supported generations and reject oversized numeric XML duration strings.
 - Check consumer OpenAPI compatibility against published v0.18.0 separately
   from the historical v0.17.1 upgrade baseline.
 
