@@ -3,6 +3,35 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.19.0] - UNRELEASED
+
+Technical candidate for canonical module and persistence boundary closure.
+No v0.19.0 tag or GitHub Release has been published.
+
+### Changed
+
+- Close the eleven Spring Modulith business modules with explicit public
+  interfaces, allowed dependencies and an acyclic business dependency graph.
+- Replace foreign business-table SQL with owner-provided contracts and enforce
+  semantic SQL ownership and SQL-free runtime boundary composition.
+- Validate configured SMTP, object storage, Google Routes and Stripe transport
+  boundaries while retaining local/test fixture support.
+- Check consumer OpenAPI compatibility against published v0.18.0 separately
+  from the historical v0.17.1 upgrade baseline.
+
+### Preserved
+
+- Existing v0.18.0 HTTP consumer contracts, PostgreSQL schema and Flyway V107
+  baseline; no new migration or published migration edit.
+- Server authorization, RLS, FEFO, concurrency, idempotency and immutable
+  business evidence boundaries.
+
+### Scope
+
+- [Candidate release notes](docs/releases/v0.19.0.md) record implementation,
+  technical evidence and known limits. Product Acceptance, System Acceptance,
+  production TLS and live provider readiness remain separate open gates.
+
 ## [0.18.0] - 2026-09-25
 
 Consumer-stable API closure for native access-context selection and the
