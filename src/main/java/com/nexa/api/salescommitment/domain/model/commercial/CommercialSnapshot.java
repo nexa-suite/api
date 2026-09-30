@@ -1,6 +1,6 @@
 package com.nexa.api.salescommitment.domain.model.commercial;
 
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 import com.nexa.api.salescommitment.domain.model.credit.CreditProfile;
 
 import java.util.Objects;

@@ -6,7 +6,7 @@ import com.nexa.api.salescommitment.application.port.out.ClientAccountCommercial
 import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
 import com.nexa.api.salescommitment.application.port.out.WarehouseReferencePort;
 import com.nexa.api.salescommitment.application.reference.port.PeruGeographyPersistencePort;
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 import com.nexa.api.customerbuyerrelationships.contract.Address;
 import com.nexa.api.salescommitment.domain.model.commercial.CommercialSnapshot;
 import com.nexa.api.salescommitment.domain.model.delivery.DeliveryAddressSnapshot;
@@ -21,7 +21,7 @@ import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequest
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestLineId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.RequestedQuantity;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -148,7 +148,7 @@ public final class SalesSnapshotAssembler {
             address = addresses.findDefaultBuyerReference(scope(context), workspace(context), context.membershipId().toString())
                     .orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("client-account-address"));
         } else {
-            throw new com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation("Delivery address is required");
+            throw new com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation("Delivery address is required");
         }
         validateGeography(address.address());
         return new DeliveryAddressSnapshot(address.id(), address.label(), address.address(), address.defaultAddress());

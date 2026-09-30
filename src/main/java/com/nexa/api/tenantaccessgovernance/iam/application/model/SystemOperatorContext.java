@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.iam.application.model;
 
 import java.util.Objects;
 
+@org.springframework.modulith.NamedInterface(value = "access-contracts", propagate = false)
 public record SystemOperatorContext(String principalId, String permission) {
     public SystemOperatorContext {
         if (principalId == null || principalId.isBlank()) throw new IllegalArgumentException("System operator principal is required");

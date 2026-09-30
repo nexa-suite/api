@@ -3,14 +3,14 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.domain;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AssignableRolePolicy;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.EffectiveAuthorization;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionCatalog;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinitionType;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.RoleDefinitionId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -45,8 +45,8 @@ class DynamicAuthorizationTests {
 		assertThat(authorization).satisfies(value -> {
 			assertThat(value.allows(PermissionKey.SALES_ORDER_CREATE_MANUAL)).isTrue();
 			assertThat(value.allows(PermissionKey.INVENTORY_RECEIVE)).isTrue();
-			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface.PLATFORM)).isTrue();
-			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface.PORTAL)).isFalse();
+			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface.PLATFORM)).isTrue();
+			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface.PORTAL)).isFalse();
 		});
 	}
 

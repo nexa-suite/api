@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.nexa</groupId>
 	<artifactId>api</artifactId>
-	<version>0.18.0</version>
+	<version>0.19.0</version>
 	<name>nexa-api</name>
 	<description>Nexa business and integration API built with Java 25 and Spring Boot, following modular monolith and domain-driven design principles.</description>
 	<url/>
@@ -28,6 +28,9 @@
 	</scm>
 	<properties>
 		<java.version>25</java.version>
+		<!-- Same-line security patches for CVE-2026-68497 in both Jackson generations. -->
+		<jackson-2-bom.version>2.21.6</jackson-2-bom.version>
+		<jackson-bom.version>3.1.6</jackson-bom.version>
 		<tomcat.version>11.0.25</tomcat.version>
 		<spring-modulith.version>2.1.1</spring-modulith.version>
 		<archunit.version>1.5.0</archunit.version>

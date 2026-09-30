@@ -1,6 +1,5 @@
 package com.nexa.api.salescommitment.presentation.purchaserequestdraft;
 
-import com.nexa.api.catalogcommercialpolicy.presentation.rest.CatalogHttpSupport;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftPreconditionRequiredException;
 import com.nexa.api.salescommitment.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
 import com.nexa.api.salescommitment.application.purchaserequestdraft.service.PurchaseRequestDraftServiceFacade;
@@ -30,7 +29,7 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 @Validated
 public class PurchaseRequestDraftController {
-    private static final String ACCESS = CatalogHttpSupport.ACCESS_CONTEXT;
+    private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final PurchaseRequestDraftServiceFacade service;
     public PurchaseRequestDraftController(PurchaseRequestDraftServiceFacade service) { this.service = service; }
 

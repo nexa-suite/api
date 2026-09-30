@@ -6,6 +6,8 @@ import java.util.UUID;
 public interface BusinessEvidenceQuery {
     boolean isAvailable(UUID tenantId, UUID workspaceId, UUID evidenceObjectId);
 
+    long countAvailableForSubject(UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId);
+
     /** Availability plus immutable subject binding; ownership remains in BC-09. */
     boolean isAvailableForSubject(UUID tenantId, UUID workspaceId, UUID evidenceObjectId,
                                   UUID clientAccountId, String subjectType, UUID subjectId);

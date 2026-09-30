@@ -3,9 +3,9 @@ package com.nexa.api.catalogcommercialpolicy.presentation.rest;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogIdempotencyKeyRequiredException;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogPreconditionRequiredException;
-import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogClientAccountPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.access.AccessDeniedException;
 

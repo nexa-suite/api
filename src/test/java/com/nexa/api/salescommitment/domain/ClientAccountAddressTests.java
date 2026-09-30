@@ -98,6 +98,9 @@ class ClientAccountAddressTests {
             @Override public Optional<CustomerAccountReference> findBuyerReference(String tenant, String workspace, String membership) {
                 return Optional.empty();
             }
+            @Override public Optional<String> findUnfilteredReferenceForMembership(String tenant, String workspace, String membership) {
+                return Optional.empty();
+            }
         };
     }
 }

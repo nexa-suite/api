@@ -2,6 +2,7 @@ package com.nexa.api.creditreceivables.infrastructure.persistence;
 
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditReservationCommands;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.LegacyCustomerCreditInitializationQuery;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -17,9 +18,11 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservationCommands {
     private final JdbcTemplate jdbc;
+    private final LegacyCustomerCreditInitializationQuery customers;
 
-    public JdbcCreditBoundary(JdbcTemplate jdbc) {
+    public JdbcCreditBoundary(JdbcTemplate jdbc, LegacyCustomerCreditInitializationQuery customers) {
         this.jdbc = jdbc;
+        this.customers = customers;
     }
 
     @Override
@@ -59,13 +62,13 @@ public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservatio
             throw new IllegalStateException("Credit commitment reference is required");
         }
         CreditReservationRow existing = reservation(tenantId, workspaceId, commercialCommitmentId, purchaseRequestId);
-        jdbc.update("insert into payments.credit_account "
-                        + "(id,tenant_id,workspace_id,client_account_id,currency,credit_limit,created_at,updated_at) "
-                        + "select md5(c.id::text || ':' || c.credit_currency)::uuid,c.tenant_id,c.workspace_id,c.id,"
-                        + "c.credit_currency,c.credit_limit,?,? from sales.client_account c "
-                        + "where c.tenant_id=? and c.workspace_id=? and c.id=? and c.credit_currency=? "
-                        + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
-                timestamp(now), timestamp(now), tenantId, workspaceId, customerAccountId, currency);
+        customers.find(tenantId, workspaceId, customerAccountId, currency).ifPresent(customer ->
+                jdbc.update("insert into payments.credit_account "
+                                + "(id,tenant_id,workspace_id,client_account_id,currency,credit_limit,created_at,updated_at) "
+                                + "values (md5(? || ':' || ?)::uuid,?,?,?,?,?,?,?) "
+                                + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
+                        customer.customerAccountId().toString(), customer.currency(), tenantId, workspaceId,
+                        customer.customerAccountId(), customer.currency(), customer.initialLimit(), timestamp(now), timestamp(now)));
         CreditAccountRow account = jdbc.query(
                 "select id,credit_limit,credit_exposure,reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? "
                         + "and client_account_id=? and currency=? and status='ACTIVE' for update",

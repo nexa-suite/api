@@ -13,8 +13,8 @@ import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocati
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentCommands;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

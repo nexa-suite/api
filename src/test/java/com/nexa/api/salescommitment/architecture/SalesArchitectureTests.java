@@ -21,7 +21,8 @@ class SalesArchitectureTests {
 
 	@Test void salesDomainContainsNoFrameworkTypes() throws Exception {
 		try (var paths = Files.walk(SALES_SOURCE.resolve("domain"))) {
-			for (Path path : paths.filter(Files::isRegularFile).filter(file -> file.toString().endsWith(".java")).toList()) {
+			for (Path path : paths.filter(Files::isRegularFile).filter(file -> file.toString().endsWith(".java"))
+                    .filter(file -> !file.getFileName().toString().equals("package-info.java")).toList()) {
 				String source = Files.readString(path);
 				assertThat(source).doesNotContain("org.springframework", "jakarta.persistence", "jakarta.validation", "com.fasterxml.jackson");
 			}
@@ -30,7 +31,8 @@ class SalesArchitectureTests {
 
 	@Test void presentationDoesNotExposeApplicationModels() throws Exception {
 		try (var paths = Files.walk(SALES_SOURCE.resolve("presentation"))) {
-			for (Path path : paths.filter(Files::isRegularFile).filter(file -> file.toString().endsWith(".java")).toList()) {
+			for (Path path : paths.filter(Files::isRegularFile).filter(file -> file.toString().endsWith(".java"))
+                    .filter(file -> !file.getFileName().toString().equals("package-info.java")).toList()) {
 				assertThat(Files.readString(path)).doesNotContain("application.model.ClientAccountView", "application.model.PurchaseRequestView", "application.model.PurchaseRequestLineView");
 			}
 		}

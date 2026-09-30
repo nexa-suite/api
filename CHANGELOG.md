@@ -3,6 +3,37 @@
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 
+## [0.19.0] - 2026-09-30
+
+Technical release boundary for canonical module and persistence boundary closure.
+Consumer support requires the verified signed v0.19.0 tag and GitHub Release.
+
+### Changed
+
+- Close the eleven Spring Modulith business modules with explicit public
+  interfaces, allowed dependencies and an acyclic business dependency graph.
+- Replace foreign business-table SQL with owner-provided contracts and enforce
+  semantic SQL ownership and SQL-free runtime boundary composition.
+- Validate configured SMTP, object storage, Google Routes and Stripe transport
+  boundaries while retaining local/test fixture support.
+- Apply Jackson 2.21.6 and 3.1.6 BOM patches for CVE-2026-68497; retain both
+  supported generations and reject oversized numeric XML duration strings.
+- Check consumer OpenAPI compatibility against published v0.18.0 separately
+  from the historical v0.17.1 upgrade baseline.
+
+### Preserved
+
+- Existing v0.18.0 HTTP consumer contracts, PostgreSQL schema and Flyway V107
+  baseline; no new migration or published migration edit.
+- Server authorization, RLS, FEFO, concurrency, idempotency and immutable
+  business evidence boundaries.
+
+### Scope
+
+- [Candidate release notes](docs/releases/v0.19.0.md) record implementation,
+  technical evidence and known limits. Product Acceptance, System Acceptance,
+  production TLS and live provider readiness remain separate open gates.
+
 ## [0.18.0] - 2026-09-25
 
 Consumer-stable API closure for native access-context selection and the

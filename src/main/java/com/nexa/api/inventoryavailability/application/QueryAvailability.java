@@ -1,7 +1,7 @@
 package com.nexa.api.inventoryavailability.application;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.inventoryavailability.application.port.WarehouseInventoryPersistencePort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;

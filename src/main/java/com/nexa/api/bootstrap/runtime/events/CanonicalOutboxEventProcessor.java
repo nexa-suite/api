@@ -1,28 +1,28 @@
 package com.nexa.api.bootstrap.runtime.events;
 
-import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
-import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
-import com.nexa.api.fulfillmentdelivery.application.port.out.LogisticsEventContextQueryPort;
-import com.nexa.api.notifications.application.model.NotificationModels.NotificationProjection;
-import com.nexa.api.notifications.application.model.NotificationModels.PushNotificationCandidate;
+import com.nexa.api.businessdocuments.application.publicapi.DocumentGenerationCommands;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.DispatchWorkflowCommands;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsEventContextQueryPort;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
-import com.nexa.api.payments.application.port.PaymentPort;
-import com.nexa.api.salescommitment.application.port.out.SalesEventContextQueryPort;
+import com.nexa.api.payments.application.publicapi.PaymentWorkflowCommands;
+import com.nexa.api.salescommitment.application.publicapi.SalesEventContextQueryPort;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
-import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
+import com.nexa.api.salescommitment.application.publicapi.SalesWorkflowCommands;
 import com.nexa.api.shared.events.PaymentEventContextQueryPort;
 import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantEventContextQueryPort;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import com.nexa.api.shared.context.RlsRequestScope;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
-import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
-import com.nexa.api.inventoryavailability.application.port.out.WarehouseEventContextQueryPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryReservationCommands;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseEventContextQueryPort;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
@@ -66,11 +66,11 @@ public final class CanonicalOutboxEventProcessor {
     private final LogisticsEventContextQueryPort logisticsContext;
     private final PaymentEventContextQueryPort paymentContext;
     private final ResolveCurrentAccessContextUseCase access;
-    private final SalesOrderUseCase salesOrders;
-    private final WarehouseOperationsService warehouse;
-    private final LogisticsOperationsService logistics;
-    private final BusinessDocumentPort documents;
-    private final PaymentPort payments;
+    private final SalesWorkflowCommands salesOrders;
+    private final InventoryReservationCommands warehouse;
+    private final DispatchWorkflowCommands logistics;
+    private final DocumentGenerationCommands documents;
+    private final PaymentWorkflowCommands payments;
     private final TechnicalMetricsPort metrics;
     private final TransactionTemplate transactionTemplate;
     private final int outboxRetentionDays;
@@ -84,11 +84,11 @@ public final class CanonicalOutboxEventProcessor {
                                          LogisticsEventContextQueryPort logisticsContext,
                                          PaymentEventContextQueryPort paymentContext,
                                          ResolveCurrentAccessContextUseCase access,
-                                         SalesOrderUseCase salesOrders,
-                                         WarehouseOperationsService warehouse,
-                                         LogisticsOperationsService logistics,
-                                         BusinessDocumentPort documents,
-                                         PaymentPort payments,
+                                         SalesWorkflowCommands salesOrders,
+                                         InventoryReservationCommands warehouse,
+                                         DispatchWorkflowCommands logistics,
+                                         DocumentGenerationCommands documents,
+                                         PaymentWorkflowCommands payments,
                                          ObjectProvider<TechnicalMetricsPort> metrics,
                                          PlatformTransactionManager transactionManager,
                                          @Value("${nexa.integration.outbox-retention-days:90}") int outboxRetentionDays,
@@ -311,8 +311,7 @@ public final class CanonicalOutboxEventProcessor {
     private void createReceivable(EventRow event, Map<String, Object> payload) {
         UUID orderId = uuid(payload.getOrDefault("salesOrderId", event.aggregateId()));
         CurrentAccessContext context = actor(event);
-        payments.createReceivable(context, new PaymentPort.ReceivableCommand(
-                "SALES_ORDER", orderId, null, "outbox-receivable-" + event.eventId()));
+        payments.createReceivable(context, "SALES_ORDER", orderId, "outbox-receivable-" + event.eventId());
     }
 
     private void createDispatch(EventRow event, Map<String, Object> payload) {

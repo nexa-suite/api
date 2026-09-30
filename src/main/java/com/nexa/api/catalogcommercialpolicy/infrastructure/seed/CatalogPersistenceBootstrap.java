@@ -24,9 +24,11 @@ import java.util.UUID;
 public class CatalogPersistenceBootstrap {
     private static final String SEED_VERSION = "v1";
     private final JdbcTemplate jdbc;
+    private final com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory;
     private final CatalogSeedLoader seedLoader;
 
-    public CatalogPersistenceBootstrap(JdbcTemplate jdbc, CatalogSeedLoader seedLoader) {
+    public CatalogPersistenceBootstrap(JdbcTemplate jdbc, CatalogSeedLoader seedLoader, com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory) {
+        this.workspaceDirectory = workspaceDirectory;
         this.jdbc = jdbc;
         this.seedLoader = seedLoader;
     }
@@ -35,21 +37,22 @@ public class CatalogPersistenceBootstrap {
     @Order(Ordered.LOWEST_PRECEDENCE - 20)
     @Transactional
     public void importDeterministicSeed() {
-        List<Workspace> workspaces;
-        try {
-            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
-            workspaces = jdbc.query("select t.id tenant_id,w.id workspace_id from tenant_management.tenant t join tenant_management.workspace w on w.tenant_id=t.id where t.status='ACTIVE' and w.status='ACTIVE' order by t.id,w.id",
-                    (rs, row) -> new Workspace(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
-        } finally {
-            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', '', true)", String.class);
-        }
-        if (workspaces.isEmpty()) return;
-        List<CatalogSeedItemRecord> seeds = seedLoader.load();
+        List<CatalogSeedItemRecord> seeds = null;
         Instant now = Instant.now();
+        UUID cursorTenant = null, cursorWorkspace = null;
         try {
-            for (Workspace workspace : workspaces) {
+            while (true) {
+                var scopes = workspacePage(cursorTenant, cursorWorkspace);
+                if (scopes.isEmpty()) break;
+                if (seeds == null) seeds = seedLoader.load();
+                for (var scope : scopes) {
+                    Workspace workspace = new Workspace(scope.tenantId(), scope.workspaceId());
                 setTransactionScope(workspace);
                 importWorkspace(workspace, seeds, now);
+            }
+                var last = scopes.getLast();
+                cursorTenant = last.tenantId(); cursorWorkspace = last.workspaceId();
+                if (scopes.size() < 100) break;
             }
         } finally {
             clearTransactionScope();
@@ -124,6 +127,16 @@ public class CatalogPersistenceBootstrap {
     }
 
     private static Timestamp timestamp(Instant value) { return Timestamp.from(value); }
+    private List<com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory.Scope> workspacePage(UUID tenant, UUID workspace) {
+        try {
+            com.nexa.api.shared.context.RlsRequestScope.enableCrossScopeWorkspaceScan();
+            return workspaceDirectory.scanActiveAfter(tenant, workspace, 100);
+        } finally {
+            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', '', true)", String.class);
+            com.nexa.api.shared.context.RlsRequestScope.clear();
+        }
+    }
+
     private void setTransactionScope(Workspace workspace) {
         jdbc.queryForObject("select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true)",
                 String.class, workspace.tenantId().toString(), workspace.workspaceId().toString());

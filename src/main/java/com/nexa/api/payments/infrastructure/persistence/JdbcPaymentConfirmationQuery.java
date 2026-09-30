@@ -1,6 +1,7 @@
 package com.nexa.api.payments.infrastructure.persistence;
 
 import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
+import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,27 +13,28 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcPaymentConfirmationQuery implements PaymentConfirmationQuery {
     private final JdbcTemplate jdbc;
+    private final ReceivablePaymentAccess receivables;
 
-    public JdbcPaymentConfirmationQuery(JdbcTemplate jdbc) {
+    public JdbcPaymentConfirmationQuery(JdbcTemplate jdbc, ReceivablePaymentAccess receivables) {
         this.jdbc = jdbc;
+        this.receivables = receivables;
     }
 
     @Override
     public boolean isConfirmed(UUID tenantId, UUID workspaceId, UUID salesOrderId) {
-        Boolean confirmed = jdbc.queryForObject("select exists(select 1 from payments.receivable r "
-                        + "join payments.payment p on p.tenant_id=r.tenant_id and p.workspace_id=r.workspace_id and p.receivable_id=r.id "
-                        + "where r.tenant_id=? and r.workspace_id=? and r.subject_type='SALES_ORDER' and r.subject_id=? "
-                        + "and p.status='SUCCEEDED' and r.amount_paid>=r.amount+coalesce(r.adjustment_total,0))", Boolean.class,
-                tenantId, workspaceId, salesOrderId);
-        return Boolean.TRUE.equals(confirmed);
+        return receivables.findForSubject(tenantId, workspaceId, salesOrderId, "SALES_ORDER")
+                .filter(value -> value.amountPaid().compareTo(value.amount().add(value.adjustmentTotal())) >= 0)
+                .map(value -> successfulPayment(tenantId, workspaceId, value.id())).orElse(false);
     }
 
     @Override
     public boolean hasSuccessfulPayment(UUID tenantId, UUID workspaceId, UUID salesOrderId) {
-        Boolean paid = jdbc.queryForObject("select exists(select 1 from payments.receivable r "
-                        + "join payments.payment p on p.tenant_id=r.tenant_id and p.workspace_id=r.workspace_id and p.receivable_id=r.id "
-                        + "where r.tenant_id=? and r.workspace_id=? and r.subject_type='SALES_ORDER' and r.subject_id=? "
-                        + "and p.status='SUCCEEDED')", Boolean.class, tenantId, workspaceId, salesOrderId);
-        return Boolean.TRUE.equals(paid);
+        return receivables.findForSubject(tenantId, workspaceId, salesOrderId, "SALES_ORDER")
+                .map(value -> successfulPayment(tenantId, workspaceId, value.id())).orElse(false);
+    }
+
+    private boolean successfulPayment(UUID tenantId, UUID workspaceId, UUID receivableId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from payments.payment where tenant_id=? and workspace_id=? and receivable_id=? and status='SUCCEEDED')",
+                Boolean.class, tenantId, workspaceId, receivableId));
     }
 }

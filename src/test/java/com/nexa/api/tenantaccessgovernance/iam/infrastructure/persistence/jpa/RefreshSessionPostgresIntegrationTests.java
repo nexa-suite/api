@@ -5,7 +5,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.RefreshSessionC
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SignInCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessionUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignInUseCase;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

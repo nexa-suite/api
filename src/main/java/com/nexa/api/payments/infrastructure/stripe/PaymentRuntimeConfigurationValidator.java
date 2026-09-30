@@ -2,6 +2,7 @@ package com.nexa.api.payments.infrastructure.stripe;
 
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
@@ -18,6 +19,10 @@ public final class PaymentRuntimeConfigurationValidator {
         if (provider.isBlank()) provider = "disabled";
         if (!SUPPORTED.contains(provider)) {
             throw new IllegalStateException("Unsupported payment provider '" + provider + "'; use disabled or stripe");
+        }
+        String apiBaseUrl = environment.getProperty("nexa.payments.api-base-url", "").trim();
+        if (!apiBaseUrl.isEmpty() && !environment.acceptsProfiles(Profiles.of("local", "test"))) {
+            throw new IllegalStateException("nexa.payments.api-base-url must be unset outside local/test");
         }
         if ("deterministic".equals(provider) && !environment.acceptsProfiles("local")) {
             throw new IllegalStateException("The deterministic payment provider is available only with the local profile");

@@ -1,6 +1,6 @@
 package com.nexa.api.salescommitment.domain.model.commercial;
 
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 
 public record PaymentTerms(String code, String label, int dueDays, boolean credit) {
     public PaymentTerms {

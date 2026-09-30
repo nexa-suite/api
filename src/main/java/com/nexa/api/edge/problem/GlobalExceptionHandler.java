@@ -33,14 +33,14 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.security.access.AccessDeniedException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.administration.OrganizationAdministrationInvariantViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationConflictException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyConflictException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationIdempotencyRequiredException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService.InvitationInvalidException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.TenantConfigurationService.CustomFieldConflictException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.OrganizationAdministrationInvariantViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ConcurrencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationIdempotencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationIdempotencyRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationInvalidException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.CustomFieldConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException;
 import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestAlreadyConvertedException;
@@ -55,17 +55,17 @@ import com.nexa.api.salescommitment.application.exception.SalesIdempotencyPayloa
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
 import com.nexa.api.salescommitment.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
-import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
 import com.nexa.api.salescommitment.application.exception.SalesOrderRejectionReasonRequiredException;
 import com.nexa.api.salescommitment.application.exception.SalesOrderTransitionException;
 import com.nexa.api.edge.streaming.ChangeFeedCapacityException;
-import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
-import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationException;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperationException;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
-import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchTransitionViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
+import com.nexa.api.fulfillmentdelivery.domain.publicapi.DispatchTransitionViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
@@ -78,7 +78,6 @@ import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogConflic
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogIdempotencyKeyRequiredException;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogPreconditionRequiredException;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.RoleDefinitionService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionPersistenceUnavailableException;
 
 import java.util.List;
@@ -189,8 +188,8 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
 	}
 
-	@ExceptionHandler(PreconditionRequiredException.class)
-	public ResponseEntity<ProblemDetail> handlePrecondition(PreconditionRequiredException exception, HttpServletRequest request) {
+	@ExceptionHandler(OrganizationPreconditionRequiredException.class)
+	public ResponseEntity<ProblemDetail> handlePrecondition(OrganizationPreconditionRequiredException exception, HttpServletRequest request) {
 		return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
 	}
 
@@ -276,12 +275,12 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.CONFLICT, code, "Organization membership policy prevents this change", request);
 	}
 
-	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException.class)
-	public ResponseEntity<ProblemDetail> handleOrganizationIdempotency(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyKeyRequiredException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.IdempotencyKeyRequiredException.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationIdempotency(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.IdempotencyKeyRequiredException exception, HttpServletRequest request) {
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required", request);
 	}
-	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException.class)
-	public ResponseEntity<ProblemDetail> handleOrganizationIdempotencyPayload(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.IdempotencyPayloadConflictException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.IdempotencyPayloadConflictException.class)
+	public ResponseEntity<ProblemDetail> handleOrganizationIdempotencyPayload(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.IdempotencyPayloadConflictException exception, HttpServletRequest request) {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different workspace", request);
 	}
 	@ExceptionHandler(AccessPolicyViolation.class)
@@ -289,28 +288,28 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
 	}
 
-	@ExceptionHandler(RoleDefinitionService.RoleDefinitionNotFoundException.class)
-	public ResponseEntity<ProblemDetail> handleRoleDefinitionNotFound(RoleDefinitionService.RoleDefinitionNotFoundException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionNotFoundException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionNotFound(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionNotFoundException exception, HttpServletRequest request) {
 		return response(HttpStatus.NOT_FOUND, ApiErrorCode.ROLE_DEFINITION_NOT_FOUND, "Role definition not found", request);
 	}
 
-	@ExceptionHandler(RoleDefinitionService.DuplicateRoleDefinitionException.class)
-	public ResponseEntity<ProblemDetail> handleRoleDefinitionDuplicate(RoleDefinitionService.DuplicateRoleDefinitionException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.DuplicateRoleDefinitionException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionDuplicate(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.DuplicateRoleDefinitionException exception, HttpServletRequest request) {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.ROLE_DEFINITION_DUPLICATE, "Role definition code already exists", request);
 	}
 
-	@ExceptionHandler(RoleDefinitionService.ImmutableRoleDefinitionException.class)
-	public ResponseEntity<ProblemDetail> handleRoleDefinitionImmutable(RoleDefinitionService.ImmutableRoleDefinitionException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ImmutableRoleDefinitionException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionImmutable(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ImmutableRoleDefinitionException exception, HttpServletRequest request) {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.ROLE_DEFINITION_IMMUTABLE, "System role definitions are immutable", request);
 	}
 
-	@ExceptionHandler(RoleDefinitionService.ActiveRoleDefinitionAssignmentsException.class)
-	public ResponseEntity<ProblemDetail> handleRoleDefinitionAssignments(RoleDefinitionService.ActiveRoleDefinitionAssignmentsException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ActiveRoleDefinitionAssignmentsException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionAssignments(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ActiveRoleDefinitionAssignmentsException exception, HttpServletRequest request) {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.ROLE_DEFINITION_ASSIGNMENTS_ACTIVE, "Active memberships still use this role", request);
 	}
 
-	@ExceptionHandler(RoleDefinitionService.RoleDefinitionConcurrencyException.class)
-	public ResponseEntity<ProblemDetail> handleRoleDefinitionConcurrency(RoleDefinitionService.RoleDefinitionConcurrencyException exception, HttpServletRequest request) {
+	@ExceptionHandler(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionConcurrencyException.class)
+	public ResponseEntity<ProblemDetail> handleRoleDefinitionConcurrency(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.RoleDefinitionConcurrencyException exception, HttpServletRequest request) {
 		return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Role definition changed by another request", request);
 	}
 
@@ -478,8 +477,8 @@ public final class GlobalExceptionHandler {
 		public ResponseEntity<ProblemDetail> handleSalesOrderInvariant(SalesOrderInvariantViolation exception, HttpServletRequest request) { return response(HttpStatus.BAD_REQUEST, ApiErrorCode.SALES_ORDER_INVALID, "Sales order is invalid", request); }
 		@ExceptionHandler(ChangeFeedCapacityException.class)
 		public ResponseEntity<ProblemDetail> handleChangeFeedCapacity(ChangeFeedCapacityException exception, HttpServletRequest request) { return response(HttpStatus.TOO_MANY_REQUESTS, ApiErrorCode.CHANGE_FEED_CONNECTION_LIMIT, "Change feed connection limit reached", request); }
-		@ExceptionHandler(WarehouseOperationsService.WarehouseException.class)
-		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationsService.WarehouseException exception, HttpServletRequest request) {
+		@ExceptionHandler(WarehouseOperationException.class)
+		public ResponseEntity<ProblemDetail> handleWarehouse(WarehouseOperationException exception, HttpServletRequest request) {
 			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
 			if (!exception.notFound() && "CONCURRENCY_CONFLICT".equals(exception.code()) && request.getHeader("If-Match") != null) {
 				return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Warehouse resource changed by another request", request);
@@ -487,8 +486,8 @@ public final class GlobalExceptionHandler {
 			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INSUFFICIENT_AVAILABLE_STOCK", "INSUFFICIENT_SELLABLE_AVAILABILITY", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS", "STALE_ALLOCATION", "NOT_ALLOCATED", "WRONG_SKU", "WRONG_LOT", "WRONG_WAREHOUSE", "WRONG_UNIT", "EXPIRED", "QUARANTINED", "NON_SELLABLE", "INSUFFICIENT_ALLOCATED_QUANTITY", "OVERRIDE_NOT_ALLOWED" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
 		}
-		@ExceptionHandler(LogisticsOperationsService.LogisticsException.class)
-		public ResponseEntity<ProblemDetail> handleLogistics(LogisticsOperationsService.LogisticsException exception, HttpServletRequest request) {
+		@ExceptionHandler(LogisticsOperationException.class)
+		public ResponseEntity<ProblemDetail> handleLogistics(LogisticsOperationException exception, HttpServletRequest request) {
 			ApiErrorCode code; try { code = ApiErrorCode.valueOf(exception.code()); } catch (IllegalArgumentException ignored) { code = ApiErrorCode.INVALID_REQUEST; }
 			if (!exception.notFound() && "CONCURRENCY_CONFLICT".equals(exception.code()) && request.getHeader("If-Match") != null) {
 				return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Logistics resource changed by another request", request);

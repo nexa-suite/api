@@ -1,6 +1,6 @@
 package com.nexa.api.salescommitment.domain.model.buyerrequest;
 
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestLine;

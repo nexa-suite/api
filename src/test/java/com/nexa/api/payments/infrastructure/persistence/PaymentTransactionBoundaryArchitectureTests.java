@@ -52,8 +52,13 @@ class PaymentTransactionBoundaryArchitectureTests {
     void reconciliationWorkerUsesKeysetWorkspacePaginationAndManualRetriesAreBounded() throws Exception {
         String source = Files.readString(SERVICE);
 
-        assertThat(source).contains("(tenant_id,id) > (?,?)", "MAX_RECONCILIATION_ATTEMPTS",
+        assertThat(source).contains("workspaces.scanAfter(afterTenant, afterWorkspace, 100)",
+                "RlsRequestScope.enableCrossScopeWorkspaceScan()", "RlsRequestScope.clearCrossScopeWorkspaceScan()",
+                "MAX_RECONCILIATION_ATTEMPTS",
                 "operator override is required", "result_json is null");
+        assertThat(Files.readString(Path.of("src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceDirectory.java")))
+                .contains("(tenant_id,id) > (?,?)", "order by tenant_id,id limit ?",
+                        "Math.min(100", "Propagation.MANDATORY", "crossScopeWorkspaceScanEnabled()");
         assertThat(Files.readString(Path.of("src/main/resources/db/migration/V87__close_foundation_claim_fencing.sql")))
                 .doesNotContain("UPDATE payments.payment_reconciliation_case");
     }

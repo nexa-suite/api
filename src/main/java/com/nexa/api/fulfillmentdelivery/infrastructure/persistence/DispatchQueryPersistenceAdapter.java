@@ -4,8 +4,11 @@ import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchQueryPersistencePort;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchStatus;
 import com.nexa.api.fulfillmentdelivery.domain.proofofdelivery.ProofOfDeliveryStatus;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -19,9 +22,15 @@ import java.util.UUID;
 @Repository
 @Profile("!test")
 public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport implements DispatchQueryPersistencePort {
+    private final WorkforceDirectory workforce;
+
     public DispatchQueryPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
-                                           WarehouseLogisticsFulfillmentPort warehouseFulfillment) {
-        super(jdbc, changeFeed, warehouseFulfillment);
+                                           WarehouseLogisticsFulfillmentPort warehouseFulfillment,
+                                           SalesOrderFulfillmentQuery salesOrders,
+                                           CustomerAccountQuery customerAccounts,
+                                           WorkforceDirectory workforce) {
+        super(jdbc, changeFeed, warehouseFulfillment, salesOrders, customerAccounts);
+        this.workforce = workforce;
     }
 
     @Override
@@ -48,9 +57,11 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
         pageArgs.add(page * size);
-        List<LogisticsOperationsService.DispatchView> items = jdbc.query(
+        List<DispatchRow> selected = jdbc.query(
                 selectSql() + where + " order by " + order + " limit ? offset ?",
-                (rs, row) -> view(read(rs), clientAccountId != null), pageArgs.toArray());
+                (rs, row) -> read(rs), pageArgs.toArray());
+        List<LogisticsOperationsService.DispatchView> items = withSalesOrderHeaders(tenant, workspace, selected)
+                .stream().map(row -> view(row, clientAccountId != null)).toList();
         return new LogisticsOperationsService.Page<>(items, page, size, total);
     }
 
@@ -182,16 +193,10 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
     @Override
     @Transactional(readOnly = true)
     public List<LogisticsOperationsService.AssigneeView> assignees(String tenantId, String workspaceId) {
-        return jdbc.query("select m.id,u.email,u.display_name from tenant_management.workspace_membership m "
-                        + "join tenant_management.workspace w on w.id=m.workspace_id "
-                        + "join iam.user_account u on u.id=m.user_id "
-                        + "where w.tenant_id=? and m.workspace_id=? and m.membership_type='INTERNAL' and m.status='ACTIVE' "
-                        + "and exists (select 1 from tenant_management.membership_role_definition a "
-                        + "join tenant_management.role_definition r on r.id=a.role_id "
-                        + "where a.membership_id=m.id and r.code='logistics' and r.status='ACTIVE') "
-                        + "order by u.display_name,u.email,m.id",
-                (rs, row) -> new LogisticsOperationsService.AssigneeView(rs.getObject(1).toString(), rs.getString(2), rs.getString(3)),
-                uuid(tenantId), uuid(workspaceId));
+        return workforce.findLogisticsAssignees(uuid(tenantId), uuid(workspaceId)).stream()
+                .map(value -> new LogisticsOperationsService.AssigneeView(value.id().toString(), value.email(),
+                        value.displayName()))
+                .toList();
     }
 
     private double averageMinutes(UUID tenant, UUID workspace, String startEvent, String endEvent,

@@ -20,8 +20,8 @@ import com.nexa.api.salescommitment.domain.model.purchaserequestdraft.PurchaseRe
 import com.nexa.api.salescommitment.domain.model.purchaserequestdraft.PurchaseRequestDraftStatus;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.context.annotation.Profile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -102,16 +102,14 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
                 .map(reference -> UUID.fromString(reference.id()))
                 .orElseThrow(() -> new AccessDeniedException("Active Buyer relationship is required"));
         long total = jdbc.queryForObject("select count(*) from sales.purchase_request_draft d "
-                        + "join sales.client_account a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.id=d.client_account_id "
                         + "where d.tenant_id=? and d.workspace_id=? and d.buyer_membership_id=? and d.client_account_id=? "
-                        + "and d.status<>'SUBMITTED' and a.status='ACTIVE'", Long.class,
+                        + "and d.status<>'SUBMITTED'", Long.class,
                 tenant(context), workspace(context), context.membershipId().value(), clientAccountId);
         List<PurchaseRequestDraftModels.DraftSummaryView> items = jdbc.query("select d.id,d.status,d.version,d.requested_delivery_date, "
                         + "(select count(*) from sales.purchase_request_draft_line l where l.tenant_id=d.tenant_id and l.workspace_id=d.workspace_id and l.draft_id=d.id) line_count, "
                         + "d.created_at,d.updated_at from sales.purchase_request_draft d "
-                        + "join sales.client_account a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.id=d.client_account_id "
                         + "where d.tenant_id=? and d.workspace_id=? and d.buyer_membership_id=? and d.client_account_id=? "
-                        + "and d.status<>'SUBMITTED' and a.status='ACTIVE' "
+                        + "and d.status<>'SUBMITTED' "
                         + "order by d.updated_at desc,d.id asc limit ? offset ?",
                 (rs, row) -> new PurchaseRequestDraftModels.DraftSummaryView(rs.getObject("id", UUID.class).toString(),
                         rs.getString("status"), rs.getLong("version"), rs.getObject("requested_delivery_date", LocalDate.class),

@@ -8,6 +8,7 @@ import java.util.UUID;
 import java.math.BigDecimal;
 import java.util.Map;
 
+@org.springframework.modulith.NamedInterface("catalog-snapshots")
 public interface GetCatalogItemSnapshotUseCase {
     Optional<CatalogItemSnapshot> findActive(String catalogItemId, UUID tenantId, UUID workspaceId);
 

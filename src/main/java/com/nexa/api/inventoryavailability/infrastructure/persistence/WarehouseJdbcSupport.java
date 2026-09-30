@@ -1,6 +1,8 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
-import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
@@ -49,19 +51,24 @@ import static com.nexa.api.inventoryavailability.infrastructure.persistence.Ware
 abstract class WarehouseJdbcSupport {
     protected final JdbcTemplate jdbc;
     protected final ChangeEventPersistencePort changeFeed;
-    protected final CatalogItemSnapshotLookupPort catalog;
+    protected final SellableSkuQuery catalog;
+    protected final InventoryCommercialSource commercialSource;
+    protected final InventoryFulfillmentSource fulfillmentSource;
     protected final TransactionTemplate transactionTemplate;
     protected final WarehouseOperationalSettingsPort operationalSettings;
 
     protected WarehouseJdbcSupport(
             JdbcTemplate jdbc,
             ChangeEventPersistencePort changeFeed,
-            CatalogItemSnapshotLookupPort catalog,
+            SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
-            WarehouseOperationalSettingsPort operationalSettings) {
+            WarehouseOperationalSettingsPort operationalSettings,
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
         this.jdbc = jdbc;
         this.changeFeed = changeFeed;
         this.catalog = catalog;
+        this.commercialSource = commercialSource;
+        this.fulfillmentSource = fulfillmentSource;
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
         if (this.transactionTemplate != null) {
             this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -200,24 +207,19 @@ abstract class WarehouseJdbcSupport {
     }
 
     protected List<LineData> lines(CurrentAccessContext context, UUID orderId) {
-        return jdbc.query("select line.sku_id,line.catalog_item_id,line.quantity,upper(line.unit) as unit from sales.sales_order_line line "
-                        + "join sales.sales_order order_header on order_header.id=line.sales_order_id "
-                        + "where order_header.tenant_id=? and order_header.workspace_id=? and line.sales_order_id=? "
-                        + "order by coalesce(line.sku_id::text,line.catalog_item_id),line.id",
-                (rs, row) -> new LineData(rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"),
-                        rs.getBigDecimal("quantity"), rs.getString("unit")),
-                tenant(context), workspace(context), orderId);
+        return commercialSource.findCandidate(tenant(context), workspace(context), orderId).stream()
+                .flatMap(order -> order.lines().stream())
+                .sorted(Comparator.comparing((InventoryCommercialSource.Line line) -> line.skuId() == null
+                        ? line.catalogItemId() : line.skuId().toString()).thenComparing(line -> line.id().toString()))
+                .map(line -> new LineData(line.skuId(), line.catalogItemId(), line.quantity(), line.unit().toUpperCase(java.util.Locale.ROOT))).toList();
     }
 
     protected OrderData loadOrder(CurrentAccessContext context, UUID id, boolean lock) {
-        return jdbc.query(
-                        "select id,number,status,version,client_account_id,delivery_snapshot from sales.sales_order "
-                                + "where tenant_id=? and workspace_id=? and id=?" + (lock ? " for update" : ""),
-                        (rs, row) -> new OrderData(rs.getObject("id", UUID.class), rs.getString("number"),
-                                rs.getString("status"), rs.getLong("version"), rs.getObject("client_account_id", UUID.class),
-                                rs.getString("delivery_snapshot")),
-                        tenant(context), workspace(context), id)
-                .stream().findFirst().orElseThrow(() -> error("FULFILLMENT_CANDIDATE_NOT_ELIGIBLE", true));
+        InventoryCommercialSource.Snapshot value = (lock
+                ? commercialSource.claimCandidate(tenant(context), workspace(context), id)
+                : commercialSource.findCandidate(tenant(context), workspace(context), id))
+                .orElseThrow(() -> error("FULFILLMENT_CANDIDATE_NOT_ELIGIBLE", true));
+        return new OrderData(value.id(), value.number(), value.status(), value.version(), value.clientAccountId(), value.destinationSnapshot());
     }
 
     protected WarehouseOperationsService.ProposalLine proposal(CurrentAccessContext context, LineData line, boolean lock,
@@ -319,21 +321,19 @@ abstract class WarehouseJdbcSupport {
     }
 
     protected SkuReference resolveSku(CurrentAccessContext context, String requestedSkuId, String legacyCatalogItemId) {
-        List<SkuReference> matches;
+        List<SellableSkuQuery.InventorySkuSnapshot> matches;
         if (requestedSkuId != null && !requestedSkuId.isBlank()) {
-            matches = jdbc.query("select id,legacy_catalog_item_id,sku_code from catalog_management.sellable_sku "
-                            + "where tenant_id=? and workspace_id=? and id=? and status='ACTIVE'",
-                    (rs, row) -> new SkuReference(rs.getObject("id", UUID.class), rs.getString("legacy_catalog_item_id"), rs.getString("sku_code")),
-                    tenant(context), workspace(context), uuid(requestedSkuId));
+            matches = catalog.findInventoryPolicies(tenant(context), workspace(context), List.of(uuid(requestedSkuId)));
         } else if (legacyCatalogItemId != null) {
-            matches = jdbc.query("select id,legacy_catalog_item_id,sku_code from catalog_management.sellable_sku "
-                            + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id=? and status='ACTIVE'",
-                    (rs, row) -> new SkuReference(rs.getObject("id", UUID.class), rs.getString("legacy_catalog_item_id"), rs.getString("sku_code")),
-                    tenant(context), workspace(context), legacyCatalogItemId);
+            matches = catalog.findInventoryPoliciesByLegacyIds(tenant(context), workspace(context), List.of(legacyCatalogItemId));
         } else {
             matches = List.of();
         }
-        if (!matches.isEmpty()) return matches.getFirst();
+        var active = matches.stream().filter(value -> "ACTIVE".equals(value.status())).findFirst();
+        if (active.isPresent()) {
+            var value = active.get();
+            return new SkuReference(value.id(), value.legacyCatalogItemId(), value.skuCode());
+        }
         // V57 makes SKU identity mandatory for persisted Warehouse rows. A
         // legacy catalog item remains an input compatibility key, not a
         // second inventory identity.

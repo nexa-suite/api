@@ -2,7 +2,7 @@ package com.nexa.api.tenantaccessgovernance.iam.application.port.out;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.model.AuthenticationSubject;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.IssuedAuthenticationTokens;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.session.SessionId;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
 
 import java.time.Instant;
 

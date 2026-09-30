@@ -4,6 +4,7 @@ import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
 import com.nexa.api.salescommitment.infrastructure.maps.GoogleMapsHttpBoundaryAdapter;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.env.MockEnvironment;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
@@ -13,6 +14,7 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GoogleMapsHttpBoundaryAdapterTest {
     @Test
@@ -45,6 +47,52 @@ class GoogleMapsHttpBoundaryAdapterTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void acceptsTrustedGoogleHttpsRuntimeEndpointOutsideLocalAndTest() {
+        runtimeAdapter("production", "https://routes.googleapis.com");
+    }
+
+    @Test
+    void rejectsHttpRuntimeEndpointOutsideLocalAndTest() {
+        assertThatThrownBy(() -> runtimeAdapter("production", "http://routes.googleapis.com"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("nexa.maps.google.routes-base-url must use the trusted HTTPS Google Routes endpoint");
+    }
+
+    @Test
+    void rejectsUntrustedRuntimeHostOutsideLocalAndTest() {
+        assertThatThrownBy(() -> runtimeAdapter("production", "https://routes.example.net"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("nexa.maps.google.routes-base-url must use the trusted HTTPS Google Routes endpoint");
+    }
+
+    @Test
+    void rejectsRuntimeEndpointUserInfo() {
+        assertThatThrownBy(() -> runtimeAdapter("production", "https://user:password@routes.googleapis.com"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("nexa.maps.google.routes-base-url must be a valid absolute HTTP(S) URI without userinfo");
+    }
+
+    @Test
+    void rejectsMalformedRuntimeEndpoint() {
+        assertThatThrownBy(() -> runtimeAdapter("production", "https://routes.googleapis.com bad"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("nexa.maps.google.routes-base-url must be a valid absolute HTTP(S) URI without userinfo");
+    }
+
+    @Test
+    void allowsLocalRuntimeMockEndpoint() {
+        runtimeAdapter("local", "http://localhost:8089");
+    }
+
+    private static GoogleMapsHttpBoundaryAdapter runtimeAdapter(String profile, String endpoint) {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles(profile);
+        environment.setProperty("nexa.maps.google.api-key", "test-key");
+        environment.setProperty("nexa.maps.google.routes-base-url", endpoint);
+        return new GoogleMapsHttpBoundaryAdapter(JsonMapper.shared(), environment);
     }
 
     private static MapRoutingPort.MapRouteRequest request() {

@@ -1,6 +1,6 @@
 package com.nexa.api.salescommitment.domain.model.purchaserequest;
 
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 
 import java.util.Objects;
 

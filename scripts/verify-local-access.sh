@@ -15,7 +15,7 @@ set -a
 set +a
 
 workspace="${NEXA_DEV_WORKSPACE_SLUG}"
-api_url="http://localhost:8080/api/v1/authentication/sign-in"
+api_url="${NEXA_LOCAL_API_URL:-http://localhost:8080}/api/v1/authentication/sign-in"
 
 verify_login() {
   label="$1"

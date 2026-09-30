@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.domain.dispatchorder;
 
+import com.nexa.api.fulfillmentdelivery.domain.publicapi.DispatchTransitionViolation;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;

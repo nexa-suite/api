@@ -34,8 +34,27 @@ public class JdbcSellableSkuQuery implements SellableSkuQuery {
         this.offers = offers;
     }
 
-    public JdbcSellableSkuQuery(JdbcTemplate jdbc) {
-        this(jdbc, new JdbcAuthoritativeOfferQuery(jdbc));
+    @Override
+    public List<InventorySkuSnapshot> findInventoryPolicies(UUID tenantId, UUID workspaceId, List<UUID> skuIds) {
+        return inventoryPolicies(tenantId, workspaceId, "id", skuIds);
+    }
+
+    @Override
+    public List<InventorySkuSnapshot> findInventoryPoliciesByLegacyIds(UUID tenantId, UUID workspaceId, List<String> catalogItemIds) {
+        return inventoryPolicies(tenantId, workspaceId, "legacy_catalog_item_id", catalogItemIds);
+    }
+
+    private List<InventorySkuSnapshot> inventoryPolicies(UUID tenantId, UUID workspaceId, String column, List<?> ids) {
+        if (ids.isEmpty()) return List.of();
+        List<?> distinct = ids.stream().distinct().toList();
+        List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId));
+        args.addAll(distinct);
+        String placeholders = distinct.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        return jdbc.query("select id,legacy_catalog_item_id,sku_code,status,temperature_min,temperature_max "
+                        + "from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and " + column
+                        + " in (" + placeholders + ") order by id",
+                (rs, row) -> new InventorySkuSnapshot(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
+                        rs.getString(4), rs.getBigDecimal(5), rs.getBigDecimal(6)), args.toArray());
     }
 
     @Override

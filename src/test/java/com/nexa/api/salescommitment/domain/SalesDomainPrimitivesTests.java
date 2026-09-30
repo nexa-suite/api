@@ -6,10 +6,10 @@ import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequest
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestStatus;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderId;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderStatus;
-import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
 import com.nexa.api.salescommitment.domain.model.reference.PeruGeographyLevel;
 import com.nexa.api.salescommitment.domain.model.reference.PeruGeographyOption;
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

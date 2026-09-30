@@ -8,19 +8,20 @@ import com.nexa.api.payments.application.port.StripePaymentProvider;
 import com.nexa.api.creditreceivables.application.publicapi.CreditPaymentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableApplicationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
+import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentCommands;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
-import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
-import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
+import com.nexa.api.payments.application.publicapi.PaymentSalesSource;
 import com.nexa.api.payments.domain.model.payment.Payment;
 import com.nexa.api.payments.domain.model.payment.PaymentMethod;
 import com.nexa.api.payments.domain.model.payment.PaymentStatus;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import org.springframework.beans.factory.ObjectProvider;
@@ -73,10 +74,12 @@ public class PaymentService implements PaymentPersistencePort {
     private final ReceivableApplicationCommands receivableApplications;
     private final CreditPaymentCommands creditPayments;
     private final ReceivableCommands receivables;
+    private final ReceivablePaymentAccess receivableAccess;
+    private final WorkspaceDirectory workspaces;
     private final BusinessDocumentCommands documents;
     private final BusinessEvidenceQuery businessEvidence;
     private final CustomerAccountQuery customerAccounts;
-    private final SalesOrderFulfillmentQuery salesOrders;
+    private final PaymentSalesSource salesOrders;
     private static final int MAX_DATABASE_TRANSACTION_ATTEMPTS = 3;
 
     public PaymentService(JdbcTemplate jdbc, StripePaymentProvider stripe,
@@ -90,8 +93,9 @@ public class PaymentService implements PaymentPersistencePort {
                           BusinessDocumentCommands documents,
                           BusinessEvidenceQuery businessEvidence,
                           CustomerAccountQuery customerAccounts,
-                          SalesOrderFulfillmentQuery salesOrders,
-                          CanonicalOutboxPort canonicalOutbox) {
+                          PaymentSalesSource salesOrders,
+                          CanonicalOutboxPort canonicalOutbox,
+                          ReceivablePaymentAccess receivableAccess, WorkspaceDirectory workspaces) {
         this.jdbc = jdbc; this.stripe = stripe; this.publishableKey = publishableKey == null ? "" : publishableKey;
         this.canonicalOutbox = canonicalOutbox;
         this.webhookSecret = webhookSecret == null ? "" : webhookSecret;
@@ -100,6 +104,8 @@ public class PaymentService implements PaymentPersistencePort {
         this.receivableApplications = receivableApplications;
         this.creditPayments = creditPayments;
         this.receivables = receivables;
+        this.receivableAccess = receivableAccess;
+        this.workspaces = workspaces;
         this.documents = documents;
         this.businessEvidence = businessEvidence;
         this.customerAccounts = customerAccounts;
@@ -112,26 +118,19 @@ public class PaymentService implements PaymentPersistencePort {
         context.requirePermission(PermissionKey.PAYMENT_READ);
         int safePage = Math.max(0, page);
         int safeSize = Math.min(100, Math.max(1, size));
-        int offset = safePage * safeSize;
-        List<ReceivableRow> rows;
-        Long total;
+        UUID accountId = null;
         if (context.hasRole(MembershipRole.BUYER)) {
-            String buyerAccountId = customerAccounts == null ? null
-                    : customerAccounts.findActiveBuyerDetails(tenant(context).toString(), workspace(context).toString(),
-                    context.membershipId().value().toString()).map(value -> value.id()).orElse(null);
-            if (buyerAccountId == null) {
-                rows = List.of();
-                total = 0L;
-            } else {
-                rows = jdbc.query("select r.id,r.client_account_id,r.subject_type,r.subject_id,r.receivable_number,r.currency,r.amount,r.amount_paid,coalesce(r.adjustment_total,0) adjustment_total,r.status,r.due_at,r.version from payments.receivable r where r.tenant_id=? and r.workspace_id=? and r.client_account_id=? order by r.due_at nulls last,r.created_at desc limit ? offset ?", (rs, n) -> receivableRow(rs), tenant(context), workspace(context), UUID.fromString(buyerAccountId), safeSize, offset);
-                total = jdbc.queryForObject("select count(*) from payments.receivable r where r.tenant_id=? and r.workspace_id=? and r.client_account_id=?", Long.class, tenant(context), workspace(context), UUID.fromString(buyerAccountId));
-            }
-        } else {
-            rows = jdbc.query("select r.id,r.client_account_id,r.subject_type,r.subject_id,r.receivable_number,r.currency,r.amount,r.amount_paid,coalesce(r.adjustment_total,0) adjustment_total,r.status,r.due_at,r.version from payments.receivable r where r.tenant_id=? and r.workspace_id=? order by r.due_at nulls last,r.created_at desc limit ? offset ?", (rs, n) -> receivableRow(rs), tenant(context), workspace(context), safeSize, offset);
-            total = jdbc.queryForObject("select count(*) from payments.receivable r where r.tenant_id=? and r.workspace_id=?", Long.class, tenant(context), workspace(context));
+            String buyerAccountId = customerAccounts.findActiveBuyerDetails(tenant(context).toString(),
+                    workspace(context).toString(), context.membershipId().value().toString())
+                    .map(value -> value.id()).orElse(null);
+            if (buyerAccountId == null) return new PaymentModels.Page<>(List.of(), safePage, safeSize, 0);
+            accountId = UUID.fromString(buyerAccountId);
         }
+        ReceivablePaymentAccess.Page result = receivableAccess.list(tenant(context), workspace(context), accountId, safePage, safeSize);
+        List<ReceivablePaymentAccess.Snapshot> rows = result.values();
+        long total = result.total();
         List<PaymentModels.ReceivableView> visible = rows.stream().filter(row -> authorizedClient(context, row.clientAccountId())).map(this::receivableView).toList();
-        return new PaymentModels.Page<>(visible, safePage, safeSize, total == null ? 0 : total);
+        return new PaymentModels.Page<>(visible, safePage, safeSize, total);
     }
 
     @Transactional(readOnly = true)
@@ -156,7 +155,7 @@ public class PaymentService implements PaymentPersistencePort {
         queryParameters.add(safeSize);
         queryParameters.add(safePage * safeSize);
         List<PaymentModels.PaymentSummaryView> values = jdbc.query(
-                "select p.id,p.receivable_id,r.receivable_number,p.client_account_id,p.method,p.status,p.amount,p.currency,p.bank_transfer_reference,p.review_reason,p.created_at,p.completed_at from payments.payment p join payments.receivable r on r.tenant_id=p.tenant_id and r.workspace_id=p.workspace_id and r.id=p.receivable_id" + where + " order by p.created_at desc,p.id desc limit ? offset ?",
+                "select p.id,p.receivable_id,null::text as receivable_number,p.client_account_id,p.method,p.status,p.amount,p.currency,p.bank_transfer_reference,p.review_reason,p.created_at,p.completed_at from payments.payment p" + where + " order by p.created_at desc,p.id desc limit ? offset ?",
                 (rs, n) -> new PaymentModels.PaymentSummaryView(
                         rs.getObject("id", UUID.class).toString(),
                         rs.getObject("receivable_id", UUID.class).toString(),
@@ -171,13 +170,13 @@ public class PaymentService implements PaymentPersistencePort {
                         rs.getTimestamp("created_at").toInstant(),
                         rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()),
                 queryParameters.toArray());
-        return new PaymentModels.Page<>(values, safePage, safeSize, total == null ? 0 : total);
+        return new PaymentModels.Page<>(withReceivableNumbers(context, values), safePage, safeSize, total == null ? 0 : total);
     }
 
     @Transactional(readOnly = true)
     public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPaymentsForReceivable(CurrentAccessContext context, UUID receivableId, int page, int size) {
         context.requirePermission(PermissionKey.PAYMENT_READ);
-        ReceivableRow receivable = receivableQuery(context, receivableId).stream()
+        ReceivablePaymentAccess.Snapshot receivable = receivableQuery(context, receivableId).stream()
                 .filter(row -> authorizedClient(context, row.clientAccountId())).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Receivable not found"));
         int safePage = Math.max(0, page);
@@ -185,8 +184,8 @@ public class PaymentService implements PaymentPersistencePort {
         Long total = jdbc.queryForObject("select count(*) from payments.payment where tenant_id=? and workspace_id=? and receivable_id=?",
                 Long.class, tenant(context), workspace(context), receivable.id());
         List<PaymentModels.PaymentSummaryView> values = jdbc.query(
-                "select p.id,p.receivable_id,r.receivable_number,p.client_account_id,p.method,p.status,p.amount,p.currency,p.bank_transfer_reference,p.review_reason,p.created_at,p.completed_at "
-                        + "from payments.payment p join payments.receivable r on r.tenant_id=p.tenant_id and r.workspace_id=p.workspace_id and r.id=p.receivable_id "
+                "select p.id,p.receivable_id,null::text as receivable_number,p.client_account_id,p.method,p.status,p.amount,p.currency,p.bank_transfer_reference,p.review_reason,p.created_at,p.completed_at "
+                        + "from payments.payment p "
                         + "where p.tenant_id=? and p.workspace_id=? and p.receivable_id=? order by p.created_at desc,p.id desc limit ? offset ?",
                 (rs, n) -> new PaymentModels.PaymentSummaryView(rs.getObject("id", UUID.class).toString(),
                         rs.getObject("receivable_id", UUID.class).toString(), rs.getString("receivable_number"),
@@ -195,7 +194,7 @@ public class PaymentService implements PaymentPersistencePort {
                         rs.getString("review_reason"), rs.getTimestamp("created_at").toInstant(),
                         rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()),
                 tenant(context), workspace(context), receivable.id(), safeSize, safePage * safeSize);
-        return new PaymentModels.Page<>(values, safePage, safeSize, total == null ? 0 : total);
+        return new PaymentModels.Page<>(withReceivableNumbers(context, values), safePage, safeSize, total == null ? 0 : total);
     }
 
     @Transactional(readOnly = true)
@@ -464,7 +463,7 @@ public class PaymentService implements PaymentPersistencePort {
         if (clientSecret == null || clientSecret.isBlank() || clientSecret.length() > 512) throw new IllegalArgumentException("Stripe client secret is required");
         ConfirmationClaim claim = transactionTemplate.execute(status -> prepareConfirmationClaim(context, receivableId));
         if (claim == null) throw new IllegalStateException("Stripe payment confirmation claim could not be prepared");
-        ReceivableRow receivable = claim.receivable();
+        ReceivablePaymentAccess.Snapshot receivable = claim.receivable();
         PaymentRow payment = claim.payment();
         if (payment == null) throw new IllegalArgumentException("Stripe payment intent was not created");
         if (PaymentStatus.SUCCEEDED.name().equals(payment.status())) return paymentView(payment, PaymentMethod.CARD_STRIPE.name());
@@ -495,7 +494,7 @@ public class PaymentService implements PaymentPersistencePort {
     private PaymentModels.PaymentView createCreditLinePaymentInTransaction(CurrentAccessContext context,
                                                                              UUID receivableId, String idempotencyKey) {
         lockIdempotencyKey(context, idempotencyKey);
-        ReceivableRow receivable = lockedReceivable(context, receivableId); ensureBuyerScope(context, receivable.clientAccountId());
+        ReceivablePaymentAccess.Snapshot receivable = lockedReceivable(context, receivableId); ensureBuyerScope(context, receivable.clientAccountId());
         BigDecimal amount = payableAmount(receivable);
         if (amount.signum() <= 0 || !SetOfOpen.contains(receivable.status())) throw new IllegalArgumentException("Receivable is not payable");
         ExistingPayment existing = existingPayment(context, idempotencyKey);
@@ -527,7 +526,7 @@ public class PaymentService implements PaymentPersistencePort {
                                                                        UUID proofEvidenceId) {
         lockIdempotencyKey(context, idempotencyKey);
         if (transferReference == null || transferReference.isBlank() || transferReference.length() > 160) throw new IllegalArgumentException("Bank transfer reference is required");
-        ReceivableRow receivable = lockedReceivable(context, receivableId); ensureBuyerScope(context, receivable.clientAccountId()); BigDecimal amount = payableAmount(receivable);
+        ReceivablePaymentAccess.Snapshot receivable = lockedReceivable(context, receivableId); ensureBuyerScope(context, receivable.clientAccountId()); BigDecimal amount = payableAmount(receivable);
         if (amount.signum() <= 0 || !SetOfOpen.contains(receivable.status())) throw new IllegalArgumentException("Receivable is not payable");
         ExistingPayment existing = existingPayment(context, idempotencyKey);
         if (existing != null) {
@@ -699,12 +698,8 @@ public class PaymentService implements PaymentPersistencePort {
             RlsRequestScope.enableCrossScopeWorkspaceScan();
             try {
                 scopes = transactionTemplate.execute(status -> {
-                    jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
-                    return afterTenant == null
-                            ? jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id limit 100",
-                            (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)))
-                            : jdbc.query("select tenant_id,id from tenant_management.workspace where (tenant_id,id) > (?,?) order by tenant_id,id limit 100",
-                            (rs, n) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)), afterTenant, afterWorkspace);
+                    return workspaces.scanAfter(afterTenant, afterWorkspace, 100).stream()
+                            .map(scope -> new WorkspaceScope(scope.tenantId(), scope.workspaceId())).toList();
                 });
             } finally {
                 RlsRequestScope.clearCrossScopeWorkspaceScan();
@@ -747,7 +742,7 @@ public class PaymentService implements PaymentPersistencePort {
     }
 
     private void applySucceededPaymentForStoredContext(PaymentRow payment, String eventKey) {
-        ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,coalesce(adjustment_total,0) adjustment_total,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=? for update", (rs, n) -> receivableRow(rs), payment.tenantId(), payment.workspaceId(), payment.receivableId()).stream().findFirst().orElseThrow();
+        ReceivablePaymentAccess.Snapshot receivable = receivableAccess.claimForPayment(payment.tenantId(), payment.workspaceId(), payment.receivableId());
         if (!receivable.currency().equalsIgnoreCase(payment.currency())) throw new IllegalArgumentException("Payment currency does not match receivable");
         UUID actorMembershipId = jdbc.queryForObject("select created_by_membership_id from payments.payment where tenant_id=? and workspace_id=? and id=?", UUID.class, payment.tenantId(), payment.workspaceId(), payment.id());
         receivableApplications.apply(new ReceivableApplicationCommands.Request(payment.tenantId(), payment.workspaceId(),
@@ -758,18 +753,10 @@ public class PaymentService implements PaymentPersistencePort {
     }
 
     private void reconcileCapturedPaymentIfSalesOrderMissing(PaymentRow payment, String eventKey) {
-        ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,coalesce(adjustment_total,0) adjustment_total,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=?",
-                (rs, n) -> receivableRow(rs), payment.tenantId(), payment.workspaceId(), payment.receivableId()).stream().findFirst().orElse(null);
+        ReceivablePaymentAccess.Snapshot receivable = receivableAccess.find(payment.tenantId(), payment.workspaceId(), payment.receivableId()).orElse(null);
         if (receivable == null || !"SALES_ORDER".equals(receivable.subjectType())) return;
-        boolean orderExists;
-        try {
-            if (salesOrders == null) throw new IllegalStateException("Sales Commitment query boundary is not configured");
-            salesOrders.get(payment.tenantId(), payment.workspaceId(), receivable.subjectId());
-            orderExists = true;
-        } catch (CommercialBusinessException exception) {
-            if (!"SALES_ORDER_NOT_FOUND".equals(exception.code())) throw exception;
-            orderExists = false;
-        }
+        if (salesOrders == null) throw new IllegalStateException("Sales Commitment query boundary is not configured");
+        boolean orderExists = salesOrders.exists(payment.tenantId(), payment.workspaceId(), receivable.subjectId());
         if (orderExists) return;
         UUID caseId = UUID.randomUUID();
         int inserted = jdbc.update("insert into payments.payment_reconciliation_case(id,tenant_id,workspace_id,payment_id,receivable_id,allocation_status,state,created_at,updated_at) values (?,?,?,?,?,'UNALLOCATED','RECONCILIATION_REQUIRED',current_timestamp,current_timestamp) on conflict (tenant_id,workspace_id,payment_id) do nothing",
@@ -813,7 +800,7 @@ public class PaymentService implements PaymentPersistencePort {
 
     private void applySucceededPayment(CurrentAccessContext context, UUID paymentId, UUID receivableId, BigDecimal amount, String currency, String eventKey) {
         PaymentRow payment = new PaymentRow(paymentId, receivableId, "SUCCEEDED", amount, currency, null, null, Instant.now(), Instant.now(), null, tenant(context), workspace(context));
-        ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,coalesce(adjustment_total,0) adjustment_total,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=? for update", (rs, n) -> receivableRow(rs), tenant(context), workspace(context), receivableId).stream().findFirst().orElseThrow();
+        ReceivablePaymentAccess.Snapshot receivable = receivableAccess.claimForPayment(tenant(context), workspace(context), receivableId);
         if (!receivable.currency().equalsIgnoreCase(currency)) throw new IllegalArgumentException("Payment currency does not match receivable");
         receivableApplications.apply(new ReceivableApplicationCommands.Request(tenant(context), workspace(context),
                 context.membershipId().value(), receivable.id(), paymentId, amount, currency, eventKey, Instant.now()));
@@ -821,7 +808,7 @@ public class PaymentService implements PaymentPersistencePort {
         outbox(payment, "PAYMENT_SUCCEEDED", Map.of("paymentId", paymentId, "receivableId", receivableId, "amount", amount, "currency", currency));
     }
 
-    private void enqueuePaymentReceipt(PaymentRow payment, ReceivableRow receivable, String eventKey) {
+    private void enqueuePaymentReceipt(PaymentRow payment, ReceivablePaymentAccess.Snapshot receivable, String eventKey) {
         UUID requester = jdbc.queryForObject("select created_by_membership_id from payments.payment where tenant_id=? and workspace_id=? and id=?", UUID.class, tenant(payment), workspace(payment), payment.id());
         if (documents == null) throw new IllegalStateException("Business Documents command boundary is not configured");
         documents.enqueuePaymentReceipt(tenant(payment), workspace(payment), payment.id(), receivable.clientAccountId(), requester, eventKey, Instant.now());
@@ -830,19 +817,19 @@ public class PaymentService implements PaymentPersistencePort {
     private void outbox(PaymentRow payment, String eventType, Map<String, Object> payload) { canonicalOutbox.append(eventType, "Payment", payment.id(), tenant(payment), workspace(payment), Instant.now(), "payment-" + payment.id(), null, "1.0", payload); }
     private String json(Object payload) { try { return objectMapper.writeValueAsString(payload); } catch (Exception exception) { throw new IllegalStateException("Payment JSON serialization failed", exception); } }
 
-    private PaymentModels.ReceivableView receivableView(ReceivableRow row) {
+    private PaymentModels.ReceivableView receivableView(ReceivablePaymentAccess.Snapshot row) {
         BigDecimal adjustedAmount = row.amount().add(row.adjustmentTotal());
         BigDecimal outstanding = adjustedAmount.subtract(row.amountPaid()).max(BigDecimal.ZERO);
         return new PaymentModels.ReceivableView(row.id().toString(), row.clientAccountId().toString(), row.subjectType(), row.subjectId().toString(), row.number(), row.currency(), row.amount(), row.amountPaid(), outstanding, row.status(), row.dueAt(), row.version());
     }
 
-    private static BigDecimal payableAmount(ReceivableRow row) {
+    private static BigDecimal payableAmount(ReceivablePaymentAccess.Snapshot row) {
         return row.amount().add(row.adjustmentTotal()).subtract(row.amountPaid()).max(BigDecimal.ZERO);
     }
 
     private CardPaymentClaim prepareCardPaymentClaim(CurrentAccessContext context, UUID receivableId, String idempotencyKey) {
         lockIdempotencyKey(context, idempotencyKey);
-        ReceivableRow receivable = lockedReceivable(context, receivableId);
+        ReceivablePaymentAccess.Snapshot receivable = lockedReceivable(context, receivableId);
         ensureBuyerScope(context, receivable.clientAccountId());
         ExistingPayment existing = existingPayment(context, idempotencyKey);
         if (existing != null) {
@@ -915,7 +902,7 @@ public class PaymentService implements PaymentPersistencePort {
     }
 
     private ConfirmationClaim prepareConfirmationClaim(CurrentAccessContext context, UUID receivableId) {
-        ReceivableRow receivable = lockedReceivable(context, receivableId);
+        ReceivablePaymentAccess.Snapshot receivable = lockedReceivable(context, receivableId);
         ensureBuyerScope(context, receivable.clientAccountId());
         return new ConfirmationClaim(latestStripePayment(context, receivableId), receivable);
     }
@@ -935,7 +922,7 @@ public class PaymentService implements PaymentPersistencePort {
                 .stream().findFirst().orElse(null);
     }
 
-    private Map<String, String> paymentMetadata(CurrentAccessContext context, ReceivableRow receivable) {
+    private Map<String, String> paymentMetadata(CurrentAccessContext context, ReceivablePaymentAccess.Snapshot receivable) {
         return Map.of("nexa_receivable_id", receivable.id().toString(), "nexa_tenant_id", tenant(context).toString(), "nexa_workspace_id", workspace(context).toString());
     }
 
@@ -957,7 +944,7 @@ public class PaymentService implements PaymentPersistencePort {
     private ExistingPayment existingPayment(CurrentAccessContext context, String idempotencyKey) {
         return jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id,p.method from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.created_by_membership_id=? and p.idempotency_key=?", (rs, n) -> new ExistingPayment(paymentRow(rs), rs.getString("method")), tenant(context), workspace(context), context.membershipId().value(), idempotencyKey).stream().findFirst().orElse(null);
     }
-    private void ensureBankTransferIdempotency(ExistingPayment existing, ReceivableRow receivable,
+    private void ensureBankTransferIdempotency(ExistingPayment existing, ReceivablePaymentAccess.Snapshot receivable,
                                                String transferReference, UUID proofEvidenceId) {
         PaymentRow payment = existing.payment();
         if (!PaymentMethod.BANK_TRANSFER.name().equals(existing.method())
@@ -976,7 +963,7 @@ public class PaymentService implements PaymentPersistencePort {
             throw new PaymentIdempotencyPayloadConflictException();
         }
     }
-    private void ensureIdempotentPayment(ExistingPayment existing, ReceivableRow receivable, PaymentMethod method, BigDecimal amount) {
+    private void ensureIdempotentPayment(ExistingPayment existing, ReceivablePaymentAccess.Snapshot receivable, PaymentMethod method, BigDecimal amount) {
         PaymentRow payment = existing.payment();
         if (!method.name().equals(existing.method()) || !receivable.id().equals(payment.receivableId()) || payment.amount().compareTo(amount) != 0 || !payment.currency().equalsIgnoreCase(receivable.currency())) {
             throw new IllegalArgumentException("Idempotency-Key was already used with a different payment request");
@@ -1077,7 +1064,7 @@ public class PaymentService implements PaymentPersistencePort {
     private PaymentRow latestStripePayment(CurrentAccessContext context, UUID receivableId) {
         return jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.receivable_id=? and p.method='CARD_STRIPE' order by p.created_at desc limit 1", (rs, n) -> paymentRow(rs), tenant(context), workspace(context), receivableId).stream().findFirst().orElse(null);
     }
-    private String testSucceededPayload(StripePaymentProvider.PaymentIntent intent, PaymentRow payment, ReceivableRow receivable, CurrentAccessContext context) {
+    private String testSucceededPayload(StripePaymentProvider.PaymentIntent intent, PaymentRow payment, ReceivablePaymentAccess.Snapshot receivable, CurrentAccessContext context) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("nexa_receivable_id", receivable.id().toString());
         metadata.put("nexa_tenant_id", tenant(context).toString());
@@ -1116,15 +1103,27 @@ public class PaymentService implements PaymentPersistencePort {
             throw new IllegalStateException("Stripe webhook signature could not be generated", exception);
         }
     }
-    private List<ReceivableRow> receivableQuery(CurrentAccessContext c, UUID id) { return jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,coalesce(adjustment_total,0) adjustment_total,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=?", (rs, n) -> receivableRow(rs), tenant(c), workspace(c), id); }
-    private List<ReceivableRow> receivableQuery(CurrentAccessContext c, UUID subjectId, String subjectType) { return jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,coalesce(adjustment_total,0) adjustment_total,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and subject_id=? and subject_type=?", (rs, n) -> receivableRow(rs), tenant(c), workspace(c), subjectId, subjectType); }
-    private ReceivableRow lockedReceivable(CurrentAccessContext c, UUID id) { return jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,coalesce(adjustment_total,0) adjustment_total,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=? for update", (rs, n) -> receivableRow(rs), tenant(c), workspace(c), id).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Receivable not found")); }
+    private List<ReceivablePaymentAccess.Snapshot> receivableQuery(CurrentAccessContext c, UUID id) { return receivableAccess.find(tenant(c), workspace(c), id).stream().toList(); }
+    private List<ReceivablePaymentAccess.Snapshot> receivableQuery(CurrentAccessContext c, UUID subjectId, String subjectType) { return receivableAccess.findForSubject(tenant(c), workspace(c), subjectId, subjectType).stream().toList(); }
+    private ReceivablePaymentAccess.Snapshot lockedReceivable(CurrentAccessContext c, UUID id) { return receivableAccess.claimForPayment(tenant(c), workspace(c), id); }
     private PaymentRow paymentRow(java.sql.ResultSet rs) throws java.sql.SQLException { return new PaymentRow(rs.getObject("id", UUID.class), rs.getObject("receivable_id", UUID.class), rs.getString("status"), rs.getBigDecimal("amount"), rs.getString("currency"), null, rs.getString("provider_payment_intent_id"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant(), rs.getObject("client_account_id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)); }
-    private ReceivableRow receivableRow(java.sql.ResultSet rs) throws java.sql.SQLException { return new ReceivableRow(rs.getObject("id", UUID.class), rs.getObject("client_account_id", UUID.class), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class), rs.getString("receivable_number"), rs.getString("currency"), rs.getBigDecimal("amount"), rs.getBigDecimal("amount_paid"), rs.getBigDecimal("adjustment_total"), rs.getString("status"), rs.getTimestamp("due_at").toInstant(), rs.getLong("version")); }
+    private List<PaymentModels.PaymentSummaryView> withReceivableNumbers(CurrentAccessContext context,
+                                                                          List<PaymentModels.PaymentSummaryView> values) {
+        Map<UUID, ReceivablePaymentAccess.Snapshot> snapshots = receivableAccess.findAll(tenant(context), workspace(context),
+                values.stream().map(value -> UUID.fromString(value.receivableId())).toList());
+        return values.stream().map(value -> {
+            ReceivablePaymentAccess.Snapshot receivable = snapshots.get(UUID.fromString(value.receivableId()));
+            if (receivable == null) throw new IllegalStateException("Payment receivable is unavailable");
+            return new PaymentModels.PaymentSummaryView(value.id(), value.receivableId(), receivable.number(),
+                    value.clientAccountId(), value.method(), value.status(), value.amount(), value.currency(),
+                    value.reference(), value.reviewReason(), value.createdAt(), value.completedAt());
+        }).toList();
+    }
+
     private AuthoritativeSubject authoritativeSubject(CurrentAccessContext context, String subjectType, UUID subjectId) {
         if (!"SALES_ORDER".equals(subjectType)) throw new IllegalArgumentException("Receivable subject must be a Sales Order");
         if (salesOrders == null) throw new IllegalStateException("Sales Commitment query boundary is not configured");
-        SalesOrderFulfillmentQuery.Snapshot order = salesOrders.getForUpdate(tenant(context), workspace(context), subjectId);
+        PaymentSalesSource.Snapshot order = salesOrders.claimPayableSubject(tenant(context), workspace(context), subjectId);
         AuthoritativeSubject value = new AuthoritativeSubject(order.clientAccountId(), order.total(), order.currency(), order.status(), order.paymentOption());
         if (!("CONFIRMED".equals(value.status()) || ("PENDING".equals(value.status()) && "PREPAID".equalsIgnoreCase(value.paymentOption())))
                 || value.clientAccountId() == null || value.amount() == null || value.amount().signum() <= 0
@@ -1139,7 +1138,7 @@ public class PaymentService implements PaymentPersistencePort {
                 .map(value -> clientAccountId != null && clientAccountId.toString().equals(value.id())).orElse(false);
     }
     private void ensureBuyerScope(CurrentAccessContext c, UUID clientAccountId) { if (!authorizedClient(c, clientAccountId)) throw new IllegalArgumentException("Receivable is outside buyer scope"); }
-    private void validateProofEvidence(CurrentAccessContext context, ReceivableRow receivable, UUID evidenceId) {
+    private void validateProofEvidence(CurrentAccessContext context, ReceivablePaymentAccess.Snapshot receivable, UUID evidenceId) {
         if (evidenceId == null) return;
         if (businessEvidence == null || !businessEvidence.isAvailableForSubject(tenant(context), workspace(context), evidenceId,
                 receivable.clientAccountId(), "RECEIVABLE", receivable.id())) {
@@ -1150,7 +1149,7 @@ public class PaymentService implements PaymentPersistencePort {
     private void validateStoredProofEvidence(CurrentAccessContext context, PaymentRow payment) {
         UUID evidenceId = jdbc.queryForObject("select bank_transfer_proof_evidence_id from payments.payment where tenant_id=? and workspace_id=? and id=?", UUID.class, tenant(context), workspace(context), payment.id());
         if (evidenceId == null) return;
-        ReceivableRow receivable = jdbc.query("select id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,amount_paid,coalesce(adjustment_total,0) adjustment_total,status,due_at,version from payments.receivable where tenant_id=? and workspace_id=? and id=?", (rs, n) -> receivableRow(rs), tenant(context), workspace(context), payment.receivableId()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Receivable not found"));
+        ReceivablePaymentAccess.Snapshot receivable = receivableAccess.find(tenant(context), workspace(context), payment.receivableId()).orElseThrow(() -> new IllegalArgumentException("Receivable not found"));
         validateProofEvidence(context, receivable, evidenceId);
     }
     private static PaymentStatus providerStatus(String value) { if (value == null) return PaymentStatus.REQUIRES_ACTION; return switch (value.toLowerCase(Locale.ROOT)) { case "succeeded" -> PaymentStatus.SUCCEEDED; case "processing" -> PaymentStatus.PROCESSING; case "canceled", "cancelled" -> PaymentStatus.CANCELLED; case "requires_payment_method", "requires_action" -> PaymentStatus.REQUIRES_ACTION; default -> PaymentStatus.CREATED; }; }
@@ -1189,15 +1188,14 @@ public class PaymentService implements PaymentPersistencePort {
                 + context.membershipId().value() + "|" + caseId + "|" + operatorNote);
     }
 
-    private record ReceivableRow(UUID id, UUID clientAccountId, String subjectType, UUID subjectId, String number, String currency, BigDecimal amount, BigDecimal amountPaid, BigDecimal adjustmentTotal, String status, Instant dueAt, long version) { }
     private record StripeEventRow(String id, String eventType, String paymentIntentId, String paymentStatus, Long amountMinor, String currency, UUID tenantId, UUID workspaceId) { }
     private record ExistingPayment(PaymentRow payment, String method) { }
     private record BankTransferPayload(String reference, UUID proofEvidenceId) { }
     private record StoredBankReview(String idempotencyKey, String action, String reason) { }
     private record ActiveCardPayment(PaymentRow payment, String idempotencyKey) { }
-    private record CardPaymentClaim(PaymentRow payment, ReceivableRow receivable, long amountMinor,
+    private record CardPaymentClaim(PaymentRow payment, ReceivablePaymentAccess.Snapshot receivable, long amountMinor,
                                     String providerIdempotencyKey, Map<String, String> metadata, String idempotencyKey) { }
-    private record ConfirmationClaim(PaymentRow payment, ReceivableRow receivable) { }
+    private record ConfirmationClaim(PaymentRow payment, ReceivablePaymentAccess.Snapshot receivable) { }
     private enum InboxOutcome { PROCESSED, IGNORED }
     private record WebhookWork(String eventId, UUID tenantId, UUID workspaceId) { }
     private record WorkspaceScope(UUID tenantId, UUID workspaceId) { }

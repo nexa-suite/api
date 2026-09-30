@@ -1,5 +1,7 @@
 package com.nexa.api.salescommitment.domain.model.salesorder;
 
+import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
+
 import java.util.Locale;
 
 public record SalesOrderId(String value) {

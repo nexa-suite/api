@@ -1,7 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.model.AccessPolicy;
-import com.nexa.api.tenantaccessgovernance.iam.domain.model.access.ClientSurface;
+import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

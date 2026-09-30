@@ -4,8 +4,10 @@ import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffNotificationPort;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffPort;
 import com.nexa.api.fulfillmentdelivery.domain.handoff.OperationalHandoffNote;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
-import com.nexa.api.inventoryavailability.application.port.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -22,8 +24,10 @@ import java.util.UUID;
 public class OperationalHandoffPersistenceAdapter extends DispatchJdbcSupport implements OperationalHandoffPort {
     public OperationalHandoffPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                                 WarehouseLogisticsFulfillmentPort warehouseFulfillment,
-                                                OperationalHandoffNotificationPort handoffNotifications) {
-        super(jdbc, changeFeed, warehouseFulfillment, handoffNotifications);
+                                                OperationalHandoffNotificationPort handoffNotifications,
+                                                SalesOrderFulfillmentQuery salesOrders,
+                                                CustomerAccountQuery customerAccounts) {
+        super(jdbc, changeFeed, warehouseFulfillment, handoffNotifications, salesOrders, customerAccounts);
     }
 
     @Override

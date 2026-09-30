@@ -1,4 +1,4 @@
-package com.nexa.api.salescommitment.infrastructure.seed;
+package com.nexa.api.bootstrap.local.seed;
 
 import org.junit.jupiter.api.Test;
 import java.nio.file.Files;

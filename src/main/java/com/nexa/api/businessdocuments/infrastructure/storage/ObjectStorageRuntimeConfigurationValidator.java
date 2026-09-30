@@ -22,16 +22,30 @@ public final class ObjectStorageRuntimeConfigurationValidator {
             required(environment, "nexa.object-storage.secret-key", "secret key");
             required(environment, "nexa.object-storage.region", "region");
             String endpoint = required(environment, "nexa.object-storage.endpoint", "endpoint");
-            try {
-                URI uri = URI.create(endpoint);
-                if (uri.getScheme() == null || uri.getHost() == null) {
-                    throw new IllegalStateException("nexa.object-storage.endpoint must be an absolute URI with a host");
-                }
-            } catch (IllegalArgumentException exception) {
-                throw new IllegalStateException("nexa.object-storage.endpoint must be an absolute URI with a host", exception);
-            }
+            validateEndpoint(environment, endpoint);
             positive(environment, "nexa.object-storage.timeout-ms", "5000");
         }
+    }
+
+    private static void validateEndpoint(Environment environment, String endpoint) {
+        URI uri;
+        try {
+            uri = URI.create(endpoint);
+        } catch (IllegalArgumentException exception) {
+            throw invalidEndpoint();
+        }
+        boolean localOrTest = environment.acceptsProfiles(Profiles.of("local", "test"));
+        boolean httpAllowed = localOrTest && "http".equalsIgnoreCase(uri.getScheme());
+        if (uri.getScheme() == null || uri.getHost() == null || uri.getHost().isBlank()
+                || uri.getRawUserInfo() != null
+                || !("https".equalsIgnoreCase(uri.getScheme()) || httpAllowed)
+                || uri.getPort() == 0 || uri.getPort() > 65535) {
+            throw invalidEndpoint();
+        }
+    }
+
+    private static IllegalStateException invalidEndpoint() {
+        return new IllegalStateException("nexa.object-storage.endpoint must be an absolute HTTPS URI with a host and no userinfo (HTTP is allowed only in local/test)");
     }
 
     private static String required(Environment environment, String key, String label) {

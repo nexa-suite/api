@@ -4,6 +4,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.Locale;
 
+@org.springframework.modulith.NamedInterface("catalog-snapshots")
 public record CatalogScope(UUID tenantId, UUID workspaceId, boolean buyerView, UUID clientAccountId,
                            String clientAccountSegment, String buyerTier) {
     public CatalogScope(UUID tenantId, UUID workspaceId) {

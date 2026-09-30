@@ -1,5 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service;
 
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.CustomFieldConflictException;
+
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -7,12 +9,11 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Te
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.TenantConfigurationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.OrganizationAdministrationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ConcurrencyConflictException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.TenantManagementInvariantViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.NotificationPreference;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationProfile;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.RegionalSettings;
@@ -129,8 +130,7 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	public TenantConfigurationModels.NotificationSettingsView notificationSettings(CurrentAccessContext context, String workspaceId) {
 		read(context);
 		String scopedWorkspace = requireWorkspace(context, workspaceId);
-		List<TenantConfigurationModels.NotificationPreferenceView> values = port.findNotificationPreferences(scopedWorkspace).stream()
-				.map(value -> new TenantConfigurationModels.NotificationPreferenceView(value.eventCategory(), value.channel(), value.enabled(), value.version())).toList();
+		List<TenantConfigurationModels.NotificationPreferenceView> values = port.findNotificationPreferences(scopedWorkspace);
 		return new TenantConfigurationModels.NotificationSettingsView(values, port.notificationVersion(scopedWorkspace));
 	}
 
@@ -140,13 +140,15 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		context.requirePermission(PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
 		String scopedWorkspace = requireWorkspace(context, workspaceId);
 		if (port.notificationVersion(scopedWorkspace) != expectedVersion) throw new ConcurrencyConflictException();
-		for (TenantConfigurationModels.NotificationPreferenceView value : request.preferences()) {
-			if (port.updateNotificationPreference(scopedWorkspace, new NotificationPreference(value.eventCategory(), value.channel(), value.enabled(), value.version())) == 0) {
+		List<TenantConfigurationModels.NotificationPreferenceView> validatedPreferences = request.preferences().stream()
+				.map(port::validateNotificationPreference).toList();
+		for (TenantConfigurationModels.NotificationPreferenceView value : validatedPreferences) {
+			if (port.updateNotificationPreference(scopedWorkspace, value) == 0) {
 				throw new ConcurrencyConflictException();
 			}
 		}
 		appendAudit(context, "NOTIFICATION_SETTINGS_CHANGED", correlationId, Map.of("section", "notifications"));
-		List<TenantConfigurationModels.NotificationPreferenceView> updated = request.preferences().stream()
+		List<TenantConfigurationModels.NotificationPreferenceView> updated = validatedPreferences.stream()
 				.map(value -> new TenantConfigurationModels.NotificationPreferenceView(value.eventCategory(), value.channel(), value.enabled(), value.version() + 1))
 				.toList();
 		return new TenantConfigurationModels.NotificationSettingsView(updated, expectedVersion + 1);
@@ -252,5 +254,5 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	}
 	private static String valueOrUnknown(String value) { return value == null || value.isBlank() ? "unknown" : value; }
 
-	public static final class CustomFieldConflictException extends RuntimeException { }
+
 }

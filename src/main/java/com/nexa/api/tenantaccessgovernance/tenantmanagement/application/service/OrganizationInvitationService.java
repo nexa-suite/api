@@ -1,5 +1,10 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service;
 
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationInvalidException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationIdempotencyRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InvitationIdempotencyConflictException;
+
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort;
@@ -12,20 +17,20 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.In
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.InvitationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.InvitationPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService.ConcurrencyConflictException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ConcurrencyConflictException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.TenantManagementInvariantViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.Permission;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AssignableRolePolicy;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleCatalog;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.InvitationExpiry;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.InvitationStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.InvitationTokenHash;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.invitation.OrganizationInvitation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -205,8 +210,8 @@ public class OrganizationInvitationService implements InvitationUseCase {
 	private void appendAudit(CurrentAccessContext context, String type, String correlationId, Map<String, Object> metadata) { audit.append(new SecurityAuditPort.Event(type, context.userId().value(), null, context.tenantId().value(), context.workspaceId().value(), context.surface().name(), valueOrUnknown(correlationId), "unknown", clock.instant(), metadata)); }
 	private static String valueOrUnknown(String value) { return value == null || value.isBlank() ? "unknown" : value; }
 
-	public static final class InvitationInvalidException extends RuntimeException { }
-	public static final class InvitationConflictException extends RuntimeException { public InvitationConflictException(String message) { super(message); } }
-	public static final class InvitationIdempotencyRequiredException extends RuntimeException { }
-	public static final class InvitationIdempotencyConflictException extends RuntimeException { }
+
+
+
+
 }

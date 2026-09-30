@@ -4,8 +4,8 @@ import com.nexa.api.businesstraceability.application.model.AuditModels.AuditEven
 import com.nexa.api.businesstraceability.application.port.out.AuditViewerQueryPort;
 import com.nexa.api.businesstraceability.application.service.AuditViewerService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.businesstraceability.application.service.SafeAuditMetadata;
 import org.junit.jupiter.api.Test;
 
@@ -30,8 +30,8 @@ class AuditViewerServiceTests {
 					Map.of("status", "ACTIVE", "sessionId", "secret", "token", "secret", "beforeRoles", List.of("SALES")))));
 		CurrentAccessContext context = mock(CurrentAccessContext.class);
 		when(context.hasRole(MembershipRole.TENANT_ADMIN)).thenReturn(true);
-		when(context.tenantId()).thenReturn(new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.TenantId("3a0a7af1-83ad-4c20-bb31-3ea89f4e4f10"));
-		when(context.workspaceId()).thenReturn(new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.WorkspaceId("7c30dcf8-bf35-40dc-bd3d-fad4dd1b3a17"));
+		when(context.tenantId()).thenReturn(new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId("3a0a7af1-83ad-4c20-bb31-3ea89f4e4f10"));
+		when(context.workspaceId()).thenReturn(new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId("7c30dcf8-bf35-40dc-bd3d-fad4dd1b3a17"));
 
 		var event = new AuditViewerService(query).list(context, 10).items().getFirst();
 

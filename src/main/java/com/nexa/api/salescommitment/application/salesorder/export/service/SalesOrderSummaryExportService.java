@@ -9,9 +9,9 @@ import com.nexa.api.salescommitment.application.salesorder.export.model.SalesOrd
 import com.nexa.api.salescommitment.application.salesorder.export.port.SalesOrderSummaryExportUseCase;
 import com.nexa.api.salescommitment.application.salesorder.export.port.SalesOrderSummaryProjectionPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionKey;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;

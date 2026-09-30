@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Set;
 import java.util.UUID;
 
-import static com.nexa.api.tenantaccessgovernance.tenantmanagement.presentation.rest.OrganizationAdministrationController.PreconditionRequiredException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -79,8 +79,8 @@ public final class OrganizationInvitationController {
 	}
 
 	private static long version(String value) {
-		if (value == null || value.isBlank()) throw new PreconditionRequiredException();
-		try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new PreconditionRequiredException(); }
+		if (value == null || value.isBlank()) throw new OrganizationPreconditionRequiredException();
+		try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException exception) { throw new OrganizationPreconditionRequiredException(); }
 	}
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }

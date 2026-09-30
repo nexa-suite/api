@@ -9,7 +9,7 @@ import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
 import com.nexa.api.salescommitment.application.port.out.PlaceAutocompletePort;
 import com.nexa.api.salescommitment.application.port.out.ReverseGeocodingPort;
 import com.nexa.api.salescommitment.application.port.out.RoutePreviewPort;
-import com.nexa.api.salescommitment.domain.exception.SalesInvariantViolation;
+import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 import com.nexa.api.salescommitment.domain.model.delivery.RouteSnapshot;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;

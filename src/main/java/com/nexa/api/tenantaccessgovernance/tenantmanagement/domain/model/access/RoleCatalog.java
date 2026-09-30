@@ -1,6 +1,8 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access;
 
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 
 import java.time.Instant;
 import java.util.Map;

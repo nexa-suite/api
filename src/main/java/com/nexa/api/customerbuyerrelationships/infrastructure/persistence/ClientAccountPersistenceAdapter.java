@@ -56,6 +56,18 @@ public class ClientAccountPersistenceAdapter implements ClientAccountPersistence
 	@Override public Optional<CustomerAccountDetails> findHistoricalDetails(String tenant, String workspace, String id) {
 		return details(tenant, workspace, "a.id=?", uuid(id));
 	}
+    @Override
+    public List<String> findRelatedAccountIds(String tenant, String workspace, String membership) {
+        return jdbc.query("select client_account_id from sales.client_account_membership where tenant_id=? and workspace_id=? and workspace_membership_id=? order by client_account_id",
+                (rs, row) -> rs.getObject(1, UUID.class).toString(), uuid(tenant), uuid(workspace), uuid(membership));
+    }
+    @Override
+    public Optional<String> findUnfilteredReferenceForMembership(String tenant, String workspace, String membership) {
+        return jdbc.query("select client_account_id from sales.client_account_membership where tenant_id=? and workspace_id=? and workspace_membership_id=?",
+                (rs, row) -> rs.getObject(1, UUID.class).toString(), uuid(tenant), uuid(workspace), uuid(membership))
+                .stream().findFirst();
+    }
+
 	@Override public List<String> findHistoricalIdsMatching(String tenant, String workspace, String search) {
 		if (search == null || search.isBlank()) return List.of();
 		String value = "%" + search.toLowerCase(java.util.Locale.ROOT) + "%";

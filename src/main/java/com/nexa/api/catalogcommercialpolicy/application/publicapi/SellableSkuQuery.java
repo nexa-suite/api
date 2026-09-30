@@ -67,6 +67,18 @@ public interface SellableSkuQuery {
         return findActiveByLegacyCatalogItemId(tenantId, workspaceId, legacyCatalogItemId);
     }
 
+    /** Inventory policy facts are independent of Buyer visibility and current pricing. */
+    default List<InventorySkuSnapshot> findInventoryPolicies(UUID tenantId, UUID workspaceId, List<UUID> skuIds) {
+        throw new UnsupportedOperationException("Inventory SKU policy query is not configured");
+    }
+
+    default List<InventorySkuSnapshot> findInventoryPoliciesByLegacyIds(UUID tenantId, UUID workspaceId, List<String> catalogItemIds) {
+        throw new UnsupportedOperationException("Inventory SKU policy query is not configured");
+    }
+
+    record InventorySkuSnapshot(UUID id, String legacyCatalogItemId, String skuCode, String status,
+                                BigDecimal temperatureMin, BigDecimal temperatureMax) { }
+
     record SellableSkuReference(UUID skuId, UUID familyId, String familyCode, String skuCode,
                                 String legacyCatalogItemId, String familyName, String presentation,
                                 String unitOfMeasure, BigDecimal price, String currency,
