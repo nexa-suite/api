@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommerc
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseSafetyStockPersistencePort;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,8 +36,10 @@ public class WarehouseSafetyStockPersistenceAdapter extends WarehouseJdbcSupport
             SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings,
-            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
+            WarehouseObjectAccess warehouseAccess) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
+                warehouseAccess);
     }
 
     @Override
@@ -47,6 +50,7 @@ public class WarehouseSafetyStockPersistenceAdapter extends WarehouseJdbcSupport
         pageCheck(page, size);
         StringBuilder predicate = new StringBuilder(" where tenant_id=? and workspace_id=?");
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        predicate.append(warehouseIdPredicate(context, "warehouse_id", args));
         if (warehouseId != null && !warehouseId.isBlank()) {
             predicate.append(" and warehouse_id=?");
             args.add(uuid(warehouseId));
@@ -76,10 +80,12 @@ public class WarehouseSafetyStockPersistenceAdapter extends WarehouseJdbcSupport
     @Transactional(readOnly = true)
     public WarehouseOperationsService.SafetyStockSummary safetyStock(CurrentAccessContext context, String id) {
         requireRead(context);
-        return jdbc.query("select id,warehouse_id,sku_id,catalog_item_id,quantity,unit,version,updated_at"
+        WarehouseOperationsService.SafetyStockSummary result = jdbc.query("select id,warehouse_id,sku_id,catalog_item_id,quantity,unit,version,updated_at"
                         + " from warehouse.safety_stock_policy where tenant_id=? and workspace_id=? and id=?",
                 (rs, row) -> safetyStock(rs), tenant(context), workspace(context), uuid(id))
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_SAFETY_STOCK_NOT_FOUND", true));
+        requireWarehouseAccess(context, uuid(result.warehouseId()));
+        return result;
     }
 
     @Override

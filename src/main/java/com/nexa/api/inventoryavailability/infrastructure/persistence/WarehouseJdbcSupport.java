@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommerc
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLotStatus;
@@ -56,6 +57,7 @@ abstract class WarehouseJdbcSupport {
     protected final InventoryFulfillmentSource fulfillmentSource;
     protected final TransactionTemplate transactionTemplate;
     protected final WarehouseOperationalSettingsPort operationalSettings;
+    protected final WarehouseObjectAccess warehouseAccess;
 
     protected WarehouseJdbcSupport(
             JdbcTemplate jdbc,
@@ -63,7 +65,8 @@ abstract class WarehouseJdbcSupport {
             SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             WarehouseOperationalSettingsPort operationalSettings,
-            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
+            WarehouseObjectAccess warehouseAccess) {
         this.jdbc = jdbc;
         this.changeFeed = changeFeed;
         this.catalog = catalog;
@@ -74,6 +77,7 @@ abstract class WarehouseJdbcSupport {
             this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         }
         this.operationalSettings = operationalSettings;
+        this.warehouseAccess = warehouseAccess;
     }
 
     protected long count(String sql, Object... args) {
@@ -88,6 +92,19 @@ abstract class WarehouseJdbcSupport {
     protected void requireActiveWarehouse(CurrentAccessContext context, UUID id) {
         if (!exists("select 1 from warehouse.warehouse where tenant_id=? and workspace_id=? and id=? and status='ACTIVE'",
                 tenant(context), workspace(context), id)) throw error("WAREHOUSE_NOT_FOUND", true);
+        requireWarehouseAccess(context, id);
+    }
+
+    protected void requireWarehouseAccess(CurrentAccessContext context, UUID id) {
+        if (!warehouseAccess.hasActiveGrant(context, id)) throw error("WAREHOUSE_NOT_FOUND", true);
+    }
+
+    /** Appends a server-side object grant filter before pagination/counting. */
+    protected String warehouseIdPredicate(CurrentAccessContext context, String column, List<Object> args) {
+        List<UUID> ids = warehouseAccess.activeWarehouseIds(context).stream().sorted().toList();
+        if (ids.isEmpty()) return " and 1=0";
+        args.addAll(ids);
+        return " and " + column + " in (" + ids.stream().map(ignored -> "?").collect(Collectors.joining(",")) + ")";
     }
 
     protected void requireActiveZone(CurrentAccessContext context, UUID warehouseId, UUID zoneId) {
@@ -96,6 +113,7 @@ abstract class WarehouseJdbcSupport {
     }
 
     protected WarehouseOperationsService.WarehouseSummary warehouseForUpdate(CurrentAccessContext context, UUID id) {
+        requireWarehouseAccess(context, id);
         return jdbc.query(
                         "select id,code,name,address,status,version from warehouse.warehouse "
                                 + "where tenant_id=? and workspace_id=? and id=? for update",
@@ -161,7 +179,9 @@ abstract class WarehouseJdbcSupport {
     }
 
     protected WarehouseOperationsService.LotSummary loadLot(CurrentAccessContext context, UUID id, boolean lock) {
-        return loadLot(tenant(context), workspace(context), id, lock);
+        WarehouseOperationsService.LotSummary lot = loadLot(tenant(context), workspace(context), id, lock);
+        requireWarehouseAccess(context, uuid(lot.warehouseId()));
+        return lot;
     }
 
     protected WarehouseOperationsService.LotSummary loadLot(UUID tenantId, UUID workspaceId, UUID id, boolean lock) {
@@ -174,7 +194,9 @@ abstract class WarehouseJdbcSupport {
     }
 
     protected WarehouseOperationsService.ReservationDetail loadReservation(CurrentAccessContext context, UUID id, boolean lock) {
-        return loadReservation(tenant(context), workspace(context), id, lock);
+        WarehouseOperationsService.ReservationDetail reservation = loadReservation(tenant(context), workspace(context), id, lock);
+        reservation.allocations().forEach(allocation -> loadLot(context, uuid(allocation.lotId()), false));
+        return reservation;
     }
 
     protected WarehouseOperationsService.ReservationDetail loadReservation(UUID tenantId, UUID workspaceId, UUID id, boolean lock) {
@@ -232,6 +254,7 @@ abstract class WarehouseJdbcSupport {
         String warehousePredicate = selectedWarehouseId == null ? "" : " and l.warehouse_id=?";
         List<Object> queryArguments = new ArrayList<>(List.of(tenant(context), workspace(context), skuArgument));
         if (selectedWarehouseId != null) queryArguments.add(selectedWarehouseId);
+        String grantPredicate = warehouseIdPredicate(context, "l.warehouse_id", queryArguments);
         List<FefoAllocationPolicy.LotSnapshot> candidates = jdbc.query(
                 "select l.id,l.sku_id,l.warehouse_id,l.status,l.stock_quantity-l.reserved_quantity available,l.unit,l.expiration_date,l.received_at "
                         + "from warehouse.inventory_lot l "
@@ -242,7 +265,7 @@ abstract class WarehouseJdbcSupport {
                         + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
                         // FEFO remains the selection policy below; it must not
                         // define the cross-route lock order.
-                        + warehousePredicate + " order by " + WarehouseLotLockOrder.inventoryLot("l")
+                        + warehousePredicate + grantPredicate + " order by " + WarehouseLotLockOrder.inventoryLot("l")
                         + (lock ? " for update of l" : ""),
                 (rs, row) -> new FefoAllocationPolicy.LotSnapshot(
                         rs.getObject("id").toString(), rs.getBigDecimal("available"), rs.getString("unit"),

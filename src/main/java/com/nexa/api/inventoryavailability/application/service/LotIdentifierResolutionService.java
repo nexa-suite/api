@@ -2,6 +2,7 @@ package com.nexa.api.inventoryavailability.application.service;
 
 import com.nexa.api.inventoryavailability.application.publicapi.LotIdentifierResolutionQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -16,9 +17,11 @@ import java.util.UUID;
 @Profile("!test")
 public class LotIdentifierResolutionService {
     private final LotIdentifierResolutionQuery query;
+    private final WarehouseObjectAccess warehouseAccess;
 
-    public LotIdentifierResolutionService(LotIdentifierResolutionQuery query) {
+    public LotIdentifierResolutionService(LotIdentifierResolutionQuery query, WarehouseObjectAccess warehouseAccess) {
         this.query = Objects.requireNonNull(query, "Lot identifier query is required");
+        this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse object access is required");
     }
 
     @Transactional(readOnly = true)
@@ -29,7 +32,8 @@ public class LotIdentifierResolutionService {
         }
         String normalized = batchNumber.trim();
         List<LotIdentifierResolutionQuery.Candidate> candidates = query.resolve(
-                context.tenantId().value(), context.workspaceId().value(), normalized);
+                context.tenantId().value(), context.workspaceId().value(), normalized,
+                warehouseAccess.activeWarehouseIds(context));
         String outcome = candidates.isEmpty() ? "NOT_FOUND" : candidates.size() == 1 ? "RESOLVED" : "AMBIGUOUS";
         LotIdentifierResolutionQuery.Candidate candidate = candidates.size() == 1 ? candidates.get(0) : null;
         return new Resolution(outcome, "BATCH_NUMBER", normalized, candidates.size(),

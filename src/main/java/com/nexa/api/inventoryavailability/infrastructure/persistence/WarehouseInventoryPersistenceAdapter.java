@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommerc
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseInventoryPersistencePort;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLot;
@@ -41,8 +42,9 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings,
             InventoryCommercialSource commercialSource,
-            InventoryFulfillmentSource fulfillmentSource) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
+            InventoryFulfillmentSource fulfillmentSource, WarehouseObjectAccess warehouseAccess) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
+                warehouseAccess);
     }
 
     @Transactional(readOnly = true)
@@ -57,6 +59,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         StringBuilder query = new StringBuilder("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
                 + "stock_quantity,reserved_quantity,unit,status,version from warehouse.inventory_lot where tenant_id=? and workspace_id=?");
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        query.append(warehouseIdPredicate(context, "warehouse_id", args));
         if (catalogItemId != null && !catalogItemId.isBlank()) { query.append(" and catalog_item_id=?"); args.add(catalogItemId.trim()); }
         if (warehouseId != null && !warehouseId.isBlank()) { query.append(" and warehouse_id=?"); args.add(uuid(warehouseId)); }
         if (zoneId != null && !zoneId.isBlank()) { query.append(" and zone_id=?"); args.add(uuid(zoneId)); }
@@ -75,8 +78,8 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         requireRead(context);
         pageCheck(page, size);
         String order = sort(sort, Map.of("occurredAt", "occurred_at", "type", "movement_type", "catalogItemId", "catalog_item_id"), "occurredAt");
-        String predicate = " where tenant_id=? and workspace_id=?";
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        String predicate = " where tenant_id=? and workspace_id=?" + warehouseIdPredicate(context, "warehouse_id", args);
         if (lotId != null && !lotId.isBlank()) { predicate += " and lot_id=?"; args.add(uuid(lotId)); }
         List<Object> pageArgs = new ArrayList<>(args); pageArgs.add(size); pageArgs.add(page * size);
         List<WarehouseOperationsService.MovementSummary> items = jdbc.query(
@@ -95,16 +98,16 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
     public WarehouseOperationsService.LotSummary receive(CurrentAccessContext context, WarehouseOperationsService.Receipt receipt,
                                                           String key, String correlation) {
         requireWrite(context);
+        if (receipt == null) throw error("INVALID_REQUEST", false);
+        UUID warehouse = uuidRequired(receipt.warehouseId(), "warehouseId");
+        requireActiveWarehouse(context, warehouse);
         requireIdempotency(key);
         lockIdempotency(context, "inbound", key);
-        if (receipt == null) throw error("INVALID_REQUEST", false);
         String hash = requestHash("inbound", receipt);
         IdempotencyRecord prior = idempotent(context, "inbound", key);
         if (prior != null) { requireSamePayload(prior, hash); return loadLot(context, uuid(prior.resourceId()), false); }
-        UUID warehouse = uuidRequired(receipt.warehouseId(), "warehouseId");
         UUID zone = uuidRequired(receipt.zoneId(), "zoneId");
         String requestedCatalogItemId = receipt.catalogItemId() == null || receipt.catalogItemId().isBlank() ? null : bounded(receipt.catalogItemId(), "catalogItemId", 64);
-        requireActiveWarehouse(context, warehouse);
         requireActiveZone(context, warehouse, zone);
         SkuReference sku = resolveSku(context, receipt.skuId(), requestedCatalogItemId);
         String catalogItemId = requestedCatalogItemId != null ? requestedCatalogItemId : sku.legacyCatalogItemId() == null || sku.legacyCatalogItemId().isBlank() ? sku.skuCode() : sku.legacyCatalogItemId();

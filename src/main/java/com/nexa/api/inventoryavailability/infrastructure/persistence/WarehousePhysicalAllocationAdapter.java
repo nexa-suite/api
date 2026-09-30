@@ -7,6 +7,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocati
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -37,51 +38,62 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     private final InventoryCommercialSource commercialSource;
     private final InventoryFulfillmentSource fulfillmentSource;
     private final SellableSkuQuery sellableSkus;
+    private final WarehouseObjectAccess warehouseAccess;
 
     @Autowired
     public WarehousePhysicalAllocationAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
                                               InventoryCommercialSource commercialSource,
                                               InventoryFulfillmentSource fulfillmentSource,
                                               SellableSkuQuery sellableSkus,
-                                              CanonicalOutboxPort canonicalOutbox) {
+                                              CanonicalOutboxPort canonicalOutbox,
+                                              WarehouseObjectAccess warehouseAccess) {
         this.jdbc = jdbc;
         this.canonicalOutbox = canonicalOutbox;
         this.traceability = traceability;
         this.commercialSource = commercialSource;
         this.fulfillmentSource = fulfillmentSource;
         this.sellableSkus = sellableSkus;
+        this.warehouseAccess = warehouseAccess;
     }
 
     @Override
-    public AllocationResult getByFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+    public AllocationResult getByFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID actorMembershipId) {
         AllocationHeader allocation = jdbc.query(
                 "select id,status,version,inventory_backing_id from warehouse.physical_allocation where tenant_id=? and workspace_id=? and fulfillment_id=?",
                 (rs, row) -> new AllocationHeader(rs.getObject("id", UUID.class), rs.getString("status"),
                         rs.getLong("version"), rs.getObject("inventory_backing_id", UUID.class)),
                 tenantId, workspaceId, fulfillmentId).stream().findFirst()
                 .orElseThrow(() -> error("PHYSICAL_ALLOCATION_NOT_FOUND", true));
+        requireAllocationWarehouseGrants(tenantId, workspaceId, actorMembershipId, allocation.id());
         return load(tenantId, workspaceId, allocation.id());
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
-        if (tenantId == null || workspaceId == null || fulfillmentId == null) {
+    public void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID actorMembershipId) {
+        if (tenantId == null || workspaceId == null || fulfillmentId == null || actorMembershipId == null) {
             throw new IllegalArgumentException("Physical allocation lock scope is incomplete");
         }
-        if (lockByFulfillment(tenantId, workspaceId, fulfillmentId) == null) {
+        AllocationHeader allocation = lockByFulfillment(tenantId, workspaceId, fulfillmentId);
+        if (allocation == null) {
             throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
         }
+        requireAllocationWarehouseGrants(tenantId, workspaceId, actorMembershipId, allocation.id());
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
-    public void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, List<UUID> candidateLotIds) {
-        if (tenantId == null || workspaceId == null || fulfillmentId == null) {
+    public void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID actorMembershipId,
+                                   List<UUID> candidateLotIds) {
+        if (tenantId == null || workspaceId == null || fulfillmentId == null || actorMembershipId == null) {
             throw new IllegalArgumentException("Physical picking lot lock scope is incomplete");
         }
         List<UUID> candidates = candidateLotIds == null ? List.of() : candidateLotIds.stream()
                 .filter(Objects::nonNull).distinct().toList();
+        AllocationHeader allocation = lockByFulfillment(tenantId, workspaceId, fulfillmentId);
+        if (allocation == null) throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        requireAllocationWarehouseGrants(tenantId, workspaceId, actorMembershipId, allocation.id());
+        requireLotWarehouseGrants(tenantId, workspaceId, actorMembershipId, candidates);
         String placeholders = candidates.stream().map(ignored -> "?").collect(Collectors.joining(","));
         String candidatePredicate = candidates.isEmpty() ? "" : " or l.id in (" + placeholders + ")";
         List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId, fulfillmentId));
@@ -115,6 +127,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "ALLOCATE", request.idempotencyKey());
         if (prior != null) {
             ensureHash(prior.requestHash(), request.requestHash());
+            requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(), prior.resourceId());
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
 
@@ -144,7 +157,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
 
         List<BackingPosition> positions = backingPositions(request.tenantId(), request.workspaceId(), request.inventoryBackingId());
         validateDemand(request.lines(), positions);
-        List<LotRow> lots = lockEligibleLots(request.tenantId(), request.workspaceId(), positions);
+        List<LotRow> lots = lockEligibleLots(request.tenantId(), request.workspaceId(), request.actorMembershipId(), positions);
         List<SelectedLot> selected = selectFefo(request.lines(), positions, lots);
         if (selected.isEmpty()) throw error("PHYSICAL_ALLOCATION_UNAVAILABLE", false);
 
@@ -205,6 +218,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         requireRequest(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
                 request.physicalAllocationLineId(), request.skuId(), request.lotId(), request.warehouseId(), request.quantity(),
                 request.unit(), request.expectedAllocationVersion(), request.now());
+        requireWarehouseGrant(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.warehouseId());
         AllocationHeader allocation = lockByFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (allocation == null) return outcome("NOT_ALLOCATED", request);
         if (allocation.version() != request.expectedAllocationVersion()) return outcome("STALE_ALLOCATION", request, allocation.version());
@@ -429,10 +443,12 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "CONSUME", request.idempotencyKey());
         if (prior != null) {
             ensureHash(prior.requestHash(), request.requestHash());
+            requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(), prior.resourceId());
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
         AllocationHeader allocation = lockByFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (allocation == null) throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(), allocation.id());
         if (allocation.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT", false);
         if ("CONSUMED".equals(allocation.status())) return load(request.tenantId(), request.workspaceId(), allocation.id());
         if (!"ALLOCATED".equals(allocation.status())) throw error("PHYSICAL_ALLOCATION_NOT_READY", false);
@@ -476,11 +492,13 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                 "RECONCILE_UNPICKED", request.idempotencyKey());
         if (prior != null) {
             ensureHash(prior.requestHash(), request.requestHash());
+            requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(), prior.resourceId());
             return load(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
 
         AllocationHeader allocation = lockByFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (allocation == null) throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(), allocation.id());
         if (allocation.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT", false);
         if (!"ALLOCATED".equals(allocation.status())) throw error("PHYSICAL_ALLOCATION_NOT_READY", false);
 
@@ -552,10 +570,12 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "RELEASE", request.idempotencyKey());
         if (prior != null) {
             ensureHash(prior.requestHash(), request.requestHash());
+            requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(), prior.resourceId());
             return;
         }
         AllocationHeader allocation = lockByFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (allocation == null) throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(), allocation.id());
         if (allocation.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT", false);
         if ("RELEASED".equals(allocation.status())) return;
         if (!"ALLOCATED".equals(allocation.status())) throw error("PHYSICAL_ALLOCATION_NOT_RELEASEABLE", false);
@@ -589,8 +609,10 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                 request.tenantId(), request.workspaceId(), request.actorMembershipId(), "RELEASE", request.idempotencyKey(), request.requestHash(), allocation.id(), timestamp(request.now()));
     }
 
-    private List<LotRow> lockEligibleLots(UUID tenant, UUID workspace, List<BackingPosition> positions) {
-        List<LotSelector> selectors = positions.stream().map(value -> new LotSelector(value.skuId(), value.warehouseId(), value.catalogItemId(), value.unit()))
+    private List<LotRow> lockEligibleLots(UUID tenant, UUID workspace, UUID actorMembershipId, List<BackingPosition> positions) {
+        List<LotSelector> selectors = positions.stream()
+                .filter(value -> warehouseAccess.hasActiveGrant(tenant, workspace, actorMembershipId, value.warehouseId()))
+                .map(value -> new LotSelector(value.skuId(), value.warehouseId(), value.catalogItemId(), value.unit()))
                 .distinct().sorted(Comparator.comparing((LotSelector value) -> value.skuId().toString()).thenComparing(value -> value.warehouseId().toString())).toList();
         if (selectors.isEmpty()) return List.of();
         List<UUID> skuIds = selectors.stream().map(LotSelector::skuId).distinct().toList();
@@ -702,6 +724,32 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         return jdbc.query("select l.lot_id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.quantity,l.released_quantity,l.consumed_quantity,lot.expiration_date,lot.stock_quantity,lot.reserved_quantity,lot.unit,lot.version from warehouse.physical_allocation_line l join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? order by "
                         + WarehouseLotLockOrder.physicalAllocationLot("l", "lot") + " for update of lot",
                 (rs, row) -> new AllocationLot(rs.getObject("lot_id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getBigDecimal("quantity"), rs.getBigDecimal("released_quantity"), rs.getBigDecimal("consumed_quantity"), rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getString("unit"), rs.getLong("version")), tenant, workspace, allocationId);
+    }
+
+    private void requireAllocationWarehouseGrants(UUID tenant, UUID workspace, UUID actor, UUID allocationId) {
+        List<UUID> warehouses = jdbc.query("select distinct warehouse_id from warehouse.physical_allocation_line "
+                        + "where tenant_id=? and workspace_id=? and physical_allocation_id=? order by warehouse_id",
+                (rs, row) -> rs.getObject(1, UUID.class), tenant, workspace, allocationId);
+        if (warehouses.isEmpty()) throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        for (UUID warehouseId : warehouses) requireWarehouseGrant(tenant, workspace, actor, warehouseId);
+    }
+
+    private void requireLotWarehouseGrants(UUID tenant, UUID workspace, UUID actor, List<UUID> lotIds) {
+        if (lotIds.isEmpty()) return;
+        String placeholders = lotIds.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        List<Object> args = new ArrayList<>(List.of(tenant, workspace));
+        args.addAll(lotIds);
+        List<UUID> warehouses = jdbc.query("select distinct warehouse_id from warehouse.inventory_lot "
+                        + "where tenant_id=? and workspace_id=? and id in (" + placeholders + ") order by warehouse_id",
+                (rs, row) -> rs.getObject(1, UUID.class), args.toArray());
+        for (UUID warehouseId : warehouses) requireWarehouseGrant(tenant, workspace, actor, warehouseId);
+    }
+
+    private void requireWarehouseGrant(UUID tenant, UUID workspace, UUID actor, UUID warehouseId) {
+        if (actor == null || warehouseId == null
+                || !warehouseAccess.hasActiveGrant(tenant, workspace, actor, warehouseId)) {
+            throw error("WAREHOUSE_NOT_FOUND", true);
+        }
     }
 
     private AllocationResult load(UUID tenant, UUID workspace, UUID allocationId) {

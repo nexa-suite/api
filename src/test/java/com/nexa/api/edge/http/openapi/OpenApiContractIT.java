@@ -53,6 +53,14 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/skus/resolve")).isTrue();
         assertThat(document.get("paths").has("/api/v1/inventory/lots/resolve")).isTrue();
         assertThat(document.get("paths").has("/api/v1/inventory/physical-allocation-scan-validations")).isTrue();
+        assertThat(document.at("/paths/~1api~1v1~1warehouses~1{warehouseId}~1access-grants/get/operationId").asText())
+                .isEqualTo("listWarehouseAccessGrants");
+        assertThat(document.at("/paths/~1api~1v1~1warehouses~1{warehouseId}~1access-grants/post/operationId").asText())
+                .isEqualTo("grantWarehouseAccess");
+        assertThat(document.at("/paths/~1api~1v1~1warehouses~1{warehouseId}~1access-grants~1{membershipId}/delete/operationId").asText())
+                .isEqualTo("revokeWarehouseAccess");
+        assertHeaderRequired(document, "/api/v1/warehouses/{warehouseId}/access-grants", "post", "If-Match", false);
+        assertRequiredHeader(document, "/api/v1/warehouses/{warehouseId}/access-grants/{membershipId}", "delete", "If-Match");
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/handoff-tokens")).isTrue();
         assertThat(document.get("paths").has("/api/v1/delivery-handoff/validations")).isTrue();
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/buyer-receipts")).isTrue();

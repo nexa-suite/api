@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommerc
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseConfigurationPersistencePort;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
@@ -18,6 +19,7 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 
@@ -36,8 +38,10 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
             SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             WarehouseOperationalSettingsPort operationalSettings,
-            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
+            WarehouseObjectAccess warehouseAccess) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
+                warehouseAccess);
     }
 
     @Transactional(readOnly = true)
@@ -47,18 +51,24 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
         pageCheck(page, size);
         String order = sort(sort, Map.of("code", "code", "name", "name", "status", "status",
                 "createdAt", "created_at", "updatedAt", "updated_at"), "code");
+        List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        String grantFilter = warehouseIdPredicate(context, "id", args);
+        List<Object> pageArgs = new ArrayList<>(args);
+        pageArgs.add(size);
+        pageArgs.add(page * size);
         List<WarehouseOperationsService.WarehouseSummary> items = jdbc.query(
                 "select id,code,name,address,status,version from warehouse.warehouse "
-                        + "where tenant_id=? and workspace_id=? order by " + order + ",id asc limit ? offset ?",
-                (rs, row) -> WarehousePersistenceSupport.warehouse(rs), tenant(context), workspace(context), size, page * size);
+                        + "where tenant_id=? and workspace_id=?" + grantFilter + " order by " + order + ",id asc limit ? offset ?",
+                (rs, row) -> WarehousePersistenceSupport.warehouse(rs), pageArgs.toArray());
         return new WarehouseOperationsService.Page<>(items, page, size,
-                count("select count(*) from warehouse.warehouse where tenant_id=? and workspace_id=?",
-                        tenant(context), workspace(context)));
+                count("select count(*) from warehouse.warehouse where tenant_id=? and workspace_id=?" + grantFilter,
+                        args.toArray()));
     }
 
     @Transactional(readOnly = true)
     public WarehouseOperationsService.WarehouseSummary warehouse(CurrentAccessContext context, String id) {
         requireRead(context);
+        requireWarehouseAccess(context, uuid(id));
         return jdbc.query("select id,code,name,address,status,version from warehouse.warehouse "
                                 + "where tenant_id=? and workspace_id=? and id=?",
                         (rs, row) -> WarehousePersistenceSupport.warehouse(rs), tenant(context), workspace(context), uuid(id))
@@ -77,12 +87,14 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
                         + "values (?,?,?,?,?,?,'ACTIVE',?,?)", id, tenant(context), workspace(context), normalizedCode,
                 normalizedName, normalizedAddress, now, now), "warehouse insert");
         appendEvent(context, id, "warehouse.warehouse.created", "warehouse");
-        return warehouse(context, id.toString());
+        return new WarehouseOperationsService.WarehouseSummary(id.toString(), normalizedCode, normalizedName,
+                normalizedAddress, "ACTIVE", 0);
     }
 
     public WarehouseOperationsService.WarehouseSummary updateWarehouse(
             CurrentAccessContext context, String id, String name, String address, String status, long expected) {
         requireWrite(context);
+        requireWarehouseAccess(context, uuid(id));
         String normalizedStatus = status == null ? null : enumValue(status, "status", "ACTIVE", "SUSPENDED");
         String normalizedName = name == null ? null : bounded(name, "name", 160);
         String normalizedAddress = address == null ? null : boundedNullable(address, "address", 2000);
@@ -165,6 +177,7 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
         UUID warehouseIdValue = uuid(warehouseId);
         if (!exists("select 1 from warehouse.warehouse where tenant_id=? and workspace_id=? and id=?",
                 tenant(context), workspace(context), warehouseIdValue)) throw error("WAREHOUSE_NOT_FOUND", true);
+        requireWarehouseAccess(context, warehouseIdValue);
         List<WarehouseOperationsService.ZoneSummary> items = jdbc.query(
                 "select id,warehouse_id,code,name,zone_type,temperature_min,temperature_max,status,version "
                         + "from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? "

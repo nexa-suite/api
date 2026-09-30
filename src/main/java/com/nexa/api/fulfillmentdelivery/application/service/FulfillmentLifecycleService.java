@@ -258,7 +258,7 @@ public class FulfillmentLifecycleService {
         }
         String canonical = shortageResolutionCanonical(command);
         PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
-                tenant(context), workspace(context), fulfillmentId);
+                tenant(context), workspace(context), fulfillmentId, actor(context));
         physicalAllocations.reconcileUnpicked(new PhysicalAllocationCommands.ReconcileUnpickedRequest(
                 tenant(context), workspace(context), fulfillmentId, actor(context),
                 operationKey("physical-reconcile-", idempotencyKey), hash("physical-reconcile-v1|" + fulfillmentId + "|" + canonical),
@@ -318,7 +318,7 @@ public class FulfillmentLifecycleService {
         if ("HANDED_OVER".equals(current.status())) return current;
         if (current.version() != expectedVersion) throw conflict("FULFILLMENT_CONCURRENCY_CONFLICT");
         PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
-                tenant(context), workspace(context), fulfillmentId);
+                tenant(context), workspace(context), fulfillmentId, actor(context));
         physicalAllocations.consumeForDispatch(new PhysicalAllocationCommands.ConsumeRequest(
                 tenant(context), workspace(context), fulfillmentId, actor(context),
                 operationKey("physical-consume-", idempotencyKey),

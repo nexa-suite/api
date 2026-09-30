@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommerc
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseTransferPersistencePort;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,8 +37,10 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings,
-            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
+            WarehouseObjectAccess warehouseAccess) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
+                warehouseAccess);
     }
 
     @Override
@@ -49,6 +52,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         pageCheck(page, size);
         StringBuilder predicate = new StringBuilder(" where tenant_id=? and workspace_id=?");
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        predicate.append(warehouseIdPredicate(context, "source_warehouse_id", args));
+        predicate.append(warehouseIdPredicate(context, "destination_warehouse_id", args));
         if (sourceWarehouseId != null && !sourceWarehouseId.isBlank()) {
             predicate.append(" and source_warehouse_id=?");
             args.add(uuid(sourceWarehouseId));
@@ -72,9 +77,12 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     @Transactional(readOnly = true)
     public WarehouseOperationsService.TransferSummary transfer(CurrentAccessContext context, String id) {
         requireRead(context);
-        return jdbc.query(transferSelect() + " where tenant_id=? and workspace_id=? and id=?",
+        WarehouseOperationsService.TransferSummary value = jdbc.query(transferSelect() + " where tenant_id=? and workspace_id=? and id=?",
                 (rs, row) -> transfer(rs), tenant(context), workspace(context), uuid(id))
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_TRANSFER_NOT_FOUND", true));
+        requireWarehouseAccess(context, UUID.fromString(value.sourceWarehouseId()));
+        requireWarehouseAccess(context, UUID.fromString(value.destinationWarehouseId()));
+        return value;
     }
 
     @Override
@@ -82,11 +90,18 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             CurrentAccessContext context, WarehouseOperationsService.TransferCommand command,
             long expectedSourceVersion, String idempotencyKey, String correlationId) {
         requireWrite(context);
-        requireIdempotency(idempotencyKey);
         if (command == null || expectedSourceVersion < 0) throw error("INVALID_REQUEST", false);
 
         UUID destinationWarehouseId = uuidRequired(command.destinationWarehouseId(), "destinationWarehouseId");
         UUID destinationZoneId = uuidRequired(command.destinationZoneId(), "destinationZoneId");
+        requireActiveWarehouse(context, destinationWarehouseId);
+        if (command.sourceLotId() != null && !command.sourceLotId().isBlank()) {
+            loadTransferLot(context, uuid(command.sourceLotId()), false);
+        } else {
+            UUID requestedSourceWarehouse = uuidRequired(command.sourceWarehouseId(), "sourceWarehouseId");
+            requireActiveWarehouse(context, requestedSourceWarehouse);
+        }
+        requireIdempotency(idempotencyKey);
         BigDecimal quantity = command.quantity();
         if (quantity == null || quantity.signum() <= 0) throw error("INVALID_REQUEST", false);
         String requestedUnit = command.unit() == null || command.unit().isBlank() ? null : normalizedUnit(command.unit());
@@ -102,7 +117,6 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             return transfer(context, prior.resourceId());
         }
 
-        requireActiveWarehouse(context, destinationWarehouseId);
         requireActiveZone(context, destinationWarehouseId, destinationZoneId);
 
         TransferLot sourceHint = command.sourceLotId() == null || command.sourceLotId().isBlank()
@@ -348,16 +362,18 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private TransferLot loadTransferLot(CurrentAccessContext context, UUID id, boolean lock) {
-        return jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
+        TransferLot lot = jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
                                 + "stock_quantity,reserved_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?"
                                 + (lock ? " for update" : ""), (rs, row) -> transferLot(rs),
                         tenant(context), workspace(context), id)
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_LOT_NOT_FOUND", true));
+        requireWarehouseAccess(context, lot.warehouseUuid());
+        return lot;
     }
 
     private TransferState transferState(CurrentAccessContext context, String id, boolean lock) {
-        return jdbc.query("select id,status,version,source_warehouse_id,source_zone_id,source_lot_id,"
+        TransferState state = jdbc.query("select id,status,version,source_warehouse_id,source_zone_id,source_lot_id,"
                                 + "destination_warehouse_id,destination_zone_id,sku_id,catalog_item_id,batch_number,"
                                 + "expiration_date,requested_quantity,unit,reason,source_lot_status_at_dispatch "
                                 + "from warehouse.inventory_transfer where tenant_id=? and workspace_id=? and id=?"
@@ -372,6 +388,9 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                                 rs.getString("unit"), rs.getString("reason"), rs.getString("source_lot_status_at_dispatch")),
                         tenant(context), workspace(context), uuid(id))
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_TRANSFER_NOT_FOUND", true));
+        requireWarehouseAccess(context, state.sourceWarehouseId());
+        requireWarehouseAccess(context, state.destinationWarehouseId());
+        return state;
     }
 
     private TransferLot destinationLot(CurrentAccessContext context, UUID warehouseId, UUID skuId,
