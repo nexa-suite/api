@@ -3,6 +3,8 @@ package com.nexa.api.inventoryavailability.infrastructure;
 import com.nexa.api.support.PostgresIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
@@ -95,6 +97,46 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .andExpect(jsonPath("$.batchNumber").value("B-INV-" + suffix));
         assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"omitted", "null", "malformed", "past", "today"})
+    void invalidExpiryCreatesNoLotMovementEventOrSuccessfulIntent(String expiryCase) throws Exception {
+        String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String suffix = suffix();
+        String warehouseId = createWarehouse(token, "WH-EXP-" + suffix);
+        String zoneId = createZone(token, warehouseId, "Z-EXP-" + suffix);
+        String key = "inbound-expiry-" + suffix;
+        String valid = receiptBody(warehouseId, zoneId, "B-EXP-" + suffix, "2.50");
+        String expiryField = "\"expirationDate\":\"2099-01-01\"";
+        String invalid = switch (expiryCase) {
+            case "omitted" -> valid.replace(expiryField + ",", "");
+            case "null" -> valid.replace(expiryField, "\"expirationDate\":null");
+            case "malformed" -> valid.replace("2099-01-01", "2099-99-99");
+            case "past" -> valid.replace("2099-01-01", java.time.LocalDate.now().minusDays(1).toString());
+            case "today" -> valid.replace("2099-01-01", java.time.LocalDate.now().toString());
+            default -> throw new IllegalArgumentException("Unknown expiry scenario");
+        };
+        int movementsBefore = jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        int eventsBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+
+        postReceipt(token, key, invalid).andExpect(status().isBadRequest());
+
+        assertThat(scopedWarehouseLotCount(warehouseId)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(movementsBefore);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(eventsBefore);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isZero();
+
+        postReceipt(token, key, valid).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.expirationDate").value("2099-01-01"))
+                .andExpect(jsonPath("$.onHand").value(2.5))
+                .andExpect(jsonPath("$.batchNumber").value("B-EXP-" + suffix));
+        assertThat(scopedWarehouseLotCount(warehouseId)).isEqualTo(1);
     }
 
     @Test void inboundReceiptScopeAndIdempotencyAreIsolatedByTenantWorkspace() throws Exception {
