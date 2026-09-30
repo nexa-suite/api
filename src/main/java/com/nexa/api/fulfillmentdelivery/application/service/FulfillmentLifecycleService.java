@@ -4,6 +4,7 @@ import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuer
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
@@ -138,6 +139,27 @@ public class FulfillmentLifecycleService {
     public FulfillmentModels.FulfillmentView get(CurrentAccessContext context, UUID fulfillmentId) {
         context.requirePermission(PermissionKey.FULFILLMENT_READ);
         return fulfillments.find(tenant(context), workspace(context), fulfillmentId);
+    }
+
+    @Transactional(readOnly = true)
+    public PhysicalAllocationModels.PhysicalAllocationView getPhysicalAllocation(CurrentAccessContext context, UUID fulfillmentId) {
+        context.requirePermission(PermissionKey.FULFILLMENT_READ);
+        FulfillmentModels.FulfillmentView fulfillment = fulfillments.find(tenant(context), workspace(context), fulfillmentId);
+        PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
+                tenant(context), workspace(context), fulfillmentId, actor(context));
+        if (fulfillment.physicalAllocationId() == null
+                || !fulfillment.physicalAllocationId().equals(allocation.allocationId())) {
+            throw new FulfillmentOperationException("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        }
+        List<PhysicalAllocationModels.PhysicalAllocationLineView> lines = allocation.lines().stream()
+                .map(line -> new PhysicalAllocationModels.PhysicalAllocationLineView(
+                        line.id(), line.skuId(), line.catalogItemId(), line.warehouseId(), line.zoneId(), line.lotId(),
+                        line.quantity(), line.releasedQuantity(), line.consumedQuantity(),
+                        line.quantity().subtract(line.releasedQuantity()).subtract(line.consumedQuantity()),
+                        line.unit(), line.expirationDate()))
+                .toList();
+        return new PhysicalAllocationModels.PhysicalAllocationView(
+                allocation.allocationId(), allocation.status(), allocation.version(), now(), lines);
     }
 
     @Transactional

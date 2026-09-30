@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentLifecycleService;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -56,6 +57,15 @@ public final class FulfillmentController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
         FulfillmentModels.FulfillmentView value = service.get(context, fulfillmentId);
+        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @GetMapping("/fulfillments/{fulfillmentId}/physical-allocation")
+    @Operation(operationId = "getFulfillmentPhysicalAllocation")
+    public ResponseEntity<PhysicalAllocationModels.PhysicalAllocationView> getPhysicalAllocation(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        PhysicalAllocationModels.PhysicalAllocationView value = service.getPhysicalAllocation(context, fulfillmentId);
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
