@@ -54,4 +54,9 @@ public final class FulfillmentModels {
     public record TemperatureView(UUID id, UUID deliveryId, UUID lotId, BigDecimal temperatureCelsius,
                                   String unit, String source, String status, Instant recordedAt,
                                   long deliveryVersion) { }
+
+    public record TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
+                                          UUID warehouseId, BigDecimal value, String unit,
+                                          Instant occurredAt, UUID actorMembershipId, String status,
+                                          String source) { }
 }

@@ -4,6 +4,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.Deli
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.PodView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureView;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureEvidenceView;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 
 import java.math.BigDecimal;
@@ -24,6 +25,8 @@ public interface DeliveryPersistencePort {
     PodView sealPod(PodSealRequest request);
 
     TemperatureView recordTemperature(TemperatureRequest request);
+
+    TemperatureEvidenceView recordTemperatureEvidence(TemperatureEvidenceRequest request);
 
     record TransitionRequest(UUID tenantId, UUID workspaceId, UUID deliveryId,
                              long expectedVersion, UUID actorMembershipId, String operation,
@@ -61,4 +64,10 @@ public interface DeliveryPersistencePort {
                               UUID actorMembershipId, String idempotencyKey, String requestHash,
                               BigDecimal temperatureCelsius, String unit, String source,
                               String evidenceMetadata, Instant recordedAt, long expectedVersion) { }
+
+    record TemperatureEvidenceRequest(UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId,
+                                      UUID lotId, UUID warehouseId, UUID zoneId, UUID actorMembershipId,
+                                      String idempotencyKey, String requestHash, BigDecimal value,
+                                      BigDecimal temperatureCelsius, String unit, String status,
+                                      Instant occurredAt) { }
 }
