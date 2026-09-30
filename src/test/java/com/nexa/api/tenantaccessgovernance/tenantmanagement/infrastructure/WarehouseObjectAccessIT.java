@@ -90,6 +90,10 @@ class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
         String hiddenZone = createZone(activeWarehouse, hiddenWarehouse, "Z-HIDDEN-" + suffix);
         receive(activeWarehouse, visibleWarehouse, visibleZone, sharedBatch, "visible-" + suffix);
         receive(activeWarehouse, hiddenWarehouse, hiddenZone, sharedBatch, "hidden-" + suffix);
+        MvcResult beforeRevocation = mockMvc.perform(get("/api/v1/inventory-availability")
+                        .param("catalogItemId", "CAT-0002").header("Authorization", "Bearer " + activeWarehouse))
+                .andExpect(status().isOk()).andReturn();
+        java.math.BigDecimal beforePhysical = json(beforeRevocation).get(0).get("physicalQuantity").decimalValue();
         mockMvc.perform(delete("/api/v1/warehouses/" + hiddenWarehouse + "/access-grants/" + membershipId(WAREHOUSE_EMAIL))
                         .header("Authorization", "Bearer " + owner)
                         .header("If-Match", hiddenGrant.getResponse().getHeader("ETag")))
@@ -107,6 +111,11 @@ class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
                 Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
                 UUID.fromString(membershipId(WAREHOUSE_EMAIL))));
 
+        MvcResult afterRevocation = mockMvc.perform(get("/api/v1/inventory-availability")
+                        .param("catalogItemId", "CAT-0002").header("Authorization", "Bearer " + activeWarehouse))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(afterRevocation).get(0).get("physicalQuantity").decimalValue())
+                .isEqualByComparingTo(beforePhysical.subtract(new java.math.BigDecimal("2")));
         mockMvc.perform(get("/api/v1/warehouses/" + visibleWarehouse + "/inventory-availability")
                         .param("catalogItemId", "CAT-0002").header("Authorization", "Bearer " + activeWarehouse))
                 .andExpect(status().isOk())
