@@ -32,6 +32,8 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String warehouse = mockMvc.perform(post("/api/v1/warehouses").header("Authorization", "Bearer "+token).contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"WH-"+suffix+"\",\"name\":\"Test Warehouse\",\"address\":\"Lima\"}"))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.id").isString()).andReturn().getResponse().getContentAsString();
         String warehouseId = tools.jackson.databind.json.JsonMapper.shared().readTree(warehouse).get("id").asText();
+        grantWarehouseAccess(accessToken(OWNER_EMAIL, "PLATFORM"), membershipId(WAREHOUSE_EMAIL), warehouseId);
+        token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String zone = mockMvc.perform(post("/api/v1/warehouses/"+warehouseId+"/zones").header("Authorization", "Bearer "+token).contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"Z-"+suffix+"\",\"name\":\"Ambient\",\"type\":\"AMBIENT\"}"))
             .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         String zoneId = tools.jackson.databind.json.JsonMapper.shared().readTree(zone).get("id").asText();
@@ -69,6 +71,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         String warehouseId = createWarehouse(token, "WH-INV-" + suffix);
+        token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String zoneId = createZone(token, warehouseId, "Z-INV-" + suffix);
         String key = "inbound-invalid-" + suffix;
         String receipt = receiptBody(warehouseId, zoneId, "B-INV-" + suffix, "0");
@@ -145,11 +148,15 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         UUID baseTenant = UUID.fromString(tenantId());
         UUID baseWorkspace = UUID.fromString(workspaceId());
         String baseWarehouse = createWarehouse(baseToken, "WH-SCOPE-A-" + suffix);
+        baseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String baseZone = createZone(baseToken, baseWarehouse, "Z-SCOPE-A-" + suffix);
 
         WorkspaceScope otherScope = createAdditionalTenantAndWorkspace(WAREHOUSE_EMAIL, suffix);
         String otherScopeToken = accessTokenForWorkspace(WAREHOUSE_EMAIL, "PLATFORM", otherScope.slug());
-        String otherScopeWarehouse = createWarehouse(otherScopeToken, "WH-SCOPE-B-" + suffix);
+        String otherScopeOwnerToken = accessTokenForWorkspace(OWNER_EMAIL, "PLATFORM", otherScope.slug());
+        String otherScopeWarehouse = createWarehouse(otherScopeToken, "WH-SCOPE-B-" + suffix,
+                otherScopeOwnerToken, otherScope.warehouseMembershipId());
+        otherScopeToken = accessTokenForWorkspace(WAREHOUSE_EMAIL, "PLATFORM", otherScope.slug());
 
         String key = "inbound-scope-" + suffix;
         String baseBody = receiptBody(baseWarehouse, baseZone, "B-SCOPE-" + suffix, "4");
@@ -185,6 +192,8 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         .content("{\"code\":\"WH-H-"+suffix+"\",\"name\":\"Hold Warehouse\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         String warehouseId = tools.jackson.databind.json.JsonMapper.shared().readTree(warehouse).get("id").asText();
+        grantWarehouseAccess(accessToken(OWNER_EMAIL, "PLATFORM"), membershipId(WAREHOUSE_EMAIL), warehouseId);
+        token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String zone = mockMvc.perform(post("/api/v1/warehouses/"+warehouseId+"/zones").header("Authorization", "Bearer "+token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"C-"+suffix+"\",\"name\":\"Chilled QA\",\"type\":\"CHILLED\",\"temperatureMin\":-5,\"temperatureMax\":5}"))
@@ -206,11 +215,25 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
     }
 
     private String createWarehouse(String token, String code) throws Exception {
+        return createWarehouse(token, code, accessToken(OWNER_EMAIL, "PLATFORM"), membershipId(WAREHOUSE_EMAIL));
+    }
+
+    private String createWarehouse(String token, String code, String grantAdminToken, String targetMembershipId) throws Exception {
         String result = mockMvc.perform(post("/api/v1/warehouses").header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"" + code + "\",\"name\":\"Receiving test warehouse\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
-        return tools.jackson.databind.json.JsonMapper.shared().readTree(result).get("id").asText();
+        String warehouseId = tools.jackson.databind.json.JsonMapper.shared().readTree(result).get("id").asText();
+        grantWarehouseAccess(grantAdminToken, targetMembershipId, warehouseId);
+        return warehouseId;
+    }
+
+    private void grantWarehouseAccess(String grantAdminToken, String targetMembershipId, String warehouseId) throws Exception {
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + grantAdminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + targetMembershipId + "\"}"))
+                .andExpect(status().isOk());
     }
 
     private String createZone(String token, String warehouseId, String code) throws Exception {
@@ -274,12 +297,28 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
                         + "where membership_id=?",
                 newMembership, tenantId, workspaceId, sourceMembership);
-        return new WorkspaceScope(tenantId.toString(), workspaceId.toString(), slug);
+        copyWorkspaceMembership(OWNER_EMAIL, tenantId, workspaceId);
+        return new WorkspaceScope(tenantId.toString(), workspaceId.toString(), slug, newMembership.toString());
+    }
+
+    private void copyWorkspaceMembership(String email, UUID tenantId, UUID workspaceId) {
+        UUID sourceMembership = UUID.fromString(membershipId(email));
+        UUID newMembership = UUID.randomUUID();
+        jdbc.update("insert into tenant_management.workspace_membership "
+                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "select ?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
+                        + "from tenant_management.workspace_membership where id=?",
+                newMembership, workspaceId, sourceMembership);
+        jdbc.update("insert into tenant_management.membership_role_definition "
+                        + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+                        + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
+                        + "where membership_id=?",
+                newMembership, tenantId, workspaceId, sourceMembership);
     }
 
     private static String suffix() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(java.util.Locale.ROOT);
     }
 
-    private record WorkspaceScope(String tenantId, String workspaceId, String slug) { }
+    private record WorkspaceScope(String tenantId, String workspaceId, String slug, String warehouseMembershipId) { }
 }

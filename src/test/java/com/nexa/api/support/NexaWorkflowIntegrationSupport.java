@@ -46,6 +46,8 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .content("{\"code\":\"WH-COM-" + suffix + "\",\"name\":\"Commercial core warehouse\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
         String warehouseId = json(createdWarehouse).get("id").asText();
+        grantWarehouseAccess(warehouseId);
+        warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult createdZone = mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones")
                         .header("Authorization", "Bearer " + warehouse)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -95,6 +97,8 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"WH-" + suffix + "\",\"name\":\"Dispatch test warehouse\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
         String warehouseId = json(createdWarehouse).get("id").asText();
+        grantWarehouseAccess(warehouseId);
+        warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult createdZone = mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones").header("Authorization", "Bearer " + warehouse)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"Z-" + suffix + "\",\"name\":\"Frozen dispatch zone\",\"type\":\"FROZEN\",\"temperatureMin\":-25,\"temperatureMax\":-15}"))
                 .andExpect(status().isCreated()).andReturn();
@@ -113,6 +117,15 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .header("Idempotency-Key", "dispatch-create-" + suffix))
                 .andExpect(status().isCreated()).andReturn();
         return new DispatchResource(json(dispatch).get("id").asText(), json(dispatch).get("dispatchNumber").asText(), dispatch.getResponse().getHeader("ETag"), logistics, reservationId, confirmed.getResponse().getHeader("ETag"), pending.id());
+    }
+
+    private void grantWarehouseAccess(String warehouseId) throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                .andExpect(status().isOk());
     }
 
     protected tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {

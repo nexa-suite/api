@@ -43,6 +43,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     @Test
     void resolvesIdentifiersAndRejectsUnsafePhysicalPickingScans() throws Exception {
         ensureCommercialInventory();
+        UUID otherGrantedWarehouse = createGrantedWarehouse();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
 
@@ -130,7 +131,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.remainingQuantity").value(2));
         scan(warehouse, flow, UUID.randomUUID(), flow.lotId(), flow.warehouseId(), "2", flow.allocationVersion(), "WRONG_SKU");
         scan(warehouse, flow, flow.skuId(), UUID.randomUUID(), flow.warehouseId(), "2", flow.allocationVersion(), "WRONG_LOT");
-        scan(warehouse, flow, flow.skuId(), flow.lotId(), UUID.randomUUID(), "2", flow.allocationVersion(), "WRONG_WAREHOUSE");
+        scan(warehouse, flow, flow.skuId(), flow.lotId(), otherGrantedWarehouse, "2", flow.allocationVersion(), "WRONG_WAREHOUSE");
         scan(warehouse, flow, flow.skuId(), flow.lotId(), flow.warehouseId(), "3", flow.allocationVersion(), "INSUFFICIENT_ALLOCATED_QUANTITY");
         scan(warehouse, flow, flow.skuId(), flow.lotId(), flow.warehouseId(), "2", flow.allocationVersion() + 1, "STALE_ALLOCATION");
 
@@ -525,6 +526,24 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         return new PhysicalFlow(UUID.fromString(fulfillmentId), UUID.fromString(lineId), physical.skuId(), physical.lotId(),
                 physical.warehouseId(), physical.id(), physical.version(), pickingStart.getResponse().getHeader("ETag"),
                 "mobile-picking-confirm-" + uuid());
+    }
+
+    private UUID createGrantedWarehouse() throws Exception {
+        String warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String suffix = uuid().replace("-", "").substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+        MvcResult created = mockMvc.perform(post("/api/v1/warehouses")
+                        .header("Authorization", "Bearer " + warehouseToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"WH-SCAN-" + suffix + "\",\"name\":\"Scan comparison warehouse\",\"address\":\"Lima\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        UUID warehouseId = UUID.fromString(json(created).get("id").asText());
+        String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                .andExpect(status().isOk());
+        return warehouseId;
     }
 
     private String pick(PhysicalFlow flow, String warehouse, String key) throws Exception {
