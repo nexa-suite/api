@@ -186,3 +186,5 @@ logistics.driver_delivery_incident	BC06	V119__append_driver_delivery_incidents.s
 logistics.driver_delivery_incident_evidence	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
 warehouse.inbound_receiving_discrepancy_case	BC05	V123__record_inbound_receiving_discrepancy_cases.sql CREATE TABLE; immutable receiving discrepancy observations and evidence-gated review requests.
 logistics.dispatch_handoff_identity	BC06	V126__create_dispatch_handoff_identity.sql:8 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_instruction_revision	BC06	V130__operational_delivery_instructions.sql CREATE TABLE; immutable operational dispatch instruction revisions.
+logistics.delivery_instruction_acknowledgement	BC06	V130__operational_delivery_instructions.sql CREATE TABLE; immutable actor acknowledgements bound to exact instruction revisions.

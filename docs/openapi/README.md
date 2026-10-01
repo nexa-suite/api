@@ -19,3 +19,5 @@ El test `OpenApiContractIT` compara `/v3/api-docs` con snapshot. Si runtime camb
 `info.version` deriva de versión Maven durante tests y de `BuildProperties` en runtime empaquetado. No mantener versión manual adicional.
 
 La compatibilidad de operaciones, parámetros, respuestas y schemas se valida en CI con `.github/scripts/check-openapi-compatibility.py` contra snapshot de rama base.
+
+El contrato de instrucciones operativas Driver/Dispatch y sus límites de autorización está descrito en [`delivery-instructions.md`](./delivery-instructions.md).

@@ -133,6 +133,10 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
         }
         if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
         if (!isReady(delivery.status())) throw error("DELIVERY_NOT_READY");
+        if (hasUnacknowledgedCriticalInstruction(request.tenantId(), request.workspaceId(),
+                request.deliveryId(), request.actorMembershipId())) {
+            throw error("DELIVERY_CRITICAL_INSTRUCTION_ACK_REQUIRED");
+        }
 
         Integer attemptNumber = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, request.tenantId(), request.workspaceId(), request.deliveryId());
@@ -236,9 +240,28 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
     }
 
     private DeliveryRow lockDelivery(UUID tenant, UUID workspace, UUID id) {
-        return jdbc.query("select id,status,version from logistics.delivery where tenant_id=? and workspace_id=? and id=? for update",
-                (rs, row) -> new DeliveryRow(rs.getObject("id", UUID.class), rs.getString("status"), rs.getLong("version")),
+        return jdbc.query("select id,status,version,instruction_set_version,fulfillment_id from logistics.delivery where tenant_id=? and workspace_id=? and id=? for update",
+                (rs, row) -> new DeliveryRow(rs.getObject("id", UUID.class), rs.getString("status"),
+                        rs.getLong("version"), rs.getLong("instruction_set_version"),
+                        rs.getObject("fulfillment_id", UUID.class)),
                 tenant, workspace, id).stream().findFirst().orElse(null);
+    }
+
+    private boolean hasUnacknowledgedCriticalInstruction(UUID tenantId, UUID workspaceId,
+                                                         UUID deliveryId, UUID membershipId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from ("
+                        + "select distinct on (r.instruction_id) r.instruction_id,r.instruction_version,r.kind "
+                        + "from logistics.delivery_instruction_revision r "
+                        + "where r.tenant_id=? and r.workspace_id=? and r.delivery_id=? "
+                        + "order by r.instruction_id,r.instruction_version desc) current_instruction "
+                        + "where current_instruction.kind<>'NORMAL' and not exists ("
+                        + "select 1 from logistics.delivery_instruction_acknowledgement a "
+                        + "where a.tenant_id=? and a.workspace_id=? and a.delivery_id=? "
+                        + "and a.instruction_id=current_instruction.instruction_id "
+                        + "and a.instruction_version=current_instruction.instruction_version "
+                        + "and a.acknowledged_by_membership_id=?))",
+                Boolean.class, tenantId, workspaceId, deliveryId,
+                tenantId, workspaceId, deliveryId, membershipId));
     }
 
     private boolean isAssigned(UUID tenant, UUID workspace, UUID delivery, UUID membership) {
@@ -385,10 +408,12 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
 
     private static FulfillmentOperationException error(String code) {
         return new FulfillmentOperationException(code,
-                "DELIVERY_NOT_FOUND".equals(code) || "DELIVERY_ATTEMPT_NOT_FOUND".equals(code));
+                "DELIVERY_NOT_FOUND".equals(code) || "DELIVERY_ATTEMPT_NOT_FOUND".equals(code)
+                        || code.endsWith("_NOT_FOUND"));
     }
 
-    private record DeliveryRow(UUID id, String status, long version) { }
+    private record DeliveryRow(UUID id, String status, long version, long instructionSetVersion,
+                               UUID fulfillmentId) { }
     private record ArrivalRow(UUID id, UUID attemptId, UUID actorMembershipId, Instant arrivedAt) { }
     private record IdempotencyRow(String requestHash, UUID resourceId) { }
 
