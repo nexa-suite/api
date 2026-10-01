@@ -657,6 +657,7 @@ public class FulfillmentLifecycleService {
 
     private static String attemptCanonical(AttemptCommand command) {
         return command.outcome() + "|" + Objects.toString(command.failureReason(), "<null>") + "|"
+                + Objects.toString(command.notes(), "<null>") + "|" + command.attemptedAt() + "|"
                 + command.lines().stream().sorted(Comparator.comparing(line -> line.fulfillmentLineId().toString()))
                 .map(line -> line.fulfillmentLineId() + ":" + line.skuId() + ":" + line.attemptedQuantity() + ":"
                         + line.deliveredQuantity() + ":" + line.rejectedQuantity() + ":" + line.cancelledQuantity() + ":" + line.unit())

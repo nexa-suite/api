@@ -5,6 +5,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.A
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartResult;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.OutcomeLineView;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryPersistencePort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -39,7 +40,8 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                         + "left join logistics.delivery_active_attempt active on active.tenant_id=d.tenant_id and active.workspace_id=d.workspace_id and active.delivery_id=d.id "
                         + "where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? "
                         + "and d.status in ('ASSIGNED','DISPATCHED','IN_TRANSIT','PARTIAL') order by d.scheduled_at nulls last,d.created_at,d.id",
-                JdbcDriverDeliveryPersistenceAdapter::mapDelivery, tenantId, workspaceId, membershipId);
+                JdbcDriverDeliveryPersistenceAdapter::mapDelivery, tenantId, workspaceId, membershipId)
+                .stream().map(delivery -> withOutcomeLines(delivery, tenantId, workspaceId)).toList();
     }
 
     @Override
@@ -51,7 +53,34 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                         + "left join logistics.delivery_active_attempt active on active.tenant_id=d.tenant_id and active.workspace_id=d.workspace_id and active.delivery_id=d.id "
                         + "where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? and d.id=?",
                 JdbcDriverDeliveryPersistenceAdapter::mapDelivery, tenantId, workspaceId, membershipId, deliveryId)
-                .stream().findFirst().orElseThrow(() -> error("DELIVERY_NOT_FOUND"));
+                .stream().findFirst().map(delivery -> withOutcomeLines(delivery, tenantId, workspaceId))
+                .orElseThrow(() -> error("DELIVERY_NOT_FOUND"));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void requireAssignedAttempt(UUID tenantId, UUID workspaceId, UUID membershipId,
+                                       UUID deliveryId, UUID attemptId, String idempotencyKey) {
+        DeliveryRow delivery = lockDelivery(tenantId, workspaceId, deliveryId);
+        if (delivery == null || !isAssigned(tenantId, workspaceId, deliveryId, membershipId)) {
+            throw error("DELIVERY_NOT_FOUND");
+        }
+        List<UUID> active = jdbc.query("select id from logistics.delivery_active_attempt "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? "
+                        + "and started_by_membership_id=? for update",
+                (rs, row) -> rs.getObject("id", UUID.class), tenantId, workspaceId,
+                deliveryId, membershipId);
+        if (active.contains(attemptId)) return;
+
+        boolean sameCommandAlreadyRecorded = Boolean.TRUE.equals(jdbc.queryForObject(
+                "select exists(select 1 from logistics.delivery_command_idempotency i "
+                        + "join logistics.delivery_attempt a on a.tenant_id=i.tenant_id "
+                        + "and a.workspace_id=i.workspace_id and a.id=i.resource_id "
+                        + "where i.tenant_id=? and i.workspace_id=? and i.actor_membership_id=? "
+                        + "and i.operation='ATTEMPT' and i.idempotency_key=? "
+                        + "and i.resource_id=? and a.delivery_id=?)",
+                Boolean.class, tenantId, workspaceId, membershipId, idempotencyKey, attemptId, deliveryId));
+        if (!sameCommandAlreadyRecorded) throw error("DELIVERY_ATTEMPT_NOT_FOUND");
     }
 
     @Override
@@ -102,6 +131,22 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
 
     private DeliveryView loadAssigned(AttemptStartRequest request) {
         return findAssigned(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.deliveryId());
+    }
+
+    private DeliveryView withOutcomeLines(DeliveryView delivery, UUID tenantId, UUID workspaceId) {
+        if (delivery.fulfillmentId() == null) return delivery;
+        List<OutcomeLineView> lines = jdbc.query(
+                "select id,sku_id,catalog_item_id,dispatched_quantity,delivered_quantity,rejected_quantity,"
+                        + "cancelled_quantity,greatest(dispatched_quantity-delivered_quantity-rejected_quantity-cancelled_quantity,0) remaining_quantity,unit "
+                        + "from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? order by id",
+                (rs, row) -> new OutcomeLineView(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
+                        rs.getString("catalog_item_id"), rs.getBigDecimal("dispatched_quantity"),
+                        rs.getBigDecimal("delivered_quantity"), rs.getBigDecimal("rejected_quantity"),
+                        rs.getBigDecimal("cancelled_quantity"), rs.getBigDecimal("remaining_quantity"), rs.getString("unit")),
+                tenantId, workspaceId, delivery.fulfillmentId());
+        return new DeliveryView(delivery.id(), delivery.fulfillmentId(), delivery.salesOrderId(), delivery.status(),
+                delivery.destinationSnapshot(), delivery.scheduledAt(), delivery.dispatchedAt(), delivery.deliveredAt(),
+                delivery.updatedAt(), delivery.version(), delivery.activeAttempt(), lines);
     }
 
     private DeliveryRow lockDelivery(UUID tenant, UUID workspace, UUID id) {
@@ -168,7 +213,7 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
         return new DeliveryView(rs.getObject("id", UUID.class), rs.getObject("fulfillment_id", UUID.class),
                 rs.getObject("sales_order_id", UUID.class), rs.getString("status"), rs.getString("destination_snapshot"),
                 instant(rs, "scheduled_at"), instant(rs, "dispatched_at"), instant(rs, "delivered_at"),
-                instant(rs, "updated_at"), rs.getLong("version"), active);
+                instant(rs, "updated_at"), rs.getLong("version"), active, List.of());
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
@@ -193,7 +238,8 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
     }
 
     private static FulfillmentOperationException error(String code) {
-        return new FulfillmentOperationException(code, "DELIVERY_NOT_FOUND".equals(code));
+        return new FulfillmentOperationException(code,
+                "DELIVERY_NOT_FOUND".equals(code) || "DELIVERY_ATTEMPT_NOT_FOUND".equals(code));
     }
 
     private record DeliveryRow(UUID id, String status, long version) { }

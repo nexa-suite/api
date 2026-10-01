@@ -615,6 +615,97 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 Integer.class, fixture.deliveryId())).isZero();
     }
 
+    @Test
+    void driverOutcomeRequiresCurrentAssignmentAndAttemptAndReplaysOnlySameCommand() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        DriverDeliveryFixture fixture = createDriverDelivery(
+                warehouse, sales, driverMembership, "driver-outcome-" + uuid());
+
+        MvcResult detail = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", detail.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "driver-outcome-transit-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult started = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", transit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "driver-outcome-start-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andReturn();
+        String attemptId = json(started).get("attempt").get("id").asText();
+        String startEtag = started.getResponse().getHeader("ETag");
+        assertThat(json(mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn()).get("outcomeLines").size()).isEqualTo(1);
+        AttemptOutcomeLine line = jdbc.queryForObject(
+                "select fl.id,fl.sku_id,fl.dispatched_quantity,fl.unit from logistics.fulfillment_line fl "
+                        + "join logistics.fulfillment f on f.tenant_id=fl.tenant_id and f.workspace_id=fl.workspace_id "
+                        + "and f.id=fl.fulfillment_id join logistics.delivery d on d.tenant_id=f.tenant_id "
+                        + "and d.workspace_id=f.workspace_id and d.fulfillment_id=f.id where d.id=?",
+                (rs, row) -> new AttemptOutcomeLine(rs.getObject("id", UUID.class),
+                        rs.getObject("sku_id", UUID.class), rs.getBigDecimal("dispatched_quantity"),
+                        rs.getString("unit")), fixture.deliveryId());
+        String body = "{\"outcome\":\"DELIVERED\",\"attemptedAt\":\"2026-09-30T12:30:00Z\",\"notes\":\"same delivery outcome\",\"lines\":[{\"fulfillmentLineId\":\""
+                + line.fulfillmentLineId() + "\",\"skuId\":\"" + line.skuId()
+                + "\",\"attemptedQuantity\":" + line.quantity().toPlainString()
+                + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
+                + ",\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\""
+                + line.unit() + "\"}]}";
+        String outcomeKey = "driver-outcome-" + uuid();
+        String path = "/api/v1/driver/deliveries/" + fixture.deliveryId()
+                + "/attempts/" + attemptId + "/outcomes";
+
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId()
+                        + "/attempts/" + UUID.randomUUID() + "/outcomes")
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", startEtag)
+                        .header("Idempotency-Key", "wrong-attempt-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_active_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+
+        MvcResult recorded = mockMvc.perform(post(path).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", startEtag).header("Idempotency-Key", outcomeKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.attemptId").value(attemptId)).andReturn();
+        long completedVersion = json(recorded).get("delivery").get("version").asLong();
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_active_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_quantity_outcome where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+
+        mockMvc.perform(post(path).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", startEtag).header("Idempotency-Key", outcomeKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.attemptId").value(attemptId))
+                .andExpect(jsonPath("$.delivery.version").value(completedVersion));
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+
+        mockMvc.perform(post(path).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", startEtag).header("Idempotency-Key", outcomeKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.replace("same delivery outcome", "changed outcome")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+
+        mockMvc.perform(post(path).header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", startEtag).header("Idempotency-Key", outcomeKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+    }
+
     private DriverDeliveryFixture createDriverDelivery(String warehouse, String sales, UUID assignedMembership,
                                                        String key) throws Exception {
         PhysicalFlow flow = createPickingFlow(warehouse, sales, key, "2");
@@ -645,6 +736,8 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     private record DriverDeliveryFixture(UUID deliveryId, long version) {
         private String etag() { return "\"" + version + "\""; }
     }
+
+    private record AttemptOutcomeLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit) { }
 
     @Override
     protected void ensureCommercialInventory() throws Exception {

@@ -4,6 +4,7 @@ import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperati
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartResult;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -25,10 +26,13 @@ import java.util.UUID;
 @Profile("!test")
 public class DriverDeliveryService {
     private final DriverDeliveryPersistencePort persistence;
+    private final FulfillmentLifecycleService lifecycle;
     private final Clock clock;
 
-    public DriverDeliveryService(DriverDeliveryPersistencePort persistence, Clock clock) {
+    public DriverDeliveryService(DriverDeliveryPersistencePort persistence, FulfillmentLifecycleService lifecycle,
+                                 Clock clock) {
         this.persistence = Objects.requireNonNull(persistence, "Driver delivery persistence is required");
+        this.lifecycle = Objects.requireNonNull(lifecycle, "Fulfillment lifecycle is required");
         this.clock = Objects.requireNonNull(clock, "Clock is required");
     }
 
@@ -55,6 +59,23 @@ public class DriverDeliveryService {
         return persistence.startAttempt(new AttemptStartRequest(tenant(context), workspace(context), deliveryId,
                 actor(context), expectedVersion, idempotencyKey,
                 hash("driver-attempt-start-v1|" + deliveryId + "|" + expectedVersion), clock.instant()));
+    }
+
+    @Transactional
+    public FulfillmentModels.DeliveryOutcomeResult recordOutcome(
+            CurrentAccessContext context, UUID deliveryId, UUID attemptId, long expectedVersion,
+            String idempotencyKey, FulfillmentLifecycleService.AttemptCommand command) {
+        context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
+        if (deliveryId == null || attemptId == null) {
+            throw new FulfillmentOperationException("DELIVERY_ATTEMPT_NOT_FOUND", true);
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 160) {
+            throw new FulfillmentOperationException("IDEMPOTENCY_KEY_REQUIRED", false);
+        }
+        if (expectedVersion < 0) throw new FulfillmentOperationException("VERSION_INVALID", false);
+        persistence.requireAssignedAttempt(
+                tenant(context), workspace(context), actor(context), deliveryId, attemptId, idempotencyKey);
+        return lifecycle.recordAttempt(context, deliveryId, expectedVersion, idempotencyKey, command);
     }
 
     private static UUID tenant(CurrentAccessContext context) { return context.tenantId().value(); }

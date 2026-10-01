@@ -13,5 +13,8 @@ public interface DriverDeliveryPersistencePort {
 
     DeliveryView findAssigned(UUID tenantId, UUID workspaceId, UUID membershipId, UUID deliveryId);
 
+    void requireAssignedAttempt(UUID tenantId, UUID workspaceId, UUID membershipId,
+                                UUID deliveryId, UUID attemptId, String idempotencyKey);
+
     AttemptStartResult startAttempt(AttemptStartRequest request);
 }
