@@ -352,11 +352,19 @@ public class FulfillmentLifecycleService {
         fulfillmentWrite(context);
         requireKey(idempotencyKey);
         requireVersion(expectedVersion);
+        physicalAllocations.lockForFulfillment(tenant(context), workspace(context), fulfillmentId, actor(context));
         FulfillmentModels.FulfillmentView current = fulfillments.find(tenant(context), workspace(context), fulfillmentId);
         if ("HANDED_OVER".equals(current.status())) return current;
         if (current.version() != expectedVersion) throw conflict("FULFILLMENT_CONCURRENCY_CONFLICT");
+        var driverAssignment = fulfillments.findDriverAssignment(tenant(context), workspace(context), fulfillmentId)
+                .orElse(null);
         PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
                 tenant(context), workspace(context), fulfillmentId, actor(context));
+        if (driverAssignment != null && (driverAssignment.fulfillmentVersion() != current.version()
+                || !driverAssignment.physicalAllocationId().equals(allocation.allocationId())
+                || driverAssignment.physicalAllocationVersion() != allocation.version())) {
+            throw conflict("FULFILLMENT_DRIVER_ASSIGNMENT_STALE");
+        }
         physicalAllocations.consumeForDispatch(new PhysicalAllocationCommands.ConsumeRequest(
                 tenant(context), workspace(context), fulfillmentId, actor(context),
                 operationKey("physical-consume-", idempotencyKey),
@@ -365,7 +373,8 @@ public class FulfillmentLifecycleService {
         FulfillmentModels.FulfillmentView result = fulfillments.handOver(
                 new FulfillmentPersistencePort.HandOverRequest(
                         tenant(context), workspace(context), fulfillmentId, expectedVersion, actor(context),
-                        idempotencyKey, hash("handover-v1|" + fulfillmentId + "|" + expectedVersion), now()));
+                        idempotencyKey, hash("handover-v1|" + fulfillmentId + "|" + expectedVersion), now(),
+                        driverAssignment == null ? null : driverAssignment.id(), allocation.allocationId(), allocation.version()));
         trace(context, "FULFILLMENT_HANDED_OVER", "Fulfillment", fulfillmentId, idempotencyKey,
                 Map.of("deliveryId", Objects.requireNonNull(result.deliveryId(), "Delivery was not created")));
         return result;

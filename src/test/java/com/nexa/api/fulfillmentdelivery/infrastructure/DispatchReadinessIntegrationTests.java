@@ -81,6 +81,87 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void driverAssignmentUsesCurrentVersionsReplaysSafelyAndTransfersToRealDelivery() throws Exception {
+        Fixture fixture = createFulfillment();
+        MvcResult readyTransition = prepareForDispatch(fixture);
+        var ready = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
+        long readyVersion = ready.get("fulfillmentVersion").asLong();
+        long allocationVersion = ready.get("physicalAllocationVersion").asLong();
+        String membershipId = membershipId(LOGISTICS_EMAIL);
+        String assignmentPath = "/api/v1/fulfillments/" + fixture.fulfillmentId() + "/driver-assignments";
+        String body = "{\"responsibleMembershipId\":\"" + membershipId + "\",\"physicalAllocationId\":\""
+                + ready.get("physicalAllocationId").asText() + "\",\"physicalAllocationVersion\":" + allocationVersion + "}";
+        String key = "driver-assignment-" + uuid();
+
+        mockMvc.perform(post(assignmentPath)
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", "\"0\"")
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.code").value("PRECONDITION_FAILED"));
+
+        String wrongAllocation = "{\"responsibleMembershipId\":\"" + membershipId + "\",\"physicalAllocationId\":\""
+                + ready.get("physicalAllocationId").asText() + "\",\"physicalAllocationVersion\":" + (allocationVersion + 1) + "}";
+        mockMvc.perform(post(assignmentPath)
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", readyTransition.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "driver-assignment-stale-allocation-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(wrongAllocation))
+                .andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.code").value("PRECONDITION_FAILED"));
+
+        MvcResult created = mockMvc.perform(post(assignmentPath)
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", readyTransition.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+        var assigned = json(created);
+        String assignmentId = assigned.get("id").asText();
+        assertThat(assigned.get("fulfillmentId").asText()).isEqualTo(fixture.fulfillmentId().toString());
+        assertThat(assigned.get("fulfillmentVersion").asLong()).isEqualTo(readyVersion + 1);
+        assertThat(assigned.get("physicalAllocationId").asText()).isEqualTo(ready.get("physicalAllocationId").asText());
+        assertThat(assigned.get("physicalAllocationVersion").asLong()).isEqualTo(allocationVersion);
+        assertThat(assigned.get("responsibleMembershipId").asText()).isEqualTo(membershipId);
+        assertThat(assigned.get("deliveryId").isNull()).isTrue();
+
+        MvcResult replay = mockMvc.perform(post(assignmentPath)
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", readyTransition.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(replay).get("id").asText()).isEqualTo(assignmentId);
+
+        mockMvc.perform(post(assignmentPath)
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", readyTransition.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(wrongAllocation))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+
+        MvcResult handedOver = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "assignment-handover-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        var deliveryId = json(handedOver).get("deliveryId").asText();
+        assertThat(deliveryId).isNotBlank();
+
+        var transferred = json(mockMvc.perform(get(assignmentPath)
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken()))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(transferred.get("id").asText()).isEqualTo(assignmentId);
+        assertThat(transferred.get("deliveryId").asText()).isEqualTo(deliveryId);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_assignment "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_driver_assignment_id=? and delivery_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                UUID.fromString(assignmentId), UUID.fromString(deliveryId))).isEqualTo(1);
+    }
+
+    @Test
     void incompletePhysicalAllocationIsVisibleAsNotReady() throws Exception {
         Fixture fixture = createFulfillment();
         String idempotencyKey = "readiness-release-" + uuid();
