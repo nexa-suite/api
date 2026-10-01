@@ -17,6 +17,7 @@ public final class RoleCatalog {
 			MembershipRole.SALES, RoleDefinition.systemTemplate(MembershipRole.SALES, CATALOG_TIME),
 			MembershipRole.WAREHOUSE, RoleDefinition.systemTemplate(MembershipRole.WAREHOUSE, CATALOG_TIME),
 			MembershipRole.LOGISTICS, RoleDefinition.systemTemplate(MembershipRole.LOGISTICS, CATALOG_TIME),
+			MembershipRole.BUSINESS_OPERATIONS_MANAGER, RoleDefinition.systemTemplate(MembershipRole.BUSINESS_OPERATIONS_MANAGER, CATALOG_TIME),
 			MembershipRole.BUYER, RoleDefinition.systemTemplate(MembershipRole.BUYER, CATALOG_TIME));
 
 	private static final Set<MembershipRole> INTERNAL_ASSIGNABLE = Set.of(
@@ -24,7 +25,8 @@ public final class RoleCatalog {
 			MembershipRole.COMPANY_OWNER,
 			MembershipRole.SALES,
 			MembershipRole.WAREHOUSE,
-			MembershipRole.LOGISTICS);
+			MembershipRole.LOGISTICS,
+			MembershipRole.BUSINESS_OPERATIONS_MANAGER);
 
 	private RoleCatalog() {
 	}
