@@ -86,8 +86,12 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         requireGeneration(context);
         requireKey(idempotencyKey);
         DocumentSubjectType subject = parseSubject(subjectType); BusinessDocumentType type = parseType(documentType); BusinessDocumentFormat output = parseFormat(format);
+        if (subject == DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY) {
+            throw new IllegalArgumentException("Issued documents are unavailable for receiving discrepancies");
+        }
         if (!renderer.supports(type, output)) throw new IllegalArgumentException("Document format is not supported for this document type");
-        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(), new DocumentSubjectReference(subject, subjectId.toString()));
+        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
         if (!snapshot.subjectExists()) throw new IllegalArgumentException("Document subject not found");
         authorizeClientScope(context, snapshot.clientAccountId());
         String requestPayload = subject.name() + subjectId + type.name() + output.name();
@@ -228,7 +232,8 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         String filename = sanitizedRequiredFilename(originalFilename);
         String contentType = requiredContentType(declaredContentType);
         DocumentSubjectType subject = parseSubject(subjectType);
-        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(), new DocumentSubjectReference(subject, subjectId.toString()));
+        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
         if (!snapshot.subjectExists()) throw new IllegalArgumentException("Evidence subject not found");
         authorizeClientScope(context, snapshot.clientAccountId());
         String requestFingerprint = evidenceRequestFingerprint(tenant(context), workspace(context), context.membershipId().value(),
@@ -336,7 +341,15 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         List<Object> params = new ArrayList<>();
         StringBuilder where = new StringBuilder("e.tenant_id=? and e.workspace_id=? and e.lifecycle_status <> 'DELETED'");
         params.add(tenant(context)); params.add(workspace(context));
-        if (subjectType != null && !subjectType.isBlank()) { where.append(" and e.subject_type=?"); params.add(parseSubject(subjectType).name()); }
+        DocumentSubjectType requestedType = subjectType != null && !subjectType.isBlank() ? parseSubject(subjectType) : null;
+        if (requestedType == DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY) {
+            if (subjectId == null) throw new IllegalArgumentException("Receiving evidence requires a case subject");
+            requireAccessibleInboundSubject(context, subjectId);
+        } else {
+            where.append(" and e.subject_type <> ?");
+            params.add(DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY.name());
+        }
+        if (requestedType != null) { where.append(" and e.subject_type=?"); params.add(requestedType.name()); }
         if (subjectId != null) { where.append(" and e.subject_id=?"); params.add(subjectId); }
         appendBuyerAccountFilter(where, params, context, "e");
         long total = jdbc.queryForObject("select count(*) from business_documents.evidence_object e where " + where, Long.class, params.toArray());
@@ -537,7 +550,17 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private EvidenceRow loadEvidenceScoped(CurrentAccessContext context, UUID evidenceId) {
         EvidenceRow row = jdbc.query(evidenceSelect() + " where e.tenant_id=? and e.workspace_id=? and e.id=?", (rs, n) -> evidenceRow(rs), tenant(context), workspace(context), evidenceId)
                 .stream().filter(value -> authorizedDocument(context, value.clientAccountId() == null ? null : value.clientAccountId().toString())).findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
+        if (parseSubject(row.subjectType()) == DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY) {
+            requireAccessibleInboundSubject(context, row.subjectId());
+        }
         return row;
+    }
+
+    private void requireAccessibleInboundSubject(CurrentAccessContext context, UUID caseId) {
+        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                context.membershipId().value().toString(), new DocumentSubjectReference(
+                        DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY, caseId.toString()));
+        if (!snapshot.subjectExists()) throw new IllegalArgumentException("Evidence not found");
     }
     private EvidenceRow loadEvidenceForWorker(UUID evidenceId) {
         RlsRequestScope.Scope scope = workerScope();

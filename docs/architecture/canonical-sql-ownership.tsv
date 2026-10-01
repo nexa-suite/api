@@ -184,3 +184,4 @@ logistics.fulfillment_outgoing_discrepancy_resolution	BC06	V121__dispatch_except
 warehouse.physical_allocation_substitution_request	BC05	V120__record_physical_allocation_substitution_requests.sql:1 CREATE TABLE; immutable authorized substitution request fact.
 logistics.driver_delivery_incident	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
 logistics.driver_delivery_incident_evidence	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
+warehouse.inbound_receiving_discrepancy_case	BC05	V123__record_inbound_receiving_discrepancy_cases.sql CREATE TABLE; immutable receiving discrepancy observations and evidence-gated review requests.
