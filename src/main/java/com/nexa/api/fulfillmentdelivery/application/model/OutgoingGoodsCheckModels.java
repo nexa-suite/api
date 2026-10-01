@@ -19,17 +19,34 @@ public final class OutgoingGoodsCheckModels {
         }
     }
 
+    public record ResolutionRequest(UUID physicalAllocationId, long physicalAllocationVersion,
+                                    UUID discrepancyCheckId, UUID matchingCheckId, String reason) { }
+
     public record Line(UUID physicalAllocationLineId, UUID skuId, UUID expectedLotId,
                        UUID observedLotId, BigDecimal expectedQuantity,
                        BigDecimal observedQuantity, String unit, boolean matches) { }
+
+    public record DiscrepancyDetails(UUID id, long fulfillmentVersion,
+                                     UUID physicalAllocationId, long physicalAllocationVersion,
+                                     UUID checkedByMembershipId, Instant checkedAt, List<Line> lines) {
+        public DiscrepancyDetails {
+            lines = List.copyOf(lines == null ? List.of() : lines);
+        }
+    }
 
     public record Check(UUID id, UUID fulfillmentId, long fulfillmentVersion,
                         UUID physicalAllocationId, long physicalAllocationVersion,
                         boolean matches, boolean current, boolean openDiscrepancy,
                         UUID checkedByMembershipId, Instant checkedAt,
-                        List<Line> lines, boolean replayed) {
+                        List<Line> lines, boolean replayed, DiscrepancyDetails discrepancy) {
         public Check {
             lines = List.copyOf(lines == null ? List.of() : lines);
         }
     }
+
+    public record DiscrepancyResolution(UUID id, UUID fulfillmentId, long fulfillmentVersion,
+                                        UUID physicalAllocationId, long physicalAllocationVersion,
+                                        UUID discrepancyCheckId, UUID matchingCheckId,
+                                        UUID actorMembershipId, String reason, Instant resolvedAt,
+                                        boolean current, boolean replayed) { }
 }

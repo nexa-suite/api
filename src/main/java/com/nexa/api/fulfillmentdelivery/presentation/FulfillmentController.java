@@ -226,6 +226,23 @@ public final class FulfillmentController {
                 .cacheControl(CacheControl.noStore()).eTag(etag(value.fulfillmentVersion())).body(value);
     }
 
+    @PostMapping("/fulfillments/{fulfillmentId}/outgoing-discrepancy-resolutions")
+    @Operation(operationId = "resolveOutgoingGoodsDiscrepancy")
+    public ResponseEntity<OutgoingGoodsCheckModels.DiscrepancyResolution> resolveOutgoingGoodsDiscrepancy(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody OutgoingDiscrepancyResolutionRequest request) {
+        OutgoingGoodsCheckModels.DiscrepancyResolution value = outgoingGoodsChecks.resolveDiscrepancy(
+                context, fulfillmentId, version(ifMatch), idempotencyKey,
+                new OutgoingGoodsCheckModels.ResolutionRequest(request.physicalAllocationId(),
+                        request.physicalAllocationVersion(), request.discrepancyCheckId(),
+                        request.matchingCheckId(), request.reason()));
+        return ResponseEntity.status(value.replayed() ? 200 : 201).cacheControl(CacheControl.noStore())
+                .eTag(etag(value.fulfillmentVersion())).body(value);
+    }
+
     @PostMapping("/deliveries/{deliveryId}/transit-starts")
     @Operation(operationId = "startDeliveryTransit")
     public ResponseEntity<FulfillmentModels.DeliveryView> startTransit(
@@ -386,4 +403,10 @@ public final class FulfillmentController {
                                              @NotNull BigDecimal value,
                                              @NotBlank @Size(max = 16) String unit,
                                              @NotNull Instant occurredAt) { }
+
+    public record OutgoingDiscrepancyResolutionRequest(@NotNull UUID physicalAllocationId,
+                                                         @PositiveOrZero long physicalAllocationVersion,
+                                                         @NotNull UUID discrepancyCheckId,
+                                                         @NotNull UUID matchingCheckId,
+                                                         @NotBlank @Size(max = 1000) String reason) { }
 }

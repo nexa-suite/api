@@ -260,7 +260,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
-    void outgoingDiscrepancyIsDurableAndBlocksHandoverWithoutMovingStock() throws Exception {
+    void outgoingDiscrepancyBlocksHandoverUntilExplicitResolutionAndCurrentMatch() throws Exception {
         Fixture fixture = createFulfillment();
         MvcResult ready = prepareForDispatch(fixture);
         var readiness = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
@@ -299,12 +299,90 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("FULFILLMENT_OUTGOING_DISCREPANCY_OPEN"));
 
+        MvcResult reinspection = recordOutgoingCheck(fixture, assigned.getResponse().getHeader("ETag"),
+                "outgoing-reinspection-" + uuid(), fixture.allocationVersion(),
+                fixture.quantity(), fixture.lotId(), 201);
+        var reinspectionJson = json(reinspection);
+        assertThat(reinspectionJson.get("matches").asBoolean()).isTrue();
+        assertThat(reinspectionJson.get("openDiscrepancy").asBoolean()).isTrue();
+        assertThat(reinspectionJson.get("discrepancy").get("id").asText()).isEqualTo(json(recorded).get("id").asText());
+
+        String resolutionKey = "outgoing-resolution-" + uuid();
+        String resolutionBody = "{\"physicalAllocationId\":\"" + fixture.allocationId()
+                + "\",\"physicalAllocationVersion\":" + fixture.allocationVersion()
+                + ",\"discrepancyCheckId\":\"" + json(recorded).get("id").asText()
+                + "\",\"matchingCheckId\":\"" + reinspectionJson.get("id").asText()
+                + "\",\"reason\":\"Recount confirmed the allocated lot and quantity.\"}";
+        mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId()
+                        + "/outgoing-discrepancy-resolutions")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", resolutionKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"physicalAllocationId\":\"" + fixture.allocationId()
+                                + "\",\"physicalAllocationVersion\":" + fixture.allocationVersion()
+                                + ",\"discrepancyCheckId\":\"" + json(recorded).get("id").asText()
+                                + "\",\"matchingCheckId\":\"" + json(recorded).get("id").asText()
+                                + "\",\"reason\":\"Incorrect match reference.\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("FULFILLMENT_OUTGOING_CHECK_REQUIRED"));
+
+        MvcResult resolved = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId()
+                        + "/outgoing-discrepancy-resolutions")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", resolutionKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(resolutionBody))
+                .andExpect(status().isCreated()).andReturn();
+        var resolution = json(resolved);
+        assertThat(resolution.get("discrepancyCheckId").asText()).isEqualTo(json(recorded).get("id").asText());
+        assertThat(resolution.get("matchingCheckId").asText()).isEqualTo(reinspectionJson.get("id").asText());
+        assertThat(resolution.get("reason").asText()).isEqualTo("Recount confirmed the allocated lot and quantity.");
+        assertThat(resolution.get("current").asBoolean()).isTrue();
+
+        MvcResult resolutionReplay = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId()
+                        + "/outgoing-discrepancy-resolutions")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", resolutionKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(resolutionBody))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(resolutionReplay).get("id").asText()).isEqualTo(resolution.get("id").asText());
+        assertThat(json(resolutionReplay).get("replayed").asBoolean()).isTrue();
+        assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment_outgoing_goods_check "
+                        + "where tenant_id=? and workspace_id=? and id=? and matches=false",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                UUID.fromString(json(recorded).get("id").asText()))).isEqualTo(1);
+
+        String handoverBody = "{\"physicalAllocationId\":\"" + fixture.allocationId()
+                + "\",\"physicalAllocationVersion\":" + fixture.allocationVersion()
+                + ",\"driverAssignmentId\":\"" + json(assigned).get("id").asText()
+                + "\",\"driverAssignmentVersion\":" + json(assigned).get("fulfillmentVersion").asLong()
+                + ",\"outgoingGoodsCheckId\":\"" + reinspectionJson.get("id").asText() + "\"}";
+        var beforeHandoverReadiness = json(readiness(fixture, fixture.coordinatorToken())
+                .andExpect(status().isOk()).andReturn());
+        assertThat(beforeHandoverReadiness.get("fulfillmentVersion").asLong())
+                .isEqualTo(json(assigned).get("fulfillmentVersion").asLong());
+        var currentAssignment = json(mockMvc.perform(get("/api/v1/fulfillments/" + fixture.fulfillmentId()
+                        + "/driver-assignments")
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken()))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(currentAssignment.get("id").asText()).isEqualTo(json(assigned).get("id").asText());
+        assertThat(currentAssignment.get("fulfillmentVersion").asLong())
+                .isEqualTo(json(assigned).get("fulfillmentVersion").asLong());
+        mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "outgoing-resolved-handover-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(handoverBody))
+                .andExpect(status().isOk());
+
         var after = json(physicalAllocation(fixture, fixture.warehouseToken())
                 .andExpect(status().isOk()).andReturn());
-        assertThat(after.get("status").asText()).isEqualTo("ALLOCATED");
-        assertThat(after.get("version").asLong()).isEqualTo(before.get("version").asLong());
+        assertThat(after.get("status").asText()).isEqualTo("CONSUMED");
+        assertThat(after.get("version").asLong()).isGreaterThan(before.get("version").asLong());
         assertThat(after.get("lines").get(0).get("remainingQuantity").decimalValue())
-                .isEqualByComparingTo(before.get("lines").get(0).get("remainingQuantity").decimalValue());
+                .isEqualByComparingTo(java.math.BigDecimal.ZERO);
     }
 
     @Test

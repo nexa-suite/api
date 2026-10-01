@@ -9,7 +9,9 @@ import com.nexa.api.fulfillmentdelivery.application.model.OutgoingGoodsCheckMode
 import com.nexa.api.fulfillmentdelivery.application.port.OutgoingGoodsCheckPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.OutgoingGoodsCheckPersistencePort.LineFact;
 import com.nexa.api.fulfillmentdelivery.application.port.OutgoingGoodsCheckPersistencePort.RecordRequest;
+import com.nexa.api.fulfillmentdelivery.application.port.OutgoingGoodsCheckPersistencePort.ResolutionRequest;
 import com.nexa.api.fulfillmentdelivery.application.port.OutgoingGoodsCheckPersistencePort.StoredCheck;
+import com.nexa.api.fulfillmentdelivery.application.port.OutgoingGoodsCheckPersistencePort.StoredResolution;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands.AllocationResult;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands.Line;
@@ -129,10 +131,63 @@ public class OutgoingGoodsCheckService {
         boolean currentVersion = stored.fulfillmentVersion() == current.fulfillmentVersion() &&
                 stored.physicalAllocationId().equals(current.physicalAllocationId()) &&
                 stored.physicalAllocationVersion() == current.physicalAllocationVersion();
-        boolean openDiscrepancy = currentVersion && checks.hasOpenDiscrepancy(
-                tenant(context), workspace(context), fulfillmentId,
-                current.physicalAllocationId(), current.physicalAllocationVersion());
-        return project(stored, currentVersion, openDiscrepancy, false);
+        return project(context, stored, currentVersion, false);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public OutgoingGoodsCheckModels.DiscrepancyResolution resolveDiscrepancy(
+            CurrentAccessContext context, UUID fulfillmentId, long expectedFulfillmentVersion,
+            String idempotencyKey, OutgoingGoodsCheckModels.ResolutionRequest request) {
+        authorize(context);
+        requireKey(idempotencyKey);
+        if (request == null || request.physicalAllocationId() == null ||
+                request.physicalAllocationVersion() < 0 || request.discrepancyCheckId() == null ||
+                request.matchingCheckId() == null ||
+                request.reason() == null || request.reason().isBlank() || request.reason().length() > 1000) {
+            throw invalid("FULFILLMENT_OUTGOING_CHECK_INVALID");
+        }
+
+        physicalAllocations.lockForFulfillment(tenant(context), workspace(context), fulfillmentId, actor(context));
+        String key = idempotencyKey.trim();
+        String hash = resolutionHash(fulfillmentId, expectedFulfillmentVersion, request);
+        StoredResolution prior = checks.findResolutionByIdempotencyKey(
+                tenant(context), workspace(context), actor(context), key).orElse(null);
+        if (prior != null) {
+            if (!prior.requestHash().equals(hash)) throw conflict("IDEMPOTENCY_PAYLOAD_CONFLICT");
+            return withCurrent(context, prior.resolution(), true);
+        }
+
+        Readiness current = readiness.warehouseReadiness(context, fulfillmentId);
+        requireCurrentSnapshot(current, expectedFulfillmentVersion,
+                request.physicalAllocationId(), request.physicalAllocationVersion());
+        if (!READY_FOR_DISPATCH.equals(current.fulfillmentStatus()) || !current.ready()) {
+            throw conflict("FULFILLMENT_NOT_READY_FOR_DISPATCH");
+        }
+        AllocationResult allocation = physicalAllocations.getByFulfillment(
+                tenant(context), workspace(context), fulfillmentId, actor(context));
+        if (allocation == null || !request.physicalAllocationId().equals(allocation.allocationId()) ||
+                request.physicalAllocationVersion() != allocation.version() || allocation.lines().isEmpty()) {
+            throw conflict("FULFILLMENT_CONCURRENCY_CONFLICT");
+        }
+        StoredCheck discrepancy = checks.latestUnresolvedDiscrepancy(tenant(context), workspace(context),
+                fulfillmentId, allocation.allocationId(), allocation.version()).orElse(null);
+        if (discrepancy == null || !discrepancy.id().equals(request.discrepancyCheckId())) {
+            throw conflict("FULFILLMENT_OUTGOING_DISCREPANCY_OPEN");
+        }
+        StoredCheck matching = checks.latest(tenant(context), workspace(context), fulfillmentId).orElse(null);
+        if (matching == null || !matching.id().equals(request.matchingCheckId()) || !matching.matches() ||
+                matching.fulfillmentVersion() != current.fulfillmentVersion() ||
+                !matching.physicalAllocationId().equals(allocation.allocationId()) ||
+                matching.physicalAllocationVersion() != allocation.version() ||
+                matching.checkedAt().isBefore(discrepancy.checkedAt())) {
+            throw conflict("FULFILLMENT_OUTGOING_CHECK_REQUIRED");
+        }
+        StoredResolution stored = checks.resolve(new ResolutionRequest(tenant(context), workspace(context),
+                fulfillmentId, current.fulfillmentVersion(), allocation.allocationId(), allocation.version(),
+                discrepancy.id(), matching.id(), actor(context), key, hash, request.reason().trim(), clock.instant()));
+        if (stored == null) throw conflict("FULFILLMENT_OUTGOING_DISCREPANCY_OPEN");
+        if (!stored.requestHash().equals(hash)) throw conflict("IDEMPOTENCY_PAYLOAD_CONFLICT");
+        return withCurrent(context, stored.resolution(), false);
     }
 
     /** Must be called in the same transaction after the allocation lock is held. */
@@ -156,18 +211,47 @@ public class OutgoingGoodsCheckService {
         boolean openDiscrepancy = current && checks.hasOpenDiscrepancy(
                 tenant(context), workspace(context), stored.fulfillmentId(),
                 stored.physicalAllocationId(), stored.physicalAllocationVersion());
-        return project(stored, current, openDiscrepancy, replayed);
+        StoredCheck discrepancy = checks.latestUnresolvedDiscrepancy(tenant(context), workspace(context),
+                stored.fulfillmentId(), stored.physicalAllocationId(), stored.physicalAllocationVersion()).orElse(null);
+        OutgoingGoodsCheckModels.DiscrepancyDetails details = discrepancy == null ? null
+                : new OutgoingGoodsCheckModels.DiscrepancyDetails(discrepancy.id(), discrepancy.fulfillmentVersion(),
+                discrepancy.physicalAllocationId(), discrepancy.physicalAllocationVersion(),
+                discrepancy.checkedByMembershipId(), discrepancy.checkedAt(), discrepancy.lines().stream()
+                .map(OutgoingGoodsCheckService::projectLine).toList());
+        return project(stored, current, openDiscrepancy, replayed, details);
     }
 
     private static Check project(StoredCheck stored, boolean current,
-                                 boolean openDiscrepancy, boolean replayed) {
+                                 boolean openDiscrepancy, boolean replayed,
+                                 OutgoingGoodsCheckModels.DiscrepancyDetails discrepancy) {
         return new Check(stored.id(), stored.fulfillmentId(), stored.fulfillmentVersion(),
                 stored.physicalAllocationId(), stored.physicalAllocationVersion(), stored.matches(),
                 current, openDiscrepancy, stored.checkedByMembershipId(), stored.checkedAt(),
-                stored.lines().stream().map(line -> new OutgoingGoodsCheckModels.Line(line.physicalAllocationLineId(),
-                        line.skuId(), line.expectedLotId(), line.observedLotId(),
-                        line.expectedQuantity(), line.observedQuantity(), line.unit(), line.matches())).toList(),
-                replayed);
+                stored.lines().stream().map(OutgoingGoodsCheckService::projectLine).toList(), replayed, discrepancy);
+    }
+
+    private static OutgoingGoodsCheckModels.Line projectLine(LineFact line) {
+        return new OutgoingGoodsCheckModels.Line(line.physicalAllocationLineId(), line.skuId(),
+                line.expectedLotId(), line.observedLotId(), line.expectedQuantity(),
+                line.observedQuantity(), line.unit(), line.matches());
+    }
+
+    private OutgoingGoodsCheckModels.DiscrepancyResolution withCurrent(
+            CurrentAccessContext context, OutgoingGoodsCheckModels.DiscrepancyResolution resolution,
+            boolean replayed) {
+        Readiness current = readiness.warehouseReadiness(context, resolution.fulfillmentId());
+        boolean currentSnapshot = current.fulfillmentVersion() == resolution.fulfillmentVersion() &&
+                Objects.equals(current.physicalAllocationId(), resolution.physicalAllocationId()) &&
+                current.physicalAllocationVersion() == resolution.physicalAllocationVersion() &&
+                checks.currentMatchId(tenant(context), workspace(context), resolution.fulfillmentId(),
+                        current.fulfillmentVersion(), current.physicalAllocationId(),
+                        current.physicalAllocationVersion()).filter(resolution.matchingCheckId()::equals).isPresent() &&
+                checks.latestUnresolvedDiscrepancy(tenant(context), workspace(context), resolution.fulfillmentId(),
+                        current.physicalAllocationId(), current.physicalAllocationVersion()).isEmpty();
+        return new OutgoingGoodsCheckModels.DiscrepancyResolution(resolution.id(), resolution.fulfillmentId(),
+                resolution.fulfillmentVersion(), resolution.physicalAllocationId(),
+                resolution.physicalAllocationVersion(), resolution.discrepancyCheckId(), resolution.matchingCheckId(),
+                resolution.actorMembershipId(), resolution.reason(), resolution.resolvedAt(), currentSnapshot, replayed);
     }
 
     private static void requireCurrentSnapshot(Readiness current, long expectedFulfillmentVersion,
@@ -205,6 +289,22 @@ public class OutgoingGoodsCheckService {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(value.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static String resolutionHash(UUID fulfillmentId, long fulfillmentVersion,
+                                         OutgoingGoodsCheckModels.ResolutionRequest request) {
+        return hash("outgoing-discrepancy-resolution-v1|" + fulfillmentId + "|" + fulfillmentVersion + "|"
+                + request.physicalAllocationId() + "|" + request.physicalAllocationVersion() + "|"
+                + request.discrepancyCheckId() + "|" + request.matchingCheckId() + "|" + request.reason());
+    }
+
+    private static String hash(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (java.security.NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }

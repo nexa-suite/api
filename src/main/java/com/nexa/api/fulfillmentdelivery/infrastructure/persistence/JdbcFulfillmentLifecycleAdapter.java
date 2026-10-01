@@ -464,9 +464,12 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         UUID currentCheckId = jdbc.query("select id from logistics.fulfillment_outgoing_goods_check "
                         + "where tenant_id=? and workspace_id=? and fulfillment_id=? and fulfillment_version=? "
                         + "and physical_allocation_id=? and physical_allocation_version=? and matches=true "
-                        + "and not exists(select 1 from logistics.fulfillment_outgoing_goods_check where "
-                        + "tenant_id=? and workspace_id=? and fulfillment_id=? and physical_allocation_id=? "
-                        + "and physical_allocation_version=? and matches=false) order by checked_at desc,id desc limit 1",
+                        + "and not exists(select 1 from logistics.fulfillment_outgoing_goods_check c where "
+                        + "c.tenant_id=? and c.workspace_id=? and c.fulfillment_id=? and c.physical_allocation_id=? "
+                        + "and c.physical_allocation_version=? and c.matches=false and not exists ("
+                        + "select 1 from logistics.fulfillment_outgoing_discrepancy_resolution r "
+                        + "where r.tenant_id=c.tenant_id and r.workspace_id=c.workspace_id "
+                        + "and r.discrepancy_check_id=c.id)) order by checked_at desc,id desc limit 1",
                 (rs, row) -> rs.getObject("id", UUID.class), request.tenantId(), request.workspaceId(),
                 request.fulfillmentId(), request.expectedVersion(), request.physicalAllocationId(),
                 request.physicalAllocationVersion(), request.tenantId(), request.workspaceId(),

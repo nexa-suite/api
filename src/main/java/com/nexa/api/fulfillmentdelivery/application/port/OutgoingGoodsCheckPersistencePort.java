@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.application.port;
 
+import com.nexa.api.fulfillmentdelivery.application.model.OutgoingGoodsCheckModels.DiscrepancyResolution;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -11,6 +13,14 @@ public interface OutgoingGoodsCheckPersistencePort {
     PersistResult record(RecordRequest request);
 
     Optional<StoredCheck> latest(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
+
+    Optional<StoredCheck> latestUnresolvedDiscrepancy(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                                                       UUID physicalAllocationId, long physicalAllocationVersion);
+
+    Optional<StoredResolution> findResolutionByIdempotencyKey(UUID tenantId, UUID workspaceId,
+                                                                UUID actorMembershipId, String idempotencyKey);
+
+    StoredResolution resolve(ResolutionRequest request);
 
     boolean hasOpenDiscrepancy(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                                UUID physicalAllocationId, long physicalAllocationVersion);
@@ -32,6 +42,13 @@ public interface OutgoingGoodsCheckPersistencePort {
             lines = List.copyOf(lines == null ? List.of() : lines);
         }
     }
+
+    record ResolutionRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId, long fulfillmentVersion,
+                             UUID physicalAllocationId, long physicalAllocationVersion,
+                             UUID discrepancyCheckId, UUID matchingCheckId, UUID actorMembershipId,
+                             String idempotencyKey, String requestHash, String reason, Instant resolvedAt) { }
+
+    record StoredResolution(DiscrepancyResolution resolution, String requestHash) { }
 
     record LineFact(UUID physicalAllocationLineId, UUID skuId, UUID expectedLotId,
                     UUID observedLotId, BigDecimal expectedQuantity,
