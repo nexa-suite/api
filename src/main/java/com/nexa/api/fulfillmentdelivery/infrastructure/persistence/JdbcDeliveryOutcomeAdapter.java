@@ -461,9 +461,12 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                 && request.subjectId().equals(request.lotId()) && request.warehouseId() != null && request.zoneId() != null;
         boolean warehouseSubject = "WAREHOUSE".equals(request.subjectType()) && request.subjectId() != null
                 && request.subjectId().equals(request.warehouseId()) && request.lotId() == null && request.zoneId() == null;
-        if (!lotSubject && !warehouseSubject) throw error("TEMPERATURE_SUBJECT_INVALID");
+        boolean fulfillmentSubject = "FULFILLMENT".equals(request.subjectType()) && request.subjectId() != null
+                && request.lotId() != null && request.warehouseId() != null && request.zoneId() != null
+                && request.fulfillmentVersion() != null && request.fulfillmentVersion() >= 0;
+        if (!lotSubject && !warehouseSubject && !fulfillmentSubject) throw error("TEMPERATURE_SUBJECT_INVALID");
 
-        String operation = "STOCK_TEMPERATURE_EVIDENCE";
+        String operation = fulfillmentSubject ? "FULFILLMENT_TEMPERATURE_EVIDENCE" : "STOCK_TEMPERATURE_EVIDENCE";
         lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), operation, request.idempotencyKey());
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
                 operation, request.idempotencyKey());
@@ -474,9 +477,12 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
 
         Instant createdAt = clock.instant();
         UUID evidenceId = UUID.randomUUID();
-        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,lot_id,warehouse_id,zone_id,subject_type,subject_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) "
-                        + "values (?,?,?,null,?,?,?,?,?,?,?,?,?,'MANUAL',null,?,null,?,?)",
-                evidenceId, request.tenantId(), request.workspaceId(), request.lotId(), request.warehouseId(), request.zoneId(),
+        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,fulfillment_id,fulfillment_version,lot_id,warehouse_id,zone_id,subject_type,subject_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) "
+                        + "values (?,?,?,null,?,?,?,?,?,?,?,?,?,?,?,'MANUAL',null,?,null,?,?)",
+                evidenceId, request.tenantId(), request.workspaceId(),
+                fulfillmentSubject ? request.subjectId() : null,
+                fulfillmentSubject ? request.fulfillmentVersion() : null,
+                request.lotId(), request.warehouseId(), request.zoneId(),
                 request.subjectType(), request.subjectId(), request.value(), request.temperatureCelsius(), request.unit(),
                 Timestamp.from(request.occurredAt()), request.status(), request.actorMembershipId(), Timestamp.from(createdAt));
         canonicalOutbox.append("TemperatureEvidenceRecorded.v1", "TemperatureEvidence", evidenceId,
@@ -488,6 +494,21 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), operation,
                 request.idempotencyKey(), request.requestHash(), evidenceId, createdAt);
         return loadTemperatureEvidence(request.tenantId(), request.workspaceId(), evidenceId);
+    }
+
+    @Override
+    public java.util.Optional<TemperatureEvidenceView> latestFulfillmentTemperatureEvidence(UUID tenantId, UUID workspaceId,
+                                                                                             UUID fulfillmentId, UUID lotId,
+                                                                                             long fulfillmentVersion) {
+        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source,fulfillment_version "
+                        + "from logistics.temperature_evidence where tenant_id=? and workspace_id=? and fulfillment_id=? and lot_id=? and fulfillment_version=? "
+                        + "order by recorded_at desc,id desc limit 1",
+                (rs, row) -> new TemperatureEvidenceView(rs.getObject("id", UUID.class), rs.getString("subject_type"),
+                        rs.getObject("subject_id", UUID.class), rs.getObject("lot_id", UUID.class),
+                        rs.getObject("warehouse_id", UUID.class), rs.getBigDecimal("value"), rs.getString("unit"),
+                        instant(rs, "recorded_at"), rs.getObject("actor_membership_id", UUID.class),
+                        rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class)),
+                tenantId, workspaceId, fulfillmentId, lotId, fulfillmentVersion).stream().findFirst();
     }
 
     private DeliveryView load(UUID tenantId, UUID workspaceId, UUID deliveryId) {
@@ -601,13 +622,13 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     }
 
     private TemperatureEvidenceView loadTemperatureEvidence(UUID tenantId, UUID workspaceId, UUID evidenceId) {
-        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source "
+        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source,fulfillment_version "
                         + "from logistics.temperature_evidence where tenant_id=? and workspace_id=? and id=?",
                 (rs, row) -> new TemperatureEvidenceView(rs.getObject("id", UUID.class), rs.getString("subject_type"),
                         rs.getObject("subject_id", UUID.class), rs.getObject("lot_id", UUID.class),
                         rs.getObject("warehouse_id", UUID.class), rs.getBigDecimal("value"), rs.getString("unit"),
                         instant(rs, "recorded_at"), rs.getObject("actor_membership_id", UUID.class),
-                        rs.getString("status"), rs.getString("source")), tenantId, workspaceId, evidenceId)
+                        rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class)), tenantId, workspaceId, evidenceId)
                 .stream().findFirst().orElseThrow(() -> error("TEMPERATURE_EVIDENCE_NOT_FOUND"));
     }
 

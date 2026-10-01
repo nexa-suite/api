@@ -2,6 +2,8 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
 import com.nexa.api.inventoryavailability.application.publicapi.ColdChainPolicyQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery.SellableSkuPolicy;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -16,10 +18,13 @@ import java.util.UUID;
 public class JdbcColdChainPolicyQuery implements ColdChainPolicyQuery {
     private final JdbcTemplate jdbc;
     private final InventoryFulfillmentSource fulfillmentSource;
+    private final SellableSkuQuery sellableSkus;
 
-    public JdbcColdChainPolicyQuery(JdbcTemplate jdbc, InventoryFulfillmentSource fulfillmentSource) {
+    public JdbcColdChainPolicyQuery(JdbcTemplate jdbc, InventoryFulfillmentSource fulfillmentSource,
+                                    SellableSkuQuery sellableSkus) {
         this.jdbc = jdbc;
         this.fulfillmentSource = fulfillmentSource;
+        this.sellableSkus = sellableSkus;
     }
 
     @Override
@@ -51,7 +56,7 @@ public class JdbcColdChainPolicyQuery implements ColdChainPolicyQuery {
 
     @Override
     public Optional<LotTemperatureContext> temperatureContextForLot(UUID tenantId, UUID workspaceId, UUID lotId) {
-        return jdbc.query("select l.id,l.warehouse_id,l.zone_id,z.temperature_min,z.temperature_max "
+        return jdbc.query("select l.id,l.warehouse_id,l.zone_id,z.temperature_min,z.temperature_max,l.sku_id "
                         + "from warehouse.inventory_lot l join warehouse.storage_zone z "
                         + "on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
                         + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
@@ -62,8 +67,14 @@ public class JdbcColdChainPolicyQuery implements ColdChainPolicyQuery {
                     Optional<Range> range = minimum == null || maximum == null
                             ? Optional.empty() : Optional.of(new Range(minimum, maximum, "CELSIUS"));
                     return new LotTemperatureContext(rs.getObject("id", UUID.class),
-                            rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), range);
+                            rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), range,
+                            rs.getObject("sku_id", UUID.class));
                 }, tenantId, workspaceId, lotId).stream().findFirst();
+    }
+
+    @Override
+    public Optional<SellableSkuPolicy> temperatureRequirementForSku(UUID tenantId, UUID workspaceId, UUID skuId) {
+        return sellableSkus.findPhysicalValidationPolicy(tenantId, workspaceId, skuId);
     }
 
     @Override

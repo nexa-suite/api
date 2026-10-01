@@ -325,6 +325,31 @@ public final class FulfillmentController {
         return ResponseEntity.status(201).body(value);
     }
 
+    @GetMapping("/fulfillments/{fulfillmentId}/temperature-evidence/current")
+    @Operation(operationId = "getCurrentFulfillmentTemperatureReadiness")
+    public ResponseEntity<FulfillmentModels.FulfillmentTemperatureReadiness> currentFulfillmentTemperatureReadiness(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        FulfillmentModels.FulfillmentTemperatureReadiness value =
+                service.fulfillmentTemperatureReadiness(context, fulfillmentId);
+        return ResponseEntity.ok().eTag(etag(value.fulfillmentVersion())).body(value);
+    }
+
+    @PostMapping("/fulfillments/{fulfillmentId}/temperature-evidence")
+    @Operation(operationId = "recordFulfillmentTemperatureEvidence")
+    public ResponseEntity<FulfillmentModels.TemperatureEvidenceView> recordFulfillmentTemperatureEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody FulfillmentTemperatureEvidenceRequest request) {
+        FulfillmentModels.TemperatureEvidenceView value = service.recordFulfillmentTemperatureEvidence(context,
+                fulfillmentId, version(ifMatch), idempotencyKey,
+                new FulfillmentLifecycleService.FulfillmentTemperatureEvidenceCommand(
+                        request.lotId(), request.value(), request.unit(), request.occurredAt()));
+        return ResponseEntity.status(201).eTag(etag(value.fulfillmentVersion())).body(value);
+    }
+
     private static ResponseEntity<FulfillmentModels.FulfillmentView> fulfillmentMutation(FulfillmentModels.FulfillmentView value) {
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
@@ -403,6 +428,11 @@ public final class FulfillmentController {
                                              @NotNull BigDecimal value,
                                              @NotBlank @Size(max = 16) String unit,
                                              @NotNull Instant occurredAt) { }
+
+    public record FulfillmentTemperatureEvidenceRequest(@NotNull UUID lotId,
+                                                        @NotNull BigDecimal value,
+                                                        @NotBlank @Size(max = 16) String unit,
+                                                        @NotNull Instant occurredAt) { }
 
     public record OutgoingDiscrepancyResolutionRequest(@NotNull UUID physicalAllocationId,
                                                          @PositiveOrZero long physicalAllocationVersion,

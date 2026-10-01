@@ -83,5 +83,28 @@ public final class FulfillmentModels {
     public record TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
                                           UUID warehouseId, BigDecimal value, String unit,
                                           Instant occurredAt, UUID actorMembershipId, String status,
-                                          String source) { }
+                                          String source, Long fulfillmentVersion) {
+        public TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
+                                       UUID warehouseId, BigDecimal value, String unit,
+                                       Instant occurredAt, UUID actorMembershipId, String status, String source) {
+            this(id, subjectType, subjectId, lotId, warehouseId, value, unit, occurredAt,
+                    actorMembershipId, status, source, null);
+        }
+    }
+
+    public record FulfillmentTemperatureReadiness(UUID fulfillmentId, String fulfillmentStatus,
+                                                  long fulfillmentVersion, UUID physicalAllocationId,
+                                                  long physicalAllocationVersion,
+                                                  boolean temperatureRequiredForFulfillment, Instant asOf,
+                                                  List<FulfillmentTemperatureLot> lots) {
+        public FulfillmentTemperatureReadiness {
+            lots = List.copyOf(lots == null ? List.of() : lots);
+        }
+    }
+
+    public record FulfillmentTemperatureLot(UUID skuId, UUID lotId, UUID warehouseId, UUID zoneId,
+                                            boolean skuColdChainRequired, boolean requiredForFulfillment,
+                                            BigDecimal minimumCelsius,
+                                            BigDecimal maximumCelsius, String status,
+                                            TemperatureEvidenceView latestEvidence) { }
 }

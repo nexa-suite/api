@@ -13,6 +13,7 @@ import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOut
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** BC-06 delivery outcome port. */
@@ -38,6 +39,12 @@ public interface DeliveryPersistencePort {
     TemperatureView recordTemperature(TemperatureRequest request);
 
     TemperatureEvidenceView recordTemperatureEvidence(TemperatureEvidenceRequest request);
+
+    default Optional<TemperatureEvidenceView> latestFulfillmentTemperatureEvidence(UUID tenantId, UUID workspaceId,
+                                                                                     UUID fulfillmentId, UUID lotId,
+                                                                                     long fulfillmentVersion) {
+        return Optional.empty();
+    }
 
     record TransitionRequest(UUID tenantId, UUID workspaceId, UUID deliveryId,
                              long expectedVersion, UUID actorMembershipId, String operation,
@@ -80,5 +87,14 @@ public interface DeliveryPersistencePort {
                                       UUID lotId, UUID warehouseId, UUID zoneId, UUID actorMembershipId,
                                       String idempotencyKey, String requestHash, BigDecimal value,
                                       BigDecimal temperatureCelsius, String unit, String status,
-                                      Instant occurredAt) { }
+                                      Instant occurredAt, Long fulfillmentVersion) {
+        public TemperatureEvidenceRequest(UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId,
+                                          UUID lotId, UUID warehouseId, UUID zoneId, UUID actorMembershipId,
+                                          String idempotencyKey, String requestHash, BigDecimal value,
+                                          BigDecimal temperatureCelsius, String unit, String status,
+                                          Instant occurredAt) {
+            this(tenantId, workspaceId, subjectType, subjectId, lotId, warehouseId, zoneId, actorMembershipId,
+                    idempotencyKey, requestHash, value, temperatureCelsius, unit, status, occurredAt, null);
+        }
+    }
 }
