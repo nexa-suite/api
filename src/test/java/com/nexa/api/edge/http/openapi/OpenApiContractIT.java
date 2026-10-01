@@ -71,6 +71,12 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
                 .isEqualTo("revokeWarehouseAccess");
         assertHeaderRequired(document, "/api/v1/warehouses/{warehouseId}/access-grants", "post", "If-Match", false);
         assertRequiredHeader(document, "/api/v1/warehouses/{warehouseId}/access-grants/{membershipId}", "delete", "If-Match");
+        assertThat(document.at("/paths/~1api~1v1~1driver~1deliveries~1{deliveryId}~1instructions/get/operationId").asText())
+                .isEqualTo("getCurrentDriverDeliveryInstructions");
+        assertThat(document.at("/paths/~1api~1v1~1driver~1deliveries~1{deliveryId}~1instruction-acknowledgements/post/operationId").asText())
+                .isEqualTo("acknowledgeCurrentDriverDeliveryInstructions");
+        assertThat(document.at("/paths/~1api~1v1~1deliveries~1{deliveryId}~1instructions/post/operationId").asText())
+                .isEqualTo("publishOperationalDeliveryInstruction");
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/handoff-tokens")).isTrue();
         assertThat(document.get("paths").has("/api/v1/delivery-handoff/validations")).isTrue();
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/buyer-receipts")).isTrue();
