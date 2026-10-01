@@ -15,5 +15,5 @@ public interface WorkforceDirectory {
 
     Set<UUID> filterActiveBuyerMembershipIds(UUID tenantId, UUID workspaceId, List<UUID> membershipIds);
 
-    record LogisticsAssignee(UUID id, String email, String displayName) { }
+    record LogisticsAssignee(UUID id, UUID userId, String email, String displayName) { }
 }

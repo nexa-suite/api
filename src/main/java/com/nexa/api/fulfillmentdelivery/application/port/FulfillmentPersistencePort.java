@@ -6,6 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.Line
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** BC-06 write/read port; SQL remains in the logistics adapter. */
@@ -23,6 +24,11 @@ public interface FulfillmentPersistencePort {
     ShortageResolutionResult resolveShortage(ShortageResolutionRequest request);
 
     FulfillmentView handOver(HandOverRequest request);
+
+    FulfillmentDriverAssignmentView assignDriver(AssignDriverRequest request);
+
+    Optional<FulfillmentDriverAssignmentView> findDriverAssignment(UUID tenantId, UUID workspaceId,
+                                                                    UUID fulfillmentId);
 
     record CreateRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                          UUID salesOrderId, UUID physicalAllocationId, String destinationSnapshot,
@@ -69,5 +75,27 @@ public interface FulfillmentPersistencePort {
 
     record HandOverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                            long expectedVersion, UUID actorMembershipId, String idempotencyKey,
-                           String requestHash, Instant now) { }
+                           String requestHash, Instant now, UUID driverAssignmentId,
+                           UUID physicalAllocationId, long physicalAllocationVersion) {
+        public HandOverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                               long expectedVersion, UUID actorMembershipId, String idempotencyKey,
+                               String requestHash, Instant now) {
+            this(tenantId, workspaceId, fulfillmentId, expectedVersion, actorMembershipId,
+                    idempotencyKey, requestHash, now, null, null, -1);
+        }
+    }
+
+    record AssignDriverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                               long expectedFulfillmentVersion, UUID expectedPhysicalAllocationId,
+                               long expectedPhysicalAllocationVersion, long currentFulfillmentVersion,
+                               String currentFulfillmentStatus, boolean currentReadiness,
+                               UUID currentPhysicalAllocationId, long currentPhysicalAllocationVersion,
+                               UUID responsibleMembershipId, UUID responsibleUserId,
+                               String responsibleDisplayName, UUID actorMembershipId,
+                               String idempotencyKey, String requestHash, Instant now) { }
+
+    record FulfillmentDriverAssignmentView(UUID id, UUID fulfillmentId, long fulfillmentVersion,
+                                           UUID physicalAllocationId, long physicalAllocationVersion,
+                                           UUID responsibleMembershipId, String responsibleDisplayName,
+                                           UUID actorMembershipId, Instant assignedAt, UUID deliveryId) { }
 }
