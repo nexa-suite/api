@@ -22,7 +22,7 @@ class FieldPurchaseRequestSubmissionIT extends NexaWorkflowIntegrationSupport {
         ensureCommercialInventory();
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        BigDecimal price = price(buyer);
+        BigDecimal price = price(sales);
         String key = "field-" + uuid();
         String command = command(price, 1);
         long before = requestCount();
@@ -47,7 +47,7 @@ class FieldPurchaseRequestSubmissionIT extends NexaWorkflowIntegrationSupport {
         ensureCommercialInventory();
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        BigDecimal price = price(buyer);
+        BigDecimal price = price(sales);
         long before = requestCount();
         mockMvc.perform(post("/api/v1/purchase-requests/field-submissions")
                 .header("Authorization", "Bearer " + sales).header("Idempotency-Key", "stale-" + uuid())
@@ -59,9 +59,11 @@ class FieldPurchaseRequestSubmissionIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isForbidden());
         assertThat(requestCount()).isEqualTo(before);
     }
-    private BigDecimal price(String buyer) throws Exception {
-        var response = mockMvc.perform(get("/api/v1/catalog-items/CAT-0002")
-                .header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
+    private BigDecimal price(String sales) throws Exception {
+        var response = mockMvc.perform(get("/api/v1/client-accounts/" + buyerClientAccountId() + "/catalog-offers/CAT-0002")
+                .param("quantity", "1").header("Authorization", "Bearer " + sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.clientAccountId").value(buyerClientAccountId()))
+                .andExpect(jsonPath("$.product.catalogItemId").value("CAT-0002")).andReturn();
         return new BigDecimal(json(response).get("unitPrice").get("amount").asText());
     }
     private long requestCount() {
