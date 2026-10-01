@@ -4,6 +4,7 @@ import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
+import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationSubstitutionRequests;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
@@ -31,7 +32,7 @@ import java.util.stream.Collectors;
 /** Inventory-owned FEFO allocation and physical stock responsibility. */
 @Repository
 @Profile("!test")
-public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCommands {
+public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCommands, PhysicalAllocationSubstitutionRequests {
     private final JdbcTemplate jdbc;
     private final CanonicalOutboxPort canonicalOutbox;
     private final BusinessTraceabilityCommands traceability;
@@ -437,6 +438,174 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public PhysicalAllocationSubstitutionRequests.Result request(PhysicalAllocationSubstitutionRequests.Request request) {
+        Objects.requireNonNull(request, "Substitution request is required");
+        requireRequest(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                request.idempotencyKey(), request.requestHash(), request.requestedAt());
+
+        // Replays still require current authority over the allocation and both lots.
+        requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                request.allocationId());
+        requireExistingLotWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                request.expectedLotId(), request.alternativeLotId());
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "LOT_SUBSTITUTION_REQUEST", request.idempotencyKey());
+        IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "LOT_SUBSTITUTION_REQUEST", request.idempotencyKey());
+        if (prior != null) {
+            ensureHash(prior.requestHash(), request.requestHash());
+            return new PhysicalAllocationSubstitutionRequests.Result(
+                    substitutionFact(request.tenantId(), request.workspaceId(), prior.resourceId()), true);
+        }
+
+        AllocationHeader allocation = lockByFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        if (allocation == null || !allocation.id().equals(request.allocationId())) {
+            throw error("PHYSICAL_ALLOCATION_NOT_FOUND", true);
+        }
+        requireAllocationWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                allocation.id());
+        if (allocation.version() != request.expectedAllocationVersion()) throw error("CONCURRENCY_CONFLICT", false);
+        if (!"ALLOCATED".equals(allocation.status())) throw error("PHYSICAL_ALLOCATION_NOT_READY", false);
+
+        SubstitutionLine current = jdbc.query(
+                "select id,sku_id,catalog_item_id,warehouse_id,zone_id,lot_id,quantity,released_quantity,consumed_quantity,unit "
+                        + "from warehouse.physical_allocation_line where tenant_id=? and workspace_id=? "
+                        + "and physical_allocation_id=? and id=?",
+                (rs, row) -> new SubstitutionLine(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
+                        rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class),
+                        rs.getObject("zone_id", UUID.class), rs.getObject("lot_id", UUID.class),
+                        rs.getBigDecimal("quantity"), rs.getBigDecimal("released_quantity"),
+                        rs.getBigDecimal("consumed_quantity"), rs.getString("unit")),
+                request.tenantId(), request.workspaceId(), allocation.id(), request.physicalAllocationLineId())
+                .stream().findFirst().orElseThrow(() -> error("PHYSICAL_ALLOCATION_LINE_NOT_FOUND", true));
+        if (!current.lotId().equals(request.expectedLotId())) throw error("CONCURRENCY_CONFLICT", false);
+        BigDecimal remaining = current.remainingQuantity();
+        if (remaining.signum() <= 0 || request.quantity().compareTo(remaining) != 0) {
+            throw error("OVERRIDE_NOT_ALLOWED", false);
+        }
+        if (!current.unit().equalsIgnoreCase(request.unit())) throw error("OVERRIDE_NOT_ALLOWED", false);
+
+        lockOverrideLots(request.tenantId(), request.workspaceId(), current.lotId(), request.alternativeLotId());
+        requireExistingLotWarehouseGrants(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                current.lotId(), request.alternativeLotId());
+        CandidateLot alternative = substitutionCandidate(request);
+        if (alternative == null) throw error("OVERRIDE_NOT_ALLOWED", false);
+        alternative = alternative.withSkuPolicy(physicalSkuPolicy(
+                request.tenantId(), request.workspaceId(), alternative.skuId()));
+        if (!current.skuId().equals(alternative.skuId())
+                || !current.catalogItemId().equals(alternative.catalogItemId())) {
+            throw error("OVERRIDE_NOT_ALLOWED", false);
+        }
+        if (!current.warehouseId().equals(alternative.warehouseId())
+                || !current.unit().equalsIgnoreCase(alternative.unit())) {
+            throw error("OVERRIDE_NOT_ALLOWED", false);
+        }
+        if (!"ACTIVE".equals(alternative.skuStatus()) || !alternative.skuVisible()
+                || !"ACTIVE".equals(alternative.warehouseStatus()) || !"ACTIVE".equals(alternative.zoneStatus())
+                || !"AVAILABLE".equals(alternative.status())
+                || "QUARANTINE".equalsIgnoreCase(alternative.zoneType())
+                || alternative.expirationDate() == null
+                || !alternative.expirationDate().isAfter(request.requestedAt()
+                .atZone(java.time.ZoneOffset.UTC).toLocalDate())
+                || !"OPERATIONAL".equals(alternative.warehouseServiceStatus()) || alternative.temperatureHold()
+                || blockedDisposition(alternative.latestDisposition())
+                || !temperatureCompatible(alternative.skuTemperatureMin(), alternative.skuTemperatureMax(),
+                alternative.zoneTemperatureMin(), alternative.zoneTemperatureMax(), alternative.temperatureValue())
+                || alternative.stockQuantity().subtract(alternative.reservedQuantity()).compareTo(remaining) < 0) {
+            throw error("OVERRIDE_NOT_ALLOWED", false);
+        }
+        if (Boolean.TRUE.equals(jdbc.queryForObject(
+                "select exists(select 1 from warehouse.physical_allocation_line where tenant_id=? and workspace_id=? "
+                        + "and physical_allocation_id=? and lot_id=? and id<>?)", Boolean.class,
+                request.tenantId(), request.workspaceId(), allocation.id(), alternative.id(), current.id()))) {
+            throw error("OVERRIDE_NOT_ALLOWED", false);
+        }
+
+        UUID requestId = UUID.randomUUID();
+        jdbc.update("insert into warehouse.physical_allocation_substitution_request "
+                        + "(id,tenant_id,workspace_id,fulfillment_id,allocation_id,physical_allocation_line_id,expected_lot_id,"
+                        + "alternative_lot_id,quantity,unit,reason,status,allocation_version,actor_membership_id,recorded_at) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,?,'REQUESTED',?,?,?)",
+                requestId, request.tenantId(), request.workspaceId(), request.fulfillmentId(), allocation.id(),
+                current.id(), current.lotId(), alternative.id(), remaining, current.unit(), request.reason(),
+                allocation.version(), request.actorMembershipId(), timestamp(request.requestedAt()));
+        jdbc.update("insert into warehouse.physical_allocation_command_idempotency "
+                        + "(tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,request_hash,resource_id,created_at) "
+                        + "values (?,?,?,?,?,?,?,?)",
+                request.tenantId(), request.workspaceId(), request.actorMembershipId(), "LOT_SUBSTITUTION_REQUEST",
+                request.idempotencyKey(), request.requestHash(), requestId, timestamp(request.requestedAt()));
+        trace(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "PHYSICAL_ALLOCATION_SUBSTITUTION_REQUESTED", allocation.id(), request.idempotencyKey(),
+                Map.of("fulfillmentId", request.fulfillmentId(), "physicalAllocationLineId", current.id(),
+                        "expectedLotId", current.lotId(), "alternativeLotId", alternative.id(),
+                        "quantity", remaining, "reason", request.reason()), request.requestedAt());
+        return new PhysicalAllocationSubstitutionRequests.Result(
+                new PhysicalAllocationSubstitutionRequests.RequestFact(requestId, current.lotId(), alternative.id(),
+                        remaining, current.unit(), request.reason(), "REQUESTED", allocation.version(),
+                        request.requestedAt()), false);
+    }
+
+    private CandidateLot substitutionCandidate(PhysicalAllocationSubstitutionRequests.Request request) {
+        return jdbc.query(
+                "select lot.id,lot.sku_id,lot.catalog_item_id,lot.warehouse_id,lot.zone_id,lot.unit,lot.expiration_date,"
+                        + "lot.stock_quantity,lot.reserved_quantity,lot.version,lot.status,"
+                        + "w.status warehouse_status,z.status zone_status,z.zone_type,lot.temperature_value,"
+                        + "z.temperature_min zone_temperature_min,z.temperature_max zone_temperature_max,"
+                        + "coalesce(service.service_status,'OPERATIONAL') warehouse_service_status,"
+                        + "exists(select 1 from warehouse.inventory_temperature_evaluation evaluation where evaluation.tenant_id=lot.tenant_id "
+                        + "and evaluation.workspace_id=lot.workspace_id and evaluation.lot_id=lot.id and evaluation.status='OPEN' "
+                        + "and evaluation.disposition='HOLD') temperature_hold,"
+                        + "coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition "
+                        + "where disposition.tenant_id=lot.tenant_id and disposition.workspace_id=lot.workspace_id "
+                        + "and disposition.lot_id=lot.id order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') latest_disposition "
+                        + "from warehouse.inventory_lot lot "
+                        + "join warehouse.warehouse w on w.tenant_id=lot.tenant_id and w.workspace_id=lot.workspace_id and w.id=lot.warehouse_id "
+                        + "join warehouse.storage_zone z on z.tenant_id=lot.tenant_id and z.workspace_id=lot.workspace_id and z.warehouse_id=lot.warehouse_id and z.id=lot.zone_id "
+                        + "left join warehouse.warehouse_service_configuration service on service.tenant_id=lot.tenant_id and service.workspace_id=lot.workspace_id and service.warehouse_id=lot.warehouse_id "
+                        + "where lot.tenant_id=? and lot.workspace_id=? and lot.id=?",
+                (rs, row) -> new CandidateLot(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
+                        rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class),
+                        rs.getObject("zone_id", UUID.class), rs.getString("unit"),
+                        rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("stock_quantity"),
+                        rs.getBigDecimal("reserved_quantity"), rs.getLong("version"), rs.getString("status"),
+                        null, false, rs.getString("warehouse_status"), rs.getString("zone_status"),
+                        rs.getString("zone_type"), rs.getBigDecimal("temperature_value"), null, null,
+                        rs.getBigDecimal("zone_temperature_min"), rs.getBigDecimal("zone_temperature_max"),
+                        rs.getString("warehouse_service_status"), rs.getBoolean("temperature_hold"),
+                        rs.getString("latest_disposition")),
+                request.tenantId(), request.workspaceId(), request.alternativeLotId())
+                .stream().findFirst().orElse(null);
+    }
+
+    private void requireExistingLotWarehouseGrants(UUID tenant, UUID workspace, UUID actor, UUID... lotIds) {
+        List<UUID> ids = java.util.Arrays.stream(lotIds).distinct().sorted().toList();
+        if (ids.isEmpty()) throw error("WAREHOUSE_NOT_FOUND", true);
+        String placeholders = ids.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        List<Object> args = new ArrayList<>(List.of(tenant, workspace));
+        args.addAll(ids);
+        List<LotWarehouseGrant> lots = jdbc.query("select id,warehouse_id from warehouse.inventory_lot "
+                        + "where tenant_id=? and workspace_id=? and id in (" + placeholders + ") order by warehouse_id",
+                (rs, row) -> new LotWarehouseGrant(rs.getObject("id", UUID.class), rs.getObject("warehouse_id", UUID.class)),
+                args.toArray());
+        if (lots.size() != ids.size()) throw error("WAREHOUSE_NOT_FOUND", true);
+        for (UUID warehouseId : lots.stream().map(LotWarehouseGrant::warehouseId).distinct().sorted().toList()) {
+            requireWarehouseGrant(tenant, workspace, actor, warehouseId);
+        }
+    }
+
+    private PhysicalAllocationSubstitutionRequests.RequestFact substitutionFact(UUID tenant, UUID workspace, UUID id) {
+        return jdbc.query("select id,expected_lot_id,alternative_lot_id,quantity,unit,reason,status,allocation_version,recorded_at "
+                        + "from warehouse.physical_allocation_substitution_request where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> new PhysicalAllocationSubstitutionRequests.RequestFact(rs.getObject("id", UUID.class),
+                        rs.getObject("expected_lot_id", UUID.class), rs.getObject("alternative_lot_id", UUID.class),
+                        rs.getBigDecimal("quantity"), rs.getString("unit"), rs.getString("reason"), rs.getString("status"),
+                        rs.getLong("allocation_version"), rs.getTimestamp("recorded_at").toInstant()),
+                tenant, workspace, id).stream().findFirst()
+                .orElseThrow(() -> new IllegalStateException("Substitution idempotency record has no request fact"));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public AllocationResult consumeForDispatch(ConsumeRequest request) {
         requireRequest(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey(), request.requestHash(), request.now());
         lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "CONSUME", request.idempotencyKey());
@@ -836,6 +1005,14 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     private record AllocationHeader(UUID id, String status, long version, UUID backingId) {
         private AllocationHeader(UUID id, String status, long version) { this(id, status, version, null); }
     }
+    private record SubstitutionLine(UUID id, UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId,
+                                    UUID lotId, BigDecimal quantity, BigDecimal releasedQuantity,
+                                    BigDecimal consumedQuantity, String unit) {
+        private BigDecimal remainingQuantity() {
+            return quantity.subtract(releasedQuantity).subtract(consumedQuantity).max(BigDecimal.ZERO);
+        }
+    }
+    private record LotWarehouseGrant(UUID lotId, UUID warehouseId) { }
     private record BackingPosition(UUID skuId, String catalogItemId, String unit, UUID warehouseId, BigDecimal quantity) { }
     private record LotSelector(UUID skuId, UUID warehouseId, String catalogItemId, String unit) { }
     private record LotRow(UUID id, UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId, String unit,

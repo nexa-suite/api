@@ -312,6 +312,132 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void substitutionRequestIsAuthorizedIdempotentAndLeavesAllocationAndStockUnchanged() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        PhysicalFlow flow = createPickingFlow(warehouse, sales, "substitution-request-" + uuid(), "2");
+        UUID allocationId = jdbc.queryForObject(
+                "select id from warehouse.physical_allocation where tenant_id=? and workspace_id=? and fulfillment_id=?",
+                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), flow.fulfillmentId());
+        UUID alternativeLot = insertAlternativeLot(flow, "SUBSTITUTION-" + uuid(), "5");
+        String key = "substitution-request-" + uuid();
+        String body = "{\"fulfillmentId\":\"" + flow.fulfillmentId() + "\","
+                + "\"allocationId\":\"" + allocationId + "\","
+                + "\"physicalAllocationLineId\":\"" + flow.physicalAllocationLineId() + "\","
+                + "\"expectedLotId\":\"" + flow.lotId() + "\","
+                + "\"alternativeLotId\":\"" + alternativeLot + "\","
+                + "\"quantity\":2,\"unit\":\"UNIT\",\"reason\":\"Expected lot cannot supply the prepared quantity\"}";
+        StockSnapshot originalBefore = stock(flow.lotId());
+        StockSnapshot alternativeBefore = stock(alternativeLot);
+        int movementCountBefore = jdbc.queryForObject(
+                "select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        long allocationVersionBefore = jdbc.queryForObject(
+                "select version from warehouse.physical_allocation where tenant_id=? and workspace_id=? and id=?",
+                Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), allocationId);
+
+        mockMvc.perform(post("/api/v1/inventory/physical-allocation-substitution-requests")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", "\"" + flow.allocationVersion() + "\"")
+                        .header("Idempotency-Key", "substitution-unauthorized-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+
+        MvcResult created = mockMvc.perform(post("/api/v1/inventory/physical-allocation-substitution-requests")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", "\"" + flow.allocationVersion() + "\"")
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("REQUESTED"))
+                .andExpect(jsonPath("$.expectedLotId").value(flow.lotId().toString()))
+                .andExpect(jsonPath("$.alternativeLotId").value(alternativeLot.toString()))
+                .andExpect(jsonPath("$.currentAllocationVersion").value(flow.allocationVersion()))
+                .andReturn();
+        String requestId = json(created).get("id").asText();
+
+        MvcResult replay = mockMvc.perform(post("/api/v1/inventory/physical-allocation-substitution-requests")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", "\"" + flow.allocationVersion() + "\"")
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(requestId))
+                .andExpect(jsonPath("$.status").value("REQUESTED"))
+                .andReturn();
+        assertThat(json(replay).get("currentAllocationVersion").asLong()).isEqualTo(flow.allocationVersion());
+
+        assertThat(jdbc.queryForObject("select lot_id from warehouse.physical_allocation_line where id=?",
+                UUID.class, flow.physicalAllocationLineId())).isEqualTo(flow.lotId());
+        assertThat(jdbc.queryForObject("select version from warehouse.physical_allocation where id=?",
+                Long.class, allocationId)).isEqualTo(allocationVersionBefore);
+        assertThat(stock(flow.lotId())).isEqualTo(originalBefore);
+        assertThat(stock(alternativeLot)).isEqualTo(alternativeBefore);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId())))
+                .isEqualTo(movementCountBefore);
+
+        mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/picking-confirmations")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", flow.pickingEtag())
+                        .header("Idempotency-Key", "substitution-authorized-decision-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(pickingBody(flow, alternativeLot, true, "Authorized FEFO exception", "2")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PICKED"));
+        assertThat(jdbc.queryForObject("select version from warehouse.physical_allocation where id=?",
+                Long.class, allocationId)).isGreaterThan(allocationVersionBefore);
+        StockSnapshot originalAfterDecision = stock(flow.lotId());
+        StockSnapshot alternativeAfterDecision = stock(alternativeLot);
+        int movementCountAfterDecision = jdbc.queryForObject(
+                "select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+
+        MvcResult replayAfterAllocationAdvanced = mockMvc.perform(
+                        post("/api/v1/inventory/physical-allocation-substitution-requests")
+                                .header("Authorization", "Bearer " + warehouse)
+                                .header("If-Match", "\"" + flow.allocationVersion() + "\"")
+                                .header("Idempotency-Key", key)
+                                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(requestId))
+                .andExpect(jsonPath("$.status").value("REQUESTED"))
+                .andExpect(jsonPath("$.currentAllocationVersion").value(flow.allocationVersion()))
+                .andReturn();
+        assertThat(json(replayAfterAllocationAdvanced).get("id").asText()).isEqualTo(requestId);
+
+        String changedReason = body.replace("cannot supply", "cannot fulfill");
+        mockMvc.perform(post("/api/v1/inventory/physical-allocation-substitution-requests")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", "\"" + flow.allocationVersion() + "\"")
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(changedReason))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+
+        mockMvc.perform(post("/api/v1/inventory/physical-allocation-substitution-requests")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", "\"" + flow.allocationVersion() + "\"")
+                        .header("Idempotency-Key", "substitution-stale-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isPreconditionFailed());
+
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.physical_allocation_substitution_request where id=?",
+                Integer.class, UUID.fromString(requestId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select lot_id from warehouse.physical_allocation_line where id=?",
+                UUID.class, flow.physicalAllocationLineId())).isEqualTo(alternativeLot);
+        assertThat(stock(flow.lotId())).isEqualTo(originalAfterDecision);
+        assertThat(stock(alternativeLot)).isEqualTo(alternativeAfterDecision);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId())))
+                .isEqualTo(movementCountAfterDecision);
+    }
+
+    @Test
     void deliveryHandoffAndBuyerReceiptRemainSeparateAndRetrySafe() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
