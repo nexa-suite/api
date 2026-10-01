@@ -18,6 +18,8 @@ contexts.
 
 ## HTTP and OpenAPI contracts
 
+- [Operations contract closure and implementation boundaries](./operations-contract-closure.md)
+
 - [OpenAPI instructions and compatibility checks](./openapi/README.md)
 - [Committed OpenAPI snapshot](./openapi/openapi.json)
 - [Cross-client API contract evidence — 2026-09-24](./verification/cross-client-contract-2026-09-24.md)
