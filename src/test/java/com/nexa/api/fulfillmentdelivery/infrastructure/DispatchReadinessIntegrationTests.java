@@ -38,11 +38,22 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
         Fixture fixture = createFulfillment();
         MvcResult readyTransition = prepareForDispatch(fixture);
 
+        var prepared = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
+        String assignmentBody = "{\"responsibleMembershipId\":\"" + membershipId(LOGISTICS_EMAIL)
+                + "\",\"physicalAllocationId\":\"" + prepared.get("physicalAllocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + prepared.get("physicalAllocationVersion").asLong() + "}";
+        MvcResult assigned = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/driver-assignments")
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", readyTransition.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "readiness-driver-assignment-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(assignmentBody))
+                .andExpect(status().isOk()).andReturn();
+
         var before = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
         assertThat(before.get("subjectKind").asText()).isEqualTo("PREPARED_FULFILLMENT");
         assertThat(before.get("fulfillmentId").asText()).isEqualTo(fixture.fulfillmentId().toString());
         assertThat(before.get("fulfillmentStatus").asText()).isEqualTo("READY_FOR_DISPATCH");
-        assertThat(before.get("fulfillmentVersion").asLong()).isEqualTo(etagVersion(readyTransition.getResponse().getHeader("ETag")));
+        assertThat(before.get("fulfillmentVersion").asLong()).isEqualTo(etagVersion(assigned.getResponse().getHeader("ETag")));
         assertThat(before.get("physicalAllocationId").asText()).isEqualTo(fixture.allocationId().toString());
         assertThat(before.get("physicalAllocationStatus").asText()).isEqualTo("ALLOCATED");
         assertThat(before.get("physicalAllocationVersion").asLong()).isEqualTo(fixture.allocationVersion());
@@ -57,13 +68,13 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .isEqualByComparingTo(fixture.quantity());
 
         String outgoingKey = "readiness-outgoing-check-" + uuid();
-        MvcResult outgoing = recordOutgoingCheck(fixture, readyTransition.getResponse().getHeader("ETag"),
+        MvcResult outgoing = recordOutgoingCheck(fixture, assigned.getResponse().getHeader("ETag"),
                 outgoingKey, fixture.allocationVersion(), fixture.quantity(), fixture.lotId(), 201);
         var check = json(outgoing);
         assertThat(check.get("matches").asBoolean()).isTrue();
         assertThat(check.get("current").asBoolean()).isTrue();
         MvcResult outgoingReplay = recordOutgoingCheck(fixture,
-                readyTransition.getResponse().getHeader("ETag"), outgoingKey,
+                assigned.getResponse().getHeader("ETag"), outgoingKey,
                 fixture.allocationVersion(), fixture.quantity(), fixture.lotId(), 200);
         assertThat(json(outgoingReplay).get("id").asText()).isEqualTo(check.get("id").asText());
         assertThat(json(outgoingReplay).get("replayed").asBoolean()).isTrue();
@@ -77,7 +88,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
 
         MvcResult handedOver = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
                         .header("Authorization", "Bearer " + fixture.warehouseToken())
-                        .header("If-Match", readyTransition.getResponse().getHeader("ETag"))
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "readiness-handover-" + uuid()))
                 .andExpect(status().isOk()).andReturn();
         var after = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
@@ -154,17 +165,44 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
 
-        recordOutgoingCheck(fixture, created.getResponse().getHeader("ETag"),
+        MvcResult check = recordOutgoingCheck(fixture, created.getResponse().getHeader("ETag"),
                 "assignment-outgoing-check-" + uuid(), allocationVersion,
                 fixture.quantity(), fixture.lotId(), 201);
-
+        String dispatchBody = "{\"physicalAllocationId\":\"" + ready.get("physicalAllocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocationVersion
+                + ",\"driverAssignmentId\":\"" + assignmentId + "\",\"driverAssignmentVersion\":"
+                + assigned.get("fulfillmentVersion").asLong() + ",\"outgoingGoodsCheckId\":\""
+                + json(check).get("id").asText() + "\"}";
+        String handoverKey = "assignment-handover-" + uuid();
         MvcResult handedOver = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
                         .header("Authorization", "Bearer " + fixture.warehouseToken())
                         .header("If-Match", created.getResponse().getHeader("ETag"))
-                        .header("Idempotency-Key", "assignment-handover-" + uuid()))
+                        .header("Idempotency-Key", handoverKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk()).andReturn();
         var deliveryId = json(handedOver).get("deliveryId").asText();
         assertThat(deliveryId).isNotBlank();
+
+        MvcResult handoverReplay = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", handoverKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(handoverReplay).get("deliveryId").asText()).isEqualTo(deliveryId);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment_handoff_evidence where fulfillment_id=?",
+                Integer.class, fixture.fulfillmentId())).isEqualTo(1);
+        var handoffEvidence = json(mockMvc.perform(get("/api/v1/fulfillments/" + fixture.fulfillmentId()
+                        + "/handoff-evidence/current").header("Authorization", "Bearer " + fixture.coordinatorToken()))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(handoffEvidence.get("fulfillmentId").asText()).isEqualTo(fixture.fulfillmentId().toString());
+        assertThat(handoffEvidence.get("deliveryId").asText()).isEqualTo(deliveryId);
+        assertThat(handoffEvidence.get("warehouseActorMembershipId").asText()).isEqualTo(membershipId(WAREHOUSE_EMAIL));
+        assertThat(handoffEvidence.get("driverAssignmentId").asText()).isEqualTo(assignmentId);
+        assertThat(handoffEvidence.get("driverMembershipId").asText()).isEqualTo(membershipId);
+        assertThat(handoffEvidence.get("outgoingGoodsCheckId").asText()).isEqualTo(json(check).get("id").asText());
+        assertThat(handoffEvidence.get("occurredAt").asText()).isNotBlank();
+        assertThat(handoffEvidence.get("current").asBoolean()).isTrue();
 
         var transferred = json(mockMvc.perform(get(assignmentPath)
                         .header("Authorization", "Bearer " + fixture.coordinatorToken()))
@@ -178,15 +216,69 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void changedOutgoingCheckSnapshotRejectsDispatchBeforePhysicalConsumption() throws Exception {
+        Fixture fixture = createFulfillment();
+        MvcResult readyTransition = prepareForDispatch(fixture);
+        var ready = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
+        String assignmentPath = "/api/v1/fulfillments/" + fixture.fulfillmentId() + "/driver-assignments";
+        String assignmentBody = "{\"responsibleMembershipId\":\"" + membershipId(LOGISTICS_EMAIL)
+                + "\",\"physicalAllocationId\":\"" + ready.get("physicalAllocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + ready.get("physicalAllocationVersion").asLong() + "}";
+        MvcResult assignment = mockMvc.perform(post(assignmentPath)
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", readyTransition.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "dispatch-snapshot-assignment-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(assignmentBody))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult firstCheck = recordOutgoingCheck(fixture, assignment.getResponse().getHeader("ETag"),
+                "dispatch-snapshot-check-old-" + uuid(), fixture.allocationVersion(),
+                fixture.quantity(), fixture.lotId(), 201);
+        MvcResult latestCheck = recordOutgoingCheck(fixture, assignment.getResponse().getHeader("ETag"),
+                "dispatch-snapshot-check-new-" + uuid(), fixture.allocationVersion(),
+                fixture.quantity(), fixture.lotId(), 201);
+        var currentAllocation = json(physicalAllocation(fixture, fixture.warehouseToken())
+                .andExpect(status().isOk()).andReturn());
+        String staleBody = "{\"physicalAllocationId\":\"" + ready.get("physicalAllocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + fixture.allocationVersion()
+                + ",\"driverAssignmentId\":\"" + json(assignment).get("id").asText()
+                + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
+                + ",\"outgoingGoodsCheckId\":\"" + json(firstCheck).get("id").asText() + "\"}";
+
+        mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", assignment.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "dispatch-snapshot-stale-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(staleBody))
+                .andExpect(status().isPreconditionFailed());
+
+        var after = json(physicalAllocation(fixture, fixture.warehouseToken()).andExpect(status().isOk()).andReturn());
+        assertThat(after.get("status").asText()).isEqualTo("ALLOCATED");
+        assertThat(after.get("version").asLong()).isEqualTo(currentAllocation.get("version").asLong());
+        assertThat(json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn())
+                .get("fulfillmentStatus").asText()).isEqualTo("READY_FOR_DISPATCH");
+        assertThat(json(latestCheck).get("id").asText()).isNotEqualTo(json(firstCheck).get("id").asText());
+    }
+
+    @Test
     void outgoingDiscrepancyIsDurableAndBlocksHandoverWithoutMovingStock() throws Exception {
         Fixture fixture = createFulfillment();
         MvcResult ready = prepareForDispatch(fixture);
+        var readiness = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
+        String assignmentBody = "{\"responsibleMembershipId\":\"" + membershipId(LOGISTICS_EMAIL)
+                + "\",\"physicalAllocationId\":\"" + readiness.get("physicalAllocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + readiness.get("physicalAllocationVersion").asLong() + "}";
+        MvcResult assigned = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/driver-assignments")
+                        .header("Authorization", "Bearer " + fixture.coordinatorToken())
+                        .header("If-Match", ready.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "discrepancy-driver-assignment-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(assignmentBody))
+                .andExpect(status().isOk()).andReturn();
         var before = json(physicalAllocation(fixture, fixture.warehouseToken())
                 .andExpect(status().isOk()).andReturn());
 
         mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/outgoing-checks")
                         .header("Authorization", "Bearer " + fixture.warehouseToken())
-                        .header("If-Match", ready.getResponse().getHeader("ETag"))
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "outgoing-stale-version-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(outgoingCheckBody(fixture, fixture.allocationVersion() + 1,
@@ -194,7 +286,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isPreconditionFailed())
                 .andExpect(jsonPath("$.code").value("PRECONDITION_FAILED"));
 
-        MvcResult recorded = recordOutgoingCheck(fixture, ready.getResponse().getHeader("ETag"),
+        MvcResult recorded = recordOutgoingCheck(fixture, assigned.getResponse().getHeader("ETag"),
                 "outgoing-mismatch-" + uuid(), fixture.allocationVersion(),
                 fixture.quantity().add(java.math.BigDecimal.ONE), fixture.lotId(), 201);
         assertThat(json(recorded).get("matches").asBoolean()).isFalse();
@@ -202,7 +294,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
 
         mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
                         .header("Authorization", "Bearer " + fixture.warehouseToken())
-                        .header("If-Match", ready.getResponse().getHeader("ETag"))
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "outgoing-blocked-handover-" + uuid()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("FULFILLMENT_OUTGOING_DISCREPANCY_OPEN"));

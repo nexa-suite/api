@@ -17,6 +17,31 @@ public final class FulfillmentModels {
         }
     }
 
+    /** Frozen current facts required to dispatch prepared goods. Optional only for older clients. */
+    public record DispatchRequest(UUID physicalAllocationId, Long physicalAllocationVersion,
+                                  UUID driverAssignmentId, Long driverAssignmentVersion,
+                                  UUID outgoingGoodsCheckId) {
+        public boolean isComplete() {
+            return physicalAllocationId != null && physicalAllocationVersion != null
+                    && physicalAllocationVersion >= 0 && driverAssignmentId != null
+                    && driverAssignmentVersion != null && driverAssignmentVersion >= 0
+                    && outgoingGoodsCheckId != null;
+        }
+
+        public boolean isAbsent() {
+            return physicalAllocationId == null && physicalAllocationVersion == null
+                    && driverAssignmentId == null && driverAssignmentVersion == null
+                    && outgoingGoodsCheckId == null;
+        }
+    }
+
+    /** Immutable evidence that the Warehouse actor transferred prepared goods to the assigned driver. */
+    public record HandoffEvidence(UUID id, UUID fulfillmentId, long fulfillmentVersion,
+                                  UUID deliveryId, UUID warehouseActorMembershipId,
+                                  UUID driverAssignmentId, UUID driverMembershipId,
+                                  UUID physicalAllocationId, long physicalAllocationVersion,
+                                  UUID outgoingGoodsCheckId, Instant occurredAt, boolean current) { }
+
     public record LineView(UUID id, UUID skuId, String catalogItemId, BigDecimal orderedQuantity,
                            BigDecimal backedQuantity, BigDecimal allocatedQuantity,
                            BigDecimal pickedQuantity, BigDecimal packedQuantity,

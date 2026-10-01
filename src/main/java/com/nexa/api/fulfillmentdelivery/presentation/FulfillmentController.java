@@ -177,8 +177,19 @@ public final class FulfillmentController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
-        return fulfillmentMutation(service.dispatch(context, fulfillmentId, version(ifMatch), idempotencyKey));
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody(required = false) FulfillmentModels.DispatchRequest request) {
+        return fulfillmentMutation(service.dispatch(context, fulfillmentId, version(ifMatch), idempotencyKey, request));
+    }
+
+    @GetMapping("/fulfillments/{fulfillmentId}/handoff-evidence/current")
+    @Operation(operationId = "getCurrentFulfillmentHandoffEvidence")
+    public ResponseEntity<FulfillmentModels.HandoffEvidence> currentHandoffEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        FulfillmentModels.HandoffEvidence value = service.handoffEvidence(context, fulfillmentId);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .eTag(etag(value.fulfillmentVersion())).body(value);
     }
 
     @GetMapping("/deliveries/{deliveryId}")

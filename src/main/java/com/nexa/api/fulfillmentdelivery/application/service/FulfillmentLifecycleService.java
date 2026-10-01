@@ -353,15 +353,30 @@ public class FulfillmentLifecycleService {
     @Transactional
     public FulfillmentModels.FulfillmentView dispatch(CurrentAccessContext context, UUID fulfillmentId,
                                                        long expectedVersion, String idempotencyKey) {
+        return dispatch(context, fulfillmentId, expectedVersion, idempotencyKey, null);
+    }
+
+    @Transactional
+    public FulfillmentModels.FulfillmentView dispatch(CurrentAccessContext context, UUID fulfillmentId,
+                                                       long expectedVersion, String idempotencyKey,
+                                                       FulfillmentModels.DispatchRequest frozenFacts) {
         fulfillmentWrite(context);
         requireKey(idempotencyKey);
         requireVersion(expectedVersion);
         physicalAllocations.lockForFulfillment(tenant(context), workspace(context), fulfillmentId, actor(context));
+        String requestHash = dispatchRequestHash(fulfillmentId, expectedVersion, frozenFacts);
+        FulfillmentModels.FulfillmentView replay = fulfillments.findHandOverReplay(
+                tenant(context), workspace(context), actor(context), idempotencyKey.trim(), requestHash).orElse(null);
+        if (replay != null) return replay;
+        if (frozenFacts != null && !frozenFacts.isAbsent() && !frozenFacts.isComplete()) {
+            throw invalid("FULFILLMENT_DISPATCH_SNAPSHOT_INVALID");
+        }
         FulfillmentModels.FulfillmentView current = fulfillments.find(tenant(context), workspace(context), fulfillmentId);
-        if ("HANDED_OVER".equals(current.status())) return current;
+        if ("HANDED_OVER".equals(current.status())) throw conflict("FULFILLMENT_ALREADY_HANDED_OVER");
         if (current.version() != expectedVersion) throw conflict("FULFILLMENT_CONCURRENCY_CONFLICT");
         var driverAssignment = fulfillments.findDriverAssignment(tenant(context), workspace(context), fulfillmentId)
                 .orElse(null);
+        if (driverAssignment == null) throw conflict("FULFILLMENT_DRIVER_ASSIGNMENT_REQUIRED");
         PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
                 tenant(context), workspace(context), fulfillmentId, actor(context));
         if (driverAssignment != null && (driverAssignment.fulfillmentVersion() != current.version()
@@ -369,8 +384,16 @@ public class FulfillmentLifecycleService {
                 || driverAssignment.physicalAllocationVersion() != allocation.version())) {
             throw conflict("FULFILLMENT_DRIVER_ASSIGNMENT_STALE");
         }
-        outgoingGoodsChecks.requireCurrentMatch(context, fulfillmentId, current.version(),
+        UUID checkId = outgoingGoodsChecks.requireCurrentMatch(context, fulfillmentId, current.version(),
                 allocation.allocationId(), allocation.version());
+        if (frozenFacts != null && !frozenFacts.isAbsent()
+                && (!frozenFacts.physicalAllocationId().equals(allocation.allocationId())
+                || frozenFacts.physicalAllocationVersion() != allocation.version()
+                || driverAssignment == null || !frozenFacts.driverAssignmentId().equals(driverAssignment.id())
+                || frozenFacts.driverAssignmentVersion() != driverAssignment.fulfillmentVersion()
+                || !frozenFacts.outgoingGoodsCheckId().equals(checkId))) {
+            throw conflict("DISPATCH_SNAPSHOT_CONCURRENCY_CONFLICT");
+        }
         physicalAllocations.consumeForDispatch(new PhysicalAllocationCommands.ConsumeRequest(
                 tenant(context), workspace(context), fulfillmentId, actor(context),
                 operationKey("physical-consume-", idempotencyKey),
@@ -379,11 +402,40 @@ public class FulfillmentLifecycleService {
         FulfillmentModels.FulfillmentView result = fulfillments.handOver(
                 new FulfillmentPersistencePort.HandOverRequest(
                         tenant(context), workspace(context), fulfillmentId, expectedVersion, actor(context),
-                        idempotencyKey, hash("handover-v1|" + fulfillmentId + "|" + expectedVersion), now(),
-                        driverAssignment == null ? null : driverAssignment.id(), allocation.allocationId(), allocation.version()));
+                        idempotencyKey.trim(), requestHash, now(),
+                        driverAssignment == null ? null : driverAssignment.id(),
+                        driverAssignment == null ? -1 : driverAssignment.fulfillmentVersion(),
+                        allocation.allocationId(), allocation.version(), checkId));
         trace(context, "FULFILLMENT_HANDED_OVER", "Fulfillment", fulfillmentId, idempotencyKey,
                 Map.of("deliveryId", Objects.requireNonNull(result.deliveryId(), "Delivery was not created")));
         return result;
+    }
+
+    @Transactional(readOnly = true)
+    public FulfillmentModels.HandoffEvidence handoffEvidence(CurrentAccessContext context, UUID fulfillmentId) {
+        context.requirePermission(PermissionKey.DISPATCH_READ);
+        Set<UUID> grantedWarehouses = warehouseAccess.activeWarehouseIds(context);
+        if (grantedWarehouses.isEmpty()) throw new FulfillmentOperationException("FULFILLMENT_NOT_FOUND", true);
+        PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
+                tenant(context), workspace(context), fulfillmentId, actor(context));
+        if (allocation.lines().stream().anyMatch(line -> line.warehouseId() == null
+                || !grantedWarehouses.contains(line.warehouseId()))) {
+            throw new FulfillmentOperationException("FULFILLMENT_NOT_FOUND", true);
+        }
+        fulfillments.find(tenant(context), workspace(context), fulfillmentId);
+        return fulfillments.findHandoffEvidence(tenant(context), workspace(context), fulfillmentId)
+                .orElseThrow(() -> new FulfillmentOperationException("FULFILLMENT_HANDOFF_EVIDENCE_NOT_FOUND", true));
+    }
+
+    private static String dispatchRequestHash(UUID fulfillmentId, long expectedVersion,
+                                              FulfillmentModels.DispatchRequest frozenFacts) {
+        if (frozenFacts == null || frozenFacts.isAbsent()) {
+            return hash("handover-v1|" + fulfillmentId + "|" + expectedVersion);
+        }
+        return hash("handover-v2|" + fulfillmentId + "|" + expectedVersion + "|"
+                + frozenFacts.physicalAllocationId() + "|" + frozenFacts.physicalAllocationVersion() + "|"
+                + frozenFacts.driverAssignmentId() + "|" + frozenFacts.driverAssignmentVersion() + "|"
+                + frozenFacts.outgoingGoodsCheckId());
     }
 
     @Transactional(readOnly = true)

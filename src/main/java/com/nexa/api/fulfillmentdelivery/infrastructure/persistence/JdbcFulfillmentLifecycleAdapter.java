@@ -1,6 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.FulfillmentView;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.HandoffEvidence;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.LineView;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
@@ -446,13 +447,36 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         }
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         requireTransition(current.status(), "HANDED_OVER");
+        if (current.version() != request.expectedVersion()
+                || !Objects.equals(current.physicalAllocationId(), request.physicalAllocationId())) {
+            throw error("DISPATCH_SNAPSHOT_CONCURRENCY_CONFLICT");
+        }
         DriverAssignmentRow assignment = request.driverAssignmentId() == null ? null
                 : lockDriverAssignment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (request.driverAssignmentId() != null && (assignment == null
                 || !request.driverAssignmentId().equals(assignment.id())
+                || request.driverAssignmentVersion() != assignment.fulfillmentVersion() + 1
                 || assignment.fulfillmentVersion() + 1 != request.expectedVersion()
                 || !Objects.equals(assignment.physicalAllocationId(), request.physicalAllocationId())
                 || assignment.physicalAllocationVersion() != request.physicalAllocationVersion())) {
+            throw error("FULFILLMENT_DRIVER_ASSIGNMENT_STALE");
+        }
+        UUID currentCheckId = jdbc.query("select id from logistics.fulfillment_outgoing_goods_check "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_id=? and fulfillment_version=? "
+                        + "and physical_allocation_id=? and physical_allocation_version=? and matches=true "
+                        + "and not exists(select 1 from logistics.fulfillment_outgoing_goods_check where "
+                        + "tenant_id=? and workspace_id=? and fulfillment_id=? and physical_allocation_id=? "
+                        + "and physical_allocation_version=? and matches=false) order by checked_at desc,id desc limit 1",
+                (rs, row) -> rs.getObject("id", UUID.class), request.tenantId(), request.workspaceId(),
+                request.fulfillmentId(), request.expectedVersion(), request.physicalAllocationId(),
+                request.physicalAllocationVersion(), request.tenantId(), request.workspaceId(),
+                request.fulfillmentId(), request.physicalAllocationId(), request.physicalAllocationVersion())
+                .stream().findFirst().orElse(null);
+        if (!Objects.equals(currentCheckId, request.outgoingGoodsCheckId())) {
+            throw error("DISPATCH_SNAPSHOT_CONCURRENCY_CONFLICT");
+        }
+        if (request.outgoingGoodsCheckId() == null) throw error("FULFILLMENT_OUTGOING_CHECK_REQUIRED");
+        if (request.driverAssignmentId() == null && request.driverAssignmentVersion() >= 0) {
             throw error("FULFILLMENT_DRIVER_ASSIGNMENT_STALE");
         }
         Instant now = Objects.requireNonNull(request.now(), "now");
@@ -472,11 +496,57 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                     assignment.responsibleMembershipId(), assignment.responsibleUserId(),
                     Timestamp.from(assignment.assignedAt()), assignment.actorMembershipId(), assignment.id());
         }
+        jdbc.update("insert into logistics.fulfillment_handoff_evidence "
+                        + "(id,tenant_id,workspace_id,fulfillment_id,delivery_id,fulfillment_version,"
+                        + "warehouse_actor_membership_id,driver_assignment_id,driver_membership_id,"
+                        + "physical_allocation_id,physical_allocation_version,outgoing_goods_check_id,"
+                        + "idempotency_key,request_hash,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), request.tenantId(), request.workspaceId(), request.fulfillmentId(), deliveryId,
+                request.expectedVersion() + 1, request.actorMembershipId(),
+                assignment == null ? null : assignment.id(),
+                assignment == null ? null : assignment.responsibleMembershipId(),
+                request.physicalAllocationId(), request.physicalAllocationVersion(), request.outgoingGoodsCheckId(),
+                request.idempotencyKey(), request.requestHash(), Timestamp.from(now));
         insertEvent(request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.status(), "HANDED_OVER",
                 "HAND_OVER", request.actorMembershipId(), "Fulfillment handed over to delivery", now);
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "HAND_OVER",
                 request.idempotencyKey(), request.requestHash(), request.fulfillmentId(), now);
         return load(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<FulfillmentView> findHandOverReplay(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
+                                                        String idempotencyKey, String requestHash) {
+        IdempotencyRow prior = idempotency(tenantId, workspaceId, actorMembershipId, "HAND_OVER", idempotencyKey);
+        if (prior == null) return Optional.empty();
+        ensureHash(prior.requestHash(), requestHash);
+        return Optional.of(load(tenantId, workspaceId, prior.resourceId()));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<HandoffEvidence> findHandoffEvidence(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        HandoffEvidenceRow row = jdbc.query("select id,fulfillment_version,delivery_id,"
+                        + "warehouse_actor_membership_id,driver_assignment_id,driver_membership_id,"
+                        + "physical_allocation_id,physical_allocation_version,outgoing_goods_check_id,occurred_at "
+                        + "from logistics.fulfillment_handoff_evidence where tenant_id=? and workspace_id=? and fulfillment_id=?",
+                (rs, index) -> new HandoffEvidenceRow(rs.getObject("id", UUID.class),
+                        rs.getLong("fulfillment_version"), rs.getObject("delivery_id", UUID.class),
+                        rs.getObject("warehouse_actor_membership_id", UUID.class),
+                        rs.getObject("driver_assignment_id", UUID.class),
+                        rs.getObject("driver_membership_id", UUID.class),
+                        rs.getObject("physical_allocation_id", UUID.class), rs.getLong("physical_allocation_version"),
+                        rs.getObject("outgoing_goods_check_id", UUID.class), instant(rs, "occurred_at")),
+                tenantId, workspaceId, fulfillmentId).stream().findFirst().orElse(null);
+        if (row == null) return Optional.empty();
+        FulfillmentView current = load(tenantId, workspaceId, fulfillmentId);
+        boolean stillCurrent = current.version() == row.fulfillmentVersion()
+                && row.deliveryId().equals(current.deliveryId());
+        return Optional.of(new HandoffEvidence(row.id(), fulfillmentId, row.fulfillmentVersion(), row.deliveryId(),
+                row.warehouseActorMembershipId(), row.driverAssignmentId(), row.driverMembershipId(),
+                row.physicalAllocationId(), row.physicalAllocationVersion(), row.outgoingGoodsCheckId(),
+                row.occurredAt(), stillCurrent));
     }
 
     @Override
@@ -704,6 +774,11 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                                        long physicalAllocationVersion, UUID responsibleMembershipId,
                                        UUID responsibleUserId, String displayName, UUID actorMembershipId,
                                        Instant assignedAt) { }
+    private record HandoffEvidenceRow(UUID id, long fulfillmentVersion, UUID deliveryId,
+                                      UUID warehouseActorMembershipId, UUID driverAssignmentId,
+                                      UUID driverMembershipId, UUID physicalAllocationId,
+                                      long physicalAllocationVersion, UUID outgoingGoodsCheckId,
+                                      Instant occurredAt) { }
     private record FulfillmentLineRow(UUID id, UUID skuId, BigDecimal allocatedQuantity,
                                       BigDecimal pickedQuantity, BigDecimal unfulfilledQuantity, String unit) { }
     private record DiscrepancyRow(UUID id, BigDecimal quantity) { }

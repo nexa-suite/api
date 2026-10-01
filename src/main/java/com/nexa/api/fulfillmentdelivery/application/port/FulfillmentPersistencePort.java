@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.application.port;
 
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.FulfillmentView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.LineView;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.HandoffEvidence;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -24,6 +25,11 @@ public interface FulfillmentPersistencePort {
     ShortageResolutionResult resolveShortage(ShortageResolutionRequest request);
 
     FulfillmentView handOver(HandOverRequest request);
+
+    Optional<FulfillmentView> findHandOverReplay(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
+                                                  String idempotencyKey, String requestHash);
+
+    Optional<HandoffEvidence> findHandoffEvidence(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
 
     FulfillmentDriverAssignmentView assignDriver(AssignDriverRequest request);
 
@@ -76,12 +82,13 @@ public interface FulfillmentPersistencePort {
     record HandOverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                            long expectedVersion, UUID actorMembershipId, String idempotencyKey,
                            String requestHash, Instant now, UUID driverAssignmentId,
-                           UUID physicalAllocationId, long physicalAllocationVersion) {
+                           long driverAssignmentVersion, UUID physicalAllocationId,
+                           long physicalAllocationVersion, UUID outgoingGoodsCheckId) {
         public HandOverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                                long expectedVersion, UUID actorMembershipId, String idempotencyKey,
                                String requestHash, Instant now) {
             this(tenantId, workspaceId, fulfillmentId, expectedVersion, actorMembershipId,
-                    idempotencyKey, requestHash, now, null, null, -1);
+                    idempotencyKey, requestHash, now, null, -1, null, -1, null);
         }
     }
 
