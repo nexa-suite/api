@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentView;
 import com.nexa.api.fulfillmentdelivery.application.service.DriverDeliveryIncidentService;
+import com.nexa.api.fulfillmentdelivery.domain.operationalexception.DriverDeliveryIncidentType;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -46,7 +47,7 @@ public final class DriverDeliveryIncidentController {
                                                @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                @Valid @RequestBody RecordIncidentRequest request) {
         IncidentView value = service.record(context, deliveryId, attemptId, version(ifMatch), key,
-                request.reason(), request.description(), request.place());
+                request.reason(), request.description(), request.place(), request.type());
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
@@ -66,7 +67,8 @@ public final class DriverDeliveryIncidentController {
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
 
-    public record RecordIncidentRequest(@NotBlank @Size(max = 500) String reason,
+    public record RecordIncidentRequest(DriverDeliveryIncidentType type,
+                                        @NotBlank @Size(max = 500) String reason,
                                         @NotBlank @Size(max = 2000) String description,
                                         @NotBlank @Size(max = 500) String place) { }
 
@@ -78,9 +80,10 @@ public final class DriverDeliveryIncidentController {
     private static long version(String value) {
         if (value == null || value.isBlank()) throw error("PRECONDITION_REQUIRED");
         String candidate = value.trim();
-        if (candidate.regionMatches(true, 0, "W/", 0, 2)) candidate = candidate.substring(2).trim();
+        if (candidate.length() < 2 || candidate.charAt(0) != '"'
+                || candidate.charAt(candidate.length() - 1) != '"') throw error("PRECONDITION_INVALID");
         try {
-            long parsed = Long.parseLong(candidate.replace("\"", ""));
+            long parsed = Long.parseLong(candidate.substring(1, candidate.length() - 1));
             if (parsed < 0) throw new NumberFormatException();
             return parsed;
         } catch (NumberFormatException exception) {

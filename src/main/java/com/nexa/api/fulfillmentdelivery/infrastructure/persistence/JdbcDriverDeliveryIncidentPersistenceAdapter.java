@@ -5,6 +5,9 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncident
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentView;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryIncidentPersistencePort;
+import com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.DriverIncidentSourceRequest;
+import com.nexa.api.fulfillmentdelivery.application.port.OperationalExceptionPersistencePort;
+import com.nexa.api.fulfillmentdelivery.domain.operationalexception.OperationalExceptionSourceClassifier;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -26,9 +29,13 @@ public class JdbcDriverDeliveryIncidentPersistenceAdapter implements DriverDeliv
     private static final String INCIDENT_OPERATION = "DRIVER_INCIDENT";
     private static final String EVIDENCE_OPERATION = "DRIVER_INCIDENT_EVIDENCE";
     private final JdbcTemplate jdbc;
+    private final OperationalExceptionPersistencePort operationalExceptions;
 
-    public JdbcDriverDeliveryIncidentPersistenceAdapter(JdbcTemplate jdbc) {
+    public JdbcDriverDeliveryIncidentPersistenceAdapter(JdbcTemplate jdbc,
+                                                        OperationalExceptionPersistencePort operationalExceptions) {
         this.jdbc = Objects.requireNonNull(jdbc, "JdbcTemplate is required");
+        this.operationalExceptions = Objects.requireNonNull(operationalExceptions,
+                "Operational-exception persistence is required");
     }
 
     @Override
@@ -43,22 +50,38 @@ public class JdbcDriverDeliveryIncidentPersistenceAdapter implements DriverDeliv
                 request.actorMembershipId(), INCIDENT_OPERATION, request.idempotencyKey());
         if (previous != null) {
             ensureHash(previous.requestHash(), request.requestHash());
-            return loadIncident(request.tenantId(), request.workspaceId(), previous.resourceId(), true);
+            return loadIncident(request.tenantId(), request.workspaceId(), previous.resourceId(), true, false);
         }
         requireCurrentAttempt(request.tenantId(), request.workspaceId(), request.deliveryId(),
                 request.attemptId(), request.actorMembershipId());
         requireVersion(delivery.version(), request.expectedDeliveryVersion());
+        if (request.type() == null || request.severity() == null
+                || request.severity() != OperationalExceptionSourceClassifier.classify(request.type())) {
+            throw error("DRIVER_INCIDENT_TYPE_REQUIRED", false);
+        }
 
         UUID incidentId = UUID.randomUUID();
+        long nextDeliveryVersion = delivery.version() + 1;
         jdbc.update("insert into logistics.driver_delivery_incident(id,tenant_id,workspace_id,delivery_id,"
                         + "delivery_attempt_id,reason,description,place,reported_by_membership_id,reported_at,"
-                        + "delivery_version,request_hash) values (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + "delivery_version,request_hash,incident_type,exception_severity) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 incidentId, request.tenantId(), request.workspaceId(), request.deliveryId(), request.attemptId(),
                 request.reason(), request.description(), request.place(), request.actorMembershipId(),
-                Timestamp.from(request.recordedAt()), request.expectedDeliveryVersion(), request.requestHash());
+                Timestamp.from(request.recordedAt()), nextDeliveryVersion, request.requestHash(), request.type().name(),
+                request.severity().name());
+        operationalExceptions.materializeDriverIncident(new DriverIncidentSourceRequest(request.tenantId(),
+                request.workspaceId(), request.deliveryId(), incidentId, request.type().name(),
+                request.severity().name(), request.reason(), request.description(), request.place(),
+                request.actorMembershipId(), request.recordedAt(), nextDeliveryVersion, request.idempotencyKey(),
+                request.requestHash()));
+        if (jdbc.update("update logistics.delivery set version=version+1,updated_at=? where tenant_id=? "
+                        + "and workspace_id=? and id=? and version=?", Timestamp.from(request.recordedAt()),
+                request.tenantId(), request.workspaceId(), request.deliveryId(), delivery.version()) != 1) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
         saveIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
                 INCIDENT_OPERATION, request.idempotencyKey(), request.requestHash(), incidentId, request.recordedAt());
-        return loadIncident(request.tenantId(), request.workspaceId(), incidentId, false);
+        return loadIncident(request.tenantId(), request.workspaceId(), incidentId, false, false);
     }
 
     @Override
@@ -74,7 +97,7 @@ public class JdbcDriverDeliveryIncidentPersistenceAdapter implements DriverDeliv
         if (previous == null) return null;
         ensureHash(previous.requestHash(), request.requestHash());
         if (!previous.resourceId().equals(request.incidentId())) throw error("DELIVERY_INCIDENT_NOT_FOUND", true);
-        return loadIncident(request.tenantId(), request.workspaceId(), request.incidentId(), true);
+        return loadIncident(request.tenantId(), request.workspaceId(), request.incidentId(), true, true);
     }
 
     @Override
@@ -90,7 +113,7 @@ public class JdbcDriverDeliveryIncidentPersistenceAdapter implements DriverDeliv
         if (previous != null) {
             ensureHash(previous.requestHash(), request.requestHash());
             if (!previous.resourceId().equals(request.incidentId())) throw error("DELIVERY_INCIDENT_NOT_FOUND", true);
-            return loadIncident(request.tenantId(), request.workspaceId(), request.incidentId(), true);
+            return loadIncident(request.tenantId(), request.workspaceId(), request.incidentId(), true, true);
         }
         requireVersion(delivery.version(), request.expectedDeliveryVersion());
         requireIncident(request);
@@ -104,7 +127,7 @@ public class JdbcDriverDeliveryIncidentPersistenceAdapter implements DriverDeliv
         saveIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
                 EVIDENCE_OPERATION, request.idempotencyKey(), request.requestHash(),
                 request.incidentId(), request.attachedAt());
-        return loadIncident(request.tenantId(), request.workspaceId(), request.incidentId(), false);
+        return loadIncident(request.tenantId(), request.workspaceId(), request.incidentId(), false, true);
     }
 
     private DeliveryRow lockAssignedDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID actorId) {
@@ -149,18 +172,28 @@ public class JdbcDriverDeliveryIncidentPersistenceAdapter implements DriverDeliv
         if (!Boolean.TRUE.equals(exists)) throw error("DELIVERY_INCIDENT_NOT_FOUND", true);
     }
 
-    private IncidentView loadIncident(UUID tenantId, UUID workspaceId, UUID incidentId, boolean replayed) {
+    private IncidentView loadIncident(UUID tenantId, UUID workspaceId, UUID incidentId,
+                                      boolean replayed, boolean currentDeliveryVersion) {
         IncidentView row = jdbc.query("select i.id,i.delivery_id,i.delivery_attempt_id,i.reason,i.description,"
-                        + "i.place,i.reported_by_membership_id,i.reported_at,d.version current_delivery_version "
+                        + "i.place,i.reported_by_membership_id,i.reported_at,i.incident_type,i.exception_severity,"
+                        + "i.delivery_version,d.version current_delivery_version,c.id operational_exception_id "
                         + "from logistics.driver_delivery_incident i join logistics.delivery d "
                         + "on d.tenant_id=i.tenant_id and d.workspace_id=i.workspace_id and d.id=i.delivery_id "
+                        + "left join logistics.operational_exception_case c on c.tenant_id=i.tenant_id "
+                        + "and c.workspace_id=i.workspace_id and c.delivery_id=i.delivery_id "
+                        + "and c.source_kind='DRIVER_INCIDENT' and c.source_driver_incident_id=i.id "
                         + "where i.tenant_id=? and i.workspace_id=? and i.id=?",
                 (rs, index) -> new IncidentView(rs.getObject("id", UUID.class),
+                        rs.getObject("operational_exception_id", UUID.class),
                         rs.getObject("delivery_id", UUID.class), rs.getObject("delivery_attempt_id", UUID.class),
+                        rs.getString("incident_type") == null ? null : com.nexa.api.fulfillmentdelivery.domain.operationalexception.DriverDeliveryIncidentType.valueOf(rs.getString("incident_type")),
+                        rs.getString("exception_severity") == null ? null : com.nexa.api.fulfillmentdelivery.domain.operationalexception.OperationalExceptionSeverity.valueOf(rs.getString("exception_severity")),
                         rs.getString("reason"), rs.getString("description"), rs.getString("place"),
                         rs.getObject("reported_by_membership_id", UUID.class),
                         rs.getTimestamp("reported_at").toInstant(), evidenceIds(tenantId, workspaceId, incidentId),
-                        rs.getLong("current_delivery_version"), replayed), tenantId, workspaceId, incidentId)
+                        currentDeliveryVersion || rs.getString("incident_type") == null
+                                ? rs.getLong("current_delivery_version") : rs.getLong("delivery_version"),
+                        replayed), tenantId, workspaceId, incidentId)
                 .stream().findFirst().orElseThrow(() -> error("DELIVERY_INCIDENT_NOT_FOUND", true));
         return row;
     }

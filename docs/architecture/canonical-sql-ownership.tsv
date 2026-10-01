@@ -55,7 +55,7 @@ logistics.delivery_attempt_line	BC06	V79__add_delivery_attempts_and_continuation
 logistics.delivery_command_idempotency	SHARED_TECHNICAL	V91__fulfillment_financial_completion.sql:475 CREATE TABLE; explicit shared technical idempotency table.
 logistics.delivery_event	BC06	V91__fulfillment_financial_completion.sql:595 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 logistics.delivery_handoff_token	BC06	V93__mobile_v1_core_contracts.sql:44 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
-logistics.delivery_incident	BC06	V19__create_logistics_tracking_and_evidence.sql:36 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+logistics.delivery_incident	BC06	V19__create_logistics_tracking_and_evidence.sql:36 CREATE TABLE; V131 adds nullable authenticated reporter attribution for new source facts; historical rows remain unclassified.
 logistics.delivery_quantity_outcome	BC06	V91__fulfillment_financial_completion.sql:559 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 logistics.dispatch_event	BC06	V18__create_logistics_dispatch.sql:56 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 logistics.dispatch_number_counter	BC06	V18__create_logistics_dispatch.sql:3 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
@@ -188,3 +188,5 @@ warehouse.inbound_receiving_discrepancy_case	BC05	V123__record_inbound_receiving
 logistics.dispatch_handoff_identity	BC06	V126__create_dispatch_handoff_identity.sql:8 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 logistics.delivery_instruction_revision	BC06	V130__operational_delivery_instructions.sql CREATE TABLE; immutable operational dispatch instruction revisions.
 logistics.delivery_instruction_acknowledgement	BC06	V130__operational_delivery_instructions.sql CREATE TABLE; immutable actor acknowledgements bound to exact instruction revisions.
+logistics.operational_exception_case	BC06	V131__append_delivery_operational_exceptions.sql CREATE TABLE; append-only cases projected from exact actor-attributed Delivery incidents.
+logistics.operational_exception_transition	BC06	V131__append_delivery_operational_exceptions.sql CREATE TABLE; append-only OPEN, Driver claim, and review transitions.

@@ -106,6 +106,13 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
         if (delivery.fulfillmentId() == null || delivery.salesOrderId() == null) throw error("DELIVERY_NOT_FULFILLMENT_BACKED");
         if (!SetOfAttemptableDeliveryStatuses.contains(delivery.status())) throw error("DELIVERY_NOT_ATTEMPTABLE");
+        if (request.outcome() == DeliveryAttemptOutcome.DELIVERED
+                || request.outcome() == DeliveryAttemptOutcome.PARTIAL) {
+            if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
+            if (hasBlockingOperationalException(request.tenantId(), request.workspaceId(), request.deliveryId())) {
+                throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING");
+            }
+        }
         FulfillmentRow fulfillment = lockFulfillment(request.tenantId(), request.workspaceId(), delivery.fulfillmentId(), request.clientAccountId());
         if (!fulfillment.id().equals(delivery.fulfillmentId())) throw error("DELIVERY_FULFILLMENT_MISMATCH");
         List<FulfillmentLineRow> currentLines = lockFulfillmentLines(request.tenantId(), request.workspaceId(), fulfillment.id());
@@ -648,6 +655,17 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                         rs.getObject("sales_order_id", UUID.class), rs.getString("status"), rs.getString("destination_snapshot"),
                         instant(rs, "scheduled_at"), instant(rs, "dispatched_at"), instant(rs, "delivered_at"), rs.getLong("version")),
                 tenantId, workspaceId, deliveryId).stream().findFirst().orElseThrow(() -> error("DELIVERY_NOT_FOUND"));
+    }
+
+    private boolean hasBlockingOperationalException(UUID tenantId, UUID workspaceId, UUID deliveryId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists("
+                        + "select 1 from logistics.driver_delivery_incident i where i.tenant_id=? "
+                        + "and i.workspace_id=? and i.delivery_id=? and i.exception_severity in ('BLOCKING','CRITICAL') "
+                        + "union all select 1 from logistics.delivery d join logistics.delivery_incident i "
+                        + "on i.tenant_id=d.tenant_id and i.workspace_id=d.workspace_id "
+                        + "and i.dispatch_order_id=d.dispatch_order_id where d.tenant_id=? and d.workspace_id=? "
+                        + "and d.id=? and i.incident_type='TEMPERATURE_EXCURSION' and i.severity='CRITICAL')",
+                Boolean.class, tenantId, workspaceId, deliveryId, tenantId, workspaceId, deliveryId));
     }
 
     private FulfillmentRow lockFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID clientAccountId) {

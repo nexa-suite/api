@@ -133,6 +133,9 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
         }
         if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
         if (!isReady(delivery.status())) throw error("DELIVERY_NOT_READY");
+        if (hasBlockingOperationalException(request.tenantId(), request.workspaceId(), request.deliveryId())) {
+            throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING");
+        }
         if (hasUnacknowledgedCriticalInstruction(request.tenantId(), request.workspaceId(),
                 request.deliveryId(), request.actorMembershipId())) {
             throw error("DELIVERY_CRITICAL_INSTRUCTION_ACK_REQUIRED");
@@ -262,6 +265,17 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                         + "and a.acknowledged_by_membership_id=?))",
                 Boolean.class, tenantId, workspaceId, deliveryId,
                 tenantId, workspaceId, deliveryId, membershipId));
+    }
+
+    private boolean hasBlockingOperationalException(UUID tenantId, UUID workspaceId, UUID deliveryId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists("
+                        + "select 1 from logistics.driver_delivery_incident i where i.tenant_id=? "
+                        + "and i.workspace_id=? and i.delivery_id=? and i.exception_severity in ('BLOCKING','CRITICAL') "
+                        + "union all select 1 from logistics.delivery d join logistics.delivery_incident i "
+                        + "on i.tenant_id=d.tenant_id and i.workspace_id=d.workspace_id "
+                        + "and i.dispatch_order_id=d.dispatch_order_id where d.tenant_id=? and d.workspace_id=? "
+                        + "and d.id=? and i.incident_type='TEMPERATURE_EXCURSION' and i.severity='CRITICAL')",
+                Boolean.class, tenantId, workspaceId, deliveryId, tenantId, workspaceId, deliveryId));
     }
 
     private boolean isAssigned(UUID tenant, UUID workspace, UUID delivery, UUID membership) {

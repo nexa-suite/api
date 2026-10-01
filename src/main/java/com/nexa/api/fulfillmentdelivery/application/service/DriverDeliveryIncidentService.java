@@ -7,6 +7,8 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncident
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentView;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryIncidentPersistencePort;
+import com.nexa.api.fulfillmentdelivery.domain.operationalexception.DriverDeliveryIncidentType;
+import com.nexa.api.fulfillmentdelivery.domain.operationalexception.OperationalExceptionSourceClassifier;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
@@ -46,23 +48,28 @@ public class DriverDeliveryIncidentService {
     @Transactional
     public IncidentView record(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
                                long expectedVersion, String key, String reason,
-                               String description, String place) {
+                               String description, String place, DriverDeliveryIncidentType type) {
         context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
         requireCommand(deliveryId, attemptId, expectedVersion, key);
         String cleanReason = requiredText(reason, 500, "INCIDENT_REASON_REQUIRED");
         String cleanDescription = requiredText(description, 2000, "INCIDENT_DESCRIPTION_REQUIRED");
         String cleanPlace = requiredText(place, 500, "INCIDENT_PLACE_REQUIRED");
+        var severity = type == null ? null : OperationalExceptionSourceClassifier.classify(type);
+        String requestHash = type == null
+                ? fingerprint("driver-delivery-incident-v1", tenant(context), workspace(context), actor(context),
+                        deliveryId, attemptId, expectedVersion, cleanReason, cleanDescription, cleanPlace)
+                : fingerprint("driver-delivery-incident-v2", tenant(context), workspace(context), actor(context),
+                        deliveryId, attemptId, expectedVersion, type, cleanReason, cleanDescription, cleanPlace);
         IncidentRequest request = new IncidentRequest(tenant(context), workspace(context), deliveryId,
-                attemptId, actor(context), expectedVersion, key,
-                fingerprint("driver-delivery-incident-v1", tenant(context), workspace(context), actor(context),
-                        deliveryId, attemptId, expectedVersion, cleanReason, cleanDescription, cleanPlace),
-                cleanReason, cleanDescription, cleanPlace, clock.instant());
+                attemptId, actor(context), expectedVersion, key, requestHash,
+                type, severity, cleanReason, cleanDescription, cleanPlace, clock.instant());
         IncidentView result = persistence.recordIncident(request);
         if (!result.replayed()) {
             traceability.record(new BusinessTraceabilityCommands.TraceRequest(tenant(context), workspace(context),
                     actor(context), "DRIVER", "DRIVER_DELIVERY_INCIDENT_RECORDED", "DeliveryIncident",
                     result.id(), deliveryId.toString(), "driver-delivery-incident:" + key,
-                    Map.of("deliveryId", deliveryId.toString(), "attemptId", attemptId.toString()),
+                    Map.of("deliveryId", deliveryId.toString(), "attemptId", attemptId.toString(),
+                            "type", result.type().name(), "severity", result.severity().name()),
                     result.recordedAt()));
         }
         return result;
