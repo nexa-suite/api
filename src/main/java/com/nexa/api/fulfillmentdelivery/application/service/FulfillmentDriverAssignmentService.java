@@ -9,6 +9,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocati
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,7 +55,7 @@ public class FulfillmentDriverAssignmentService {
                                                   long expectedFulfillmentVersion, UUID expectedAllocationId,
                                                   long expectedAllocationVersion, UUID responsibleMembershipId,
                                                   String idempotencyKey) {
-        context.requirePermission(Permission.LOGISTICS_WRITE);
+        context.requirePermission(PermissionKey.DISPATCH_ASSIGN);
         requireKey(idempotencyKey);
         if (fulfillmentId == null || expectedFulfillmentVersion < 0 || expectedAllocationId == null
                 || expectedAllocationVersion < 0 || responsibleMembershipId == null) {
