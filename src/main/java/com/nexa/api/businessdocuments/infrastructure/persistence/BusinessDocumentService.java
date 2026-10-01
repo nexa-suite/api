@@ -560,7 +560,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
                 context.membershipId().value().toString(), new DocumentSubjectReference(
                         DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY, caseId.toString()));
-        if (!snapshot.subjectExists()) throw new IllegalArgumentException("Evidence not found");
+        if (!snapshot.subjectExists()) throw new IllegalArgumentException("Business document not found");
     }
     private EvidenceRow loadEvidenceForWorker(UUID evidenceId) {
         RlsRequestScope.Scope scope = workerScope();

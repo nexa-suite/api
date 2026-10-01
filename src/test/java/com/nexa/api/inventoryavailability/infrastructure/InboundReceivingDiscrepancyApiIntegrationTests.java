@@ -85,21 +85,21 @@ class InboundReceivingDiscrepancyApiIntegrationTests extends NexaWorkflowIntegra
 
         mockMvc.perform(get("/api/v1/business-document-evidence/" + evidenceId)
                         .header("Authorization", "Bearer " + warehouseToken))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("Evidence not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
         mockMvc.perform(get("/api/v1/business-document-evidence")
                         .param("subjectType", "INBOUND_RECEIVING_DISCREPANCY")
                         .param("subjectId", caseId.toString())
                         .header("Authorization", "Bearer " + warehouseToken))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("Evidence not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
         mockMvc.perform(multipart("/api/v1/business-document-evidence/" + evidenceId + "/content")
                         .file(new MockMultipartFile("file", "receipt.jpg", "image/jpeg", new byte[]{(byte) 0xff, (byte) 0xd8, (byte) 0xff}))
                         .with(request -> { request.setMethod("PUT"); return request; })
                         .header("Authorization", "Bearer " + warehouseToken)
                         .header("Idempotency-Key", evidenceKey))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("Evidence not found"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
 
         UUID availableEvidence = insertEvidence(caseId, "AVAILABLE");
         mockMvc.perform(post("/api/v1/inventory/inbound-discrepancy-cases/" + caseId + "/submissions")
