@@ -89,6 +89,14 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
         String authorizedWarehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
 
         readAllocation(fixture, authorizedWarehouse).andExpect(status().isOk());
+        MvcResult beforeList = mockMvc.perform(get("/api/v1/fulfillments")
+                        .param("page", "0").param("size", "100")
+                        .header("Authorization", "Bearer " + authorizedWarehouse))
+                .andExpect(status().isOk()).andReturn();
+        var beforePage = json(beforeList);
+        assertThat(java.util.stream.StreamSupport.stream(beforePage.get("items").spliterator(), false)
+                .anyMatch(value -> fixture.fulfillmentId().equals(value.get("fulfillmentId").asText())))
+                .isTrue();
         mockMvc.perform(delete("/api/v1/warehouses/" + fixture.warehouseId() + "/access-grants/"
                                 + membershipId(WAREHOUSE_EMAIL))
                         .header("Authorization", "Bearer " + owner)
@@ -104,6 +112,16 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
         readAllocation(fixture, warehouseWithOnlyB)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("WAREHOUSE_NOT_FOUND"));
+        MvcResult afterList = mockMvc.perform(get("/api/v1/fulfillments")
+                        .param("page", "0").param("size", "100")
+                        .header("Authorization", "Bearer " + warehouseWithOnlyB))
+                .andExpect(status().isOk()).andReturn();
+        var afterPage = json(afterList);
+        assertThat(java.util.stream.StreamSupport.stream(afterPage.get("items").spliterator(), false)
+                .noneMatch(value -> fixture.fulfillmentId().equals(value.get("fulfillmentId").asText())))
+                .isTrue();
+        assertThat(afterPage.get("totalItems").asLong())
+                .isLessThan(beforePage.get("totalItems").asLong());
     }
 
     @Test
