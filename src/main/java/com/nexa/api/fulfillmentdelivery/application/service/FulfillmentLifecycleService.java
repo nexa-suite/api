@@ -410,6 +410,72 @@ public class FulfillmentLifecycleService {
 
     /** Records the current-driver route with an unambiguous canonical request identity. */
     @Transactional
+    public FulfillmentModels.DeliveryOutcomeResult recordDriverAttempt(CurrentAccessContext context, UUID deliveryId,
+                                                                        long expectedVersion, String idempotencyKey,
+                                                                        AttemptCommand command) {
+        return recordAttempt(context, deliveryId, expectedVersion, idempotencyKey, command, true);
+    }
+
+    private FulfillmentModels.DeliveryOutcomeResult recordAttempt(CurrentAccessContext context, UUID deliveryId,
+                                                                   long expectedVersion, String idempotencyKey,
+                                                                   AttemptCommand command, boolean driverCanonical) {
+        logisticsWrite(context);
+        requireKey(idempotencyKey);
+        requireVersion(expectedVersion);
+        if (command == null || command.outcome() == null || command.outcome() == DeliveryAttemptOutcome.PENDING) {
+            throw invalid("DELIVERY_OUTCOME_REQUIRED");
+        }
+        FulfillmentModels.DeliveryView delivery = deliveries.find(tenant(context), workspace(context), deliveryId);
+        if (delivery.fulfillmentId() == null || delivery.salesOrderId() == null) throw invalid("DELIVERY_NOT_FULFILLMENT_BACKED");
+        FulfillmentModels.FulfillmentView fulfillment = fulfillments.find(tenant(context), workspace(context), delivery.fulfillmentId());
+        SalesOrderFulfillmentQuery.Snapshot order = salesOrders.get(tenant(context), workspace(context), delivery.salesOrderId());
+        Map<UUID, FulfillmentModels.LineView> fulfillmentLines = new HashMap<>();
+        fulfillment.lines().forEach(line -> fulfillmentLines.put(line.id(), line));
+        Map<LineKey, SalesOrderFulfillmentQuery.Line> orderLines = new HashMap<>();
+        order.lines().forEach(line -> orderLines.put(new LineKey(line.skuId(), line.catalogItemId(), line.unit()), line));
+        List<DeliveryPersistencePort.AttemptLine> lines = new ArrayList<>();
+        for (AttemptLineCommand line : command.lines()) {
+            FulfillmentModels.LineView fulfillmentLine = fulfillmentLines.get(line.fulfillmentLineId());
+            if (fulfillmentLine == null) throw invalid("DELIVERY_OUTCOME_LINE_INVALID");
+            SalesOrderFulfillmentQuery.Line priced = orderLines.get(new LineKey(
+                    fulfillmentLine.skuId(), fulfillmentLine.catalogItemId(), fulfillmentLine.unit()));
+            if (priced == null) throw invalid("DELIVERY_OUTCOME_PRICE_NOT_FOUND");
+            String currency = priced.currency() == null ? order.currency() : priced.currency();
+            lines.add(new DeliveryPersistencePort.AttemptLine(
+                    line.fulfillmentLineId(), line.skuId(), line.attemptedQuantity(), line.deliveredQuantity(),
+                    line.rejectedQuantity(), line.cancelledQuantity(), priced.unitPriceAmount(), currency, line.unit()));
+        }
+        FulfillmentModels.DeliveryOutcomeResult result = deliveries.recordAttempt(
+                new DeliveryPersistencePort.AttemptRequest(
+                        tenant(context), workspace(context), deliveryId, order.clientAccountId(), expectedVersion, actor(context), idempotencyKey,
+                        hash((driverCanonical ? "driver-delivery-attempt-v2|" : "delivery-attempt-v1|")
+                                + deliveryId + "|" + expectedVersion + "|"
+                                + (driverCanonical ? attemptCanonicalV2(command) : attemptCanonical(command))),
+                        command.outcome(), bounded(command.failureReason()), bounded(command.notes()), command.attemptedAt(), lines));
+        if (result.finalAdjustmentAmount() != null && result.finalAdjustmentAmount().signum() > 0) {
+            financialAdjustments.postFinalQuantityAdjustment(new FinancialAdjustmentCommands.Request(
+                    tenant(context), workspace(context), actor(context), context.userId().value(),
+                    result.receivableId(), result.salesOrderId(), deliveryId, result.attemptId(),
+                    "DECREASE", "DECREASE", result.finalAdjustmentAmount(), result.adjustmentCurrency(),
+                    "Final undelivered quantity adjustment", "FINAL_UNDELIVERED_QUANTITY",
+                    operationKey("final-adjustment-", idempotencyKey),
+                    hash("final-adjustment-v1|" + result.attemptId() + "|" + result.finalAdjustmentAmount() + "|" + result.adjustmentCurrency()),
+                    "CUSTOMER_CREDIT", null, now()));
+        }
+        if (result.allCommercialQuantityResolved()) {
+            salesOrderCommands.markCompleted(tenant(context), workspace(context), result.salesOrderId(), actor(context), now(),
+                    "Delivery quantities commercially resolved", BigDecimal.ZERO);
+        } else if (result.partial() && command.outcome() != DeliveryAttemptOutcome.FAILED) {
+            salesOrderCommands.markPartiallyDelivered(tenant(context), workspace(context), result.salesOrderId(), actor(context), now(),
+                    "Partial delivery recorded");
+        }
+        trace(context, "DELIVERY_OUTCOME_RECORDED", "Delivery", deliveryId, idempotencyKey,
+                Map.of("attemptId", result.attemptId(), "outcome", command.outcome().name(),
+                        "allCommercialQuantityResolved", result.allCommercialQuantityResolved()));
+        return result;
+    }
+
+    @Transactional
     public FulfillmentModels.PodView capturePod(CurrentAccessContext context, UUID deliveryId,
                                                 long expectedVersion, String idempotencyKey, PodCommand command) {
         logisticsWrite(context);
