@@ -174,3 +174,5 @@ warehouse.warehouse	BC05	V15__create_warehouse_inventory.sql:3 CREATE TABLE; own
 warehouse.warehouse_service_configuration	BC05	V36__create_business_commerce_foundations.sql:271 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 sales.field_visit_evidence	BC02	V113__customer_field_visit_evidence.sql:1 CREATE TABLE; customer relationship field visit evidence.
 logistics.fulfillment_driver_assignment	BC06	V111__assign_driver_to_prepared_fulfillment.sql:1 CREATE TABLE; prepared fulfillment driver assignment.
+logistics.fulfillment_outgoing_goods_check	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
+logistics.fulfillment_outgoing_goods_check_line	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
