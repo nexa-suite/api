@@ -185,3 +185,4 @@ warehouse.physical_allocation_substitution_request	BC05	V120__record_physical_al
 logistics.driver_delivery_incident	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
 logistics.driver_delivery_incident_evidence	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
 warehouse.inbound_receiving_discrepancy_case	BC05	V123__record_inbound_receiving_discrepancy_cases.sql CREATE TABLE; immutable receiving discrepancy observations and evidence-gated review requests.
+logistics.dispatch_handoff_identity	BC06	V126__create_dispatch_handoff_identity.sql:8 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
