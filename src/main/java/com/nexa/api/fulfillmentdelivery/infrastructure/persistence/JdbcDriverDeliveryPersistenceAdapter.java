@@ -1,8 +1,11 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalFact;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartResult;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.OutcomeLineView;
@@ -129,6 +132,58 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                 new AttemptView(attemptId, attemptNumber, "ACTIVE", request.actorMembershipId(), startedAt), false);
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ArrivalView signalArrival(ArrivalRequest request) {
+        validate(request);
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "driver-arrival", request.idempotencyKey());
+        DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (delivery == null || !isAssigned(request.tenantId(), request.workspaceId(), request.deliveryId(),
+                request.actorMembershipId())) {
+            throw error("DELIVERY_NOT_FOUND");
+        }
+
+        IdempotencyRow previous = arrivalIdempotency(request);
+        if (previous != null) {
+            ensureHash(previous.requestHash(), request.requestHash());
+            ArrivalRow arrival = findArrival(request, previous.resourceId());
+            if (arrival == null || !arrival.attemptId().equals(request.attemptId())) {
+                throw error("DELIVERY_ATTEMPT_NOT_FOUND");
+            }
+            return new ArrivalView(arrival.id(), request.deliveryId(), arrival.attemptId(),
+                    arrival.actorMembershipId(), arrival.arrivedAt(), delivery.version(), true);
+        }
+
+        if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
+        if (!isCurrentAssignedAttempt(request)) throw error("DELIVERY_ATTEMPT_NOT_FOUND");
+
+        ArrivalRow existing = findArrivalForAttempt(request);
+        if (existing != null) {
+            insertIdempotency("DRIVER_ARRIVAL", request.tenantId(), request.workspaceId(),
+                    request.actorMembershipId(), request.idempotencyKey(), request.requestHash(),
+                    existing.id(), request.arrivedAt());
+            return new ArrivalView(existing.id(), request.deliveryId(), existing.attemptId(),
+                    existing.actorMembershipId(), existing.arrivedAt(), delivery.version(), true);
+        }
+
+        UUID eventId = UUID.randomUUID();
+        Instant arrivedAt = request.arrivedAt() == null ? Instant.now() : request.arrivedAt();
+        jdbc.update("insert into logistics.delivery_event(id,tenant_id,workspace_id,delivery_id,event_type,actor_membership_id,reason,occurred_at,attempt_id) values (?,?,?,?,?,?,?,?,?)",
+                eventId, request.tenantId(), request.workspaceId(), request.deliveryId(), "DRIVER_ARRIVED",
+                request.actorMembershipId(), "Driver signaled arrival", Timestamp.from(arrivedAt), request.attemptId());
+        long newVersion = request.expectedVersion() + 1;
+        if (jdbc.update("update logistics.delivery set updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
+                Timestamp.from(arrivedAt), request.tenantId(), request.workspaceId(), request.deliveryId(),
+                request.expectedVersion()) != 1) {
+            throw error("CONCURRENCY_CONFLICT");
+        }
+        insertIdempotency("DRIVER_ARRIVAL", request.tenantId(), request.workspaceId(),
+                request.actorMembershipId(), request.idempotencyKey(), request.requestHash(), eventId, arrivedAt);
+        return new ArrivalView(eventId, request.deliveryId(), request.attemptId(), request.actorMembershipId(),
+                arrivedAt, newVersion, false);
+    }
+
     private DeliveryView loadAssigned(AttemptStartRequest request) {
         return findAssigned(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.deliveryId());
     }
@@ -144,9 +199,19 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                         rs.getBigDecimal("delivered_quantity"), rs.getBigDecimal("rejected_quantity"),
                         rs.getBigDecimal("cancelled_quantity"), rs.getBigDecimal("remaining_quantity"), rs.getString("unit")),
                 tenantId, workspaceId, delivery.fulfillmentId());
+        ArrivalFact arrival = delivery.activeAttempt() == null ? null : findArrivalFact(
+                tenantId, workspaceId, delivery.id(), delivery.activeAttempt().id());
         return new DeliveryView(delivery.id(), delivery.fulfillmentId(), delivery.salesOrderId(), delivery.status(),
                 delivery.destinationSnapshot(), delivery.scheduledAt(), delivery.dispatchedAt(), delivery.deliveredAt(),
-                delivery.updatedAt(), delivery.version(), delivery.activeAttempt(), lines);
+                delivery.updatedAt(), delivery.version(), delivery.activeAttempt(), lines, arrival);
+    }
+
+    private ArrivalFact findArrivalFact(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId) {
+        return jdbc.query("select id,attempt_id,occurred_at from logistics.delivery_event "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and attempt_id=? and event_type='DRIVER_ARRIVED'",
+                (rs, row) -> new ArrivalFact(rs.getObject("id", UUID.class), rs.getObject("attempt_id", UUID.class),
+                        rs.getTimestamp("occurred_at").toInstant()), tenantId, workspaceId, deliveryId, attemptId)
+                .stream().findFirst().orElse(null);
     }
 
     private DeliveryRow lockDelivery(UUID tenant, UUID workspace, UUID id) {
@@ -162,10 +227,60 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
     }
 
     private void lockCommand(AttemptStartRequest request) {
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "driver-attempt-start", request.idempotencyKey());
+    }
+
+    private void lockCommand(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
+                             String command, String idempotencyKey) {
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))",
                 (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
-                request.tenantId() + "|" + request.workspaceId() + "|driver-attempt-start|"
-                        + request.actorMembershipId() + "|" + request.idempotencyKey());
+                tenantId + "|" + workspaceId + "|" + command + "|"
+                        + actorMembershipId + "|" + idempotencyKey);
+    }
+
+    private IdempotencyRow arrivalIdempotency(ArrivalRequest request) {
+        return jdbc.query("select request_hash,resource_id from logistics.delivery_command_idempotency "
+                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? "
+                        + "and operation='DRIVER_ARRIVAL' and idempotency_key=?",
+                (rs, row) -> new IdempotencyRow(rs.getString("request_hash"), rs.getObject("resource_id", UUID.class)),
+                request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey())
+                .stream().findFirst().orElse(null);
+    }
+
+    private ArrivalRow findArrival(ArrivalRequest request, UUID id) {
+        return jdbc.query("select id,attempt_id,actor_membership_id,occurred_at from logistics.delivery_event "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and id=? and event_type='DRIVER_ARRIVED'",
+                (rs, row) -> new ArrivalRow(rs.getObject("id", UUID.class), rs.getObject("attempt_id", UUID.class),
+                        rs.getObject("actor_membership_id", UUID.class), rs.getTimestamp("occurred_at").toInstant()),
+                request.tenantId(), request.workspaceId(), request.deliveryId(), id).stream().findFirst().orElse(null);
+    }
+
+    private ArrivalRow findArrivalForAttempt(ArrivalRequest request) {
+        return jdbc.query("select id,attempt_id,actor_membership_id,occurred_at from logistics.delivery_event "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and attempt_id=? and event_type='DRIVER_ARRIVED'",
+                (rs, row) -> new ArrivalRow(rs.getObject("id", UUID.class), rs.getObject("attempt_id", UUID.class),
+                        rs.getObject("actor_membership_id", UUID.class), rs.getTimestamp("occurred_at").toInstant()),
+                request.tenantId(), request.workspaceId(), request.deliveryId(), request.attemptId())
+                .stream().findFirst().orElse(null);
+    }
+
+    private boolean isCurrentAssignedAttempt(ArrivalRequest request) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.delivery_active_attempt a "
+                        + "join logistics.delivery_assignment d on d.tenant_id=a.tenant_id "
+                        + "and d.workspace_id=a.workspace_id and d.delivery_id=a.delivery_id "
+                        + "and d.responsible_membership_id=a.started_by_membership_id "
+                        + "where a.tenant_id=? and a.workspace_id=? and a.delivery_id=? and a.id=? "
+                        + "and a.started_by_membership_id=? and d.responsible_membership_id=?)",
+                Boolean.class, request.tenantId(), request.workspaceId(), request.deliveryId(), request.attemptId(),
+                request.actorMembershipId(), request.actorMembershipId()));
+    }
+
+    private void insertIdempotency(String operation, UUID tenantId, UUID workspaceId, UUID actorMembershipId,
+                                   String idempotencyKey, String requestHash, UUID resourceId, Instant createdAt) {
+        jdbc.update("insert into logistics.delivery_command_idempotency(tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,request_hash,resource_id,created_at) values (?,?,?,?,?,?,?,?)",
+                tenantId, workspaceId, actorMembershipId, operation, idempotencyKey, requestHash,
+                resourceId, Timestamp.from(createdAt));
     }
 
     private IdempotencyRow idempotency(AttemptStartRequest request) {
@@ -213,7 +328,7 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
         return new DeliveryView(rs.getObject("id", UUID.class), rs.getObject("fulfillment_id", UUID.class),
                 rs.getObject("sales_order_id", UUID.class), rs.getString("status"), rs.getString("destination_snapshot"),
                 instant(rs, "scheduled_at"), instant(rs, "dispatched_at"), instant(rs, "delivered_at"),
-                instant(rs, "updated_at"), rs.getLong("version"), active, List.of());
+                instant(rs, "updated_at"), rs.getLong("version"), active, List.of(), null);
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
@@ -227,6 +342,16 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                 || request.idempotencyKey() == null || request.idempotencyKey().isBlank()
                 || request.idempotencyKey().length() > 160 || request.requestHash() == null
                 || !request.requestHash().matches("[0-9a-f]{64}")) throw new IllegalArgumentException("Driver attempt request is incomplete");
+    }
+
+    private static void validate(ArrivalRequest request) {
+        if (request.tenantId() == null || request.workspaceId() == null || request.deliveryId() == null
+                || request.attemptId() == null || request.actorMembershipId() == null || request.expectedVersion() < 0
+                || request.idempotencyKey() == null || request.idempotencyKey().isBlank()
+                || request.idempotencyKey().length() > 160 || request.requestHash() == null
+                || !request.requestHash().matches("[0-9a-f]{64}") || request.arrivedAt() == null) {
+            throw new IllegalArgumentException("Driver arrival request is incomplete");
+        }
     }
 
     private static void ensureHash(String stored, String actual) {
@@ -243,6 +368,7 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
     }
 
     private record DeliveryRow(UUID id, String status, long version) { }
+    private record ArrivalRow(UUID id, UUID attemptId, UUID actorMembershipId, Instant arrivedAt) { }
     private record IdempotencyRow(String requestHash, UUID resourceId) { }
 
     private static final String DELIVERY_COLUMNS = "d.id,d.fulfillment_id,coalesce(f.sales_order_id,o.sales_order_id) sales_order_id,d.status,d.destination_snapshot,d.scheduled_at,d.dispatched_at,d.delivered_at,d.updated_at,d.version,";

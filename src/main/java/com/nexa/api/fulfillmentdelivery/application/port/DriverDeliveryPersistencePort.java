@@ -2,6 +2,8 @@ package com.nexa.api.fulfillmentdelivery.application.port;
 
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartResult;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 
 import java.util.List;
@@ -17,4 +19,6 @@ public interface DriverDeliveryPersistencePort {
                                 UUID deliveryId, UUID attemptId, String idempotencyKey);
 
     AttemptStartResult startAttempt(AttemptStartRequest request);
+
+    ArrivalView signalArrival(ArrivalRequest request);
 }

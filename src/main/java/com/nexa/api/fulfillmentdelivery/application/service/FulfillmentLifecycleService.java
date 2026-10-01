@@ -4,6 +4,7 @@ import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuer
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureEvidenceView;
 import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
@@ -414,6 +415,14 @@ public class FulfillmentLifecycleService {
                                                                         long expectedVersion, String idempotencyKey,
                                                                         AttemptCommand command) {
         return recordAttempt(context, deliveryId, expectedVersion, idempotencyKey, command, true);
+    }
+
+    public void traceDriverArrival(CurrentAccessContext context, ArrivalView arrival, String idempotencyKey) {
+        trace(context, "DELIVERY_ARRIVAL_RECORDED", "DeliveryArrival", arrival.id(),
+                "driver-arrival:" + idempotencyKey,
+                Map.of("deliveryId", arrival.deliveryId().toString(),
+                        "attemptId", arrival.attemptId().toString(),
+                        "arrivedAt", arrival.arrivedAt().toString()));
     }
 
     private FulfillmentModels.DeliveryOutcomeResult recordAttempt(CurrentAccessContext context, UUID deliveryId,

@@ -715,6 +715,91 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 Integer.class, fixture.deliveryId())).isEqualTo(1);
     }
 
+    @Test
+    void driverArrivalIsScopedIdempotentAndLeavesDeliveryOpen() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        DriverDeliveryFixture fixture = createDriverDelivery(
+                warehouse, sales, driverMembership, "driver-arrival-" + uuid());
+
+        MvcResult detail = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", detail.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "driver-arrival-transit-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult started = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", transit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "driver-arrival-start-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andReturn();
+        String attemptId = json(started).get("attempt").get("id").asText();
+        String path = "/api/v1/driver/deliveries/" + fixture.deliveryId()
+                + "/attempts/" + attemptId + "/arrivals";
+        String key = "driver-arrival-signal-" + uuid();
+
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId()
+                        + "/attempts/" + UUID.randomUUID() + "/arrivals")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", started.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "driver-arrival-wrong-attempt-" + uuid()))
+                .andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_event "
+                        + "where delivery_id=? and event_type='DRIVER_ARRIVED'", Integer.class, fixture.deliveryId()))
+                .isZero();
+
+        MvcResult first = mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", started.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.deliveryId").value(fixture.deliveryId().toString()))
+                .andExpect(jsonPath("$.attemptId").value(attemptId))
+                .andExpect(jsonPath("$.replayed").value(false)).andReturn();
+        String eventId = json(first).get("id").asText();
+        String arrivedAt = json(first).get("arrivedAt").asText();
+        long arrivalVersion = json(first).get("deliveryVersion").asLong();
+        assertThat(arrivalVersion).isEqualTo(Long.parseLong(started.getResponse().getHeader("ETag").replace("\"", "")) + 1);
+
+        mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", started.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(eventId))
+                .andExpect(jsonPath("$.arrivedAt").value(arrivedAt))
+                .andExpect(jsonPath("$.replayed").value(true));
+        mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", "\"" + arrivalVersion + "\"")
+                        .header("Idempotency-Key", key))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+
+        MvcResult current = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_TRANSIT"))
+                .andExpect(jsonPath("$.activeAttempt.id").value(attemptId))
+                .andExpect(jsonPath("$.arrival.id").value(eventId))
+                .andExpect(jsonPath("$.arrival.attemptId").value(attemptId))
+                .andReturn();
+        assertThat(json(current).get("version").asLong()).isEqualTo(arrivalVersion);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_event "
+                        + "where delivery_id=? and event_type='DRIVER_ARRIVED'", Integer.class, fixture.deliveryId()))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_command_idempotency "
+                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? "
+                        + "and operation='DRIVER_ARRIVAL' and idempotency_key=? and resource_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                driverMembership, key, UUID.fromString(eventId))).isEqualTo(1);
+    }
+
     private DriverDeliveryFixture createDriverDelivery(String warehouse, String sales, UUID assignedMembership,
                                                        String key) throws Exception {
         PhysicalFlow flow = createPickingFlow(warehouse, sales, key, "2");

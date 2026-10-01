@@ -12,7 +12,7 @@ public final class DriverDeliveryModels {
     public record DeliveryView(UUID id, UUID fulfillmentId, UUID salesOrderId, String status,
                                String destinationSnapshot, Instant scheduledAt, Instant dispatchedAt,
                                Instant deliveredAt, Instant updatedAt, long version, AttemptView activeAttempt,
-                               List<OutcomeLineView> outcomeLines) {
+                               List<OutcomeLineView> outcomeLines, ArrivalFact arrival) {
         public DeliveryView {
             outcomeLines = List.copyOf(outcomeLines == null ? List.of() : outcomeLines);
         }
@@ -31,4 +31,13 @@ public final class DriverDeliveryModels {
     public record AttemptStartRequest(UUID tenantId, UUID workspaceId, UUID deliveryId,
                                      UUID actorMembershipId, long expectedVersion,
                                      String idempotencyKey, String requestHash, Instant startedAt) { }
+
+    public record ArrivalView(UUID id, UUID deliveryId, UUID attemptId, UUID actorMembershipId,
+                              Instant arrivedAt, long deliveryVersion, boolean replayed) { }
+
+    public record ArrivalFact(UUID id, UUID attemptId, Instant arrivedAt) { }
+
+    public record ArrivalRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId,
+                                 UUID actorMembershipId, long expectedVersion, String idempotencyKey,
+                                 String requestHash, Instant arrivedAt) { }
 }

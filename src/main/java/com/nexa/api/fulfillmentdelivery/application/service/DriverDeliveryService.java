@@ -3,6 +3,8 @@ package com.nexa.api.fulfillmentdelivery.application.service;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartResult;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryPersistencePort;
@@ -76,6 +78,26 @@ public class DriverDeliveryService {
         persistence.requireAssignedAttempt(
                 tenant(context), workspace(context), actor(context), deliveryId, attemptId, idempotencyKey);
         return lifecycle.recordDriverAttempt(context, deliveryId, expectedVersion, idempotencyKey, command);
+    }
+
+    @Transactional
+    public ArrivalView signalArrival(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
+                                    long expectedVersion, String idempotencyKey) {
+        context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
+        if (deliveryId == null || attemptId == null) {
+            throw new FulfillmentOperationException("DELIVERY_ATTEMPT_NOT_FOUND", true);
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 160) {
+            throw new FulfillmentOperationException("IDEMPOTENCY_KEY_REQUIRED", false);
+        }
+        if (expectedVersion < 0) throw new FulfillmentOperationException("VERSION_INVALID", false);
+        ArrivalView result = persistence.signalArrival(new ArrivalRequest(
+                tenant(context), workspace(context), deliveryId, attemptId, actor(context), expectedVersion,
+                idempotencyKey,
+                hash("driver-arrival-v1|" + deliveryId + "|" + attemptId + "|" + expectedVersion),
+                clock.instant()));
+        if (!result.replayed()) lifecycle.traceDriverArrival(context, result, idempotencyKey);
+        return result;
     }
 
     private static UUID tenant(CurrentAccessContext context) { return context.tenantId().value(); }

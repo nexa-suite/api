@@ -1,6 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartResult;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
 import com.nexa.api.fulfillmentdelivery.application.service.DriverDeliveryService;
@@ -90,6 +91,19 @@ public final class DriverDeliveryController {
         FulfillmentModels.DeliveryOutcomeResult value = service.recordOutcome(
                 context, deliveryId, attemptId, version(ifMatch), key, command);
         return ResponseEntity.ok().eTag(etag(value.delivery().version())).body(value);
+    }
+
+    @PostMapping("/{deliveryId}/attempts/{attemptId}/arrivals")
+    @Operation(operationId = "signalCurrentDriverArrival")
+    public ResponseEntity<ArrivalView> signalArrival(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID deliveryId,
+            @PathVariable UUID attemptId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key) {
+        ArrivalView value = service.signalArrival(context, deliveryId, attemptId, version(ifMatch), key);
+        return ResponseEntity.status(value.replayed() ? 200 : 201)
+                .eTag(etag(value.deliveryVersion())).body(value);
     }
 
     private static DeliveryAttemptOutcome outcome(String value) {
