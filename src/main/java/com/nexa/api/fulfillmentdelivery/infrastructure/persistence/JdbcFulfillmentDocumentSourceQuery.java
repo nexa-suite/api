@@ -66,7 +66,7 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
 
     @Override
     public Optional<IncidentSubject> findIncidentSubject(UUID tenantId, UUID workspaceId, UUID incidentId) {
-        return jdbc.query("select i.id,coalesce(dispatch.client_account_id,order_row.client_account_id) customer_account_id,"
+        return jdbc.query("select i.id,dispatch.client_account_id customer_account_id,fulfillment.sales_order_id,"
                         + "'RECORDED' status from logistics.driver_delivery_incident i "
                         + "join logistics.delivery delivery on delivery.tenant_id=i.tenant_id "
                         + "and delivery.workspace_id=i.workspace_id and delivery.id=i.delivery_id "
@@ -74,11 +74,10 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
                         + "and dispatch.workspace_id=delivery.workspace_id and dispatch.id=delivery.dispatch_order_id "
                         + "left join logistics.fulfillment fulfillment on fulfillment.tenant_id=delivery.tenant_id "
                         + "and fulfillment.workspace_id=delivery.workspace_id and fulfillment.id=delivery.fulfillment_id "
-                        + "left join sales.sales_order order_row on order_row.tenant_id=fulfillment.tenant_id "
-                        + "and order_row.workspace_id=fulfillment.workspace_id and order_row.id=fulfillment.sales_order_id "
                         + "where i.tenant_id=? and i.workspace_id=? and i.id=?",
                 (rs, row) -> new IncidentSubject(rs.getObject("id", UUID.class),
-                        rs.getObject("customer_account_id", UUID.class), rs.getString("status")),
+                        rs.getObject("customer_account_id", UUID.class), rs.getString("status"),
+                        rs.getObject("sales_order_id", UUID.class)),
                 tenantId, workspaceId, incidentId).stream().findFirst();
     }
 

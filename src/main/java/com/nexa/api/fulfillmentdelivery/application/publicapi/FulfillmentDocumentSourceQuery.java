@@ -30,5 +30,5 @@ public interface FulfillmentDocumentSourceQuery {
                     String description, Instant occurredAt, String resolution,
                     UUID dispatchId) { }
 
-    record IncidentSubject(UUID id, UUID customerAccountId, String status) { }
+    record IncidentSubject(UUID id, UUID customerAccountId, String status, UUID salesOrderId) { }
 }

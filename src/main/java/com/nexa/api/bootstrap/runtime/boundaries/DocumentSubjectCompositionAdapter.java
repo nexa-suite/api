@@ -88,9 +88,22 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
     }
 
     private DocumentSubjectSnapshot resolveDeliveryIncident(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {
-        return fulfillment.findIncidentSubject(tenant, workspace, id)
+        var incident = fulfillment.findIncidentSubject(tenant, workspace, id);
+        if (incident.isPresent()) {
+            var value = incident.get();
+            if (value.customerAccountId() != null) {
+                return snapshot(tenant, workspace, subject.type(), value.id().toString(),
+                        value.customerAccountId().toString(), value.status(), true);
+            }
+            if (value.salesOrderId() == null) return absent(tenant, workspace, subject);
+            return sales.findOrder(tenant, workspace, value.salesOrderId())
+                    .map(order -> snapshot(tenant, workspace, subject.type(), value.id().toString(),
+                            order.customerAccountId().toString(), value.status(), true))
+                    .orElseGet(() -> absent(tenant, workspace, subject));
+        }
+        return fulfillment.findIncident(tenant, workspace, id)
                 .map(value -> snapshot(tenant, workspace, subject.type(), value.id().toString(),
-                        nullable(value.customerAccountId()), value.status(), true))
+                        nullable(value.customerAccountId()), "RECORDED", true))
                 .orElseGet(() -> absent(tenant, workspace, subject));
     }
 

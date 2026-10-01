@@ -179,3 +179,8 @@ logistics.fulfillment_outgoing_goods_check_line	BC06	V114__record_outgoing_goods
 warehouse.inventory_transfer_receipt_observation	BC05	V115__record_transfer_receipt_observations.sql CREATE TABLE; attributable transfer receipt observations.
 warehouse.inventory_cycle_count	BC05	V117__record_cycle_counts_and_corrections.sql CREATE TABLE; attributable count and authorized correction facts.
 warehouse.inventory_cycle_count_correction	BC05	V117__record_cycle_counts_and_corrections.sql CREATE TABLE; attributable count and authorized correction facts.
+logistics.fulfillment_handoff_evidence	BC06	V116__record_warehouse_driver_handoff_evidence.sql CREATE TABLE; immutable warehouse-to-driver handoff facts.
+logistics.fulfillment_outgoing_discrepancy_resolution	BC06	V121__dispatch_exception_evidence_and_schedule.sql CREATE TABLE; immutable linked reinspection resolution evidence.
+warehouse.physical_allocation_substitution_request	BC05	V120__record_physical_allocation_substitution_requests.sql:1 CREATE TABLE; immutable authorized substitution request fact.
+logistics.driver_delivery_incident	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
+logistics.driver_delivery_incident_evidence	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
