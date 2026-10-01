@@ -1,15 +1,25 @@
 # Operational delivery instructions
 
-BC-06 owns Operational Dispatch Instructions. Customer Delivery Instructions
-remain outside this API slice. Dispatch Coordinators and BOM members publish
-instructions under current `dispatch.schedule` authority and the existing
-dispatch-read/Warehouse-grant check. Driver routes use the current
+BC-06 owns Operational Dispatch Instructions. Dispatch Coordinators and BOM
+members publish revisions under current `dispatch.schedule` authority and the
+existing dispatch-read/Warehouse-grant check. Operational Dispatch commands do
+not create or revise Customer Delivery Instructions. Read projections may
+include immutable Customer-source revisions. Driver routes use the current
 `dispatch.read` and `dispatch.start_route` permissions; assignment remains the
 server-side access boundary.
 
+`GET /api/v1/deliveries/{deliveryId}/instructions` returns the current instruction
+set to a Dispatch actor with current `dispatch.read` permission and Warehouse
+grant. The server reuses BC-06 dispatch-readiness authority for the exact Delivery.
+The response uses the same `InstructionSetView` fields as the Driver projection,
+including source and recording provenance. Its strong ETag is the quoted
+`deliveryVersion`, which is the concurrency token required by Dispatch publish.
+Customer-source IDs remain read-only; only current `OPERATIONAL_DISPATCH` rows may
+be revised through the publish route.
+
 `GET /api/v1/driver/deliveries/{deliveryId}/instructions` returns only the
-currently assigned Driver's instructions while the current BC-06 Driver status
-is `ASSIGNED`, `DISPATCHED` or `IN_TRANSIT`. Response contains `deliveryId`, `deliveryVersion`,
+currently assigned Driver's instructions while the Delivery is `PLANNED`,
+`ASSIGNED`, `DISPATCHED` or `IN_TRANSIT`. Response contains `deliveryId`, `deliveryVersion`,
 `instructionSetVersion` and `instructions[]`. Each instruction contains `id`,
 `kind`, `content`, `instructionVersion`, server-derived `critical`,
 `acknowledged`, and current-actor `acknowledgedAt` and

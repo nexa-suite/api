@@ -119,6 +119,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,dispatch_order_id,status,destination_snapshot,created_at,updated_at,version) " +
                         "values (?,?,?,?,?,?,?,?,0)",
                 id, tenant, workspace, id, "PLANNED", source.destinationSnapshot(), timestamp(now), timestamp(now));
+        CustomerInstructionDeliveryProjection.copy(jdbc, tenant, workspace, source.salesOrderId(), id, Instant.ofEpochMilli(now));
         appendEvent(tenant, workspace, id, "logistics.dispatch.created", null, "READY_FOR_OPERATIONS", actor,
                 false, null, now, source.clientAccountId());
         saveIdempotency(tenant, workspace, "dispatch-create", key, requestHash, id, now);

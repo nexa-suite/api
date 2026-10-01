@@ -51,6 +51,15 @@ public final class DeliveryInstructionController {
         return ResponseEntity.ok().eTag(etag(value.instructionSetVersion())).body(value);
     }
 
+    @GetMapping("/deliveries/{deliveryId}/instructions")
+    @Operation(operationId = "getCurrentDispatchDeliveryInstructions")
+    public ResponseEntity<InstructionSetView> getForDispatch(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID deliveryId) {
+        InstructionSetView value = service.getForDispatch(context, deliveryId);
+        return ResponseEntity.ok().eTag(etag(value.deliveryVersion())).body(value);
+    }
+
     @PostMapping("/driver/deliveries/{deliveryId}/instruction-acknowledgements")
     @Operation(operationId = "acknowledgeCurrentDriverDeliveryInstructions")
     public ResponseEntity<AcknowledgementResult> acknowledge(

@@ -31,7 +31,7 @@ import java.util.UUID;
 public class JdbcDeliveryInstructionPersistenceAdapter implements DeliveryInstructionPersistencePort {
     private static final String PUBLISH_OPERATION = "DISPATCH_INSTRUCTION_PUBLISH";
     private static final String ACK_OPERATION = "DRIVER_INSTRUCTION_ACK";
-    private static final String ACTIVE_INSTRUCTION_STATUSES = "('ASSIGNED','DISPATCHED','IN_TRANSIT')";
+    private static final String ACTIVE_INSTRUCTION_STATUSES = "('PLANNED','ASSIGNED','DISPATCHED','IN_TRANSIT')";
 
     private final JdbcTemplate jdbc;
 
@@ -42,12 +42,12 @@ public class JdbcDeliveryInstructionPersistenceAdapter implements DeliveryInstru
     @Override
     public InstructionSetView findForDriver(UUID tenantId, UUID workspaceId, UUID membershipId, UUID deliveryId) {
         List<InstructionSetRow> rows = jdbc.query("with current_instruction as ("
-                        + "select distinct on (r.instruction_id) r.instruction_id,r.kind,r.content,r.instruction_version,r.authored_at "
+                        + "select distinct on (r.instruction_id) r.instruction_id,r.kind,r.content,r.instruction_version,r.authored_at,r.authored_by_membership_id,r.source_kind "
                         + "from logistics.delivery_instruction_revision r "
                         + "where r.tenant_id=? and r.workspace_id=? and r.delivery_id=? "
                         + "order by r.instruction_id,r.instruction_version desc) "
                         + "select d.id delivery_id,d.version delivery_version,d.instruction_set_version,"
-                        + "i.instruction_id,i.kind,i.content,i.instruction_version,ack.acknowledged_at,"
+                        + "i.instruction_id,i.kind,i.content,i.instruction_version,i.authored_at,i.authored_by_membership_id,i.source_kind,ack.acknowledged_at,"
                         + "ack.acknowledged_by_membership_id "
                         + "from logistics.delivery d join logistics.delivery_assignment assignment "
                         + "on assignment.tenant_id=d.tenant_id and assignment.workspace_id=d.workspace_id and assignment.delivery_id=d.id "
@@ -69,11 +69,59 @@ public class JdbcDeliveryInstructionPersistenceAdapter implements DeliveryInstru
                         instruction = new InstructionView(instructionId, kind, rs.getString("content"),
                                 rs.getLong("instruction_version"), kind.isCritical(), acknowledgedAt != null,
                                 acknowledgedAt == null ? null : acknowledgedAt.toInstant(),
-                                rs.getObject("acknowledged_by_membership_id", UUID.class));
+                                rs.getObject("acknowledged_by_membership_id", UUID.class), rs.getString("source_kind"),
+                                rs.getObject("authored_by_membership_id", UUID.class),
+                                rs.getTimestamp("authored_at").toInstant());
                     }
                     return new InstructionSetRow(rs.getObject("delivery_id", UUID.class),
                             rs.getLong("delivery_version"), rs.getLong("instruction_set_version"), instruction);
                 }, tenantId, workspaceId, deliveryId, membershipId, tenantId, workspaceId, deliveryId, membershipId);
+        if (rows.isEmpty()) throw error("DELIVERY_NOT_FOUND");
+        List<InstructionView> instructions = rows.stream().map(InstructionSetRow::instruction)
+                .filter(Objects::nonNull).toList();
+        InstructionSetRow first = rows.getFirst();
+        return new InstructionSetView(first.deliveryId(), first.deliveryVersion(), first.instructionSetVersion(), instructions);
+    }
+
+    @Override
+    public InstructionSetView findForDispatch(UUID tenantId, UUID workspaceId, UUID deliveryId) {
+        List<InstructionSetRow> rows = jdbc.query("with current_instruction as ("
+                        + "select distinct on (r.instruction_id) r.instruction_id,r.kind,r.content,r.instruction_version,r.authored_at,r.authored_by_membership_id,r.source_kind "
+                        + "from logistics.delivery_instruction_revision r "
+                        + "where r.tenant_id=? and r.workspace_id=? and r.delivery_id=? "
+                        + "order by r.instruction_id,r.instruction_version desc) "
+                        + "select d.id delivery_id,d.version delivery_version,d.instruction_set_version,"
+                        + "i.instruction_id,i.kind,i.content,i.instruction_version,i.authored_at,i.authored_by_membership_id,i.source_kind,ack.acknowledged_at,"
+                        + "ack.acknowledged_by_membership_id "
+                        + "from logistics.delivery d left join current_instruction i on true "
+                        + "left join lateral (select a.acknowledged_at,a.acknowledged_by_membership_id "
+                        + "from logistics.delivery_assignment assignment "
+                        + "join logistics.delivery_instruction_acknowledgement a "
+                        + "on a.tenant_id=assignment.tenant_id and a.workspace_id=assignment.workspace_id "
+                        + "and a.delivery_id=assignment.delivery_id "
+                        + "and a.acknowledged_by_membership_id=assignment.responsible_membership_id "
+                        + "where assignment.tenant_id=d.tenant_id and assignment.workspace_id=d.workspace_id "
+                        + "and assignment.delivery_id=d.id and a.instruction_id=i.instruction_id "
+                        + "and a.instruction_version=i.instruction_version "
+                        + "order by a.acknowledged_at desc,a.acknowledgement_id desc limit 1) ack on true "
+                        + "where d.tenant_id=? and d.workspace_id=? and d.id=? and d.status in "
+                        + ACTIVE_INSTRUCTION_STATUSES + " order by i.authored_at,i.instruction_id",
+                (rs, row) -> {
+                    UUID instructionId = rs.getObject("instruction_id", UUID.class);
+                    InstructionView instruction = null;
+                    if (instructionId != null) {
+                        DeliveryInstructionKind kind = DeliveryInstructionKind.valueOf(rs.getString("kind"));
+                        Timestamp acknowledgedAt = rs.getTimestamp("acknowledged_at");
+                        instruction = new InstructionView(instructionId, kind, rs.getString("content"),
+                                rs.getLong("instruction_version"), kind.isCritical(), acknowledgedAt != null,
+                                acknowledgedAt == null ? null : acknowledgedAt.toInstant(),
+                                rs.getObject("acknowledged_by_membership_id", UUID.class), rs.getString("source_kind"),
+                                rs.getObject("authored_by_membership_id", UUID.class),
+                                rs.getTimestamp("authored_at").toInstant());
+                    }
+                    return new InstructionSetRow(rs.getObject("delivery_id", UUID.class),
+                            rs.getLong("delivery_version"), rs.getLong("instruction_set_version"), instruction);
+                }, tenantId, workspaceId, deliveryId, tenantId, workspaceId, deliveryId);
         if (rows.isEmpty()) throw error("DELIVERY_NOT_FOUND");
         List<InstructionView> instructions = rows.stream().map(InstructionSetRow::instruction)
                 .filter(Objects::nonNull).toList();
@@ -115,6 +163,10 @@ public class JdbcDeliveryInstructionPersistenceAdapter implements DeliveryInstru
             if (request.instructionId() != null) throw error("DELIVERY_INSTRUCTION_NOT_FOUND");
             nextInstructionVersion = 1;
         } else {
+            String source = jdbc.queryForObject("select source_kind from logistics.delivery_instruction_revision "
+                            + "where tenant_id=? and workspace_id=? and delivery_id=? and instruction_id=? order by instruction_version desc limit 1",
+                    String.class,request.tenantId(),request.workspaceId(),request.deliveryId(),instructionId);
+            if (!"OPERATIONAL_DISPATCH".equals(source)) throw error("CUSTOMER_INSTRUCTION_EDIT_WINDOW_CLOSED");
             nextInstructionVersion = currentVersion + 1;
         }
 
@@ -266,7 +318,8 @@ public class JdbcDeliveryInstructionPersistenceAdapter implements DeliveryInstru
     }
 
     private static boolean isDriverInstructionActive(String status) {
-        return "ASSIGNED".equals(status) || "DISPATCHED".equals(status) || "IN_TRANSIT".equals(status);
+        return "PLANNED".equals(status) || "ASSIGNED".equals(status)
+                || "DISPATCHED".equals(status) || "IN_TRANSIT".equals(status);
     }
 
     private static boolean isDispatchInstructionActive(String status) {

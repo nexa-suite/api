@@ -47,6 +47,18 @@ public class DeliveryInstructionService {
         return persistence.findForDriver(tenant(context), workspace(context), actor(context), deliveryId);
     }
 
+    @Transactional(readOnly = true)
+    public InstructionSetView getForDispatch(CurrentAccessContext context, UUID deliveryId) {
+        context.requirePermission(PermissionKey.DISPATCH_READ);
+        if (deliveryId == null) throw invalid("DELIVERY_NOT_FOUND");
+        DispatchInstructionScope scope = persistence.findDispatchScope(tenant(context), workspace(context), deliveryId)
+                .orElseThrow(() -> invalid("DELIVERY_NOT_FOUND"));
+        if (scope.fulfillmentId() == null) throw invalid("DELIVERY_NOT_FOUND");
+        // Reuse BC-06's current dispatch-read and Warehouse-grant authority used by publishing.
+        readiness.readiness(context, scope.fulfillmentId());
+        return persistence.findForDispatch(tenant(context), workspace(context), deliveryId);
+    }
+
     @Transactional
     public AcknowledgementResult acknowledge(CurrentAccessContext context, UUID deliveryId,
                                              long expectedInstructionSetVersion,

@@ -12,7 +12,8 @@ public final class DeliveryInstructionModels {
 
     public record InstructionView(UUID id, DeliveryInstructionKind kind, String content,
                                   long instructionVersion, boolean critical, boolean acknowledged,
-                                  Instant acknowledgedAt, UUID acknowledgedByMembershipId) { }
+                                  Instant acknowledgedAt, UUID acknowledgedByMembershipId,
+                                  String sourceKind, UUID recordedByMembershipId, Instant recordedAt) { }
 
     public record InstructionSetView(UUID deliveryId, long deliveryVersion, long instructionSetVersion,
                                      List<InstructionView> instructions) {

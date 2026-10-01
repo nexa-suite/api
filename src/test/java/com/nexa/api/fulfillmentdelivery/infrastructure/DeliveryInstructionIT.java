@@ -118,6 +118,9 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(get(driverPath(fixture) + "/instructions")
                         .header("Authorization", bearer(outsiderDriverToken)))
                 .andExpect(status().isNotFound());
+        mockMvc.perform(get(dispatchInstructionsPath(fixture))
+                        .header("Authorization", bearer(outsiderDriverToken)))
+                .andExpect(status().isNotFound());
         mockMvc.perform(post(driverPath(fixture) + "/instruction-acknowledgements")
                         .header("Authorization", bearer(outsiderDriverToken))
                         .header("If-Match", currentInstructionEtag)
@@ -125,7 +128,51 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isNotFound());
     }
 
-    private AssignedDelivery createAssignedDelivery() throws Exception {
+    @Test
+    void customerInstructionsFreezeAtReadinessAndPreserveBuyerProvenanceInDriverProjection() throws Exception {
+        AssignedDelivery fixture = createAssignedDelivery(true);
+        var view = mockMvc.perform(get(driverPath(fixture) + "/instructions")
+                        .header("Authorization", bearer(fixture.token())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.instructions[0].sourceKind").value("BUYER"))
+                .andExpect(jsonPath("$.instructions[0].recordedByMembershipId").value(membershipId(BUYER_EMAIL)))
+                .andExpect(jsonPath("$.instructions[0].critical").value(true)).andReturn();
+        assertThat(json(view).toString()).doesNotContain("creditLimit", "pricing", "receivables");
+        MvcResult dispatchView = mockMvc.perform(get(dispatchInstructionsPath(fixture))
+                        .header("Authorization", bearer(fixture.token())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deliveryId").value(fixture.deliveryId().toString()))
+                .andExpect(jsonPath("$.instructions[0].sourceKind").value("BUYER"))
+                .andExpect(jsonPath("$.instructions[0].recordedByMembershipId").value(membershipId(BUYER_EMAIL)))
+                .andReturn();
+        String dispatchDeliveryEtag = dispatchView.getResponse().getHeader("ETag");
+        assertThat(dispatchDeliveryEtag).isEqualTo("\"" + json(dispatchView).get("deliveryVersion").asLong() + "\"");
+        String customerInstructionId = json(dispatchView).get("instructions").get(0).get("id").asText();
+        mockMvc.perform(post(dispatchInstructionsPath(fixture))
+                        .header("Authorization", bearer(fixture.token()))
+                        .header("If-Match", dispatchDeliveryEtag)
+                        .header("Idempotency-Key", "dispatch-customer-instruction-edit-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"instructionId\":\"" + customerInstructionId
+                                + "\",\"kind\":\"NORMAL\",\"content\":\"Dispatch cannot replace Buyer source\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CUSTOMER_INSTRUCTION_EDIT_WINDOW_CLOSED"));
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        mockMvc.perform(get("/api/v1/buyer/sales-orders/" + fixture.salesOrderId() + "/customer-delivery-instructions")
+                        .header("Authorization", bearer(buyer)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.editable").value(false));
+        mockMvc.perform(post("/api/v1/buyer/sales-orders/" + fixture.salesOrderId() + "/customer-delivery-instructions")
+                        .header("Authorization", bearer(buyer)).header("If-Match", "\"1\"")
+                        .header("Idempotency-Key", "late-buyer-instruction-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"kind\":\"NORMAL\",\"content\":\"Late edit\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CUSTOMER_INSTRUCTION_EDIT_WINDOW_CLOSED"));
+        mockMvc.perform(post(driverPath(fixture) + "/attempts").header("Authorization", bearer(fixture.token()))
+                        .header("If-Match", deliveryEtag(fixture)).header("Idempotency-Key", "buyer-critical-gate-" + UUID.randomUUID()))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DELIVERY_CRITICAL_INSTRUCTION_ACK_REQUIRED"));
+    }
+
+    private AssignedDelivery createAssignedDelivery() throws Exception { return createAssignedDelivery(false); }
+
+    private AssignedDelivery createAssignedDelivery(boolean customerInstruction) throws Exception {
         ensureCommercialInventory();
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         MvcResult order = mockMvc.perform(post("/api/v1/direct-orders")
@@ -139,6 +186,26 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                                 + "\"quantity\":1,\"unit\":\"UNIT\"}]}") )
                 .andExpect(status().isCreated()).andReturn();
         UUID orderId = UUID.fromString(json(order).get("id").asText());
+        if (customerInstruction) {
+            String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+            UUID customerInstructionId = UUID.randomUUID();
+            String customerInstructionKey = "buyer-instruction-" + UUID.randomUUID();
+            String customerInstructionBody = "{\"instructionId\":\"" + customerInstructionId
+                    + "\",\"kind\":\"COLD_CHAIN\",\"content\":\"Use refrigerated unloading area\"}";
+            mockMvc.perform(post("/api/v1/buyer/sales-orders/" + orderId + "/customer-delivery-instructions")
+                            .header("Authorization", bearer(buyer)).header("If-Match", "\"0\"")
+                            .header("Idempotency-Key", customerInstructionKey)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(customerInstructionBody))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.instructions[0].sourceKind").value("BUYER"))
+                    .andExpect(jsonPath("$.instructions[0].id").value(customerInstructionId.toString()));
+            mockMvc.perform(post("/api/v1/buyer/sales-orders/" + orderId + "/customer-delivery-instructions")
+                            .header("Authorization", bearer(buyer)).header("If-Match", "\"0\"")
+                            .header("Idempotency-Key", customerInstructionKey)
+                            .contentType(MediaType.APPLICATION_JSON).content(customerInstructionBody))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1))
+                    .andExpect(jsonPath("$.instructions.length()").value(1));
+        }
         String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
         List<UUID> backedWarehouseIds = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
@@ -238,7 +305,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk()).andReturn();
         UUID deliveryId = UUID.fromString(json(dispatched).get("deliveryId").asText());
-        return new AssignedDelivery(deliveryId, logisticsMembership, logisticsToken);
+        return new AssignedDelivery(deliveryId, logisticsMembership, logisticsToken, orderId);
     }
 
     private MvcResult transition(UUID fulfillmentId, String action, String token, String etag) throws Exception {
@@ -257,6 +324,10 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{" + optionalId + "\"kind\":\"" + kind + "\",\"content\":\"" + content + "\"}"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.critical").value(true)).andReturn();
+    }
+
+    private String dispatchInstructionsPath(AssignedDelivery fixture) {
+        return "/api/v1/deliveries/" + fixture.deliveryId() + "/instructions";
     }
 
     private String deliveryEtag(AssignedDelivery fixture) throws Exception {
@@ -315,5 +386,5 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
 
     private static String bearer(String token) { return "Bearer " + token; }
 
-    private record AssignedDelivery(UUID deliveryId, UUID membershipId, String token) { }
+    private record AssignedDelivery(UUID deliveryId, UUID membershipId, String token, UUID salesOrderId) { }
 }

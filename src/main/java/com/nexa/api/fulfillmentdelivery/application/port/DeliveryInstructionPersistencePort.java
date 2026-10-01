@@ -14,6 +14,8 @@ import java.util.UUID;
 public interface DeliveryInstructionPersistencePort {
     InstructionSetView findForDriver(UUID tenantId, UUID workspaceId, UUID membershipId, UUID deliveryId);
 
+    InstructionSetView findForDispatch(UUID tenantId, UUID workspaceId, UUID deliveryId);
+
     Optional<DispatchInstructionScope> findDispatchScope(UUID tenantId, UUID workspaceId, UUID deliveryId);
 
     PublishedInstruction publish(PublishRequest request);
