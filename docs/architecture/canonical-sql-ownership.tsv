@@ -177,3 +177,5 @@ logistics.fulfillment_driver_assignment	BC06	V111__assign_driver_to_prepared_ful
 logistics.fulfillment_outgoing_goods_check	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
 logistics.fulfillment_outgoing_goods_check_line	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
 warehouse.inventory_transfer_receipt_observation	BC05	V115__record_transfer_receipt_observations.sql CREATE TABLE; attributable transfer receipt observations.
+warehouse.inventory_cycle_count	BC05	V117__record_cycle_counts_and_corrections.sql CREATE TABLE; attributable count and authorized correction facts.
+warehouse.inventory_cycle_count_correction	BC05	V117__record_cycle_counts_and_corrections.sql CREATE TABLE; attributable count and authorized correction facts.
