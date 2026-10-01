@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -66,6 +67,30 @@ public final class OperationalExceptionController {
         MutationResult value = service.review(context, deliveryId, exceptionId, version(ifMatch), idempotencyKey);
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
+    }
+
+    public record WarningResolutionBody(String resolution) { }
+
+    @PostMapping("/driver/deliveries/{deliveryId}/operational-exceptions/{exceptionId}/resolutions")
+    @Operation(operationId = "resolveCurrentDriverWarningOperationalException")
+    public ResponseEntity<MutationResult> resolveWarning(
+            @RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID deliveryId,
+            @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @RequestBody WarningResolutionBody request) {
+        MutationResult value = service.completeWarning(context, deliveryId, exceptionId, version(ifMatch), key,
+                request.resolution(), false);
+        return ResponseEntity.status(value.replayed() ? 200 : 201).eTag(etag(value.deliveryVersion())).body(value);
+    }
+
+    @PostMapping("/driver/deliveries/{deliveryId}/operational-exceptions/{exceptionId}/closures")
+    @Operation(operationId = "closeCurrentDriverWarningOperationalException")
+    public ResponseEntity<MutationResult> closeWarning(
+            @RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID deliveryId,
+            @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key) {
+        MutationResult value = service.completeWarning(context, deliveryId, exceptionId, version(ifMatch), key, null, true);
+        return ResponseEntity.status(value.replayed() ? 200 : 201).eTag(etag(value.deliveryVersion())).body(value);
     }
 
     private static String etag(long version) { return "\"" + version + "\""; }

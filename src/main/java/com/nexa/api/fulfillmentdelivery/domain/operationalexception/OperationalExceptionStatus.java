@@ -1,8 +1,10 @@
 package com.nexa.api.fulfillmentdelivery.domain.operationalexception;
 
-/** Driver-lane states; resolution and closure remain owned by other authority. */
+/** Actor-attributed exception lifecycle; source business authority remains separate. */
 public enum OperationalExceptionStatus {
     OPEN,
     CLAIMED,
-    UNDER_REVIEW
+    UNDER_REVIEW,
+    RESOLVED,
+    CLOSED
 }

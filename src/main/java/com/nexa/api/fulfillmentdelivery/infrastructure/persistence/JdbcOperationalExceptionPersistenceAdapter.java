@@ -47,7 +47,7 @@ public class JdbcOperationalExceptionPersistenceAdapter implements OperationalEx
     public ExceptionSetView findForDriver(UUID tenantId, UUID workspaceId, UUID actorMembershipId, UUID deliveryId) {
         List<ExceptionRow> rows = jdbc.query("select d.id delivery_id,d.version delivery_version,"
                         + "c.id exception_id,c.source_kind,c.source_incident_id,c.type,c.severity,c.reason,c.description,"
-                        + "c.place,c.resolution,c.outcome,c.reported_by_membership_id,c.occurred_at,c.reported_at,"
+                        + "c.place,coalesce(latest.resolution,c.resolution) resolution,coalesce(latest.outcome,c.outcome) outcome,c.reported_by_membership_id,c.occurred_at,c.reported_at,"
                         + "latest.to_status,latest.responsible_membership_id,claimed.occurred_at claimed_at,"
                         + "reviewed.actor_membership_id under_review_by,reviewed.occurred_at under_review_at,"
                         + "coalesce((select array_agg(e.evidence_object_id order by e.evidence_object_id) "
@@ -58,7 +58,7 @@ public class JdbcOperationalExceptionPersistenceAdapter implements OperationalEx
                         + "on assignment.tenant_id=d.tenant_id and assignment.workspace_id=d.workspace_id "
                         + "and assignment.delivery_id=d.id left join logistics.operational_exception_case c "
                         + "on c.tenant_id=d.tenant_id and c.workspace_id=d.workspace_id and c.delivery_id=d.id "
-                        + "left join lateral (select t.to_status,t.responsible_membership_id,t.transition_number "
+                        + "left join lateral (select t.to_status,t.responsible_membership_id,t.transition_number,t.resolution,t.outcome "
                         + "from logistics.operational_exception_transition t where t.tenant_id=d.tenant_id "
                         + "and t.workspace_id=d.workspace_id and t.delivery_id=d.id and t.exception_id=c.id "
                         + "order by t.transition_number desc limit 1) latest on true "
@@ -94,6 +94,55 @@ public class JdbcOperationalExceptionPersistenceAdapter implements OperationalEx
         return transition(new MutationCommand(request.tenantId(), request.workspaceId(), request.deliveryId(),
                 request.exceptionId(), request.actorMembershipId(), request.expectedDeliveryVersion(),
                 request.idempotencyKey(), request.requestHash(), request.reviewedAt(), REVIEW_OPERATION, true));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public MutationResult completeWarning(
+            com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.WarningCompletionRequest command) {
+        String operation = command.close() ? "OPERATIONAL_EXCEPTION_CLOSE" : "OPERATIONAL_EXCEPTION_RESOLVE";
+        MutationCommand request = new MutationCommand(command.tenantId(), command.workspaceId(), command.deliveryId(),
+                command.exceptionId(), command.actorMembershipId(), command.expectedDeliveryVersion(),
+                command.idempotencyKey(), command.requestHash(), command.occurredAt(), operation, false);
+        validateCommand(request);
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), operation, request.idempotencyKey());
+        DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (delivery == null || !isDriverActive(delivery.status())
+                || !isAssigned(request.tenantId(), request.workspaceId(), request.deliveryId(), request.actorMembershipId())) {
+            throw error("DELIVERY_NOT_FOUND", true);
+        }
+        IdempotencyRow prior = idempotency(request);
+        if (prior != null) {
+            ensureHash(prior.requestHash(), request.requestHash());
+            return resultForTransition(request.tenantId(), request.workspaceId(), request.deliveryId(), prior.resourceId(), true);
+        }
+        if (delivery.version() != request.expectedDeliveryVersion()) throw error("CONCURRENCY_CONFLICT", false);
+        ExceptionState current = currentState(request.tenantId(), request.workspaceId(), request.deliveryId(), request.exceptionId());
+        String[] source = jdbc.query("select type,severity from logistics.operational_exception_case where tenant_id=? "
+                        + "and workspace_id=? and delivery_id=? and id=?", (rs, row) -> new String[]{rs.getString(1),rs.getString(2)},
+                request.tenantId(), request.workspaceId(), request.deliveryId(), request.exceptionId()).getFirst();
+        OperationalExceptionLifecycle.Transition next = (command.close()
+                ? OperationalExceptionLifecycle.closeWarning(current.status(), current.responsibleMembershipId(), request.actorMembershipId(), source[1])
+                : OperationalExceptionLifecycle.resolveWarning(current.status(), current.responsibleMembershipId(), request.actorMembershipId(), source[0], source[1]))
+                .orElseThrow(() -> error("OPERATIONAL_EXCEPTION_TRANSITION_INVALID", false));
+        String resolution = command.resolution();
+        if (command.close()) {
+            resolution = jdbc.queryForObject("select resolution from logistics.operational_exception_transition where tenant_id=? "
+                            + "and workspace_id=? and exception_id=? and transition_number=?", String.class,
+                    request.tenantId(), request.workspaceId(), request.exceptionId(), current.transitionNumber());
+        }
+        UUID transitionId = UUID.randomUUID();
+        long nextVersion = delivery.version() + 1;
+        jdbc.update("insert into logistics.operational_exception_transition(id,tenant_id,workspace_id,delivery_id,exception_id,"
+                        + "transition_number,from_status,to_status,actor_membership_id,responsible_membership_id,occurred_at,reason_code,"
+                        + "delivery_version,command_type,idempotency_key,request_hash,resolution,outcome) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                transitionId, request.tenantId(), request.workspaceId(), request.deliveryId(), request.exceptionId(),
+                current.transitionNumber()+1, current.status().name(), next.status().name(), request.actorMembershipId(),
+                current.responsibleMembershipId(), Timestamp.from(request.occurredAt()), next.reasonCode(), nextVersion,
+                command.close() ? "CLOSE" : "RESOLVE", request.idempotencyKey(), request.requestHash(), resolution, "WARNING_CONDITION_ADDRESSED");
+        incrementDeliveryVersion(request.tenantId(), request.workspaceId(), delivery, request.occurredAt());
+        insertIdempotency(request, transitionId);
+        return resultForTransition(request.tenantId(), request.workspaceId(), request.deliveryId(), transitionId, false);
     }
 
     @Override
@@ -218,7 +267,7 @@ public class JdbcOperationalExceptionPersistenceAdapter implements OperationalEx
                                                UUID transitionId, boolean replayed) {
         return jdbc.query("select selected.delivery_id,selected.delivery_version,selected.to_status,selected.responsible_membership_id,"
                         + "c.id exception_id,c.source_kind,c.source_incident_id,c.type,c.severity,c.reason,c.description,"
-                        + "c.place,c.resolution,c.outcome,c.reported_by_membership_id,c.occurred_at,c.reported_at,"
+                        + "c.place,coalesce(selected.resolution,c.resolution) resolution,coalesce(selected.outcome,c.outcome) outcome,c.reported_by_membership_id,c.occurred_at,c.reported_at,"
                         + "claimed.occurred_at claimed_at,reviewed.actor_membership_id under_review_by,"
                         + "reviewed.occurred_at under_review_at,coalesce((select array_agg(e.evidence_object_id order by e.evidence_object_id) "
                         + "from logistics.driver_delivery_incident_evidence e where e.tenant_id=c.tenant_id "

@@ -176,6 +176,12 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.exception.underReviewByMembershipId").value(fixture.membershipId().toString()))
                 .andReturn();
         String reviewEtag = review.getResponse().getHeader("ETag");
+        mockMvc.perform(post(exceptionCollection + "/" + exceptionId + "/resolutions")
+                        .header("Authorization", "Bearer " + fixture.token()).header("If-Match", reviewEtag)
+                        .header("Idempotency-Key", "blocked-resolution-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"resolution\":\"Driver cannot override access restriction\"}"))
+                .andExpect(status().isConflict());
+
         mockMvc.perform(post(reviewPath).header("Authorization", "Bearer " + fixture.token())
                         .header("If-Match", claimEtag).header("Idempotency-Key", reviewKey))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.replayed").value(true));
@@ -204,6 +210,56 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
                 Integer.class, incidentId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
                 Integer.class, fixture.deliveryId())).isZero();
+    }
+
+    @Test
+    void responsibleDriverCanResolveAndCloseWarningWithoutChangingDeliveryOrStockAuthority() throws Exception {
+        ensureCommercialInventory();
+        ActiveDelivery fixture = createActiveDelivery();
+        String incidentPath = "/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts/"
+                + fixture.attemptId() + "/incidents";
+        MvcResult reported = mockMvc.perform(post(incidentPath)
+                        .header("Authorization", "Bearer " + fixture.token()).header("If-Match", fixture.deliveryEtag())
+                        .header("Idempotency-Key", "warning-source-" + UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"DELAY\",\"reason\":\"Traffic delay\",\"description\":\"Temporary congestion\",\"place\":\"Public road\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.severity").value("WARNING")).andReturn();
+        String exceptionId = json(reported).get("operationalExceptionId").asText();
+        String path = "/api/v1/driver/deliveries/" + fixture.deliveryId() + "/operational-exceptions/" + exceptionId;
+        MvcResult claimed = mockMvc.perform(post(path + "/claims").header("Authorization", "Bearer " + fixture.token())
+                        .header("If-Match", reported.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "warning-claim-" + UUID.randomUUID()))
+                .andExpect(status().isCreated()).andReturn();
+        MvcResult reviewed = mockMvc.perform(post(path + "/reviews").header("Authorization", "Bearer " + fixture.token())
+                        .header("If-Match", claimed.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "warning-review-" + UUID.randomUUID()))
+                .andExpect(status().isCreated()).andReturn();
+        String resolutionKey = "warning-resolution-" + UUID.randomUUID();
+        String reviewTag = reviewed.getResponse().getHeader("ETag");
+        MvcResult resolved = mockMvc.perform(post(path + "/resolutions").header("Authorization", "Bearer " + fixture.token())
+                        .header("If-Match", reviewTag).header("Idempotency-Key", resolutionKey)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"resolution\":\"Congestion cleared; normal travel resumed\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exception.status").value("RESOLVED"))
+                .andExpect(jsonPath("$.exception.resolution").value("Congestion cleared; normal travel resumed"))
+                .andExpect(jsonPath("$.exception.outcome").value("WARNING_CONDITION_ADDRESSED")).andReturn();
+        String closeKey = "warning-close-" + UUID.randomUUID();
+        String resolvedTag = resolved.getResponse().getHeader("ETag");
+        mockMvc.perform(post(path + "/closures").header("Authorization", "Bearer " + fixture.token())
+                        .header("If-Match", resolvedTag).header("Idempotency-Key", closeKey))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exception.status").value("CLOSED"))
+                .andExpect(jsonPath("$.exception.resolution").value("Congestion cleared; normal travel resumed"));
+        mockMvc.perform(post(path + "/resolutions").header("Authorization", "Bearer " + fixture.token())
+                        .header("If-Match", reviewTag).header("Idempotency-Key", resolutionKey)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"resolution\":\"Congestion cleared; normal travel resumed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exception.status").value("RESOLVED"))
+                .andExpect(jsonPath("$.replayed").value(true));
+        mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/operational-exceptions")
+                        .header("Authorization", "Bearer " + fixture.token()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exceptions[0].status").value("CLOSED"));
+        assertThat(jdbc.queryForObject("select count(*) from logistics.operational_exception_transition where exception_id=?",
+                Integer.class, UUID.fromString(exceptionId))).isEqualTo(5);
+        assertThat(jdbc.queryForObject("select status from logistics.delivery where id=?", String.class, fixture.deliveryId())).isEqualTo("IN_TRANSIT");
+        assertThat(jdbc.queryForObject("select i.incident_type from logistics.driver_delivery_incident i join logistics.operational_exception_case c on c.source_driver_incident_id=i.id where c.id=?",
+                String.class, UUID.fromString(exceptionId))).isEqualTo("DELAY");
     }
 
     private ActiveDelivery createActiveDelivery() throws Exception {

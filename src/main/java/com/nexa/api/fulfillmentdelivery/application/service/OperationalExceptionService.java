@@ -61,6 +61,22 @@ public class OperationalExceptionService {
                         + expectedDeliveryVersion), clock.instant()));
     }
 
+    @Transactional
+    public MutationResult completeWarning(CurrentAccessContext context, UUID deliveryId, UUID exceptionId,
+            long expectedDeliveryVersion, String idempotencyKey, String resolution, boolean close) {
+        context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
+        validateCommand(deliveryId, exceptionId, expectedDeliveryVersion, idempotencyKey);
+        String normalized = resolution == null ? null : resolution.trim();
+        if (!close && (normalized == null || normalized.isBlank() || normalized.length() > 2000)) {
+            throw error("INVALID_REQUEST", false);
+        }
+        return persistence.completeWarning(new com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.WarningCompletionRequest(
+                tenant(context), workspace(context), deliveryId, exceptionId, actor(context), expectedDeliveryVersion,
+                idempotencyKey, hash("driver-warning-completion-v1|" + close + "|" + deliveryId + "|" + exceptionId
+                        + "|" + expectedDeliveryVersion + "|" + Objects.toString(normalized, "")),
+                clock.instant(), normalized, close));
+    }
+
     private static void validateCommand(UUID deliveryId, UUID exceptionId, long expectedVersion, String key) {
         if (deliveryId == null || exceptionId == null) throw error("DELIVERY_NOT_FOUND", true);
         if (expectedVersion < 0) throw error("VERSION_INVALID", false);

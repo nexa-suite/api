@@ -17,6 +17,8 @@ public interface OperationalExceptionPersistencePort {
 
     MutationResult review(ReviewRequest request);
 
+    MutationResult completeWarning(com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.WarningCompletionRequest request);
+
     /** Persists the immutable typed Dispatch incident and any Owner-classified case atomically. */
     void recordTypedIncident(TypedIncidentSourceRequest request);
 

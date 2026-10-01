@@ -38,6 +38,10 @@ public final class OperationalExceptionModels {
                                 UUID actorMembershipId, long expectedDeliveryVersion, String idempotencyKey,
                                 String requestHash, Instant reviewedAt) { }
 
+    public record WarningCompletionRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID exceptionId,
+            UUID actorMembershipId, long expectedDeliveryVersion, String idempotencyKey,
+            String requestHash, Instant occurredAt, String resolution, boolean close) { }
+
     public record TypedIncidentSourceRequest(UUID tenantId, UUID workspaceId, UUID dispatchOrderId,
                                              UUID incidentId, String type, String sourceSeverity,
                                              boolean buyerVisible, String description, Instant occurredAt,
