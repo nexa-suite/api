@@ -497,6 +497,155 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 UUID.fromString(subscriptionId))).isEqualTo("UNREGISTERED");
     }
 
+    @Test
+    void driverStartIsSingleActiveConcurrentAndLegacyOutcomeTerminatesSameAttempt() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        DriverDeliveryFixture fixture = createDriverDelivery(warehouse, sales, driverMembership, "driver-active-" + uuid());
+
+        MvcResult detail = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.activeAttempt").doesNotExist()).andReturn();
+        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", detail.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "driver-transit-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics)).andExpect(status().isOk()).andReturn())
+                .get("activeAttempt").isNull()).as("IN_TRANSIT is not an active Delivery Attempt").isTrue();
+
+        String firstKey = "driver-attempt-a-" + uuid();
+        String secondKey = "driver-attempt-b-" + uuid();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        MvcResult first;
+        MvcResult second;
+        try {
+            Future<MvcResult> firstFuture = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                                .header("Authorization", "Bearer " + logistics)
+                                .header("If-Match", transit.getResponse().getHeader("ETag"))
+                                .header("Idempotency-Key", firstKey).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .andReturn();
+            });
+            Future<MvcResult> secondFuture = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                                .header("Authorization", "Bearer " + logistics)
+                                .header("If-Match", transit.getResponse().getHeader("ETag"))
+                                .header("Idempotency-Key", secondKey).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                        .andReturn();
+            });
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            first = firstFuture.get(30, TimeUnit.SECONDS);
+            second = secondFuture.get(30, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(first.getResponse().getStatus()).isIn(200, 201);
+        assertThat(second.getResponse().getStatus()).isIn(200, 201);
+        String attemptId = json(first).get("attempt").get("id").asText();
+        assertThat(json(second).get("attempt").get("id").asText()).isEqualTo(attemptId);
+        assertThat(json(first).get("delivery").get("status").asText()).isEqualTo("IN_TRANSIT");
+        assertThat(json(first).get("delivery").get("activeAttempt").get("id").asText()).isEqualTo(attemptId);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_active_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isZero();
+
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", transit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", firstKey).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.attempt.id").value(attemptId));
+
+        mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", first.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "legacy-terminal-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"outcome\":\"FAILED\",\"failureReason\":\"Recipient unavailable\",\"lines\":[]}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.attemptId").value(attemptId));
+        assertThat(jdbc.queryForObject("select attempt_number from logistics.delivery_attempt where id=?",
+                Integer.class, UUID.fromString(attemptId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_active_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+    }
+
+    @Test
+    void driverCurrentAndLegacyMyDeliveryReadsHideAnotherAssignment() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        UUID otherMembership = UUID.fromString(membershipId(WAREHOUSE_EMAIL));
+        DriverDeliveryFixture fixture = createDriverDelivery(warehouse, sales, otherMembership, "driver-other-" + uuid());
+
+        MvcResult currentList = mockMvc.perform(get("/api/v1/driver/deliveries")
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult legacyList = mockMvc.perform(get("/api/v1/my-deliveries")
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(currentList.getResponse().getContentAsString()).doesNotContain(fixture.deliveryId().toString());
+        assertThat(json(legacyList).get("items").toString()).doesNotContain(fixture.deliveryId().toString());
+        mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/my-deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", fixture.etag())
+                        .header("Idempotency-Key", "driver-wrong-assignment-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_active_attempt where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isZero();
+    }
+
+    private DriverDeliveryFixture createDriverDelivery(String warehouse, String sales, UUID assignedMembership,
+                                                       String key) throws Exception {
+        PhysicalFlow flow = createPickingFlow(warehouse, sales, key, "2");
+        String picked = pick(flow, warehouse, key + "-pick");
+        MvcResult packed = transition(flow.fulfillmentId(), "/packing", warehouse, picked, key + "-pack");
+        MvcResult staged = transition(flow.fulfillmentId(), "/staging", warehouse,
+                packed.getResponse().getHeader("ETag"), key + "-stage");
+        MvcResult ready = transition(flow.fulfillmentId(), "/ready-for-dispatch", warehouse,
+                staged.getResponse().getHeader("ETag"), key + "-ready");
+        MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/dispatches")
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", ready.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key + "-dispatch"))
+                .andExpect(status().isOk()).andReturn();
+        UUID deliveryId = UUID.fromString(json(dispatched).get("deliveryId").asText());
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID assignedUser = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
+                UUID.class, assignedMembership);
+        jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,vehicle_reference,route_name,assigned_at,actor_membership_id) values (?,?,?,?,?,?,?, ?,current_timestamp,?)",
+                UUID.randomUUID(), tenant, workspace, deliveryId, assignedMembership, assignedUser,
+                "VAN-DRIVER-1", "DRIVER-TEST", assignedMembership);
+        long version = jdbc.queryForObject("select version from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
+                Long.class, tenant, workspace, deliveryId);
+        return new DriverDeliveryFixture(deliveryId, version);
+    }
+
+    private record DriverDeliveryFixture(UUID deliveryId, long version) {
+        private String etag() { return "\"" + version + "\""; }
+    }
+
     @Override
     protected void ensureCommercialInventory() throws Exception {
         super.ensureCommercialInventory();

@@ -2,6 +2,8 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService.LogisticsException;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels;
+import com.nexa.api.fulfillmentdelivery.application.service.DriverDeliveryService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -12,7 +14,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -22,7 +26,11 @@ import java.util.List;
 public final class LogisticsController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final LogisticsOperationsService service;
-    public LogisticsController(LogisticsOperationsService service) { this.service = service; }
+    private final DriverDeliveryService driverDeliveries;
+    public LogisticsController(LogisticsOperationsService service, DriverDeliveryService driverDeliveries) {
+        this.service = service;
+        this.driverDeliveries = driverDeliveries;
+    }
 
     @GetMapping("/dispatch-orders") public PageResponse<DispatchResponse> dispatches(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required=false) String status, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="25") int size, @RequestParam(defaultValue="updatedAt,desc") String sort) { return page(service.list(c,status,page,size,sort)); }
     @GetMapping("/dispatch-assignees") @Operation(operationId = "listDispatchAssignees") public List<LogisticsOperationsService.AssigneeView> assignees(@RequestAttribute(ACCESS) CurrentAccessContext c) { return service.assignees(c); }
@@ -48,9 +56,57 @@ public final class LogisticsController {
     @GetMapping("/proof-of-delivery") public PageResponse<PodResponse> proof(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) String status,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="25") int size){return podPage(service.proofOfDelivery(c,status,page,size));}
     @GetMapping("/logistics/operations-dashboard") public LogisticsOperationsService.DashboardView dashboard(@RequestAttribute(ACCESS) CurrentAccessContext c){return service.dashboard(c);}
     @GetMapping("/logistics/operational-analytics") public LogisticsOperationsService.AnalyticsView analytics(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) Instant from,@RequestParam(required=false) Instant to){return service.analytics(c,from,to);}
-    @GetMapping("/my-deliveries") public PageResponse<DispatchResponse> myDeliveries(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) String status,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="25") int size,@RequestParam(defaultValue="updatedAt,desc") String sort){return page(service.list(c,status,page,size,sort));}
-    @GetMapping("/my-deliveries/{id}") public ResponseEntity<DispatchResponse> myDelivery(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){LogisticsOperationsService.DispatchView value=service.detail(c,id);return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));}
-    @GetMapping("/my-deliveries/{id}/events") public List<DispatchEventResponse> myDeliveryEvents(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return events(c,id);}
+    @GetMapping("/my-deliveries")
+    public PageResponse<DispatchResponse> myDeliveries(@RequestAttribute(ACCESS) CurrentAccessContext c,
+            @RequestParam(required=false) String status,@RequestParam(defaultValue="0") int page,
+            @RequestParam(defaultValue="25") int size,@RequestParam(defaultValue="updatedAt,desc") String sort) {
+        if (page < 0 || size < 1 || size > 100) throw new LogisticsException("INVALID_REQUEST", false);
+        Comparator<DriverDeliveryModels.DeliveryView> order = Comparator
+                .comparing(DriverDeliveryModels.DeliveryView::updatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(DriverDeliveryModels.DeliveryView::id);
+        if ("updatedAt,desc".equals(sort) || sort == null || sort.isBlank()) order = order.reversed();
+        else if (!"updatedAt,asc".equals(sort) && !"id,asc".equals(sort) && !"id,desc".equals(sort)) {
+            throw new LogisticsException("INVALID_REQUEST", false);
+        }
+        if ("id,asc".equals(sort)) order = Comparator.comparing(DriverDeliveryModels.DeliveryView::id);
+        if ("id,desc".equals(sort)) order = Comparator.comparing(DriverDeliveryModels.DeliveryView::id).reversed();
+        List<DispatchResponse> assigned = driverDeliveries.listAssigned(c).stream()
+                .filter(value -> status == null || status.isBlank() || value.status().equalsIgnoreCase(status.trim()))
+                .sorted(order)
+                .map(value -> driverResponse(c, value)).toList();
+        long fromLong = (long) page * size;
+        int from = (int) Math.min(fromLong, assigned.size());
+        int to = Math.min(from + size, assigned.size());
+        return new PageResponse<>(assigned.subList(from, to), page, size, assigned.size());
+    }
+
+    @GetMapping("/my-deliveries/{id}")
+    public ResponseEntity<DispatchResponse> myDelivery(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                       @PathVariable String id) {
+        DriverDeliveryModels.DeliveryView value = driverDeliveries.getAssigned(c, deliveryId(id));
+        return ResponseEntity.ok().eTag(etag(value.version())).body(driverResponse(c, value));
+    }
+
+    @GetMapping("/my-deliveries/{id}/events")
+    public List<DispatchEventResponse> myDeliveryEvents(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                       @PathVariable String id) {
+        driverDeliveries.getAssigned(c, deliveryId(id));
+        return events(c,id);
+    }
+
+    private DispatchResponse driverResponse(CurrentAccessContext context, DriverDeliveryModels.DeliveryView value) {
+        return new DispatchResponse(value.id().toString(), null, null,
+                value.salesOrderId() == null ? null : value.salesOrderId().toString(), null, null, null, null,
+                value.status(), value.destinationSnapshot(), null, null, null, null, null,
+                new AssignmentResponse(context.membershipId().toString(), null, null, null),
+                null, null, null, null, null, null, value.version(), value.updatedAt(), List.of(), null,
+                null, null, List.of());
+    }
+
+    private static UUID deliveryId(String id) {
+        try { return UUID.fromString(id); }
+        catch (IllegalArgumentException exception) { throw new LogisticsException("RESOURCE_NOT_FOUND", true); }
+    }
 
     private PageResponse<DispatchResponse> page(LogisticsOperationsService.Page<LogisticsOperationsService.DispatchView> p){return new PageResponse<>(p.items().stream().map(this::response).toList(),p.page(),p.size(),p.total());}
     private PageResponse<PodResponse> podPage(LogisticsOperationsService.Page<LogisticsOperationsService.ProofOfDeliveryView> p){return new PageResponse<>(p.items().stream().map(x->new PodResponse(x.podId(),x.dispatchOrderId(),x.dispatchNumber(),x.status(),x.receiverName(),x.completedAt(),x.notes(),x.photoEvidenceDeclared(),x.signatureEvidenceDeclared(),x.updatedAt())).toList(),p.page(),p.size(),p.total());}
