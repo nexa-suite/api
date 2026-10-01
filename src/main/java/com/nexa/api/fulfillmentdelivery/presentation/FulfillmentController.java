@@ -2,8 +2,10 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentWorkListModels;
 import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentLifecycleService;
+import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentWorkListService;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
@@ -46,9 +49,21 @@ public final class FulfillmentController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
 
     private final FulfillmentLifecycleService service;
+    private final FulfillmentWorkListService workList;
 
-    public FulfillmentController(FulfillmentLifecycleService service) {
+    public FulfillmentController(FulfillmentLifecycleService service, FulfillmentWorkListService workList) {
         this.service = service;
+        this.workList = workList;
+    }
+
+    @GetMapping("/fulfillments")
+    @Operation(operationId = "listPickingFulfillmentWork")
+    public ResponseEntity<FulfillmentWorkListModels.Page> listPickingWork(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        FulfillmentWorkListModels.Page value = workList.list(context, page, size);
+        return ResponseEntity.ok(value);
     }
 
     @GetMapping("/fulfillments/{fulfillmentId}")
