@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -64,10 +65,35 @@ public final class FulfillmentDriverAssignmentController {
         return ResponseEntity.ok().eTag(etag(value.fulfillmentVersion())).body(response(value));
     }
 
+    @PostMapping("/plan-changes")
+    @Operation(operationId = "changePreparedFulfillmentDispatchPlan")
+    public ResponseEntity<AssignmentResponse> changePlan(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody PlanChangeRequest request) {
+        FulfillmentDriverAssignmentView value = service.changePlan(context, fulfillmentId, version(ifMatch),
+                request.expectedAssignmentId(), request.expectedAssignmentVersion(),
+                request.physicalAllocationId(), request.physicalAllocationVersion(),
+                request.responsibleMembershipId(), request.plannedDispatchAt(), idempotencyKey);
+        return ResponseEntity.ok().eTag(etag(value.fulfillmentVersion())).body(response(value));
+    }
+
+    @GetMapping("/history")
+    @Operation(operationId = "getPreparedFulfillmentDriverAssignmentHistory")
+    public ResponseEntity<List<AssignmentResponse>> history(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        return ResponseEntity.ok(service.history(context, fulfillmentId).stream()
+                .map(FulfillmentDriverAssignmentController::response).toList());
+    }
+
     private static AssignmentResponse response(FulfillmentDriverAssignmentView value) {
         return new AssignmentResponse(value.id(), value.fulfillmentId(), value.fulfillmentVersion(),
                 value.physicalAllocationId(), value.physicalAllocationVersion(), value.responsibleMembershipId(),
-                value.responsibleDisplayName(), value.assignedAt(), value.deliveryId());
+                value.responsibleDisplayName(), value.assignedAt(), value.plannedDispatchAt(),
+                value.deliveryId(), value.current());
     }
 
     private static String etag(long version) {
@@ -96,5 +122,13 @@ public final class FulfillmentDriverAssignmentController {
     public record AssignmentResponse(UUID id, UUID fulfillmentId, long fulfillmentVersion,
                                       UUID physicalAllocationId, long physicalAllocationVersion,
                                       UUID responsibleMembershipId, String responsibleDisplayName,
-                                      Instant assignedAt, UUID deliveryId) { }
+                                      Instant assignedAt, Instant plannedDispatchAt, UUID deliveryId,
+                                      boolean current) { }
+
+    public record PlanChangeRequest(@NotNull UUID expectedAssignmentId,
+                                    @NotNull @PositiveOrZero Long expectedAssignmentVersion,
+                                    @NotNull UUID physicalAllocationId,
+                                    @NotNull @PositiveOrZero Long physicalAllocationVersion,
+                                    UUID responsibleMembershipId,
+                                    Instant plannedDispatchAt) { }
 }

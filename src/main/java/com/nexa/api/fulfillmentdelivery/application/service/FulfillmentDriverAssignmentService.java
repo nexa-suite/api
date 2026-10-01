@@ -20,6 +20,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -87,10 +88,73 @@ public class FulfillmentDriverAssignmentService {
         return result;
     }
 
+    @Transactional
+    public FulfillmentDriverAssignmentView changePlan(CurrentAccessContext context, UUID fulfillmentId,
+                                                       long expectedFulfillmentVersion,
+                                                       UUID expectedAssignmentId,
+                                                       long expectedAssignmentVersion,
+                                                       UUID expectedAllocationId,
+                                                       long expectedAllocationVersion,
+                                                       UUID requestedMembershipId,
+                                                       Instant requestedDispatchAt,
+                                                       String idempotencyKey) {
+        if (requestedMembershipId == null && requestedDispatchAt == null) throw invalid("INVALID_REQUEST");
+        if (requestedMembershipId != null) context.requirePermission(PermissionKey.DISPATCH_ASSIGN);
+        if (requestedDispatchAt != null) context.requirePermission(PermissionKey.DISPATCH_SCHEDULE);
+        requireKey(idempotencyKey);
+        if (fulfillmentId == null || expectedFulfillmentVersion < 0 || expectedAssignmentId == null
+                || expectedAssignmentVersion < 0 || expectedAllocationId == null || expectedAllocationVersion < 0) {
+            throw invalid("INVALID_REQUEST");
+        }
+
+        UUID tenantId = context.tenantId().value();
+        UUID workspaceId = context.workspaceId().value();
+        UUID actorMembershipId = context.membershipId().value();
+        physicalAllocations.lockForFulfillment(tenantId, workspaceId, fulfillmentId, actorMembershipId);
+
+        // Recheck active warehouse grants and read permission before resolving a replay or current driver.
+        var current = readiness.readiness(context, fulfillmentId);
+        FulfillmentDriverAssignmentView baseline = fulfillments.findDriverAssignmentById(
+                        tenantId, workspaceId, expectedAssignmentId)
+                .filter(value -> value.fulfillmentId().equals(fulfillmentId))
+                .orElseThrow(() -> invalid("FULFILLMENT_DRIVER_ASSIGNMENT_STALE"));
+        UUID targetMembershipId = requestedMembershipId == null
+                ? baseline.responsibleMembershipId() : requestedMembershipId;
+        WorkforceDirectory.LogisticsAssignee responsible = workforce.findLogisticsAssignees(tenantId, workspaceId)
+                .stream().filter(candidate -> candidate.id().equals(targetMembershipId))
+                .findFirst().orElseThrow(() -> invalid("RESPONSIBLE_MEMBERSHIP_INVALID"));
+        Instant targetDispatchAt = requestedDispatchAt == null
+                ? baseline.plannedDispatchAt() : requestedDispatchAt;
+        String requestHash = hash("fulfillment-dispatch-plan-change-v1|" + fulfillmentId + "|"
+                + expectedFulfillmentVersion + "|" + expectedAssignmentId + "|" + expectedAssignmentVersion
+                + "|" + expectedAllocationId + "|" + expectedAllocationVersion + "|"
+                + Objects.toString(requestedMembershipId, "null") + "|"
+                + Objects.toString(requestedDispatchAt, "null"));
+        Instant changedAt = clock.instant();
+        FulfillmentDriverAssignmentView result = fulfillments.changeDispatchPlan(
+                new FulfillmentPersistencePort.DispatchPlanChangeRequest(
+                        tenantId, workspaceId, fulfillmentId, expectedFulfillmentVersion,
+                        expectedAssignmentId, expectedAssignmentVersion, expectedAllocationId,
+                        expectedAllocationVersion, current.fulfillmentVersion(), current.fulfillmentStatus(),
+                        current.ready(), current.physicalAllocationId(), current.physicalAllocationVersion(),
+                        responsible.id(), responsible.userId(), responsible.displayName(), targetDispatchAt,
+                        actorMembershipId, idempotencyKey, requestHash, changedAt));
+        tracePlanChange(context, fulfillmentId, result.id(), responsible.id(), targetDispatchAt,
+                idempotencyKey, changedAt);
+        return result;
+    }
+
     @Transactional(readOnly = true)
     public Optional<FulfillmentDriverAssignmentView> current(CurrentAccessContext context, UUID fulfillmentId) {
         readiness.readiness(context, fulfillmentId);
         return fulfillments.findDriverAssignment(context.tenantId().value(), context.workspaceId().value(), fulfillmentId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<FulfillmentDriverAssignmentView> history(CurrentAccessContext context, UUID fulfillmentId) {
+        readiness.readiness(context, fulfillmentId);
+        return fulfillments.findDriverAssignmentHistory(
+                context.tenantId().value(), context.workspaceId().value(), fulfillmentId);
     }
 
     private void trace(CurrentAccessContext context, UUID fulfillmentId, UUID responsibleMembershipId,
@@ -100,6 +164,17 @@ public class FulfillmentDriverAssignmentService {
                 "FULFILLMENT_DELIVERY", "FULFILLMENT_DRIVER_ASSIGNED", "Fulfillment", fulfillmentId,
                 idempotencyKey, operationKey("trace-", idempotencyKey),
                 Map.of("responsibleMembershipId", responsibleMembershipId), now));
+    }
+
+    private void tracePlanChange(CurrentAccessContext context, UUID fulfillmentId, UUID assignmentId,
+                                 UUID responsibleMembershipId, Instant plannedDispatchAt,
+                                 String idempotencyKey, Instant now) {
+        traceability.record(new BusinessTraceabilityCommands.TraceRequest(
+                context.tenantId().value(), context.workspaceId().value(), context.membershipId().value(),
+                "FULFILLMENT_DELIVERY", "FULFILLMENT_DISPATCH_PLAN_CHANGED", "Fulfillment", fulfillmentId,
+                idempotencyKey, operationKey("dispatch-plan-trace-", idempotencyKey),
+                Map.of("assignmentId", assignmentId, "responsibleMembershipId", responsibleMembershipId,
+                        "plannedDispatchAt", Objects.toString(plannedDispatchAt, "UNCHANGED")), now));
     }
 
     private static String operationKey(String prefix, String value) {

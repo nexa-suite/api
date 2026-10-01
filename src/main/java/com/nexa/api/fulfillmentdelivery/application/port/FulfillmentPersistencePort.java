@@ -33,8 +33,16 @@ public interface FulfillmentPersistencePort {
 
     FulfillmentDriverAssignmentView assignDriver(AssignDriverRequest request);
 
+    FulfillmentDriverAssignmentView changeDispatchPlan(DispatchPlanChangeRequest request);
+
     Optional<FulfillmentDriverAssignmentView> findDriverAssignment(UUID tenantId, UUID workspaceId,
                                                                     UUID fulfillmentId);
+
+    Optional<FulfillmentDriverAssignmentView> findDriverAssignmentById(UUID tenantId, UUID workspaceId,
+                                                                        UUID assignmentId);
+
+    List<FulfillmentDriverAssignmentView> findDriverAssignmentHistory(UUID tenantId, UUID workspaceId,
+                                                                      UUID fulfillmentId);
 
     record CreateRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                          UUID salesOrderId, UUID physicalAllocationId, String destinationSnapshot,
@@ -101,8 +109,20 @@ public interface FulfillmentPersistencePort {
                                String responsibleDisplayName, UUID actorMembershipId,
                                String idempotencyKey, String requestHash, Instant now) { }
 
+    record DispatchPlanChangeRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                                     long expectedFulfillmentVersion, UUID expectedAssignmentId,
+                                     long expectedAssignmentVersion, UUID expectedPhysicalAllocationId,
+                                     long expectedPhysicalAllocationVersion, long currentFulfillmentVersion,
+                                     String currentFulfillmentStatus, boolean currentReadiness,
+                                     UUID currentPhysicalAllocationId, long currentPhysicalAllocationVersion,
+                                     UUID responsibleMembershipId, UUID responsibleUserId,
+                                     String responsibleDisplayName, Instant plannedDispatchAt,
+                                     UUID actorMembershipId, String idempotencyKey,
+                                     String requestHash, Instant now) { }
+
     record FulfillmentDriverAssignmentView(UUID id, UUID fulfillmentId, long fulfillmentVersion,
                                            UUID physicalAllocationId, long physicalAllocationVersion,
                                            UUID responsibleMembershipId, String responsibleDisplayName,
-                                           UUID actorMembershipId, Instant assignedAt, UUID deliveryId) { }
+                                           UUID actorMembershipId, Instant assignedAt, Instant plannedDispatchAt,
+                                           UUID deliveryId, boolean current) { }
 }
