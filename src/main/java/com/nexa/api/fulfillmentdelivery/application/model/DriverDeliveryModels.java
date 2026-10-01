@@ -40,4 +40,21 @@ public final class DriverDeliveryModels {
     public record ArrivalRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId,
                                  UUID actorMembershipId, long expectedVersion, String idempotencyKey,
                                  String requestHash, Instant arrivedAt) { }
+
+    public record ProofOfDeliveryView(UUID id, UUID deliveryId, UUID attemptId, String status,
+                                      UUID actorMembershipId, String receiverName, Instant capturedAt,
+                                      UUID photoEvidenceObjectId, UUID signatureEvidenceObjectId,
+                                      long deliveryVersion, boolean replayed) { }
+
+    public record ProofOfDeliveryCreateRequest(UUID tenantId, UUID workspaceId, UUID deliveryId,
+                                               UUID attemptId, UUID actorMembershipId, long expectedVersion,
+                                               String idempotencyKey, String requestHash, String receiverName,
+                                               Instant capturedAt, String notes, Instant recordedAt) { }
+
+    public enum ProofEvidenceKind { PHOTO, SIGNATURE }
+
+    public record ProofEvidenceRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId,
+                                      UUID podId, UUID actorMembershipId, long expectedVersion,
+                                      String idempotencyKey, String requestHash, ProofEvidenceKind kind,
+                                      UUID evidenceObjectId, Instant attachedAt) { }
 }

@@ -14,6 +14,7 @@ import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
+import com.nexa.api.businessdocuments.application.exception.BusinessEvidenceIdempotencyConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -465,6 +466,8 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftInvariant(PurchaseRequestDraftInvariantException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Purchase request draft is not ready to submit", request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
+	@ExceptionHandler(BusinessEvidenceIdempotencyConflictException.class)
+	public ResponseEntity<ProblemDetail> handleBusinessEvidenceIdempotencyPayload(BusinessEvidenceIdempotencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with different evidence metadata or bytes", request); }
 	@ExceptionHandler(PurchaseRequestAlreadyConvertedException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestAlreadyConverted(PurchaseRequestAlreadyConvertedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_ALREADY_CONVERTED, "Purchase request has already been converted", request); }
 	@ExceptionHandler(SalesPreconditionRequiredException.class)

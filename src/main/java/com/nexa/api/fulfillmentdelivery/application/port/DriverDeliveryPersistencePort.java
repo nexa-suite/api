@@ -18,6 +18,9 @@ public interface DriverDeliveryPersistencePort {
     void requireAssignedAttempt(UUID tenantId, UUID workspaceId, UUID membershipId,
                                 UUID deliveryId, UUID attemptId, String idempotencyKey);
 
+    void requireAssignedTerminalAttempt(UUID tenantId, UUID workspaceId, UUID membershipId,
+                                         UUID deliveryId, UUID attemptId);
+
     AttemptStartResult startAttempt(AttemptStartRequest request);
 
     ArrivalView signalArrival(ArrivalRequest request);

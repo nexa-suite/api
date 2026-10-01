@@ -2,6 +2,8 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptStartResult;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceKind;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
 import com.nexa.api.fulfillmentdelivery.application.service.DriverDeliveryService;
@@ -106,6 +108,38 @@ public final class DriverDeliveryController {
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
 
+    @PostMapping("/{deliveryId}/attempts/{attemptId}/proof-of-delivery")
+    @Operation(operationId = "createCurrentDriverProofOfDelivery")
+    public ResponseEntity<ProofOfDeliveryView> createProofOfDelivery(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID deliveryId,
+            @PathVariable UUID attemptId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody ProofOfDeliveryCreateRequest request) {
+        ProofOfDeliveryView value = service.createProofOfDelivery(context, deliveryId, attemptId,
+                version(ifMatch), key, new FulfillmentLifecycleService.DriverProofCommand(
+                        request.receiverName(), request.capturedAt(), request.notes()));
+        return ResponseEntity.status(value.replayed() ? 200 : 201)
+                .eTag(etag(value.deliveryVersion())).body(value);
+    }
+
+    @PostMapping("/{deliveryId}/attempts/{attemptId}/proof-of-delivery/{podId}/evidence")
+    @Operation(operationId = "attachCurrentDriverProofEvidence")
+    public ResponseEntity<ProofOfDeliveryView> attachProofEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID deliveryId,
+            @PathVariable UUID attemptId,
+            @PathVariable UUID podId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody ProofEvidenceAttachmentRequest request) {
+        ProofOfDeliveryView value = service.attachProofEvidence(context, deliveryId, attemptId, podId,
+                version(ifMatch), key, request.kind(), request.evidenceObjectId());
+        return ResponseEntity.status(value.replayed() ? 200 : 201)
+                .eTag(etag(value.deliveryVersion())).body(value);
+    }
+
     private static DeliveryAttemptOutcome outcome(String value) {
         try {
             return DeliveryAttemptOutcome.valueOf(value.trim().toUpperCase(Locale.ROOT));
@@ -126,6 +160,12 @@ public final class DriverDeliveryController {
                                      @NotNull @PositiveOrZero BigDecimal rejectedQuantity,
                                      @NotNull @PositiveOrZero BigDecimal cancelledQuantity,
                                      @NotBlank @Size(max = 32) String unit) { }
+
+    public record ProofOfDeliveryCreateRequest(@NotBlank @Size(max = 160) String receiverName,
+                                               Instant capturedAt, @Size(max = 2000) String notes) { }
+
+    public record ProofEvidenceAttachmentRequest(@NotNull ProofEvidenceKind kind,
+                                                  @NotNull UUID evidenceObjectId) { }
 
     private static String etag(long version) { return "\"" + version + "\""; }
 

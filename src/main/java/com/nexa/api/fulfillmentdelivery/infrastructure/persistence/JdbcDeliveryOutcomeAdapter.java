@@ -8,6 +8,10 @@ import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.PodV
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.RemainingLine;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureEvidenceView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryCreateRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceKind;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort.AttemptLine;
@@ -270,6 +274,107 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public ProofOfDeliveryView createDriverPod(ProofOfDeliveryCreateRequest request) {
+        validateScope(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey());
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_POD_CREATE", request.idempotencyKey());
+        IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_POD_CREATE", request.idempotencyKey());
+        if (prior != null) {
+            ensureHash(prior.requestHash(), request.requestHash());
+            return loadDriverPod(request.tenantId(), request.workspaceId(), prior.resourceId(), true);
+        }
+        DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (!"DELIVERED".equals(delivery.status())) throw error("POD_REQUIRES_FINAL_DELIVERY");
+        if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
+        Instant capturedAt = request.capturedAt() == null ? request.recordedAt() : request.capturedAt();
+        String receiver = boundedRequired(request.receiverName());
+        List<PodIdentity> existing = jdbc.query("select id,attempt_id,receiver_name,completed_at,notes from logistics.proof_of_delivery "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? for update",
+                (rs, row) -> new PodIdentity(rs.getObject("id", UUID.class), rs.getObject("attempt_id", UUID.class),
+                        rs.getString("receiver_name"), instant(rs, "completed_at"), rs.getString("notes")),
+                request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (!existing.isEmpty()) {
+            PodIdentity pod = existing.get(0);
+            if (!pod.attemptId().equals(request.attemptId()) || !pod.receiverName().equals(receiver)
+                    || !pod.capturedAt().equals(capturedAt) || !Objects.equals(pod.notes(), bounded(request.notes()))) {
+                throw error("POD_ALREADY_EXISTS");
+            }
+            insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                    "DRIVER_POD_CREATE", request.idempotencyKey(), request.requestHash(), pod.id(), request.recordedAt());
+            return loadDriverPod(request.tenantId(), request.workspaceId(), pod.id(), true);
+        }
+        UUID podId = UUID.randomUUID();
+        jdbc.update("insert into logistics.proof_of_delivery(id,tenant_id,workspace_id,dispatch_order_id,receiver_name,completed_at,notes,photo_evidence_declared,signature_evidence_declared,status,created_at,delivery_id,attempt_id,photo_evidence_object_id,signature_evidence_object_id,sealed_at) "
+                        + "values (?,?,?,?,?,?,?,false,false,'PENDING',?,?,?,null,null,null)",
+                podId, request.tenantId(), request.workspaceId(), null, receiver, Timestamp.from(capturedAt),
+                bounded(request.notes()), Timestamp.from(request.recordedAt()), request.deliveryId(), request.attemptId());
+        insertAttemptEvent(request.tenantId(), request.workspaceId(), request.deliveryId(), request.attemptId(),
+                "POD_DRAFT_CREATED", request.actorMembershipId(), "Driver began proof of delivery capture", request.recordedAt());
+        incrementDeliveryVersion(request.tenantId(), request.workspaceId(), request.deliveryId(), request.expectedVersion(), request.recordedAt());
+        insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_POD_CREATE", request.idempotencyKey(), request.requestHash(), podId, request.recordedAt());
+        return loadDriverPod(request.tenantId(), request.workspaceId(), podId, false);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ProofOfDeliveryView findDriverPodEvidenceReplay(UUID tenantId, UUID workspaceId,
+                                                            UUID actorMembershipId, String idempotencyKey,
+                                                            String requestHash) {
+        lockCommand(tenantId, workspaceId, actorMembershipId, "DRIVER_POD_EVIDENCE", idempotencyKey);
+        IdempotencyRow prior = idempotency(tenantId, workspaceId, actorMembershipId,
+                "DRIVER_POD_EVIDENCE", idempotencyKey);
+        if (prior == null) return null;
+        ensureHash(prior.requestHash(), requestHash);
+        return loadDriverPod(tenantId, workspaceId, prior.resourceId(), true);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public ProofOfDeliveryView attachDriverPodEvidence(ProofEvidenceRequest request) {
+        validateScope(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey());
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_POD_EVIDENCE", request.idempotencyKey());
+        IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_POD_EVIDENCE", request.idempotencyKey());
+        if (prior != null) {
+            ensureHash(prior.requestHash(), request.requestHash());
+            return loadDriverPod(request.tenantId(), request.workspaceId(), prior.resourceId(), true);
+        }
+        DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (!"DELIVERED".equals(delivery.status())) throw error("POD_REQUIRES_FINAL_DELIVERY");
+        if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
+        DriverPodRow pod = lockDriverPod(request.tenantId(), request.workspaceId(), request.deliveryId(), request.podId());
+        if (!pod.attemptId().equals(request.attemptId())) throw error("DELIVERY_ATTEMPT_NOT_FOUND");
+        UUID existingEvidence = switch (request.kind()) {
+            case PHOTO -> pod.photoEvidenceObjectId();
+            case SIGNATURE -> pod.signatureEvidenceObjectId();
+        };
+        if (existingEvidence != null) {
+            if (!existingEvidence.equals(request.evidenceObjectId())) throw error("POD_EVIDENCE_ALREADY_ATTACHED");
+            insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                    "DRIVER_POD_EVIDENCE", request.idempotencyKey(), request.requestHash(), request.podId(), request.attachedAt());
+            return loadDriverPod(request.tenantId(), request.workspaceId(), request.podId(), true);
+        }
+        String column = request.kind() == ProofEvidenceKind.PHOTO ? "photo_evidence_object_id" : "signature_evidence_object_id";
+        String declaredColumn = request.kind() == ProofEvidenceKind.PHOTO ? "photo_evidence_declared" : "signature_evidence_declared";
+        if ("SEALED".equals(pod.status()) || "REJECTED".equals(pod.status())) throw error("POD_NOT_ATTACHABLE");
+        int changed = jdbc.update("update logistics.proof_of_delivery set " + column + "=?," + declaredColumn
+                        + "=true,status='CAPTURED' where tenant_id=? and workspace_id=? and id=? and " + column + " is null "
+                        + "and status in ('PENDING','CAPTURED')",
+                request.evidenceObjectId(), request.tenantId(), request.workspaceId(), request.podId());
+        if (changed != 1) throw error("POD_NOT_ATTACHABLE");
+        insertAttemptEvent(request.tenantId(), request.workspaceId(), request.deliveryId(), request.attemptId(),
+                "POD_CAPTURED", request.actorMembershipId(), "Driver attached proof of delivery evidence", request.attachedAt());
+        incrementDeliveryVersion(request.tenantId(), request.workspaceId(), request.deliveryId(), request.expectedVersion(), request.attachedAt());
+        insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_POD_EVIDENCE", request.idempotencyKey(), request.requestHash(), request.podId(), request.attachedAt());
+        return loadDriverPod(request.tenantId(), request.workspaceId(), request.podId(), false);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public PodView sealPod(PodSealRequest request) {
         validateScope(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey());
         lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "POD_SEAL", request.idempotencyKey());
@@ -460,6 +565,33 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                 tenantId, workspaceId, podId).stream().findFirst().orElseThrow(() -> error("POD_NOT_FOUND"));
     }
 
+    private ProofOfDeliveryView loadDriverPod(UUID tenantId, UUID workspaceId, UUID podId, boolean replayed) {
+        return jdbc.query("select p.id,p.delivery_id,p.attempt_id,p.status,p.receiver_name,p.completed_at,"
+                        + "p.photo_evidence_object_id,p.signature_evidence_object_id,d.version delivery_version,"
+                        + "(select e.actor_membership_id from logistics.delivery_event e where e.tenant_id=p.tenant_id "
+                        + "and e.workspace_id=p.workspace_id and e.delivery_id=p.delivery_id and e.attempt_id=p.attempt_id "
+                        + "and e.event_type='POD_DRAFT_CREATED' order by e.occurred_at,e.id limit 1) actor_membership_id "
+                        + "from logistics.proof_of_delivery p join logistics.delivery d on d.tenant_id=p.tenant_id "
+                        + "and d.workspace_id=p.workspace_id and d.id=p.delivery_id where p.tenant_id=? and p.workspace_id=? and p.id=?",
+                (rs, row) -> new ProofOfDeliveryView(rs.getObject("id", UUID.class),
+                        rs.getObject("delivery_id", UUID.class), rs.getObject("attempt_id", UUID.class),
+                        rs.getString("status"), rs.getObject("actor_membership_id", UUID.class),
+                        rs.getString("receiver_name"), instant(rs, "completed_at"),
+                        rs.getObject("photo_evidence_object_id", UUID.class),
+                        rs.getObject("signature_evidence_object_id", UUID.class),
+                        rs.getLong("delivery_version"), replayed),
+                tenantId, workspaceId, podId).stream().findFirst().orElseThrow(() -> error("POD_NOT_FOUND"));
+    }
+
+    private DriverPodRow lockDriverPod(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID podId) {
+        return jdbc.query("select id,attempt_id,status,photo_evidence_object_id,signature_evidence_object_id "
+                        + "from logistics.proof_of_delivery where tenant_id=? and workspace_id=? and delivery_id=? and id=? for update",
+                (rs, row) -> new DriverPodRow(rs.getObject("id", UUID.class), rs.getObject("attempt_id", UUID.class),
+                        rs.getString("status"), rs.getObject("photo_evidence_object_id", UUID.class),
+                        rs.getObject("signature_evidence_object_id", UUID.class)),
+                tenantId, workspaceId, deliveryId, podId).stream().findFirst().orElseThrow(() -> error("POD_NOT_FOUND"));
+    }
+
     private TemperatureView loadTemperature(UUID tenantId, UUID workspaceId, UUID evidenceId) {
         return jdbc.query("select t.id,t.delivery_id,t.lot_id,t.temperature_celsius,t.unit,t.source,t.status,t.recorded_at,d.version delivery_version from logistics.temperature_evidence t join logistics.delivery d on d.tenant_id=t.tenant_id and d.workspace_id=t.workspace_id and d.id=t.delivery_id where t.tenant_id=? and t.workspace_id=? and t.id=?",
                 (rs, row) -> new TemperatureView(rs.getObject("id", UUID.class), rs.getObject("delivery_id", UUID.class),
@@ -516,6 +648,22 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                                      UUID actorMembershipId, String reason, Instant occurredAt) {
         jdbc.update("insert into logistics.delivery_event(id,tenant_id,workspace_id,delivery_id,event_type,actor_membership_id,reason,occurred_at) values (?,?,?,?,?,?,?,?)",
                 UUID.randomUUID(), tenantId, workspaceId, deliveryId, eventType, actorMembershipId, bounded(reason), Timestamp.from(occurredAt));
+    }
+
+    private void insertAttemptEvent(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId,
+                                    String eventType, UUID actorMembershipId, String reason, Instant occurredAt) {
+        jdbc.update("insert into logistics.delivery_event(id,tenant_id,workspace_id,delivery_id,event_type,actor_membership_id,reason,occurred_at,attempt_id) values (?,?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), tenantId, workspaceId, deliveryId, eventType, actorMembershipId,
+                bounded(reason), Timestamp.from(occurredAt), attemptId);
+    }
+
+    private void incrementDeliveryVersion(UUID tenantId, UUID workspaceId, UUID deliveryId,
+                                          long expectedVersion, Instant occurredAt) {
+        if (jdbc.update("update logistics.delivery set updated_at=?,version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and id=? and version=?",
+                Timestamp.from(occurredAt), tenantId, workspaceId, deliveryId, expectedVersion) != 1) {
+            throw error("CONCURRENCY_CONFLICT");
+        }
     }
 
     private IdempotencyRow idempotency(UUID tenantId, UUID workspaceId, UUID actor, String operation, String key) {
@@ -620,6 +768,9 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
 
     private record IdempotencyRow(String requestHash, UUID resourceId) { }
     private record PodRow(UUID id, UUID deliveryId, String status) { }
+    private record PodIdentity(UUID id, UUID attemptId, String receiverName, Instant capturedAt, String notes) { }
+    private record DriverPodRow(UUID id, UUID attemptId, String status,
+                                UUID photoEvidenceObjectId, UUID signatureEvidenceObjectId) { }
     private record FulfillmentLineRow(UUID id, UUID skuId, String catalogItemId, String unit,
                                       BigDecimal dispatchedQuantity, BigDecimal deliveredQuantity,
                                       BigDecimal rejectedQuantity, BigDecimal cancelledQuantity,

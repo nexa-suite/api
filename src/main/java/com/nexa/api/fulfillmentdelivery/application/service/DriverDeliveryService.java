@@ -6,6 +6,8 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.A
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceKind;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -98,6 +100,40 @@ public class DriverDeliveryService {
                 clock.instant()));
         if (!result.replayed()) lifecycle.traceDriverArrival(context, result, idempotencyKey);
         return result;
+    }
+
+    @Transactional
+    public ProofOfDeliveryView createProofOfDelivery(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
+                                                      long expectedVersion, String idempotencyKey,
+                                                      FulfillmentLifecycleService.DriverProofCommand command) {
+        context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
+        validateProofCommand(deliveryId, attemptId, expectedVersion, idempotencyKey);
+        persistence.requireAssignedTerminalAttempt(tenant(context), workspace(context), actor(context), deliveryId, attemptId);
+        return lifecycle.createDriverProof(context, deliveryId, attemptId, expectedVersion, idempotencyKey, command);
+    }
+
+    @Transactional
+    public ProofOfDeliveryView attachProofEvidence(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
+                                                   UUID podId, long expectedVersion, String idempotencyKey,
+                                                   ProofEvidenceKind kind, UUID evidenceObjectId) {
+        context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
+        context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
+        validateProofCommand(deliveryId, attemptId, expectedVersion, idempotencyKey);
+        if (podId == null || kind == null || evidenceObjectId == null) {
+            throw new FulfillmentOperationException("POD_EVIDENCE_REQUIRED", false);
+        }
+        persistence.requireAssignedTerminalAttempt(tenant(context), workspace(context), actor(context), deliveryId, attemptId);
+        return lifecycle.attachDriverProofEvidence(context, deliveryId, attemptId, podId, expectedVersion,
+                idempotencyKey, kind, evidenceObjectId);
+    }
+
+    private static void validateProofCommand(UUID deliveryId, UUID attemptId, long expectedVersion,
+                                              String idempotencyKey) {
+        if (deliveryId == null || attemptId == null) throw new FulfillmentOperationException("DELIVERY_ATTEMPT_NOT_FOUND", true);
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 160) {
+            throw new FulfillmentOperationException("IDEMPOTENCY_KEY_REQUIRED", false);
+        }
+        if (expectedVersion < 0) throw new FulfillmentOperationException("VERSION_INVALID", false);
     }
 
     private static UUID tenant(CurrentAccessContext context) { return context.tenantId().value(); }

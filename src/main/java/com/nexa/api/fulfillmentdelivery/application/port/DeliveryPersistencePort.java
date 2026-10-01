@@ -5,6 +5,9 @@ import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.Deli
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.PodView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureEvidenceView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryCreateRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceRequest;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 
 import java.math.BigDecimal;
@@ -21,6 +24,14 @@ public interface DeliveryPersistencePort {
     DeliveryOutcomeResult recordAttempt(AttemptRequest request);
 
     PodView capturePod(PodRequest request);
+
+    ProofOfDeliveryView createDriverPod(ProofOfDeliveryCreateRequest request);
+
+    ProofOfDeliveryView findDriverPodEvidenceReplay(UUID tenantId, UUID workspaceId,
+                                                     UUID actorMembershipId, String idempotencyKey,
+                                                     String requestHash);
+
+    ProofOfDeliveryView attachDriverPodEvidence(ProofEvidenceRequest request);
 
     PodView sealPod(PodSealRequest request);
 

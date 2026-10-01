@@ -800,6 +800,161 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 driverMembership, key, UUID.fromString(eventId))).isEqualTo(1);
     }
 
+    @Test
+    void driverProofIsBoundToOwnedFinalAttemptAndSubjectScopedEvidence() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        DriverDeliveryFixture fixture = createDriverDelivery(
+                warehouse, sales, driverMembership, "driver-proof-" + uuid());
+        TerminalAttemptFixture terminal = completeDriverDelivery(fixture, logistics, "driver-proof-complete-" + uuid());
+        String createPath = "/api/v1/driver/deliveries/" + fixture.deliveryId()
+                + "/attempts/" + terminal.attemptId() + "/proof-of-delivery";
+        String capturedAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
+        String createBody = "{\"receiverName\":\"Verified receiver\",\"capturedAt\":\"" + capturedAt
+                + "\",\"notes\":\"Package handed over\"}";
+
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId()
+                        + "/attempts/" + UUID.randomUUID() + "/proof-of-delivery")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", terminal.deliveryEtag())
+                        .header("Idempotency-Key", "driver-proof-wrong-attempt-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(createBody))
+                .andExpect(status().isNotFound());
+
+        String createKey = "driver-proof-create-" + uuid();
+        MvcResult pending = mockMvc.perform(post(createPath)
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", terminal.deliveryEtag())
+                        .header("Idempotency-Key", createKey).contentType(MediaType.APPLICATION_JSON).content(createBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.attemptId").value(terminal.attemptId()))
+                .andExpect(jsonPath("$.actorMembershipId").value(driverMembership.toString()))
+                .andExpect(jsonPath("$.photoEvidenceObjectId").doesNotExist()).andReturn();
+        UUID podId = UUID.fromString(json(pending).get("id").asText());
+        String pendingEtag = pending.getResponse().getHeader("ETag");
+        mockMvc.perform(post(createPath).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", terminal.deliveryEtag()).header("Idempotency-Key", createKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(createBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(podId.toString()))
+                .andExpect(jsonPath("$.replayed").value(true));
+        mockMvc.perform(post(createPath).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", terminal.deliveryEtag()).header("Idempotency-Key", createKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createBody.replace("Package handed over", "Changed notes")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+
+        UUID clientAccountId = jdbc.queryForObject("select sales_order.client_account_id from logistics.delivery delivery "
+                        + "join logistics.fulfillment fulfillment on fulfillment.id=delivery.fulfillment_id "
+                        + "join sales.sales_order sales_order on sales_order.id=fulfillment.sales_order_id where delivery.id=?",
+                UUID.class, fixture.deliveryId());
+        UUID wrongSubjectEvidence = seedAvailablePodEvidence(clientAccountId, UUID.randomUUID(), driverMembership);
+        UUID matchingEvidence = seedAvailablePodEvidence(clientAccountId, podId, driverMembership);
+        String evidencePath = createPath + "/" + podId + "/evidence";
+        mockMvc.perform(post(evidencePath).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", pendingEtag).header("Idempotency-Key", "driver-proof-wrong-subject-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"kind\":\"PHOTO\",\"evidenceObjectId\":\"" + wrongSubjectEvidence + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BUSINESS_EVIDENCE_NOT_AVAILABLE"));
+        assertThat(jdbc.queryForObject("select count(*) from logistics.proof_of_delivery where id=? and status='PENDING' "
+                        + "and photo_evidence_object_id is null", Integer.class, podId)).isEqualTo(1);
+
+        String evidenceKey = "driver-proof-attach-" + uuid();
+        String evidenceBody = "{\"kind\":\"PHOTO\",\"evidenceObjectId\":\"" + matchingEvidence + "\"}";
+        MvcResult captured = mockMvc.perform(post(evidencePath).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", pendingEtag).header("Idempotency-Key", evidenceKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(evidenceBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("CAPTURED"))
+                .andExpect(jsonPath("$.photoEvidenceObjectId").value(matchingEvidence.toString()))
+                .andExpect(jsonPath("$.attemptId").value(terminal.attemptId())).andReturn();
+        String capturedAtServer = json(captured).get("capturedAt").asText();
+        String capturedEtag = captured.getResponse().getHeader("ETag");
+        mockMvc.perform(post(evidencePath).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", pendingEtag).header("Idempotency-Key", evidenceKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(evidenceBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(podId.toString()))
+                .andExpect(jsonPath("$.capturedAt").value(capturedAtServer))
+                .andExpect(jsonPath("$.replayed").value(true));
+        mockMvc.perform(post(evidencePath).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", capturedEtag).header("Idempotency-Key", evidenceKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"kind\":\"PHOTO\",\"evidenceObjectId\":\"" + wrongSubjectEvidence + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+        assertThat(jdbc.queryForObject("select count(*) from logistics.proof_of_delivery where delivery_id=?",
+                Integer.class, fixture.deliveryId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_event where delivery_id=? "
+                        + "and attempt_id=? and event_type='POD_CAPTURED' and actor_membership_id=?",
+                Integer.class, fixture.deliveryId(), UUID.fromString(terminal.attemptId()), driverMembership)).isEqualTo(1);
+    }
+
+    private TerminalAttemptFixture completeDriverDelivery(DriverDeliveryFixture fixture, String logistics,
+                                                           String key) throws Exception {
+        MvcResult current = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", current.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key + "-transit"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult started = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", transit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key + "-start")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andReturn();
+        String attemptId = json(started).get("attempt").get("id").asText();
+        AttemptOutcomeLine line = jdbc.queryForObject(
+                "select fl.id,fl.sku_id,fl.dispatched_quantity,fl.unit from logistics.fulfillment_line fl "
+                        + "join logistics.fulfillment f on f.tenant_id=fl.tenant_id and f.workspace_id=fl.workspace_id "
+                        + "and f.id=fl.fulfillment_id join logistics.delivery d on d.tenant_id=f.tenant_id "
+                        + "and d.workspace_id=f.workspace_id and d.fulfillment_id=f.id where d.id=?",
+                (rs, row) -> new AttemptOutcomeLine(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
+                        rs.getBigDecimal("dispatched_quantity"), rs.getString("unit")), fixture.deliveryId());
+        String timestamp = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
+        String body = "{\"outcome\":\"DELIVERED\",\"attemptedAt\":\"" + timestamp
+                + "\",\"lines\":[{\"fulfillmentLineId\":\"" + line.fulfillmentLineId()
+                + "\",\"skuId\":\"" + line.skuId() + "\",\"attemptedQuantity\":" + line.quantity().toPlainString()
+                + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
+                + ",\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\"" + line.unit() + "\"}]}";
+        MvcResult completed = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId()
+                        + "/attempts/" + attemptId + "/outcomes")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", started.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key + "-outcome")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
+        return new TerminalAttemptFixture(attemptId, completed.getResponse().getHeader("ETag"));
+    }
+
+    private UUID seedAvailablePodEvidence(UUID clientAccountId, UUID subjectId, UUID actorMembershipId) {
+        UUID evidenceId = UUID.randomUUID();
+        String objectKey = "evidence/test/driver-pod-" + uuid() + ".jpg";
+        String checksum = "a".repeat(64);
+        Instant now = Instant.now();
+        jdbc.update("insert into business_documents.object_storage_object "
+                        + "(object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) "
+                        + "values (?,?,?,?,?,?,?,?,?)",
+                objectKey, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), "nexa-private", checksum,
+                "image/jpeg", 8L, true, java.sql.Timestamp.from(now));
+        jdbc.update("insert into business_documents.evidence_object "
+                        + "(id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,object_key,lifecycle_status,"
+                        + "declared_content_type,detected_content_type,original_filename,checksum_sha256,byte_size,created_at,scanned_at,"
+                        + "requested_by_membership_id,idempotency_key,scan_attempt_count,next_scan_at,updated_at) "
+                        + "values (?,?,?,?,?,?,?,'AVAILABLE','image/jpeg','image/jpeg','driver-proof.jpg',?,?,?, ?,?,?,0,?,?)",
+                evidenceId, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), clientAccountId,
+                "PROOF_OF_DELIVERY", subjectId, objectKey, checksum, 8L, java.sql.Timestamp.from(now),
+                java.sql.Timestamp.from(now), actorMembershipId, "seed-driver-proof-" + uuid(),
+                java.sql.Timestamp.from(now), java.sql.Timestamp.from(now));
+        return evidenceId;
+    }
+
+    private record TerminalAttemptFixture(String attemptId, String deliveryEtag) { }
+
     private DriverDeliveryFixture createDriverDelivery(String warehouse, String sales, UUID assignedMembership,
                                                        String key) throws Exception {
         PhysicalFlow flow = createPickingFlow(warehouse, sales, key, "2");

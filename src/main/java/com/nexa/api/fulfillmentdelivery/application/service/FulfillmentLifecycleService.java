@@ -6,6 +6,10 @@ import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentC
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureEvidenceView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceKind;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryCreateRequest;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort;
@@ -556,6 +560,63 @@ public class FulfillmentLifecycleService {
     }
 
     @Transactional
+    public ProofOfDeliveryView createDriverProof(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
+                                                  long expectedVersion, String idempotencyKey,
+                                                  DriverProofCommand command) {
+        requireKey(idempotencyKey);
+        requireVersion(expectedVersion);
+        if (attemptId == null || command == null || command.receiverName() == null
+                || command.receiverName().isBlank()) throw invalid("POD_RECEIVER_REQUIRED");
+        Instant capturedAt = command.capturedAt() == null ? now() : command.capturedAt();
+        Instant recordedAt = now();
+        ProofOfDeliveryView result = deliveries.createDriverPod(new ProofOfDeliveryCreateRequest(
+                tenant(context), workspace(context), deliveryId, attemptId, actor(context), expectedVersion,
+                idempotencyKey, driverPodCreateHash(deliveryId, attemptId, expectedVersion,
+                command.receiverName(), capturedAt, bounded(command.notes())), command.receiverName(),
+                capturedAt, bounded(command.notes()), recordedAt));
+        if (!result.replayed()) {
+            trace(context, "POD_DRAFT_CREATED", "ProofOfDelivery", result.id(), idempotencyKey,
+                    Map.of("deliveryId", deliveryId, "attemptId", attemptId, "status", result.status()));
+        }
+        return result;
+    }
+
+    @Transactional
+    public ProofOfDeliveryView attachDriverProofEvidence(CurrentAccessContext context, UUID deliveryId,
+                                                          UUID attemptId, UUID podId, long expectedVersion,
+                                                          String idempotencyKey, ProofEvidenceKind kind,
+                                                          UUID evidenceObjectId) {
+        requireKey(idempotencyKey);
+        requireVersion(expectedVersion);
+        if (deliveryId == null || attemptId == null || podId == null || kind == null || evidenceObjectId == null) {
+            throw invalid("POD_EVIDENCE_REQUIRED");
+        }
+        FulfillmentModels.DeliveryView delivery = deliveries.find(tenant(context), workspace(context), deliveryId);
+        if (delivery.salesOrderId() == null) throw invalid("DELIVERY_FULFILLMENT_NOT_FOUND");
+        SalesOrderFulfillmentQuery.Snapshot order = salesOrders.get(
+                tenant(context), workspace(context), delivery.salesOrderId());
+        String requestHash = driverPodEvidenceHash(deliveryId, attemptId, podId, expectedVersion, kind,
+                evidenceObjectId);
+        ProofOfDeliveryView replay = deliveries.findDriverPodEvidenceReplay(
+                tenant(context), workspace(context), actor(context), idempotencyKey, requestHash);
+        if (replay != null) return replay;
+        if (!businessEvidence.isAvailableForSubject(tenant(context), workspace(context), evidenceObjectId,
+                order.clientAccountId(), "PROOF_OF_DELIVERY", podId)) {
+            throw invalid("BUSINESS_EVIDENCE_NOT_AVAILABLE");
+        }
+        Instant attachedAt = now();
+        ProofOfDeliveryView result = deliveries.attachDriverPodEvidence(new ProofEvidenceRequest(
+                tenant(context), workspace(context), deliveryId, attemptId, podId, actor(context), expectedVersion,
+                idempotencyKey, requestHash, kind, evidenceObjectId, attachedAt));
+        if (!result.replayed()) {
+            trace(context, "POD_CAPTURED", "ProofOfDelivery", result.id(), idempotencyKey,
+                    Map.of("deliveryId", deliveryId, "attemptId", attemptId,
+                            "evidenceKind", kind.name(), "evidenceObjectId", evidenceObjectId));
+        }
+        return result;
+    }
+
+    @Transactional
     public FulfillmentModels.PodView sealPod(CurrentAccessContext context, UUID deliveryId,
                                               long expectedVersion, String idempotencyKey, Instant sealedAt) {
         logisticsWrite(context);
@@ -780,6 +841,31 @@ public class FulfillmentLifecycleService {
                 + command.photoEvidenceObjectId() + "|" + command.signatureEvidenceObjectId();
     }
 
+    private static String driverPodCreateHash(UUID deliveryId, UUID attemptId, long expectedVersion,
+                                              String receiver, Instant capturedAt, String notes) {
+        StringBuilder value = new StringBuilder("driver-pod-create-v1|");
+        appendCanonicalField(value, deliveryId.toString());
+        appendCanonicalField(value, attemptId.toString());
+        appendCanonicalField(value, Long.toString(expectedVersion));
+        appendCanonicalField(value, receiver);
+        appendCanonicalField(value, capturedAt.toString());
+        appendCanonicalField(value, notes);
+        return hash(value.toString());
+    }
+
+    private static String driverPodEvidenceHash(UUID deliveryId, UUID attemptId, UUID podId,
+                                                long expectedVersion, ProofEvidenceKind kind,
+                                                UUID evidenceObjectId) {
+        StringBuilder value = new StringBuilder("driver-pod-evidence-v1|");
+        appendCanonicalField(value, deliveryId.toString());
+        appendCanonicalField(value, attemptId.toString());
+        appendCanonicalField(value, podId.toString());
+        appendCanonicalField(value, Long.toString(expectedVersion));
+        appendCanonicalField(value, kind.name());
+        appendCanonicalField(value, evidenceObjectId.toString());
+        return hash(value.toString());
+    }
+
     private static String temperatureCanonical(TemperatureCommand command) {
         return command.lotId() + "|" + command.temperatureCelsius() + "|" + command.unit() + "|"
                 + command.source() + "|" + command.evidenceMetadata() + "|" + command.recordedAt();
@@ -901,6 +987,8 @@ public class FulfillmentLifecycleService {
 
     public record PodCommand(String receiverName, Instant capturedAt, String notes,
                              UUID photoEvidenceObjectId, UUID signatureEvidenceObjectId) { }
+
+    public record DriverProofCommand(String receiverName, Instant capturedAt, String notes) { }
 
     public record TemperatureCommand(UUID lotId, BigDecimal temperatureCelsius, String unit,
                                      String source, String evidenceMetadata, Instant recordedAt) { }

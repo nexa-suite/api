@@ -88,6 +88,27 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public void requireAssignedTerminalAttempt(UUID tenantId, UUID workspaceId, UUID membershipId,
+                                               UUID deliveryId, UUID attemptId) {
+        DeliveryRow delivery = lockDelivery(tenantId, workspaceId, deliveryId);
+        if (delivery == null || !"DELIVERED".equals(delivery.status())
+                || !isAssigned(tenantId, workspaceId, deliveryId, membershipId)) {
+            throw error("DELIVERY_NOT_FOUND");
+        }
+        boolean ownedFinalAttempt = Boolean.TRUE.equals(jdbc.queryForObject(
+                "select exists(select 1 from logistics.delivery_attempt a "
+                        + "join logistics.delivery_command_idempotency i on i.tenant_id=a.tenant_id "
+                        + "and i.workspace_id=a.workspace_id and i.resource_id=a.id "
+                        + "where a.tenant_id=? and a.workspace_id=? and a.delivery_id=? and a.id=? "
+                        + "and a.status='FINAL' and i.actor_membership_id=? and i.operation='ATTEMPT' "
+                        + "and a.attempt_number=(select max(latest.attempt_number) from logistics.delivery_attempt latest "
+                        + "where latest.tenant_id=a.tenant_id and latest.workspace_id=a.workspace_id and latest.delivery_id=a.delivery_id))",
+                Boolean.class, tenantId, workspaceId, deliveryId, attemptId, membershipId));
+        if (!ownedFinalAttempt) throw error("DELIVERY_ATTEMPT_NOT_FOUND");
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public AttemptStartResult startAttempt(AttemptStartRequest request) {
         validate(request);
         lockCommand(request);

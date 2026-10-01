@@ -3,6 +3,7 @@ package com.nexa.api.businessdocuments.infrastructure.persistence;
 import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentCommands;
 import com.nexa.api.businessdocuments.application.model.BusinessDocumentModels;
+import com.nexa.api.businessdocuments.application.exception.BusinessEvidenceIdempotencyConflictException;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentProjections;
 import com.nexa.api.businessdocuments.application.port.ContentScannerPort;
 import com.nexa.api.businessdocuments.application.port.DocumentRendererPort;
@@ -33,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.InputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Timestamp;
@@ -43,6 +45,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /** Persistence adapter for business documents, storage boundary and bounded generation worker. */
@@ -51,6 +54,7 @@ import java.util.UUID;
 public class BusinessDocumentService implements BusinessDocumentPort, BusinessDocumentCommands {
     private static final Logger LOGGER = LoggerFactory.getLogger(BusinessDocumentService.class);
     private static final String WORKER_LEASE = "current_timestamp + interval '10 minutes'";
+    private static final int MAX_EVIDENCE_BYTES = 10_485_760;
     private final JdbcTemplate jdbc;
     private final CanonicalOutboxPort canonicalOutbox;
     private final ObjectStoragePort storage;
@@ -227,13 +231,30 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(), new DocumentSubjectReference(subject, subjectId.toString()));
         if (!snapshot.subjectExists()) throw new IllegalArgumentException("Evidence subject not found");
         authorizeClientScope(context, snapshot.clientAccountId());
+        String requestFingerprint = evidenceRequestFingerprint(tenant(context), workspace(context), context.membershipId().value(),
+                uuid(snapshot.clientAccountId()), subject.name(), subjectId, filename, contentType);
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (rs, n) -> rs.getObject(1),
+                tenant(context) + "|" + workspace(context) + "|business-evidence|" + context.membershipId().value() + "|" + idempotencyKey);
         List<EvidenceRow> existing = jdbc.query(evidenceSelect() + " where e.tenant_id=? and e.workspace_id=? and e.requested_by_membership_id=? and e.idempotency_key=?",
                 (rs, n) -> evidenceRow(rs), tenant(context), workspace(context), context.membershipId().value(), idempotencyKey);
-        if (!existing.isEmpty()) return evidenceView(existing.get(0));
+        if (!existing.isEmpty()) {
+            EvidenceRow row = existing.get(0);
+            if (!Objects.equals(row.clientAccountId(), uuid(snapshot.clientAccountId()))
+                    || !row.subjectType().equals(subject.name()) || !row.subjectId().equals(subjectId)
+                    || !row.originalFilename().equals(filename) || !row.declaredContentType().equals(contentType)
+                    || row.requestFingerprint() != null && !row.requestFingerprint().equals(requestFingerprint)) {
+                throw new BusinessEvidenceIdempotencyConflictException();
+            }
+            if (row.requestFingerprint() == null) {
+                jdbc.update("update business_documents.evidence_object set request_fingerprint=? where tenant_id=? and workspace_id=? and id=? and request_fingerprint is null",
+                        requestFingerprint, tenant(context), workspace(context), row.id());
+            }
+            return evidenceView(row);
+        }
         UUID id = UUID.randomUUID(); Instant now = Instant.now();
-        jdbc.update("insert into business_documents.evidence_object (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,object_key,lifecycle_status,declared_content_type,original_filename,requested_by_membership_id,idempotency_key,scan_attempt_count,next_scan_at,created_at,updated_at) values (?,?,?,?,?,?,null,'REQUESTED',?,?,?,?,0,current_timestamp,?,?)",
+        jdbc.update("insert into business_documents.evidence_object (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,object_key,lifecycle_status,declared_content_type,original_filename,requested_by_membership_id,idempotency_key,request_fingerprint,scan_attempt_count,next_scan_at,created_at,updated_at) values (?,?,?,?,?,?,null,'REQUESTED',?,?,?,?,?,0,current_timestamp,?,?)",
                 id, tenant(context), workspace(context), uuid(snapshot.clientAccountId()), subject.name(), subjectId, contentType, filename,
-                context.membershipId().value(), idempotencyKey, Timestamp.from(now), Timestamp.from(now));
+                context.membershipId().value(), idempotencyKey, requestFingerprint, Timestamp.from(now), Timestamp.from(now));
         return loadEvidenceForWrite(context, id).view();
     }
 
@@ -243,23 +264,53 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         requireIdempotencyKey(idempotencyKey);
         String filename = sanitizedRequiredFilename(originalFilename);
         String contentType = requiredContentType(declaredContentType);
-        if (content == null || contentLength <= 0 || contentLength > 10485760) throw new IllegalArgumentException("Evidence size is invalid");
+        if (content == null || contentLength <= 0 || contentLength > MAX_EVIDENCE_BYTES) throw new IllegalArgumentException("Evidence size is invalid");
+        byte[] bytes = readEvidenceBytes(content, contentLength);
         EvidenceAccess access = loadEvidenceForWrite(context, evidenceId);
         EvidenceRow row = access.row();
+        if (!Objects.equals(row.requestedByMembershipId(), context.membershipId().value())
+                || !Objects.equals(row.idempotencyKey(), idempotencyKey)) {
+            throw new IllegalArgumentException("Evidence request not found");
+        }
+        if (!row.originalFilename().equals(filename) || !row.declaredContentType().equals(contentType)) {
+            throw new BusinessEvidenceIdempotencyConflictException();
+        }
+        String requestFingerprint = evidenceRequestFingerprint(tenant(context), workspace(context), context.membershipId().value(),
+                row.clientAccountId(), row.subjectType(), row.subjectId(), filename, contentType);
+        if (row.requestFingerprint() != null && !row.requestFingerprint().equals(requestFingerprint)) {
+            throw new BusinessEvidenceIdempotencyConflictException();
+        }
+        if (row.requestFingerprint() == null) {
+            jdbc.update("update business_documents.evidence_object set request_fingerprint=? where tenant_id=? and workspace_id=? and id=? and request_fingerprint is null",
+                    requestFingerprint, tenant(context), workspace(context), evidenceId);
+        }
+        String contentSha256 = sha256(bytes);
+        requireSameEvidenceContent(row, contentSha256);
+        if (row.uploadContentSha256() == null && row.checksumSha256() != null) {
+            jdbc.update("update business_documents.evidence_object set upload_content_sha256=? where tenant_id=? and workspace_id=? and id=? and upload_content_sha256 is null and checksum_sha256=?",
+                    contentSha256, tenant(context), workspace(context), evidenceId, row.checksumSha256());
+        }
         if ("AVAILABLE".equals(row.lifecycleStatus()) || "DELETED".equals(row.lifecycleStatus())) return access.view();
         if ("REJECTED".equals(row.lifecycleStatus())) throw new IllegalArgumentException("Evidence was rejected and cannot be completed");
         UUID uploadClaimToken = UUID.randomUUID();
-        int claimed = jdbc.update("update business_documents.evidence_object set lifecycle_status='UPLOADING',upload_claim_token=?,upload_lease_until=" + WORKER_LEASE + ",updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status in ('REQUESTED','UPLOADING') and (upload_claim_token is null or upload_lease_until <= current_timestamp)",
-                uploadClaimToken, tenant(context), workspace(context), evidenceId);
-        if (claimed == 0) return loadEvidenceForWrite(context, evidenceId).view();
+        int claimed = jdbc.update("update business_documents.evidence_object set lifecycle_status='UPLOADING',upload_content_sha256=?,upload_claim_token=?,upload_lease_until=" + WORKER_LEASE + ",updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status in ('REQUESTED','UPLOADING') and (upload_content_sha256 is null or upload_content_sha256=?) and (upload_claim_token is null or upload_lease_until <= current_timestamp)",
+                contentSha256, uploadClaimToken, tenant(context), workspace(context), evidenceId, contentSha256);
+        if (claimed == 0) {
+            EvidenceRow current = loadEvidenceForWrite(context, evidenceId).row();
+            requireSameEvidenceContent(current, contentSha256);
+            return evidenceView(current);
+        }
         String key = "evidence/quarantine/" + tenant(context) + "/" + evidenceId + "/" + UUID.randomUUID() + ".bin";
         try {
-            ObjectStoragePort.StoredObject stored = storage.put(key, content, contentLength, contentType);
+            ObjectStoragePort.StoredObject stored = storage.put(key, new java.io.ByteArrayInputStream(bytes), bytes.length, contentType);
+            if (!contentSha256.equalsIgnoreCase(stored.checksumSha256()) || stored.byteSize() != bytes.length) {
+                throw new IllegalStateException("Evidence storage checksum did not match uploaded bytes");
+            }
             Instant now = Instant.now();
             jdbc.update("insert into business_documents.object_storage_object (object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?,?,?)",
                     key, tenant(context), workspace(context), "nexa-private", stored.checksumSha256(), contentType, stored.byteSize(), true, Timestamp.from(now));
-            int finalized = jdbc.update("update business_documents.evidence_object set object_key=?,lifecycle_status='QUARANTINED',upload_claim_token=null,upload_lease_until=null,declared_content_type=?,original_filename=?,checksum_sha256=?,byte_size=?,failure_code=null,next_scan_at=current_timestamp,updated_at=? where tenant_id=? and workspace_id=? and id=? and lifecycle_status='UPLOADING' and upload_claim_token=? and upload_lease_until > current_timestamp",
-                    key, contentType, filename, stored.checksumSha256(), stored.byteSize(), Timestamp.from(now), tenant(context), workspace(context), evidenceId, uploadClaimToken);
+            int finalized = jdbc.update("update business_documents.evidence_object set object_key=?,lifecycle_status='QUARANTINED',upload_claim_token=null,upload_lease_until=null,checksum_sha256=?,byte_size=?,failure_code=null,next_scan_at=current_timestamp,updated_at=? where tenant_id=? and workspace_id=? and id=? and lifecycle_status='UPLOADING' and upload_claim_token=? and upload_lease_until > current_timestamp and upload_content_sha256=?",
+                    key, stored.checksumSha256(), stored.byteSize(), Timestamp.from(now), tenant(context), workspace(context), evidenceId, uploadClaimToken, contentSha256);
             if (finalized != 1) {
                 discardEvidenceObject(key, tenant(context), workspace(context));
                 return loadEvidenceForWrite(context, evidenceId).view();
@@ -478,7 +529,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private BusinessDocumentModels.DocumentView documentView(java.sql.ResultSet rs) throws java.sql.SQLException { UUID replacementOfDocumentId = rs.getObject("replacement_of_document_id", UUID.class); return new BusinessDocumentModels.DocumentView(rs.getObject("id", UUID.class).toString(), rs.getObject("client_account_id", UUID.class) == null ? null : rs.getObject("client_account_id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("document_type"), rs.getString("document_number"), rs.getInt("version"), rs.getString("status"), rs.getString("format"), rs.getString("storage_object_key"), rs.getString("checksum_sha256"), rs.getString("content_type"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("generated_at") == null ? null : rs.getTimestamp("generated_at").toInstant(), rs.getString("failure_code"), rs.getString("failure_detail"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(), replacementOfDocumentId == null ? null : replacementOfDocumentId.toString()); }
     private BusinessDocumentModels.EvidenceView evidenceView(java.sql.ResultSet rs) throws java.sql.SQLException { return new BusinessDocumentModels.EvidenceView(rs.getObject("id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("lifecycle_status"), rs.getString("declared_content_type"), rs.getString("detected_content_type"), rs.getString("original_filename"), rs.getString("checksum_sha256"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("scanned_at") == null ? null : rs.getTimestamp("scanned_at").toInstant(), rs.getString("failure_code"), rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant()); }
     private BusinessDocumentModels.EvidenceView evidenceView(EvidenceRow row) { return new BusinessDocumentModels.EvidenceView(row.id().toString(), row.subjectType(), row.subjectId().toString(), row.lifecycleStatus(), row.declaredContentType(), row.detectedContentType(), row.originalFilename(), row.checksumSha256(), row.byteSize(), row.createdAt(), row.scannedAt(), row.failureCode(), row.updatedAt()); }
-    private String evidenceSelect() { return "select e.id,e.client_account_id,e.subject_type,e.subject_id,e.object_key,e.lifecycle_status,e.declared_content_type,e.detected_content_type,e.original_filename,e.checksum_sha256,e.byte_size,e.created_at,e.scanned_at,e.failure_code,e.updated_at from business_documents.evidence_object e"; }
+    private String evidenceSelect() { return "select e.id,e.client_account_id,e.subject_type,e.subject_id,e.requested_by_membership_id,e.idempotency_key,e.request_fingerprint,e.upload_content_sha256,e.object_key,e.lifecycle_status,e.declared_content_type,e.detected_content_type,e.original_filename,e.checksum_sha256,e.byte_size,e.created_at,e.scanned_at,e.failure_code,e.updated_at from business_documents.evidence_object e"; }
     private EvidenceAccess loadEvidence(CurrentAccessContext context, UUID evidenceId) { context.requirePermission(PermissionKey.DOCUMENT_READ); return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
     private EvidenceAccess loadEvidenceForWrite(CurrentAccessContext context, UUID evidenceId) { context.requirePermission(PermissionKey.DOCUMENT_UPLOAD); return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
     private EvidenceAccess loadEvidenceForDownload(CurrentAccessContext context, UUID evidenceId) { return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
@@ -497,11 +548,57 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         return jdbc.query(evidenceSelect() + " where e.tenant_id=? and e.workspace_id=? and e.requested_by_membership_id=? and e.idempotency_key=?", (rs, n) -> rs.getObject("id", UUID.class), tenant(context), workspace(context), context.membershipId().value(), idempotencyKey)
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence request not found"));
     }
-    private EvidenceRow evidenceRow(java.sql.ResultSet rs) throws java.sql.SQLException { return new EvidenceRow(rs.getObject("id", UUID.class), rs.getObject("client_account_id", UUID.class), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class), rs.getString("object_key"), rs.getString("lifecycle_status"), rs.getString("declared_content_type"), rs.getString("detected_content_type"), rs.getString("original_filename"), rs.getString("checksum_sha256"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("scanned_at") == null ? null : rs.getTimestamp("scanned_at").toInstant(), rs.getString("failure_code"), rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant()); }
+    private EvidenceRow evidenceRow(java.sql.ResultSet rs) throws java.sql.SQLException { return new EvidenceRow(
+            rs.getObject("id", UUID.class), rs.getObject("client_account_id", UUID.class), rs.getString("subject_type"),
+            rs.getObject("subject_id", UUID.class), rs.getObject("requested_by_membership_id", UUID.class), rs.getString("idempotency_key"),
+            rs.getObject("request_fingerprint", String.class), rs.getObject("upload_content_sha256", String.class),
+            rs.getString("object_key"), rs.getString("lifecycle_status"), rs.getString("declared_content_type"),
+            rs.getString("detected_content_type"), rs.getString("original_filename"), rs.getString("checksum_sha256"),
+            rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("created_at").toInstant(),
+            rs.getTimestamp("scanned_at") == null ? null : rs.getTimestamp("scanned_at").toInstant(), rs.getString("failure_code"),
+            rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant()); }
     private static String safeEvidenceFilename(String original, UUID id) { return id + "-" + sanitizeFilename(original); }
     private static String sanitizedRequiredFilename(String value) { if (value == null || value.isBlank()) throw new IllegalArgumentException("Evidence filename is required"); String safe = sanitizeFilename(value); if (safe.isBlank() || safe.equals(".")) throw new IllegalArgumentException("Evidence filename is invalid"); return safe; }
     private static String requiredContentType(String value) { if (value == null || value.isBlank() || value.length() > 160) throw new IllegalArgumentException("Evidence content type is required"); return value.trim().toLowerCase(Locale.ROOT); }
     private static void requireIdempotencyKey(String value) { if (value == null || value.isBlank() || value.length() > 160) throw new IllegalArgumentException("Idempotency-Key is required"); }
+    private static byte[] readEvidenceBytes(InputStream content, long contentLength) {
+        try {
+            byte[] bytes = content.readNBytes(MAX_EVIDENCE_BYTES + 1);
+            if (bytes.length != contentLength || bytes.length == 0 || bytes.length > MAX_EVIDENCE_BYTES) {
+                throw new IllegalArgumentException("Evidence size is invalid");
+            }
+            return bytes;
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Evidence could not be read", exception);
+        }
+    }
+    private static String evidenceRequestFingerprint(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
+            UUID clientAccountId, String subjectType, UUID subjectId, String filename, String contentType) {
+        return fingerprint(tenantId.toString(), workspaceId.toString(), actorMembershipId.toString(),
+                clientAccountId == null ? null : clientAccountId.toString(), subjectType, subjectId.toString(), filename, contentType);
+    }
+    private static String fingerprint(String... values) {
+        StringBuilder canonical = new StringBuilder();
+        for (String value : values) {
+            if (value == null) {
+                canonical.append("-1:");
+            } else {
+                canonical.append(value.getBytes(StandardCharsets.UTF_8).length).append(':').append(value);
+            }
+        }
+        return sha256(canonical.toString());
+    }
+    private void requireSameEvidenceContent(EvidenceRow row, String incomingChecksum) {
+        String immutableChecksum = row.uploadContentSha256() == null ? row.checksumSha256() : row.uploadContentSha256();
+        if (immutableChecksum != null) {
+            if (!immutableChecksum.equalsIgnoreCase(incomingChecksum)) throw new BusinessEvidenceIdempotencyConflictException();
+            return;
+        }
+        if (!("REQUESTED".equals(row.lifecycleStatus()) || "UPLOADING".equals(row.lifecycleStatus()))) {
+            throw new BusinessEvidenceIdempotencyConflictException();
+        }
+    }
+    private static String sha256(byte[] value) { try { byte[] digest = MessageDigest.getInstance("SHA-256").digest(value); StringBuilder out = new StringBuilder(64); for (byte b : digest) out.append(String.format("%02x", b)); return out.toString(); } catch (Exception e) { throw new IllegalStateException(e); } }
     private static boolean extensionCompatible(String filename, String detected) { String lower = filename.toLowerCase(Locale.ROOT); return ("image/png".equalsIgnoreCase(detected) && lower.endsWith(".png")) || ("image/jpeg".equalsIgnoreCase(detected) && (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) || ("application/pdf".equalsIgnoreCase(detected) && lower.endsWith(".pdf")); }
     private static boolean retryableScan(ContentScannerPort.ScanResult scan) {
         if (scan.reason() == null) return false;
@@ -511,8 +608,10 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
                 || reason.equals("MALFORMED_SCANNER_RESPONSE");
     }
     private record EvidenceAccess(EvidenceRow row, BusinessDocumentModels.EvidenceView view) { }
-    private record EvidenceRow(UUID id, UUID clientAccountId, String subjectType, UUID subjectId, String objectKey, String lifecycleStatus,
-            String declaredContentType, String detectedContentType, String originalFilename, String checksumSha256, long byteSize,
+    private record EvidenceRow(UUID id, UUID clientAccountId, String subjectType, UUID subjectId,
+            UUID requestedByMembershipId, String idempotencyKey, String requestFingerprint, String uploadContentSha256,
+            String objectKey, String lifecycleStatus, String declaredContentType, String detectedContentType,
+            String originalFilename, String checksumSha256, long byteSize,
             Instant createdAt, Instant scannedAt, String failureCode, Instant updatedAt) { }
     private void outbox(CurrentAccessContext context, String type, UUID aggregateId, Map<String, Object> payload) { canonicalOutbox.append(type, "BusinessDocument", aggregateId, tenant(context), workspace(context), Instant.now(), "document-" + aggregateId, null, "1.0", payload); }
     private void read(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_READ); }
