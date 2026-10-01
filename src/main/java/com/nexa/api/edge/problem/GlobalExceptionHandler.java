@@ -1,5 +1,6 @@
 package com.nexa.api.edge.problem;
 
+import com.nexa.api.customerbuyerrelationships.application.exception.FieldVisitStaleException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidCredentialsException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidRefreshTokenException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidAccessContextTicketException;
@@ -442,6 +443,11 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Resource changed by another request", request); }
+    @ExceptionHandler(FieldVisitStaleException.class)
+    public ResponseEntity<ProblemDetail> handleFieldVisitStale(FieldVisitStaleException exception, HttpServletRequest request) {
+        return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.CONCURRENCY_CONFLICT, "Customer changed; review the current relationship", request);
+    }
+
 	@ExceptionHandler(CustomerRelationshipConflictException.class)
 	public ResponseEntity<ProblemDetail> handleCustomerRelationshipConflict(CustomerRelationshipConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Customer relationship changed by another request", request); }
 	@ExceptionHandler(CustomerRelationshipPreconditionRequiredException.class)
