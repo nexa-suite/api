@@ -115,8 +115,24 @@ public class JdbcOutgoingGoodsCheckAdapter implements OutgoingGoodsCheckPersiste
                         + "where tenant_id=? and workspace_id=? and fulfillment_id=? "
                         + "and physical_allocation_id=? and physical_allocation_version=? and matches=false)",
                 Boolean.class, tenantId, workspaceId, fulfillmentId, fulfillmentVersion, physicalAllocationId,
-                physicalAllocationVersion, tenantId, workspaceId, fulfillmentId, physicalAllocationId,
-                physicalAllocationVersion));
+                        physicalAllocationVersion, tenantId, workspaceId, fulfillmentId, physicalAllocationId,
+                        physicalAllocationVersion));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<UUID> currentMatchId(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                                         long fulfillmentVersion, UUID physicalAllocationId,
+                                         long physicalAllocationVersion) {
+        return jdbc.query("select id from logistics.fulfillment_outgoing_goods_check "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_id=? and fulfillment_version=? "
+                        + "and physical_allocation_id=? and physical_allocation_version=? and matches=true "
+                        + "and not exists(select 1 from logistics.fulfillment_outgoing_goods_check where "
+                        + "tenant_id=? and workspace_id=? and fulfillment_id=? and physical_allocation_id=? "
+                        + "and physical_allocation_version=? and matches=false) order by checked_at desc,id desc limit 1",
+                (rs, row) -> rs.getObject("id", UUID.class), tenantId, workspaceId, fulfillmentId,
+                fulfillmentVersion, physicalAllocationId, physicalAllocationVersion, tenantId, workspaceId,
+                fulfillmentId, physicalAllocationId, physicalAllocationVersion).stream().findFirst();
     }
 
     private StoredCheck load(UUID tenantId, UUID workspaceId, Header header) {

@@ -136,17 +136,19 @@ public class OutgoingGoodsCheckService {
     }
 
     /** Must be called in the same transaction after the allocation lock is held. */
-    public void requireCurrentMatch(CurrentAccessContext context, UUID fulfillmentId,
+    public UUID requireCurrentMatch(CurrentAccessContext context, UUID fulfillmentId,
                                     long fulfillmentVersion, UUID allocationId,
                                     long allocationVersion) {
-        if (!checks.hasCurrentMatch(tenant(context), workspace(context), fulfillmentId,
-                fulfillmentVersion, allocationId, allocationVersion)) {
+        UUID currentMatchId = checks.currentMatchId(tenant(context), workspace(context), fulfillmentId,
+                fulfillmentVersion, allocationId, allocationVersion).orElse(null);
+        if (currentMatchId == null) {
             if (checks.hasOpenDiscrepancy(tenant(context), workspace(context), fulfillmentId,
                     allocationId, allocationVersion)) {
                 throw conflict("FULFILLMENT_OUTGOING_DISCREPANCY_OPEN");
             }
             throw conflict("FULFILLMENT_OUTGOING_CHECK_REQUIRED");
         }
+        return currentMatchId;
     }
 
     private Check project(CurrentAccessContext context, StoredCheck stored,

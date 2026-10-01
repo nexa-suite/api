@@ -19,6 +19,10 @@ public interface OutgoingGoodsCheckPersistencePort {
                             long fulfillmentVersion, UUID physicalAllocationId,
                             long physicalAllocationVersion);
 
+    Optional<UUID> currentMatchId(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                                  long fulfillmentVersion, UUID physicalAllocationId,
+                                  long physicalAllocationVersion);
+
     record RecordRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                         long fulfillmentVersion, UUID physicalAllocationId,
                         long physicalAllocationVersion, UUID actorMembershipId,
