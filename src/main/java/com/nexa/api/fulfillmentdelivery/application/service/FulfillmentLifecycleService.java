@@ -63,6 +63,7 @@ public class FulfillmentLifecycleService {
     private final ColdChainPolicyQuery coldChain;
     private final WarehouseSelectionQuery warehouseSelection;
     private final WarehouseObjectAccess warehouseAccess;
+    private final OutgoingGoodsCheckService outgoingGoodsChecks;
     private final Clock clock;
 
     public FulfillmentLifecycleService(SalesOrderFulfillmentQuery salesOrders,
@@ -77,6 +78,7 @@ public class FulfillmentLifecycleService {
                                        ColdChainPolicyQuery coldChain,
                                        WarehouseSelectionQuery warehouseSelection,
                                        WarehouseObjectAccess warehouseAccess,
+                                       OutgoingGoodsCheckService outgoingGoodsChecks,
                                        Clock clock) {
         this.salesOrders = Objects.requireNonNull(salesOrders, "Sales Order query is required");
         this.salesOrderCommands = Objects.requireNonNull(salesOrderCommands, "Sales Order commands are required");
@@ -90,6 +92,7 @@ public class FulfillmentLifecycleService {
         this.coldChain = Objects.requireNonNull(coldChain, "Cold-chain policy query is required");
         this.warehouseSelection = Objects.requireNonNull(warehouseSelection, "Warehouse selection query is required");
         this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse access is required");
+        this.outgoingGoodsChecks = Objects.requireNonNull(outgoingGoodsChecks, "Outgoing goods check is required");
         this.clock = Objects.requireNonNull(clock, "Clock is required");
     }
 
@@ -365,6 +368,8 @@ public class FulfillmentLifecycleService {
                 || driverAssignment.physicalAllocationVersion() != allocation.version())) {
             throw conflict("FULFILLMENT_DRIVER_ASSIGNMENT_STALE");
         }
+        outgoingGoodsChecks.requireCurrentMatch(context, fulfillmentId, current.version(),
+                allocation.allocationId(), allocation.version());
         physicalAllocations.consumeForDispatch(new PhysicalAllocationCommands.ConsumeRequest(
                 tenant(context), workspace(context), fulfillmentId, actor(context),
                 operationKey("physical-consume-", idempotencyKey),

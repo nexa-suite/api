@@ -163,6 +163,18 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
         MvcResult packed = fulfillmentStep(fixture, "packing", picked.getResponse().getHeader("ETag"));
         MvcResult staged = fulfillmentStep(fixture, "staging", packed.getResponse().getHeader("ETag"));
         MvcResult ready = fulfillmentStep(fixture, "ready-for-dispatch", staged.getResponse().getHeader("ETag"));
+        String outgoingBody = "{\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong()
+                + ",\"observations\":[{\"physicalAllocationLineId\":\""
+                + line.get("physicalAllocationLineId").asText() + "\",\"observedLotId\":\""
+                + line.get("lotId").asText() + "\",\"observedQuantity\":"
+                + line.get("remainingQuantity").asText() + "}]}";
+        mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/outgoing-checks")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", ready.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "physical-read-outgoing-" + suffix())
+                        .contentType(MediaType.APPLICATION_JSON).content(outgoingBody))
+                .andExpect(status().isCreated());
         mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
                         .header("Authorization", "Bearer " + fixture.warehouseToken())
                         .header("If-Match", ready.getResponse().getHeader("ETag"))

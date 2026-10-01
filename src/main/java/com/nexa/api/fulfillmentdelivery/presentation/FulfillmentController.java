@@ -3,9 +3,11 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentWorkListModels;
+import com.nexa.api.fulfillmentdelivery.application.model.OutgoingGoodsCheckModels;
 import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentLifecycleService;
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentWorkListService;
+import com.nexa.api.fulfillmentdelivery.application.service.OutgoingGoodsCheckService;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,6 +20,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,10 +53,13 @@ public final class FulfillmentController {
 
     private final FulfillmentLifecycleService service;
     private final FulfillmentWorkListService workList;
+    private final OutgoingGoodsCheckService outgoingGoodsChecks;
 
-    public FulfillmentController(FulfillmentLifecycleService service, FulfillmentWorkListService workList) {
+    public FulfillmentController(FulfillmentLifecycleService service, FulfillmentWorkListService workList,
+                                 OutgoingGoodsCheckService outgoingGoodsChecks) {
         this.service = service;
         this.workList = workList;
+        this.outgoingGoodsChecks = outgoingGoodsChecks;
     }
 
     @GetMapping("/fulfillments")
@@ -182,6 +188,31 @@ public final class FulfillmentController {
             @PathVariable UUID deliveryId) {
         FulfillmentModels.DeliveryView value = service.getDelivery(context, deliveryId);
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @GetMapping("/fulfillments/{fulfillmentId}/outgoing-checks/current")
+    @Operation(operationId = "getCurrentOutgoingGoodsCheck")
+    public ResponseEntity<OutgoingGoodsCheckModels.Check> currentOutgoingGoodsCheck(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        OutgoingGoodsCheckModels.Check value = outgoingGoodsChecks.current(context, fulfillmentId);
+        if (value == null) return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .eTag(etag(value.fulfillmentVersion())).body(value);
+    }
+
+    @PostMapping("/fulfillments/{fulfillmentId}/outgoing-checks")
+    @Operation(operationId = "recordOutgoingGoodsCheck")
+    public ResponseEntity<OutgoingGoodsCheckModels.Check> recordOutgoingGoodsCheck(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody OutgoingGoodsCheckModels.Request request) {
+        OutgoingGoodsCheckModels.Check value = outgoingGoodsChecks.record(context, fulfillmentId,
+                version(ifMatch), idempotencyKey, request);
+        return ResponseEntity.status(value.replayed() ? 200 : 201)
+                .cacheControl(CacheControl.noStore()).eTag(etag(value.fulfillmentVersion())).body(value);
     }
 
     @PostMapping("/deliveries/{deliveryId}/transit-starts")

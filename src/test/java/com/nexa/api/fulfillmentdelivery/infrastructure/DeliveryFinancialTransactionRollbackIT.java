@@ -63,6 +63,8 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
         fulfillmentEtag = staged.getResponse().getHeader("ETag");
         MvcResult ready = transition(fulfillmentId, fulfillmentEtag, warehouse, "ready-for-dispatch", "rollback-financial-ready-");
         fulfillmentEtag = ready.getResponse().getHeader("ETag");
+        recordMatchingOutgoingCheck(fulfillmentId, warehouse, fulfillmentEtag,
+                "rollback-financial-outgoing-" + UUID.randomUUID());
         MvcResult handedOver = transition(fulfillmentId, fulfillmentEtag, warehouse, "dispatches", "rollback-financial-dispatch-");
         String deliveryId = json(handedOver).get("deliveryId").asText();
 
@@ -114,6 +116,33 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
                         .header("Authorization", "Bearer " + token).header("If-Match", etag)
                         .header("Idempotency-Key", keyPrefix + UUID.randomUUID()))
                 .andExpect(status().isOk()).andReturn();
+    }
+
+    private MvcResult recordMatchingOutgoingCheck(String fulfillmentId, String token,
+                                                   String fulfillmentEtag, String idempotencyKey) throws Exception {
+        var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + fulfillmentId + "/physical-allocation")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn());
+        StringBuilder body = new StringBuilder("{\"physicalAllocationId\":\"")
+                .append(allocation.get("allocationId").asText())
+                .append("\",\"physicalAllocationVersion\":").append(allocation.get("version").asLong())
+                .append(",\"observations\":[");
+        for (int index = 0; index < allocation.get("lines").size(); index++) {
+            var line = allocation.get("lines").get(index);
+            if (index > 0) body.append(',');
+            BigDecimal quantity = line.get("remainingQuantity").decimalValue();
+            body.append("{\"physicalAllocationLineId\":\"").append(line.get("physicalAllocationLineId").asText())
+                    .append("\",\"observedLotId\":")
+                    .append(quantity.signum() == 0 ? "null" : "\"" + line.get("lotId").asText() + "\"")
+                    .append(",\"observedQuantity\":").append(quantity.toPlainString()).append('}');
+        }
+        body.append("]}");
+        return mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/outgoing-checks")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(body.toString()))
+                .andExpect(status().isCreated()).andReturn();
     }
 
     private SalesOrderResource createConfirmedDirectOrder() throws Exception {

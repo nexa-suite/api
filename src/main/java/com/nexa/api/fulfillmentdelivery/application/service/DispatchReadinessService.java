@@ -85,6 +85,18 @@ public class DispatchReadinessService {
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Readiness readiness(CurrentAccessContext context, UUID fulfillmentId) {
         authorize(context);
+        return currentReadiness(context, fulfillmentId);
+    }
+
+    /** Current allocation and picking facts for a Warehouse fulfillment mutation. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Readiness warehouseReadiness(CurrentAccessContext context, UUID fulfillmentId) {
+        Objects.requireNonNull(context, "Verified access context is required")
+                .requirePermission(PermissionKey.FULFILLMENT_MANAGE);
+        return currentReadiness(context, fulfillmentId);
+    }
+
+    private Readiness currentReadiness(CurrentAccessContext context, UUID fulfillmentId) {
         DispatchReadinessPersistencePort.PreparedFulfillment candidate = query.find(
                         context.tenantId().value(), context.workspaceId().value(), fulfillmentId)
                 .orElseThrow(DispatchReadinessService::notFound);
