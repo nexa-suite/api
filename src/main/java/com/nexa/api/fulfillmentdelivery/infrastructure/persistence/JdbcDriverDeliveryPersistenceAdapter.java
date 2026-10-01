@@ -141,6 +141,14 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
             throw error("DELIVERY_CRITICAL_INSTRUCTION_ACK_REQUIRED");
         }
 
+        List<String> workdayStatuses = jdbc.query("select status from logistics.driver_workday "
+                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? "
+                        + "and status<>'CLOSED' for update",
+                (rs, row) -> rs.getString("status"), request.tenantId(), request.workspaceId(), request.actorMembershipId());
+        if (workdayStatuses.isEmpty() || !"ACTIVE".equals(workdayStatuses.getFirst())) {
+            throw new FulfillmentOperationException("DRIVER_LOCATION_UNAVAILABLE", false);
+        }
+
         Integer attemptNumber = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, request.tenantId(), request.workspaceId(), request.deliveryId());
         Instant startedAt = request.startedAt() == null ? Instant.now() : request.startedAt();

@@ -190,3 +190,6 @@ logistics.delivery_instruction_revision	BC06	V130__operational_delivery_instruct
 logistics.delivery_instruction_acknowledgement	BC06	V130__operational_delivery_instructions.sql CREATE TABLE; immutable actor acknowledgements bound to exact instruction revisions.
 logistics.operational_exception_case	BC06	V131__append_delivery_operational_exceptions.sql CREATE TABLE; append-only cases projected from exact actor-attributed Delivery incidents.
 logistics.operational_exception_transition	BC06	V131__append_delivery_operational_exceptions.sql CREATE TABLE; append-only OPEN, Driver claim, and review transitions.
+logistics.driver_workday	BC06	V135__driver_operational_workdays_and_location_ttl.sql CREATE TABLE; scope-bound operational Driver workdays.
+logistics.driver_workday_event	BC06	V135__driver_operational_workdays_and_location_ttl.sql CREATE TABLE; immutable workday facts without coordinates.
+logistics.driver_coordinate	BC06	V135__driver_operational_workdays_and_location_ttl.sql CREATE TABLE; operational coordinates with maximum 24-hour TTL and retention-only deletion.

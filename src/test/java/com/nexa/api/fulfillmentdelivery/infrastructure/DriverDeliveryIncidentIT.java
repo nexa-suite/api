@@ -18,6 +18,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -221,6 +222,15 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
                         + "operator_id,vehicle_reference,route_name,assigned_at,actor_membership_id) values (?,?,?,?,?,?,?,?,current_timestamp,?)",
                 UUID.randomUUID(), tenant, workspace, deliveryId, membershipId, userId, "VAN-TEST", "ROUTE-TEST", membershipId);
         String token = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        var currentWorkday = mockMvc.perform(get("/api/v1/driver/workdays/current")
+                        .header("Authorization", "Bearer " + token)).andReturn();
+        if (currentWorkday.getResponse().getStatus() == 204) {
+        mockMvc.perform(post("/api/v1/driver/workdays")
+                        .header("Authorization", "Bearer " + token)
+                        .header("Idempotency-Key", "incident-workday-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"locationAvailable\":true}"))
+                .andExpect(status().isOk());
+        }
         MvcResult detail = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .get("/api/v1/driver/deliveries/" + deliveryId).header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk()).andReturn();

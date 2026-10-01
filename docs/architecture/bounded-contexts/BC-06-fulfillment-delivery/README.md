@@ -51,3 +51,11 @@ Blocking and critical source facts prevent new route attempts and successful
 remain available for documenting the event. Historical facts without an
 explicit, supported classification remain unchanged and do not produce a
 case.
+
+### Operational Driver location
+
+US-029 separates operational workday state from raw coordinate retention. BC-06 owns authenticated start/end and location-availability facts, and accepts coordinates only for the current actor's ACTIVE workday. BC-01 supplies current Driver eligibility and permissions. New attempt starts require an ACTIVE workday; exact prior attempt replay does not start new work.
+
+Coordinates expire 24 hours after capture. Reads exclude expired points and CLOSED/unavailable workdays. A retention-only database function removes expired coordinates; it exposes no coordinates, accepts no arbitrary predicate and grants no general cross-scope access. The running API invokes it every 30 seconds. Physical purge scheduling must remain active; this local implementation does not establish backup-retention or production operations evidence. Workday events preserve facts without coordinates.
+
+Buyer access additionally requires current Buyer relationship to the Delivery's Customer through BC-02/BC-04 public contracts and an actually dispatched, nonterminal Delivery. Dispatch location access requires current internal Logistics/Owner role and dispatch assignment authority. Warehouse and Sales do not receive Driver coordinates. Client capture must stop before ending a workday and whenever local authority or OS location availability is lost.

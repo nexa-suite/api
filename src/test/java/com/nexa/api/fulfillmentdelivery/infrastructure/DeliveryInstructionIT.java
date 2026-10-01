@@ -23,6 +23,16 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
 
     @Test
     void criticalAcknowledgementsGateNewAttemptAndBindToCurrentRevisionAndActor() throws Exception {
+        String workdayToken = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        var currentWorkday = mockMvc.perform(get("/api/v1/driver/workdays/current")
+                        .header("Authorization", bearer(workdayToken))).andReturn();
+        if (currentWorkday.getResponse().getStatus() == 204) {
+        mockMvc.perform(post("/api/v1/driver/workdays")
+                        .header("Authorization", bearer(workdayToken))
+                        .header("Idempotency-Key", "instruction-workday-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"locationAvailable\":true}"))
+                .andExpect(status().isOk());
+        }
         AssignedDelivery noInstructions = createAssignedDelivery();
         String noInstructionEtag = deliveryEtag(noInstructions);
         mockMvc.perform(post(driverPath(noInstructions) + "/attempts")
