@@ -187,6 +187,137 @@ class WarehouseDiscrepancyApiIntegrationTests extends PostgresIntegrationSupport
         assertThat(commandCount("lot-disposition", "release-without-evidence-" + lot.suffix())).isEqualTo(1);
     }
 
+    @Test
+    void cycleCountCorrectionIsAppendOnlyIdempotentAndRequiresExplicitCurrentVersionApplication() throws Exception {
+        WarehouseLot lot = receiveLot(false);
+        int movementsBefore = movementCount(lot.id());
+        int eventsBefore = eventCount(lot.id());
+        String countKey = "cycle-count-" + lot.suffix();
+        String countBody = "{\"observedQuantity\":\"8\",\"unit\":\"UNIT\"}";
+
+        MvcResult counted = mockMvc.perform(post(cycleCountPath(lot.id()))
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", countKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(countBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("REQUESTED"))
+                .andExpect(jsonPath("$.lotVersion").value(0))
+                .andExpect(jsonPath("$.expectedQuantity").value(10))
+                .andExpect(jsonPath("$.observedQuantity").value(8))
+                .andExpect(jsonPath("$.actorMembershipId").value(membershipId(WAREHOUSE_EMAIL)))
+                .andReturn();
+        String countId = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(counted.getResponse().getContentAsString()).get("id").asText();
+
+        assertLot(lot.id(), "10", "AVAILABLE", 0);
+        assertThat(movementCount(lot.id())).isEqualTo(movementsBefore);
+        assertThat(eventCount(lot.id())).isEqualTo(eventsBefore);
+
+        MvcResult replayedCount = mockMvc.perform(post(cycleCountPath(lot.id()))
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", countKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(countBody))
+                .andExpect(status().isCreated()).andReturn();
+        assertThat(tools.jackson.databind.json.JsonMapper.shared().readTree(replayedCount.getResponse().getContentAsString())
+                .get("id").asText()).isEqualTo(countId);
+        mockMvc.perform(post(cycleCountPath(lot.id()))
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", countKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"observedQuantity\":\"7\",\"unit\":\"UNIT\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+
+        String correctionPath = correctionPath(countId);
+        String correctionKey = "cycle-correction-" + lot.suffix();
+        MvcResult applied = mockMvc.perform(post(correctionPath)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", correctionKey))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cycleCountId").value(countId))
+                .andExpect(jsonPath("$.quantityBefore").value(10))
+                .andExpect(jsonPath("$.quantityAfter").value(8))
+                .andExpect(jsonPath("$.quantityDelta").value(-2))
+                .andExpect(jsonPath("$.lotVersionBefore").value(0))
+                .andExpect(jsonPath("$.lotVersionAfter").value(1))
+                .andExpect(jsonPath("$.actorMembershipId").value(membershipId(WAREHOUSE_EMAIL)))
+                .andReturn();
+        assertLot(lot.id(), "8", "AVAILABLE", 1);
+        assertThat(movementCount(lot.id())).isEqualTo(movementsBefore + 1);
+        assertThat(eventCount(lot.id())).isEqualTo(eventsBefore + 1);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_cycle_count_correction where cycle_count_id=?",
+                Integer.class, UUID.fromString(countId))).isEqualTo(1);
+
+        MvcResult replayedCorrection = mockMvc.perform(post(correctionPath)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", correctionKey))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(replayedCorrection.getResponse().getContentAsString()).get("id").asText())
+                .isEqualTo(tools.jackson.databind.json.JsonMapper.shared()
+                        .readTree(applied.getResponse().getContentAsString()).get("id").asText());
+        assertLot(lot.id(), "8", "AVAILABLE", 1);
+        assertThat(movementCount(lot.id())).isEqualTo(movementsBefore + 1);
+        assertThat(commandCount("inventory-cycle-count-correction", correctionKey)).isEqualTo(1);
+    }
+
+    @Test
+    void cycleCountCorrectionRejectsStaleSnapshotAndRechecksPermissionAndWarehouseGrant() throws Exception {
+        WarehouseLot lot = receiveLot(false);
+        String countKey = "cycle-count-stale-" + lot.suffix();
+        MvcResult counted = mockMvc.perform(post(cycleCountPath(lot.id()))
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", countKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"observedQuantity\":\"8\",\"unit\":\"UNIT\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String countId = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(counted.getResponse().getContentAsString()).get("id").asText();
+        String path = correctionPath(countId);
+
+        mockMvc.perform(post("/api/v1/inventory/adjustments")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", "intervening-adjustment-" + lot.suffix())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(adjustmentBody(lot.id(), "IN", "1", "Count snapshot changed")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post(path)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(lot.token()))
+                        .header(HttpHeaders.IF_MATCH, lot.etag())
+                        .header("Idempotency-Key", "stale-cycle-correction-" + lot.suffix()))
+                .andExpect(status().isPreconditionFailed());
+        assertLot(lot.id(), "11", "AVAILABLE", 1);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_cycle_count_correction where cycle_count_id=?",
+                Integer.class, UUID.fromString(countId))).isZero();
+
+        String salesToken = accessToken(SALES_EMAIL, "PLATFORM");
+        mockMvc.perform(post(path)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(salesToken))
+                        .header(HttpHeaders.IF_MATCH, "\"1\"")
+                        .header("Idempotency-Key", "cycle-correction-no-permission-" + lot.suffix()))
+                .andExpect(status().isForbidden());
+        assertThat(commandCount("inventory-cycle-count-correction", "cycle-correction-no-permission-" + lot.suffix())).isZero();
+
+        mockMvc.perform(delete("/api/v1/warehouses/" + lot.warehouseId() + "/access-grants/" + membershipId(WAREHOUSE_EMAIL))
+                        .header(HttpHeaders.AUTHORIZATION, bearer(accessToken(OWNER_EMAIL, "PLATFORM")))
+                        .header(HttpHeaders.IF_MATCH, "\"0\""))
+                .andExpect(status().isOk());
+        mockMvc.perform(post(path)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(accessToken(WAREHOUSE_EMAIL, "PLATFORM")))
+                        .header(HttpHeaders.IF_MATCH, "\"1\"")
+                        .header("Idempotency-Key", "cycle-correction-no-grant-" + lot.suffix()))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("WAREHOUSE_NOT_FOUND"));
+        assertThat(commandCount("inventory-cycle-count-correction", "cycle-correction-no-grant-" + lot.suffix())).isZero();
+        assertLot(lot.id(), "11", "AVAILABLE", 1);
+    }
+
     private WarehouseLot receiveLot(boolean temperatureExcursion) throws Exception {
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
@@ -233,6 +364,10 @@ class WarehouseDiscrepancyApiIntegrationTests extends PostgresIntegrationSupport
     }
 
     private static String dispositionPath(String lotId) { return "/api/v1/inventory/lots/" + lotId + "/dispositions"; }
+
+    private static String cycleCountPath(String lotId) { return "/api/v1/inventory/lots/" + lotId + "/cycle-counts"; }
+
+    private static String correctionPath(String countId) { return "/api/v1/inventory/cycle-counts/" + countId + "/corrections"; }
 
     private static String dispositionBody(String disposition, String reason) {
         return "{\"disposition\":\"" + disposition + "\",\"reason\":\"" + reason + "\"}";

@@ -240,6 +240,34 @@ public final class WarehouseController {
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
+    @PostMapping("/inventory/lots/{lotId}/cycle-counts")
+    @Operation(operationId = "recordInventoryCycleCount")
+    public ResponseEntity<CycleCountResponse> recordCycleCount(
+            @RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String lotId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody CycleCountRequest request,
+            @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        var command = new WarehouseOperationsService.CycleCountCommand(request.observedQuantity(), request.unit());
+        var value = cycleCount(service.recordCycleCount(c, lotId, command, version(ifMatch), key,
+                String.valueOf(correlation)));
+        return ResponseEntity.status(201).eTag(etag(value.lotVersion())).body(value);
+    }
+
+    @PostMapping("/inventory/cycle-counts/{countId}/corrections")
+    @Operation(operationId = "applyInventoryCycleCountCorrection")
+    public ResponseEntity<CycleCountCorrectionResponse> applyCycleCountCorrection(
+            @RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String countId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        var value = cycleCountCorrection(service.applyCycleCountCorrection(c, countId, version(ifMatch), key,
+                String.valueOf(correlation)));
+        return ResponseEntity.ok().eTag(etag(value.lotVersionAfter())).body(value);
+    }
+
     @PostMapping("/inventory/lots/{lotId}/blocks")
     public ResponseEntity<LotResponse> blockLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         return mutation(service.blockLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
@@ -484,6 +512,15 @@ public final class WarehouseController {
             String observedBatchNumber, LocalDate observedExpirationDate,
             BigDecimal observedQuantity, String observedUnit, boolean hasDifference,
             String actorMembershipId, Instant recordedAt) { }
+    public record CycleCountResponse(String id, String lotId, String warehouseId, String zoneId,
+                                     long lotVersion, BigDecimal expectedQuantity, BigDecimal observedQuantity,
+                                     String unit, String status, String actorMembershipId, Instant recordedAt) { }
+    public record CycleCountCorrectionResponse(String id, String cycleCountId, String lotId,
+                                               String warehouseId, String zoneId,
+                                               long lotVersionBefore, long lotVersionAfter,
+                                               BigDecimal quantityBefore, BigDecimal quantityAfter,
+                                               BigDecimal quantityDelta, String unit,
+                                               String actorMembershipId, Instant recordedAt) { }
     public record ReservationPreviewResponse(String salesOrderId, String orderNumber, List<ProposalLineResponse> lines, boolean complete, Instant generatedAt, String notice) { }
     public record ProposalLineResponse(String catalogItemId, BigDecimal requested, String unit, List<AllocationResponse> allocations, BigDecimal shortage, boolean complete, String skuId) { }
     public record AllocationResponse(String lotId, BigDecimal quantity, String unit, LocalDate expirationDate) { }
@@ -536,4 +573,17 @@ public final class WarehouseController {
             LocalDate observedExpirationDate,
             @NotNull @DecimalMin("0.0") BigDecimal observedQuantity,
             @NotBlank @Size(max = 32) String unit) { }
+    public record CycleCountRequest(@NotNull @DecimalMin("0.0") BigDecimal observedQuantity,
+                                    @NotBlank @Size(max = 32) String unit) { }
+
+    private CycleCountResponse cycleCount(WarehouseOperationsService.CycleCountRecord x) {
+        return new CycleCountResponse(x.id(), x.lotId(), x.warehouseId(), x.zoneId(), x.lotVersion(),
+                x.expectedQuantity(), x.observedQuantity(), x.unit(), x.status(), x.actorMembershipId(), x.recordedAt());
+    }
+
+    private CycleCountCorrectionResponse cycleCountCorrection(WarehouseOperationsService.CycleCountCorrection x) {
+        return new CycleCountCorrectionResponse(x.id(), x.cycleCountId(), x.lotId(), x.warehouseId(), x.zoneId(),
+                x.lotVersionBefore(), x.lotVersionAfter(), x.quantityBefore(), x.quantityAfter(),
+                x.quantityDelta(), x.unit(), x.actorMembershipId(), x.recordedAt());
+    }
 }

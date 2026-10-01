@@ -17,6 +17,10 @@ public interface WarehouseInventoryPersistencePort {
     WarehouseOperationsService.LotSummary quarantineLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation);
     WarehouseOperationsService.LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation);
     WarehouseOperationsService.LotSummary disposeLot(CurrentAccessContext context, String lotId, String disposition, long expected, String reason, String key, String correlation);
+    WarehouseOperationsService.CycleCountRecord recordCycleCount(CurrentAccessContext context, String lotId,
+            WarehouseOperationsService.CycleCountCommand command, long expectedLotVersion, String key, String correlation);
+    WarehouseOperationsService.CycleCountCorrection applyCycleCountCorrection(CurrentAccessContext context,
+            String countId, long expectedLotVersion, String key, String correlation);
     List<WarehouseOperationsService.Availability> availability(CurrentAccessContext context, List<String> ids);
     List<WarehouseOperationsService.Availability> warehouseAvailability(CurrentAccessContext context, String warehouseId, List<String> ids);
 }

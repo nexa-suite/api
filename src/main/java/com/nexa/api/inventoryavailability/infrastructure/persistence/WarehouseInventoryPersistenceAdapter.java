@@ -264,6 +264,201 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         return loadLot(context, id, false);
     }
 
+    @Override
+    @Transactional
+    public WarehouseOperationsService.CycleCountRecord recordCycleCount(
+            CurrentAccessContext context, String lotId,
+            WarehouseOperationsService.CycleCountCommand command, long expectedLotVersion,
+            String idempotencyKey, String correlationId) {
+        requireWrite(context);
+        requireIdempotency(idempotencyKey);
+        if (command == null || expectedLotVersion < 0 || command.observedQuantity() == null
+                || !fitsCycleCountQuantity(command.observedQuantity()) || command.observedQuantity().signum() < 0) {
+            throw error("INVALID_REQUEST", false);
+        }
+
+        UUID lotUuid = uuid(lotId);
+        WarehouseOperationsService.LotSummary lot = loadLot(context, lotUuid, true);
+        String unit = normalizedUnit(command.unit());
+        if (!lot.unit().equalsIgnoreCase(unit)) throw error("INVENTORY_UNIT_MISMATCH", false);
+        String operation = "inventory-cycle-count";
+        String hashInput = lengthPrefixed(lotUuid.toString())
+                + lengthPrefixed(Long.toString(expectedLotVersion))
+                + lengthPrefixed(canonicalQuantity(command.observedQuantity()))
+                + lengthPrefixed(unit)
+                + lengthPrefixed(context.membershipId().value().toString());
+        String hash = requestHash(operation, hashInput);
+        lockIdempotency(context, operation, idempotencyKey);
+        IdempotencyRecord prior = idempotent(context, operation, idempotencyKey);
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            return cycleCount(context, prior.resourceId());
+        }
+        if (lot.version() != expectedLotVersion) throw error("CONCURRENCY_CONFLICT", false);
+
+        BigDecimal observed = command.observedQuantity().stripTrailingZeros();
+        String status = lot.onHand().compareTo(observed) == 0 ? "RECORDED" : "REQUESTED";
+        UUID countId = UUID.randomUUID();
+        Timestamp recordedAt = now();
+        String correlation = correlationId == null || correlationId.isBlank() || "null".equals(correlationId)
+                ? "unknown" : bounded(correlationId, "correlationId", 160);
+        checkUpdated(jdbc.update("insert into warehouse.inventory_cycle_count"
+                        + "(id,tenant_id,workspace_id,lot_id,warehouse_id,zone_id,lot_version,expected_quantity,"
+                        + "observed_quantity,unit,status,actor_membership_id,correlation_id,recorded_at)"
+                        + " values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                countId, tenant(context), workspace(context), lotUuid, uuid(lot.warehouseId()), uuid(lot.zoneId()),
+                lot.version(), lot.onHand(), observed, unit, status, context.membershipId().value(), correlation,
+                recordedAt), "cycle count insert");
+        saveIdempotency(context, operation, idempotencyKey, hash, countId.toString());
+        return cycleCount(context, countId.toString());
+    }
+
+    @Override
+    @Transactional
+    public WarehouseOperationsService.CycleCountCorrection applyCycleCountCorrection(
+            CurrentAccessContext context, String countId, long expectedLotVersion,
+            String idempotencyKey, String correlationId) {
+        requireWrite(context);
+        requireIdempotency(idempotencyKey);
+        if (expectedLotVersion < 0) throw error("INVALID_REQUEST", false);
+        CycleCountRow count = cycleCountRow(context, uuid(countId));
+        UUID lotUuid = uuid(count.lotId());
+        WarehouseOperationsService.LotSummary lot = loadLot(context, lotUuid, true);
+        if (!lot.warehouseId().equals(count.warehouseId()) || !lot.zoneId().equals(count.zoneId())) {
+            throw error("INVENTORY_CYCLE_COUNT_NOT_FOUND", true);
+        }
+
+        String operation = "inventory-cycle-count-correction";
+        String hashInput = lengthPrefixed(count.id()) + lengthPrefixed(Long.toString(expectedLotVersion))
+                + lengthPrefixed(context.membershipId().value().toString());
+        String hash = requestHash(operation, hashInput);
+        lockIdempotency(context, operation, idempotencyKey);
+        IdempotencyRecord prior = idempotent(context, operation, idempotencyKey);
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            return cycleCountCorrection(context, prior.resourceId());
+        }
+        if (!"REQUESTED".equals(count.status())) throw error("CYCLE_COUNT_CORRECTION_NOT_REQUESTED", false);
+        if (expectedLotVersion != count.lotVersion() || lot.version() != count.lotVersion()
+                || lot.onHand().compareTo(count.expectedQuantity()) != 0) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        if (!lot.unit().equalsIgnoreCase(count.unit())) throw error("INVENTORY_UNIT_MISMATCH", false);
+        if (cycleCountCorrectionExists(context, uuid(count.id()))) {
+            throw error("CYCLE_COUNT_CORRECTION_ALREADY_APPLIED", false);
+        }
+
+        BigDecimal before = lot.onHand();
+        BigDecimal after = count.observedQuantity();
+        BigDecimal delta = after.subtract(before);
+        BigDecimal movementQuantity = delta.abs();
+        boolean inbound = delta.signum() > 0;
+        String movementType = inbound ? "ADJUSTMENT_IN" : "ADJUSTMENT_OUT";
+        String reason = "Cycle count correction " + count.id();
+        InventoryLot lotAggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
+                InventoryLotStatus.valueOf(lot.status()));
+        try {
+            if (inbound) lotAggregate.adjustIn(movementQuantity);
+            else lotAggregate.adjustOut(movementQuantity);
+        } catch (IllegalStateException exception) {
+            throw error(inbound ? "INVENTORY_LOT_NOT_ALLOCATABLE" : "INSUFFICIENT_AVAILABLE_STOCK", false);
+        }
+        if (lotAggregate.onHand().compareTo(after) != 0) throw error("INVALID_REQUEST", false);
+
+        checkUpdated(jdbc.update("update warehouse.inventory_lot set stock_quantity=?,status=?,version=version+1"
+                        + " where tenant_id=? and workspace_id=? and id=? and version=?",
+                after, lotAggregate.status().name(), tenant(context), workspace(context), lotUuid, count.lotVersion()),
+                "cycle count stock correction", "CONCURRENCY_CONFLICT");
+        UUID movementId = UUID.randomUUID();
+        Timestamp recordedAt = now();
+        String correlation = correlationId == null || correlationId.isBlank() || "null".equals(correlationId)
+                ? "unknown" : bounded(correlationId, "correlationId", 160);
+        checkUpdated(jdbc.update("insert into warehouse.stock_movement"
+                        + "(id,tenant_id,workspace_id,warehouse_id,zone_id,lot_id,catalog_item_id,sku_id,movement_type,"
+                        + "quantity,unit,quantity_before,quantity_after,reserved_before,reserved_after,reason,"
+                        + "actor_membership_id,correlation_id,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                movementId, tenant(context), workspace(context), uuid(lot.warehouseId()), uuid(lot.zoneId()), lotUuid,
+                lot.catalogItemId(), uuidNullable(lot.skuId()), movementType, movementQuantity, lot.unit(), before,
+                after, lot.reserved(), lot.reserved(), reason, context.membershipId().value(), correlation, recordedAt),
+                "cycle count correction movement insert");
+        UUID correctionId = UUID.randomUUID();
+        checkUpdated(jdbc.update("insert into warehouse.inventory_cycle_count_correction"
+                        + "(id,tenant_id,workspace_id,cycle_count_id,lot_id,warehouse_id,zone_id,lot_version_before,"
+                        + "lot_version_after,quantity_before,quantity_after,quantity_delta,unit,movement_id,"
+                        + "actor_membership_id,correlation_id,recorded_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                correctionId, tenant(context), workspace(context), uuid(count.id()), lotUuid,
+                uuid(lot.warehouseId()), uuid(lot.zoneId()), count.lotVersion(), count.lotVersion() + 1,
+                before, after, delta, lot.unit(), movementId, context.membershipId().value(), correlation, recordedAt),
+                "cycle count correction evidence insert");
+        appendEvent(context, lotUuid, "warehouse.lot.adjusted", "lot", lotAggregate.status().name(), recordedAt);
+        saveIdempotency(context, operation, idempotencyKey, hash, correctionId.toString());
+        return cycleCountCorrection(context, correctionId.toString());
+    }
+
+    private WarehouseOperationsService.CycleCountRecord cycleCount(CurrentAccessContext context, String id) {
+        return jdbc.query("select id,lot_id,warehouse_id,zone_id,lot_version,expected_quantity,observed_quantity,unit,"
+                        + "status,actor_membership_id,recorded_at from warehouse.inventory_cycle_count"
+                        + " where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> new WarehouseOperationsService.CycleCountRecord(
+                        rs.getObject("id", UUID.class).toString(), rs.getObject("lot_id", UUID.class).toString(),
+                        rs.getObject("warehouse_id", UUID.class).toString(), rs.getObject("zone_id", UUID.class).toString(),
+                        rs.getLong("lot_version"), rs.getBigDecimal("expected_quantity"),
+                        rs.getBigDecimal("observed_quantity"), rs.getString("unit"), rs.getString("status"),
+                        rs.getObject("actor_membership_id", UUID.class).toString(), instant(rs, "recorded_at")),
+                tenant(context), workspace(context), uuid(id)).stream().findFirst()
+                .orElseThrow(() -> error("INVENTORY_CYCLE_COUNT_NOT_FOUND", true));
+    }
+
+    private CycleCountRow cycleCountRow(CurrentAccessContext context, UUID id) {
+        return jdbc.query("select id,lot_id,warehouse_id,zone_id,lot_version,expected_quantity,observed_quantity,unit,status"
+                        + " from warehouse.inventory_cycle_count where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> new CycleCountRow(rs.getObject("id", UUID.class).toString(),
+                        rs.getObject("lot_id", UUID.class).toString(), rs.getObject("warehouse_id", UUID.class).toString(),
+                        rs.getObject("zone_id", UUID.class).toString(), rs.getLong("lot_version"),
+                        rs.getBigDecimal("expected_quantity"), rs.getBigDecimal("observed_quantity"),
+                        rs.getString("unit"), rs.getString("status")), tenant(context), workspace(context), id)
+                .stream().findFirst().orElseThrow(() -> error("INVENTORY_CYCLE_COUNT_NOT_FOUND", true));
+    }
+
+    private WarehouseOperationsService.CycleCountCorrection cycleCountCorrection(CurrentAccessContext context, String id) {
+        return jdbc.query("select id,cycle_count_id,lot_id,warehouse_id,zone_id,lot_version_before,lot_version_after,"
+                        + "quantity_before,quantity_after,quantity_delta,unit,actor_membership_id,recorded_at"
+                        + " from warehouse.inventory_cycle_count_correction where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> new WarehouseOperationsService.CycleCountCorrection(
+                        rs.getObject("id", UUID.class).toString(), rs.getObject("cycle_count_id", UUID.class).toString(),
+                        rs.getObject("lot_id", UUID.class).toString(), rs.getObject("warehouse_id", UUID.class).toString(),
+                        rs.getObject("zone_id", UUID.class).toString(), rs.getLong("lot_version_before"),
+                        rs.getLong("lot_version_after"), rs.getBigDecimal("quantity_before"),
+                        rs.getBigDecimal("quantity_after"), rs.getBigDecimal("quantity_delta"), rs.getString("unit"),
+                        rs.getObject("actor_membership_id", UUID.class).toString(), instant(rs, "recorded_at")),
+                tenant(context), workspace(context), uuid(id)).stream().findFirst()
+                .orElseThrow(() -> error("INVENTORY_CYCLE_COUNT_CORRECTION_NOT_FOUND", true));
+    }
+
+    private boolean cycleCountCorrectionExists(CurrentAccessContext context, UUID countId) {
+        return exists("select 1 from warehouse.inventory_cycle_count_correction"
+                        + " where tenant_id=? and workspace_id=? and cycle_count_id=?",
+                tenant(context), workspace(context), countId);
+    }
+
+    private static boolean fitsCycleCountQuantity(BigDecimal quantity) {
+        BigDecimal normalized = quantity.stripTrailingZeros();
+        int fractionalDigits = Math.max(0, normalized.scale());
+        int integerDigits = Math.max(0, normalized.precision() - normalized.scale());
+        return fractionalDigits <= 4 && integerDigits <= 15;
+    }
+
+    private static String canonicalQuantity(BigDecimal quantity) {
+        return quantity.stripTrailingZeros().toPlainString();
+    }
+
+    private static String lengthPrefixed(String value) {
+        return value == null ? "-1:" : value.length() + ":" + value;
+    }
+
+    private record CycleCountRow(String id, String lotId, String warehouseId, String zoneId, long lotVersion,
+                                 BigDecimal expectedQuantity, BigDecimal observedQuantity, String unit, String status) { }
+
     private IdempotencyRecord legacyAdjustmentIdempotency(CurrentAccessContext context, String key,
                                                             String movementType, String lotId, BigDecimal quantity,
                                                             String reason, long expected) {
