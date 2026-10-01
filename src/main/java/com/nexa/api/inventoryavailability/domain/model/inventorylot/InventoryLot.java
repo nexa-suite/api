@@ -96,6 +96,17 @@ public final class InventoryLot {
         validate();
     }
 
+    /**
+     * Applies a preventive temperature hold to a lot already assigned to a
+     * pre-dispatch fulfillment. Existing reservation is retained; the hold
+     * prevents new allocation while the evidence is reviewed.
+     */
+    public void markPreventiveTemperatureHold() {
+        if (status != InventoryLotStatus.AVAILABLE) throw invalidTransition();
+        status = InventoryLotStatus.HOLD;
+        validate();
+    }
+
     public void restoreAvailability() {
         if (status != InventoryLotStatus.BLOCKED && status != InventoryLotStatus.QUARANTINED && status != InventoryLotStatus.HOLD) {
             throw invalidTransition();

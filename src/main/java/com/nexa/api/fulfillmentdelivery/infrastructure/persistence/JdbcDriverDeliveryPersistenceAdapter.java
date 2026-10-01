@@ -42,7 +42,7 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                         + "join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id "
                         + "left join logistics.delivery_active_attempt active on active.tenant_id=d.tenant_id and active.workspace_id=d.workspace_id and active.delivery_id=d.id "
                         + "where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? "
-                        + "and d.status in ('ASSIGNED','DISPATCHED','IN_TRANSIT','PARTIAL') order by d.scheduled_at nulls last,d.created_at,d.id",
+                        + "and d.status in ('PLANNED','ASSIGNED','DISPATCHED','IN_TRANSIT','PARTIAL') order by d.scheduled_at nulls last,d.created_at,d.id",
                 JdbcDriverDeliveryPersistenceAdapter::mapDelivery, tenantId, workspaceId, membershipId)
                 .stream().map(delivery -> withOutcomeLines(delivery, tenantId, workspaceId)).toList();
     }
@@ -276,14 +276,7 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
     }
 
     private boolean hasBlockingOperationalException(UUID tenantId, UUID workspaceId, UUID deliveryId) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("select exists("
-                        + "select 1 from logistics.driver_delivery_incident i where i.tenant_id=? "
-                        + "and i.workspace_id=? and i.delivery_id=? and i.exception_severity in ('BLOCKING','CRITICAL') "
-                        + "union all select 1 from logistics.delivery d join logistics.delivery_incident i "
-                        + "on i.tenant_id=d.tenant_id and i.workspace_id=d.workspace_id "
-                        + "and i.dispatch_order_id=d.dispatch_order_id where d.tenant_id=? and d.workspace_id=? "
-                        + "and d.id=? and i.incident_type='TEMPERATURE_EXCURSION' and i.severity='CRITICAL')",
-                Boolean.class, tenantId, workspaceId, deliveryId, tenantId, workspaceId, deliveryId));
+        return DeliveryExecutionHoldGate.blocking(jdbc, tenantId, workspaceId, deliveryId);
     }
 
     private boolean isAssigned(UUID tenant, UUID workspace, UUID delivery, UUID membership) {

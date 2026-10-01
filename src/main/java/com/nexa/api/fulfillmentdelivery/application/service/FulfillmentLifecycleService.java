@@ -20,6 +20,7 @@ import com.nexa.api.fulfillmentdelivery.domain.temperaturereading.TemperatureSca
 import com.nexa.api.inventoryavailability.application.publicapi.ColdChainPolicyQuery;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery.SellableSkuPolicy;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryBackingQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryTemperatureHoldCommands;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentCommands;
@@ -67,6 +68,7 @@ public class FulfillmentLifecycleService {
     private final BusinessEvidenceQuery businessEvidence;
     private final BusinessTraceabilityCommands traceability;
     private final ColdChainPolicyQuery coldChain;
+    private final InventoryTemperatureHoldCommands temperatureHolds;
     private final WarehouseSelectionQuery warehouseSelection;
     private final WarehouseObjectAccess warehouseAccess;
     private final OutgoingGoodsCheckService outgoingGoodsChecks;
@@ -82,6 +84,7 @@ public class FulfillmentLifecycleService {
                                        BusinessEvidenceQuery businessEvidence,
                                        BusinessTraceabilityCommands traceability,
                                        ColdChainPolicyQuery coldChain,
+                                       InventoryTemperatureHoldCommands temperatureHolds,
                                        WarehouseSelectionQuery warehouseSelection,
                                        WarehouseObjectAccess warehouseAccess,
                                        OutgoingGoodsCheckService outgoingGoodsChecks,
@@ -96,6 +99,7 @@ public class FulfillmentLifecycleService {
         this.businessEvidence = Objects.requireNonNull(businessEvidence, "Business evidence query is required");
         this.traceability = Objects.requireNonNull(traceability, "Business traceability is required");
         this.coldChain = Objects.requireNonNull(coldChain, "Cold-chain policy query is required");
+        this.temperatureHolds = Objects.requireNonNull(temperatureHolds, "Inventory temperature hold is required");
         this.warehouseSelection = Objects.requireNonNull(warehouseSelection, "Warehouse selection query is required");
         this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse access is required");
         this.outgoingGoodsChecks = Objects.requireNonNull(outgoingGoodsChecks, "Outgoing goods check is required");
@@ -676,7 +680,19 @@ public class FulfillmentLifecycleService {
                 || command.unit() == null || command.occurredAt() == null) {
             throw invalid("TEMPERATURE_EVIDENCE_REQUIRED");
         }
+        if (command.expectedLotVersion() != null && command.expectedLotVersion() < 0) {
+            throw invalid("LOT_VERSION_INVALID");
+        }
+        String normalizedKey = idempotencyKey.trim();
+        TemperatureEvidenceView replay = fulfillmentTemperatureEvidenceReplay(context, fulfillmentId,
+                expectedFulfillmentVersion, normalizedKey, command);
+        if (replay != null) return replay;
+
         physicalAllocations.lockForFulfillment(tenant(context), workspace(context), fulfillmentId, actor(context));
+        replay = fulfillmentTemperatureEvidenceReplay(context, fulfillmentId, expectedFulfillmentVersion,
+                normalizedKey, command);
+        if (replay != null) return replay;
+
         FulfillmentModels.FulfillmentView current = fulfillments.find(tenant(context), workspace(context), fulfillmentId);
         if (current.version() != expectedFulfillmentVersion) throw conflict("FULFILLMENT_CONCURRENCY_CONFLICT");
         if (!Set.of("STAGED", "READY_FOR_DISPATCH").contains(current.status())) {
@@ -687,9 +703,13 @@ public class FulfillmentLifecycleService {
         if (current.physicalAllocationId() == null || !current.physicalAllocationId().equals(allocation.allocationId())) {
             throw invalid("PHYSICAL_ALLOCATION_NOT_FOUND");
         }
-        PhysicalAllocationCommands.Line target = allocation.lines().stream()
+        List<PhysicalAllocationCommands.Line> matchingLines = allocation.lines().stream()
                 .filter(line -> command.lotId().equals(line.lotId()) && remainingQuantity(line).signum() > 0)
-                .findFirst().orElseThrow(() -> invalid("TEMPERATURE_LOT_NOT_ALLOCATED"));
+                .toList();
+        PhysicalAllocationCommands.Line target = matchingLines.stream().findFirst()
+                .orElseThrow(() -> invalid("TEMPERATURE_LOT_NOT_ALLOCATED"));
+        BigDecimal affectedQuantity = matchingLines.stream().map(FulfillmentLifecycleService::remainingQuantity)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         TemperatureTarget temperatureTarget = temperatureTarget(context, target);
         TemperatureScale scale;
         BigDecimal celsius;
@@ -700,24 +720,89 @@ public class FulfillmentLifecycleService {
         } catch (IllegalArgumentException exception) {
             throw invalid("TEMPERATURE_VALUE_OR_UNIT_INVALID");
         }
-        if (!within(celsius, temperatureTarget.policy().temperatureMin(), temperatureTarget.policy().temperatureMax())) {
-            throw conflict("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
+        boolean withinRange = within(celsius, temperatureTarget.policy().temperatureMin(),
+                temperatureTarget.policy().temperatureMax());
+        if (command.expectedLotVersion() != null
+                && command.expectedLotVersion() != temperatureTarget.lot().version()) {
+            throw conflict("INVENTORY_LOT_CONCURRENCY_CONFLICT");
         }
-        String requestHash = hash("fulfillment-temperature-v1|" + fulfillmentId + "|" + expectedFulfillmentVersion
+        if (!withinRange && command.expectedLotVersion() == null) throw invalid("LOT_VERSION_REQUIRED");
+        if (!withinRange && command.evidenceObjectId() == null) throw invalid("TEMPERATURE_EVIDENCE_REQUIRED");
+        if (command.evidenceObjectId() != null && !businessEvidence.isAvailablePhotoForSubject(
+                tenant(context), workspace(context), command.evidenceObjectId(), "WAREHOUSE",
+                temperatureTarget.lot().warehouseId())) {
+            throw invalid("BUSINESS_EVIDENCE_NOT_AVAILABLE");
+        }
+        if (command.expectedLotVersion() != null && withinRange) {
+            temperatureHolds.verifyTemperatureEvidenceTarget(context, command.lotId(),
+                    temperatureTarget.lot().warehouseId(), command.expectedLotVersion());
+        }
+        UUID evidenceId = UUID.randomUUID();
+        InventoryTemperatureHoldCommands.PreventiveHoldResult hold = null;
+        if (!withinRange) {
+            hold = temperatureHolds.recordPreventiveTemperatureExcursion(context,
+                    new InventoryTemperatureHoldCommands.PreventiveHoldRequest(command.lotId(),
+                            temperatureTarget.lot().warehouseId(), command.expectedLotVersion(), fulfillmentId,
+                            expectedFulfillmentVersion, celsius, temperatureTarget.policy().temperatureMin(),
+                            temperatureTarget.policy().temperatureMax(), affectedQuantity, evidenceId,
+                            command.evidenceObjectId(), command.occurredAt()));
+        }
+        String requestHash = command.expectedLotVersion() == null && command.evidenceObjectId() == null
+                && withinRange
+                ? hash("fulfillment-temperature-v1|" + fulfillmentId + "|" + expectedFulfillmentVersion
                 + "|" + command.lotId() + "|" + command.value().toPlainString() + "|" + scale.name()
                 + "|" + command.occurredAt() + "|" + temperatureTarget.policy().temperatureMin()
+                + "|" + temperatureTarget.policy().temperatureMax())
+                : hash("fulfillment-temperature-v2|" + fulfillmentId + "|" + expectedFulfillmentVersion
+                + "|" + command.lotId() + "|" + command.value().toPlainString() + "|" + scale.name()
+                + "|" + command.occurredAt() + "|" + command.expectedLotVersion() + "|"
+                + command.evidenceObjectId() + "|" + temperatureTarget.policy().temperatureMin()
                 + "|" + temperatureTarget.policy().temperatureMax());
         TemperatureEvidenceView result = deliveries.recordTemperatureEvidence(
                 new DeliveryPersistencePort.TemperatureEvidenceRequest(tenant(context), workspace(context),
                         "FULFILLMENT", fulfillmentId, command.lotId(), temperatureTarget.lot().warehouseId(),
-                        temperatureTarget.lot().zoneId(), actor(context), idempotencyKey.trim(), requestHash,
-                        command.value(), celsius, "CELSIUS", TemperatureReadingStatus.WITHIN_RANGE.name(),
-                        command.occurredAt(), expectedFulfillmentVersion));
+                        temperatureTarget.lot().zoneId(), actor(context), normalizedKey, requestHash,
+                        command.value(), celsius, "CELSIUS", (withinRange ? TemperatureReadingStatus.WITHIN_RANGE
+                        : TemperatureReadingStatus.OUT_OF_RANGE).name(), command.occurredAt(),
+                        expectedFulfillmentVersion, evidenceId, command.evidenceObjectId(),
+                        command.expectedLotVersion(), hold == null ? command.expectedLotVersion()
+                        : hold.resultingLotVersion(), hold == null ? null : hold.temperatureEvaluationId(),
+                        hold == null ? null : hold.lotStatus(), hold == null ? null : hold.affectedQuantity()));
         trace(context, "TEMPERATURE_EVIDENCE_RECORDED", "TemperatureEvidence", result.id(), idempotencyKey,
                 Map.of("subjectType", result.subjectType(), "subjectId", result.subjectId(),
                         "lotId", command.lotId(), "fulfillmentVersion", expectedFulfillmentVersion,
                         "status", result.status()));
         return result;
+    }
+
+    private TemperatureEvidenceView fulfillmentTemperatureEvidenceReplay(CurrentAccessContext context,
+                                                                           UUID fulfillmentId,
+                                                                           long expectedFulfillmentVersion,
+                                                                           String idempotencyKey,
+                                                                           FulfillmentTemperatureEvidenceCommand command) {
+        TemperatureEvidenceView prior = deliveries.findFulfillmentTemperatureEvidenceReplay(tenant(context),
+                workspace(context), actor(context), idempotencyKey).orElse(null);
+        if (prior == null) return null;
+        TemperatureScale scale;
+        try {
+            scale = TemperatureScale.from(command.unit());
+        } catch (IllegalArgumentException exception) {
+            throw invalid("TEMPERATURE_VALUE_OR_UNIT_INVALID");
+        }
+        boolean sameRequest = "FULFILLMENT".equals(prior.subjectType())
+                && fulfillmentId.equals(prior.subjectId())
+                && command.lotId().equals(prior.lotId())
+                && prior.value() != null && prior.value().compareTo(command.value()) == 0
+                && "CELSIUS".equals(scale.name()) && "CELSIUS".equals(prior.unit())
+                && Objects.equals(prior.occurredAt(), command.occurredAt())
+                && Objects.equals(prior.fulfillmentVersion(), expectedFulfillmentVersion)
+                && Objects.equals(prior.expectedLotVersion(), command.expectedLotVersion())
+                && Objects.equals(prior.evidenceObjectId(), command.evidenceObjectId());
+        if (!sameRequest) throw conflict("IDEMPOTENCY_PAYLOAD_CONFLICT");
+        if (prior.warehouseId() == null || !warehouseAccess.hasActiveGrant(context, prior.warehouseId())) {
+            throw new AccessPolicyViolation("Membership has no active grant for the recorded Warehouse");
+        }
+        return prior;
     }
 
     @Transactional
@@ -793,17 +878,22 @@ public class FulfillmentLifecycleService {
         for (PhysicalAllocationCommands.Line line : allocation.lines()) {
             if (remainingQuantity(line).signum() <= 0) continue;
             if (line.lotId() != null && !seenLots.add(line.lotId())) continue;
+            Long lotVersion = line.lotId() == null ? null : coldChain.temperatureContextForLot(
+                    tenant(context), workspace(context), line.lotId()).map(ColdChainPolicyQuery.LotTemperatureContext::version)
+                    .orElse(null);
             SellableSkuPolicy policy = coldChain.temperatureRequirementForSku(tenant(context), workspace(context), line.skuId())
                     .orElse(null);
             if (policy == null) {
                 lots.add(new FulfillmentModels.FulfillmentTemperatureLot(line.skuId(), line.lotId(),
-                        line.warehouseId(), line.zoneId(), false, false, null, null, "POLICY_UNAVAILABLE", null));
+                        line.warehouseId(), line.zoneId(), false, false, null, null, "POLICY_UNAVAILABLE", null,
+                        lotVersion));
                 continue;
             }
             boolean required = policy.temperatureMin() != null || policy.temperatureMax() != null;
             if (!required) {
                 lots.add(new FulfillmentModels.FulfillmentTemperatureLot(line.skuId(), line.lotId(),
-                        line.warehouseId(), line.zoneId(), false, false, null, null, "NOT_REQUIRED", null));
+                        line.warehouseId(), line.zoneId(), false, false, null, null, "NOT_REQUIRED", null,
+                        lotVersion));
                 continue;
             }
             TemperatureTarget target;
@@ -812,18 +902,19 @@ public class FulfillmentLifecycleService {
             } catch (FulfillmentOperationException exception) {
                 lots.add(new FulfillmentModels.FulfillmentTemperatureLot(line.skuId(), line.lotId(),
                         line.warehouseId(), line.zoneId(), true, false, policy.temperatureMin(),
-                        policy.temperatureMax(), "POLICY_UNAVAILABLE", null));
+                        policy.temperatureMax(), "POLICY_UNAVAILABLE", null, lotVersion));
                 continue;
             }
             TemperatureEvidenceView evidence = deliveries.latestFulfillmentTemperatureEvidence(tenant(context), workspace(context),
                     current.id(), line.lotId(), current.version()).orElse(null);
-            String status = evidence == null ? "OPTIONAL_NOT_RECORDED"
+            String status = target.lot().temperatureHoldOpen() || "HOLD".equals(target.lot().inventoryLotStatus())
+                    ? "OUT_OF_RANGE_REVIEW_REQUIRED" : evidence == null ? "OPTIONAL_NOT_RECORDED"
                     : "CELSIUS".equals(evidence.unit()) && TemperatureReadingStatus.WITHIN_RANGE.name().equals(evidence.status())
                     && within(evidence.value(), target.policy().temperatureMin(), target.policy().temperatureMax())
                     ? "OPTIONAL_WITHIN_RANGE" : "OUT_OF_RANGE_REVIEW_REQUIRED";
             lots.add(new FulfillmentModels.FulfillmentTemperatureLot(line.skuId(), line.lotId(),
                     target.lot().warehouseId(), target.lot().zoneId(), true, false, policy.temperatureMin(),
-                    policy.temperatureMax(), status, evidence));
+                    policy.temperatureMax(), status, evidence, target.lot().version()));
         }
         return new FulfillmentModels.FulfillmentTemperatureReadiness(current.id(), current.status(), current.version(),
                 allocation.allocationId(), allocation.version(), false, now(), lots);
@@ -1149,7 +1240,13 @@ public class FulfillmentLifecycleService {
                                              String unit, Instant occurredAt) { }
 
     public record FulfillmentTemperatureEvidenceCommand(UUID lotId, BigDecimal value,
-                                                        String unit, Instant occurredAt) { }
+                                                        String unit, Instant occurredAt,
+                                                        Long expectedLotVersion, UUID evidenceObjectId) {
+        public FulfillmentTemperatureEvidenceCommand(UUID lotId, BigDecimal value,
+                                                    String unit, Instant occurredAt) {
+            this(lotId, value, unit, occurredAt, null, null);
+        }
+    }
 
     private record TemperatureTarget(SellableSkuPolicy policy,
                                     ColdChainPolicyQuery.LotTemperatureContext lot) { }

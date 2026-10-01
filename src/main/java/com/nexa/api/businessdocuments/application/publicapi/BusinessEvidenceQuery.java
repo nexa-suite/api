@@ -15,4 +15,8 @@ public interface BusinessEvidenceQuery {
     /** Availability plus an exact BC-09 subject binding when a client account is not part of the subject contract. */
     boolean isAvailableForSubject(UUID tenantId, UUID workspaceId, UUID evidenceObjectId,
                                   String subjectType, UUID subjectId);
+
+    /** Availability, image media type, and exact subject binding for photo evidence. */
+    boolean isAvailablePhotoForSubject(UUID tenantId, UUID workspaceId, UUID evidenceObjectId,
+                                       String subjectType, UUID subjectId);
 }

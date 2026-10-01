@@ -1,8 +1,10 @@
 package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
+import com.nexa.api.inventoryavailability.application.publicapi.InventoryTemperatureHoldCommands;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -33,7 +36,8 @@ import static com.nexa.api.inventoryavailability.infrastructure.persistence.Ware
 @Repository
 @Profile("!test")
 public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
-        implements WarehouseInventoryPersistencePort {
+        implements WarehouseInventoryPersistencePort, InventoryTemperatureHoldCommands {
+    private final BusinessEvidenceQuery businessEvidence;
 
     @Autowired
     public WarehouseInventoryPersistenceAdapter(
@@ -43,9 +47,69 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings,
             InventoryCommercialSource commercialSource,
-            InventoryFulfillmentSource fulfillmentSource, WarehouseObjectAccess warehouseAccess) {
+            InventoryFulfillmentSource fulfillmentSource, WarehouseObjectAccess warehouseAccess,
+            BusinessEvidenceQuery businessEvidence) {
         super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
                 warehouseAccess);
+        this.businessEvidence = businessEvidence;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void verifyTemperatureEvidenceTarget(CurrentAccessContext context, UUID lotId, UUID warehouseId,
+                                                long expectedLotVersion) {
+        if (context == null || lotId == null || warehouseId == null || expectedLotVersion < 0) {
+            throw error("TEMPERATURE_EVIDENCE_INVALID", false);
+        }
+        WarehouseOperationsService.LotSummary lot = loadLot(context, lotId, true);
+        if (!warehouseId.toString().equals(lot.warehouseId())) throw error("INVENTORY_LOT_NOT_FOUND", true);
+        if (lot.version() != expectedLotVersion) throw error("INVENTORY_LOT_CONCURRENCY_CONFLICT", false);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public InventoryTemperatureHoldCommands.PreventiveHoldResult recordPreventiveTemperatureExcursion(
+            CurrentAccessContext context, InventoryTemperatureHoldCommands.PreventiveHoldRequest request) {
+        if (context == null || request == null) throw error("TEMPERATURE_EVIDENCE_INVALID", false);
+        WarehouseOperationsService.LotSummary lot = loadLot(context, request.lotId(), true);
+        if (!request.warehouseId().toString().equals(lot.warehouseId())) {
+            throw error("INVENTORY_LOT_NOT_FOUND", true);
+        }
+        if (lot.version() != request.expectedLotVersion()) {
+            throw error("INVENTORY_LOT_CONCURRENCY_CONFLICT", false);
+        }
+        if (!"AVAILABLE".equals(lot.status()) || request.affectedQuantity().compareTo(lot.onHand()) > 0) {
+            throw error("INVENTORY_TEMPERATURE_HOLD_CONFLICT", false);
+        }
+        if (!businessEvidence.isAvailablePhotoForSubject(tenant(context), workspace(context),
+                request.evidenceObjectId(), "WAREHOUSE", request.warehouseId())) {
+            throw error("BUSINESS_EVIDENCE_NOT_AVAILABLE", false);
+        }
+
+        InventoryLot aggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
+                InventoryLotStatus.valueOf(lot.status()));
+        try {
+            aggregate.markPreventiveTemperatureHold();
+        } catch (IllegalStateException exception) {
+            throw error("INVENTORY_TEMPERATURE_HOLD_CONFLICT", false);
+        }
+
+        Timestamp createdAt = now();
+        UUID evaluationId = UUID.randomUUID();
+        checkUpdated(jdbc.update("update warehouse.inventory_lot set status='HOLD',version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and id=? and version=? and status='AVAILABLE'",
+                tenant(context), workspace(context), request.lotId(), request.expectedLotVersion()),
+                "preventive temperature hold", "INVENTORY_LOT_CONCURRENCY_CONFLICT");
+        jdbc.update("insert into warehouse.inventory_temperature_evaluation(id,tenant_id,workspace_id,lot_id,received_value,expected_min,expected_max,status,disposition,created_at,evidence_object_id,affected_quantity,actor_membership_id,observed_value,source_type,source_subject_id,source_subject_version,temperature_evidence_id,expected_lot_version) "
+                        + "values (?,?,?,?,?,?,?,'OPEN','HOLD',?,?,?,?,?,'FULFILLMENT',?,?,?,?)",
+                evaluationId, tenant(context), workspace(context), request.lotId(), null,
+                request.minimumCelsius(), request.maximumCelsius(), createdAt, request.evidenceObjectId(),
+                request.affectedQuantity(), context.membershipId().value(), request.valueCelsius(),
+                request.fulfillmentId(), request.fulfillmentVersion(), request.temperatureEvidenceId(),
+                request.expectedLotVersion());
+        appendEvent(context, request.lotId(), "warehouse.lot.temperature-preventive-hold", "lot", "HOLD", createdAt);
+        return new InventoryTemperatureHoldCommands.PreventiveHoldResult(evaluationId, request.lotId(), "HOLD",
+                request.expectedLotVersion() + 1, request.affectedQuantity());
     }
 
     @Transactional(readOnly = true)
@@ -104,7 +168,9 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         requireActiveWarehouse(context, warehouse);
         requireIdempotency(key);
         lockIdempotency(context, "inbound", key);
-        String hash = requestHash("inbound", receipt);
+        String hash = receipt.temperatureEvidenceObjectId() == null
+                ? requestHash("inbound", legacyReceiptHashValue(receipt))
+                : requestHash("inbound-v2", receipt);
         IdempotencyRecord prior = idempotent(context, "inbound", key);
         if (prior != null) { requireSamePayload(prior, hash); return loadLot(context, uuid(prior.resourceId()), false); }
         UUID zone = uuidRequired(receipt.zoneId(), "zoneId");
@@ -125,27 +191,65 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         TemperatureRange range = jdbc.query("select temperature_min,temperature_max from warehouse.storage_zone where tenant_id=? and workspace_id=? and id=?",
                 (rs, n) -> new TemperatureRange(rs.getBigDecimal(1), rs.getBigDecimal(2)), tenant(context), workspace(context), zone)
                 .stream().findFirst().orElse(new TemperatureRange(null, null));
+        BigDecimal expectedMinimum = stricterMinimum(range.min(), skuRange.min());
+        BigDecimal expectedMaximum = stricterMaximum(range.max(), skuRange.max());
         boolean temperatureExcursion = receipt.temperatureReading() != null
                 && (!range.accepts(receipt.temperatureReading()) || !skuRange.accepts(receipt.temperatureReading()));
-        if (temperatureExcursion) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP", false);
+        UUID temperatureEvidenceId = receipt.temperatureEvidenceObjectId() == null ? null
+                : uuidRequired(receipt.temperatureEvidenceObjectId(), "temperatureEvidenceObjectId");
+        if (temperatureExcursion && temperatureEvidenceId == null) {
+            throw error("BUSINESS_EVIDENCE_NOT_AVAILABLE", false);
+        }
+        if (temperatureEvidenceId != null && !businessEvidence.isAvailablePhotoForSubject(
+                tenant(context), workspace(context), temperatureEvidenceId, "WAREHOUSE", warehouse)) {
+            throw error("BUSINESS_EVIDENCE_NOT_AVAILABLE", false);
+        }
         InventoryLot lotAggregate = InventoryLot.rehydrate("new-lot", BigDecimal.ZERO, BigDecimal.ZERO, unit,
                 InventoryLotStatus.AVAILABLE);
         lotAggregate.receive(receipt.quantity());
         if (temperatureExcursion) lotAggregate.markHold();
         UUID id = UUID.randomUUID();
         Timestamp occurred = now();
-        checkUpdated(jdbc.update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,temperature_value) values (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)",
+        checkUpdated(jdbc.update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,temperature_value,temperature_evidence_object_id,temperature_recorded_by_membership_id,temperature_recorded_at) values (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)",
                 id, tenant(context), workspace(context), warehouse, zone, catalogItemId, sku.id(), batch, receipt.expirationDate(), occurred, receipt.quantity(), unit,
-                temperatureExcursion ? "HOLD" : "AVAILABLE", range.snapshot(), receipt.temperatureReading()), "lot insert");
+                temperatureExcursion ? "HOLD" : "AVAILABLE", range.snapshot(), receipt.temperatureReading(), temperatureEvidenceId,
+                receipt.temperatureReading() == null ? null : context.membershipId().value(),
+                receipt.temperatureReading() == null ? null : occurred), "lot insert");
         if (temperatureExcursion) {
-            jdbc.update("insert into warehouse.inventory_temperature_evaluation(id,tenant_id,workspace_id,lot_id,received_value,expected_min,expected_max,status,disposition,created_at) values (?,?,?,?,?,?,?,'OPEN','HOLD',?)",
-                    UUID.randomUUID(), tenant(context), workspace(context), id, receipt.temperatureReading(), range.min(), range.max(), occurred);
+            jdbc.update("insert into warehouse.inventory_temperature_evaluation(id,tenant_id,workspace_id,lot_id,received_value,expected_min,expected_max,status,disposition,created_at,evidence_object_id,affected_quantity,actor_membership_id,observed_value) values (?,?,?,?,?,?,?,'OPEN','HOLD',?,?,?,?,?)",
+                    UUID.randomUUID(), tenant(context), workspace(context), id, receipt.temperatureReading(), expectedMinimum, expectedMaximum, occurred,
+                    temperatureEvidenceId, receipt.quantity(), context.membershipId().value(), receipt.temperatureReading());
         }
         insertMovement(context, warehouse, zone, id, catalogItemId, sku.id(), "INBOUND_RECEIPT", receipt.quantity(), unit,
                 BigDecimal.ZERO, receipt.quantity(), BigDecimal.ZERO, receipt.quantity(), notes, correlation, occurred);
         appendEvent(context, id, temperatureExcursion ? "warehouse.lot.temperature-hold" : "warehouse.lot.received", "lot", temperatureExcursion ? "HOLD" : "ACTIVE", occurred);
         saveIdempotency(context, "inbound", key, hash, id.toString());
         return loadLot(context, id, false);
+    }
+
+    private static String legacyReceiptHashValue(WarehouseOperationsService.Receipt receipt) {
+        return "Receipt[warehouseId=" + receipt.warehouseId()
+                + ", zoneId=" + receipt.zoneId()
+                + ", catalogItemId=" + receipt.catalogItemId()
+                + ", batchNumber=" + receipt.batchNumber()
+                + ", expirationDate=" + receipt.expirationDate()
+                + ", quantity=" + receipt.quantity()
+                + ", unit=" + receipt.unit()
+                + ", temperatureReading=" + receipt.temperatureReading()
+                + ", notes=" + receipt.notes()
+                + ", skuId=" + receipt.skuId() + "]";
+    }
+
+    private static BigDecimal stricterMinimum(BigDecimal zoneMinimum, BigDecimal skuMinimum) {
+        if (zoneMinimum == null) return skuMinimum;
+        if (skuMinimum == null) return zoneMinimum;
+        return zoneMinimum.max(skuMinimum);
+    }
+
+    private static BigDecimal stricterMaximum(BigDecimal zoneMaximum, BigDecimal skuMaximum) {
+        if (zoneMaximum == null) return skuMaximum;
+        if (skuMaximum == null) return zoneMaximum;
+        return zoneMaximum.min(skuMaximum);
     }
 
     public WarehouseOperationsService.LotSummary adjust(CurrentAccessContext context, String lotId, BigDecimal quantity,

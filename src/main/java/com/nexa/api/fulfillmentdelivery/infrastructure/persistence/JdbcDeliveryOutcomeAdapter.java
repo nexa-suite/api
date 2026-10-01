@@ -256,6 +256,9 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
             return loadPod(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (DeliveryExecutionHoldGate.blocking(jdbc, request.tenantId(), request.workspaceId(), request.deliveryId())) {
+            throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING");
+        }
         if (!"DELIVERED".equals(delivery.status())) throw error("POD_REQUIRES_FINAL_DELIVERY");
         if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
         String receiver = boundedRequired(request.receiverName());
@@ -292,6 +295,8 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
             return loadDriverPod(request.tenantId(), request.workspaceId(), prior.resourceId(), true);
         }
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (DeliveryExecutionHoldGate.blocking(jdbc, request.tenantId(), request.workspaceId(), request.deliveryId()))
+            throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING");
         if (!"DELIVERED".equals(delivery.status())) throw error("POD_REQUIRES_FINAL_DELIVERY");
         if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
         Instant capturedAt = request.capturedAt() == null ? request.recordedAt() : request.capturedAt();
@@ -350,6 +355,8 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
             return loadDriverPod(request.tenantId(), request.workspaceId(), prior.resourceId(), true);
         }
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
+        if (DeliveryExecutionHoldGate.blocking(jdbc, request.tenantId(), request.workspaceId(), request.deliveryId()))
+            throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING");
         if (!"DELIVERED".equals(delivery.status())) throw error("POD_REQUIRES_FINAL_DELIVERY");
         if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
         DriverPodRow pod = lockDriverPod(request.tenantId(), request.workspaceId(), request.deliveryId(), request.podId());
@@ -482,41 +489,77 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
             ensureHash(prior.requestHash(), request.requestHash());
             return loadTemperatureEvidence(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
-        if ("OUT_OF_RANGE".equals(request.status())) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
+        if ("OUT_OF_RANGE".equals(request.status())) {
+            boolean fulfillmentExcursion = fulfillmentSubject && request.evidenceId() != null
+                    && request.evidenceObjectId() != null && request.expectedLotVersion() != null
+                    && request.resultingLotVersion() != null
+                    && request.inventoryTemperatureEvaluationId() != null
+                    && "HOLD".equals(request.inventoryLotStatus())
+                    && request.affectedQuantity() != null && request.affectedQuantity().signum() > 0;
+            if (!fulfillmentExcursion) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
+        }
 
         Instant createdAt = clock.instant();
-        UUID evidenceId = UUID.randomUUID();
-        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,fulfillment_id,fulfillment_version,lot_id,warehouse_id,zone_id,subject_type,subject_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) "
-                        + "values (?,?,?,null,?,?,?,?,?,?,?,?,?,?,?,'MANUAL',null,?,null,?,?)",
+        UUID evidenceId = request.evidenceId() == null ? UUID.randomUUID() : request.evidenceId();
+        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,fulfillment_id,fulfillment_version,lot_id,warehouse_id,zone_id,subject_type,subject_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at,expected_lot_version,resulting_lot_version,inventory_temperature_evaluation_id,inventory_lot_status,affected_quantity) "
+                        + "values (?,?,?,null,?,?,?,?,?,?,?,?,?,?,?,'MANUAL',null,?,?,?, ?,?,?,?,?,?)",
                 evidenceId, request.tenantId(), request.workspaceId(),
                 fulfillmentSubject ? request.subjectId() : null,
                 fulfillmentSubject ? request.fulfillmentVersion() : null,
                 request.lotId(), request.warehouseId(), request.zoneId(),
                 request.subjectType(), request.subjectId(), request.value(), request.temperatureCelsius(), request.unit(),
-                Timestamp.from(request.occurredAt()), request.status(), request.actorMembershipId(), Timestamp.from(createdAt));
+                Timestamp.from(request.occurredAt()), request.status(), request.evidenceObjectId(),
+                request.actorMembershipId(), Timestamp.from(createdAt), request.expectedLotVersion(),
+                request.resultingLotVersion(), request.inventoryTemperatureEvaluationId(),
+                request.inventoryLotStatus(), request.affectedQuantity());
+        Map<String, Object> payload = new HashMap<>(Map.of("subjectType", request.subjectType(),
+                "subjectId", request.subjectId(), "value", request.value(), "unit", request.unit(),
+                "occurredAt", request.occurredAt(), "actorMembershipId", request.actorMembershipId(),
+                "status", request.status(), "source", "MANUAL"));
+        if (request.evidenceObjectId() != null) payload.put("evidenceObjectId", request.evidenceObjectId());
+        if (request.expectedLotVersion() != null) payload.put("expectedLotVersion", request.expectedLotVersion());
+        if (request.resultingLotVersion() != null) payload.put("resultingLotVersion", request.resultingLotVersion());
+        if (request.inventoryTemperatureEvaluationId() != null) {
+            payload.put("inventoryTemperatureEvaluationId", request.inventoryTemperatureEvaluationId());
+        }
+        if (request.inventoryLotStatus() != null) payload.put("inventoryLotStatus", request.inventoryLotStatus());
+        if (request.affectedQuantity() != null) payload.put("affectedQuantity", request.affectedQuantity());
         canonicalOutbox.append("TemperatureEvidenceRecorded.v1", "TemperatureEvidence", evidenceId,
                 request.tenantId(), request.workspaceId(), request.occurredAt(), request.idempotencyKey(), null,
-                "1.0", request.idempotencyKey(), Map.of("subjectType", request.subjectType(),
-                        "subjectId", request.subjectId(), "value", request.value(), "unit", request.unit(),
-                        "occurredAt", request.occurredAt(), "actorMembershipId", request.actorMembershipId(),
-                        "status", request.status(), "source", "MANUAL"));
+                "1.0", request.idempotencyKey(), payload);
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), operation,
                 request.idempotencyKey(), request.requestHash(), evidenceId, createdAt);
         return loadTemperatureEvidence(request.tenantId(), request.workspaceId(), evidenceId);
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public java.util.Optional<TemperatureEvidenceView> findFulfillmentTemperatureEvidenceReplay(
+            UUID tenantId, UUID workspaceId, UUID actorMembershipId, String idempotencyKey) {
+        validateScope(tenantId, workspaceId, actorMembershipId, idempotencyKey);
+        String operation = "FULFILLMENT_TEMPERATURE_EVIDENCE";
+        lockCommand(tenantId, workspaceId, actorMembershipId, operation, idempotencyKey);
+        IdempotencyRow prior = idempotency(tenantId, workspaceId, actorMembershipId, operation, idempotencyKey);
+        return prior == null ? java.util.Optional.empty()
+                : java.util.Optional.of(loadTemperatureEvidence(tenantId, workspaceId, prior.resourceId()));
+    }
+
+    @Override
     public java.util.Optional<TemperatureEvidenceView> latestFulfillmentTemperatureEvidence(UUID tenantId, UUID workspaceId,
                                                                                              UUID fulfillmentId, UUID lotId,
                                                                                              long fulfillmentVersion) {
-        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source,fulfillment_version "
+        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source,fulfillment_version,evidence_object_id,expected_lot_version,resulting_lot_version,inventory_temperature_evaluation_id,inventory_lot_status,affected_quantity "
                         + "from logistics.temperature_evidence where tenant_id=? and workspace_id=? and fulfillment_id=? and lot_id=? and fulfillment_version=? "
                         + "order by recorded_at desc,id desc limit 1",
                 (rs, row) -> new TemperatureEvidenceView(rs.getObject("id", UUID.class), rs.getString("subject_type"),
                         rs.getObject("subject_id", UUID.class), rs.getObject("lot_id", UUID.class),
                         rs.getObject("warehouse_id", UUID.class), rs.getBigDecimal("value"), rs.getString("unit"),
                         instant(rs, "recorded_at"), rs.getObject("actor_membership_id", UUID.class),
-                        rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class)),
+                        rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class),
+                        rs.getObject("evidence_object_id", UUID.class), rs.getObject("expected_lot_version", Long.class),
+                        rs.getObject("resulting_lot_version", Long.class),
+                        rs.getObject("inventory_temperature_evaluation_id", UUID.class),
+                        rs.getString("inventory_lot_status"), rs.getBigDecimal("affected_quantity")),
                 tenantId, workspaceId, fulfillmentId, lotId, fulfillmentVersion).stream().findFirst();
     }
 
@@ -631,13 +674,18 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     }
 
     private TemperatureEvidenceView loadTemperatureEvidence(UUID tenantId, UUID workspaceId, UUID evidenceId) {
-        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source,fulfillment_version "
+        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source,fulfillment_version,evidence_object_id,expected_lot_version,resulting_lot_version,inventory_temperature_evaluation_id,inventory_lot_status,affected_quantity "
                         + "from logistics.temperature_evidence where tenant_id=? and workspace_id=? and id=?",
                 (rs, row) -> new TemperatureEvidenceView(rs.getObject("id", UUID.class), rs.getString("subject_type"),
                         rs.getObject("subject_id", UUID.class), rs.getObject("lot_id", UUID.class),
                         rs.getObject("warehouse_id", UUID.class), rs.getBigDecimal("value"), rs.getString("unit"),
                         instant(rs, "recorded_at"), rs.getObject("actor_membership_id", UUID.class),
-                        rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class)), tenantId, workspaceId, evidenceId)
+                        rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class),
+                        rs.getObject("evidence_object_id", UUID.class), rs.getObject("expected_lot_version", Long.class),
+                        rs.getObject("resulting_lot_version", Long.class),
+                        rs.getObject("inventory_temperature_evaluation_id", UUID.class),
+                        rs.getString("inventory_lot_status"), rs.getBigDecimal("affected_quantity")),
+                tenantId, workspaceId, evidenceId)
                 .stream().findFirst().orElseThrow(() -> error("TEMPERATURE_EVIDENCE_NOT_FOUND"));
     }
 
@@ -658,14 +706,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     }
 
     private boolean hasBlockingOperationalException(UUID tenantId, UUID workspaceId, UUID deliveryId) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("select exists("
-                        + "select 1 from logistics.driver_delivery_incident i where i.tenant_id=? "
-                        + "and i.workspace_id=? and i.delivery_id=? and i.exception_severity in ('BLOCKING','CRITICAL') "
-                        + "union all select 1 from logistics.delivery d join logistics.delivery_incident i "
-                        + "on i.tenant_id=d.tenant_id and i.workspace_id=d.workspace_id "
-                        + "and i.dispatch_order_id=d.dispatch_order_id where d.tenant_id=? and d.workspace_id=? "
-                        + "and d.id=? and i.incident_type='TEMPERATURE_EXCURSION' and i.severity='CRITICAL')",
-                Boolean.class, tenantId, workspaceId, deliveryId, tenantId, workspaceId, deliveryId));
+        return DeliveryExecutionHoldGate.blocking(jdbc, tenantId, workspaceId, deliveryId);
     }
 
     private FulfillmentRow lockFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID clientAccountId) {

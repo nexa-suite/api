@@ -622,6 +622,10 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
         if ("CONSUMED".equals(allocation.status())) return load(request.tenantId(), request.workspaceId(), allocation.id());
         if (!"ALLOCATED".equals(allocation.status())) throw error("PHYSICAL_ALLOCATION_NOT_READY", false);
         List<AllocationLot> lines = allocationLots(request.tenantId(), request.workspaceId(), allocation.id());
+        if (lines.stream().anyMatch(line -> line.remainingQuantity().signum() > 0
+                && ("HOLD".equals(line.status()) || line.temperatureHoldOpen()))) {
+            throw error("INVENTORY_TEMPERATURE_HOLD_OPEN", false);
+        }
         for (AllocationLot line : lines) {
             BigDecimal quantity = line.remainingQuantity();
             if (quantity.signum() == 0) continue;
@@ -890,9 +894,18 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     }
 
     private List<AllocationLot> allocationLots(UUID tenant, UUID workspace, UUID allocationId) {
-        return jdbc.query("select l.lot_id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.quantity,l.released_quantity,l.consumed_quantity,lot.expiration_date,lot.stock_quantity,lot.reserved_quantity,lot.unit,lot.version from warehouse.physical_allocation_line l join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? order by "
+        return jdbc.query("select l.lot_id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.zone_id,l.quantity,l.released_quantity,l.consumed_quantity,lot.expiration_date,lot.stock_quantity,lot.reserved_quantity,lot.unit,lot.version,lot.status, "
+                        + "exists(select 1 from warehouse.inventory_temperature_evaluation e where e.tenant_id=lot.tenant_id "
+                        + "and e.workspace_id=lot.workspace_id and e.lot_id=lot.id and e.status='OPEN' and e.disposition='HOLD') temperature_hold_open "
+                        + "from warehouse.physical_allocation_line l join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=? order by "
                         + WarehouseLotLockOrder.physicalAllocationLot("l", "lot") + " for update of lot",
-                (rs, row) -> new AllocationLot(rs.getObject("lot_id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class), rs.getObject("zone_id", UUID.class), rs.getBigDecimal("quantity"), rs.getBigDecimal("released_quantity"), rs.getBigDecimal("consumed_quantity"), rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getString("unit"), rs.getLong("version")), tenant, workspace, allocationId);
+                (rs, row) -> new AllocationLot(rs.getObject("lot_id", UUID.class), rs.getObject("sku_id", UUID.class),
+                        rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class),
+                        rs.getObject("zone_id", UUID.class), rs.getBigDecimal("quantity"),
+                        rs.getBigDecimal("released_quantity"), rs.getBigDecimal("consumed_quantity"),
+                        rs.getObject("expiration_date", LocalDate.class), rs.getBigDecimal("stock_quantity"),
+                        rs.getBigDecimal("reserved_quantity"), rs.getString("unit"), rs.getLong("version"),
+                        rs.getString("status"), rs.getBoolean("temperature_hold_open")), tenant, workspace, allocationId);
     }
 
     private void requireAllocationWarehouseGrants(UUID tenant, UUID workspace, UUID actor, UUID allocationId) {
@@ -1028,7 +1041,7 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
     private record AllocationLot(UUID lotId, UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId,
                                  BigDecimal quantity, BigDecimal releasedQuantity, BigDecimal consumedQuantity,
                                  LocalDate expirationDate, BigDecimal stock, BigDecimal reserved, String unit,
-                                 long version) {
+                                 long version, String status, boolean temperatureHoldOpen) {
         private BigDecimal remainingQuantity() {
             return quantity.subtract(releasedQuantity).subtract(consumedQuantity).max(BigDecimal.ZERO);
         }

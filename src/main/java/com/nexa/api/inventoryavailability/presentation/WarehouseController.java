@@ -4,6 +4,7 @@ import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -220,7 +221,7 @@ public final class WarehouseController {
 
     @PostMapping("/inventory/inbound-receipts")
     public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId()), key, String.valueOf(correlation)));
+        var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId(), r.temperatureEvidenceObjectId()), key, String.valueOf(correlation)));
         return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
     }
 
@@ -549,7 +550,13 @@ public final class WarehouseController {
     public record SelectionPolicyPatchRequest(String selectionPolicy) { }
     public record ZoneRequest(String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax) { }
     public record ZonePatch(String name, BigDecimal temperatureMin, BigDecimal temperatureMax, String status) { }
-    public record ReceiptRequest(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) { }
+    public record ReceiptRequest(String warehouseId, String zoneId, String catalogItemId, String batchNumber,
+                                 LocalDate expirationDate, BigDecimal quantity, String unit,
+                                 @Schema(description = "Manual receiving temperature in Celsius; required for cold-chain SKUs.")
+                                 BigDecimal temperatureReading,
+                                 String notes, String skuId,
+                                 @Schema(description = "AVAILABLE image evidence bound to this WAREHOUSE; required for an out-of-range reading.")
+                                 String temperatureEvidenceObjectId) { }
     public record QuantityRequest(String lotId, BigDecimal quantity, String direction, String reason) { }
     public record ReasonRequest(String reason) { }
     public record DispositionRequest(String disposition, String reason) { }

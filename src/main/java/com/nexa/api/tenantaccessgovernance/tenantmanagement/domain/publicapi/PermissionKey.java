@@ -66,6 +66,7 @@ public enum PermissionKey {
 	DISPATCH_SCHEDULE("dispatch.schedule", PermissionGroup.LOGISTICS, "logistics:write"),
 	DISPATCH_START_ROUTE("dispatch.start_route", PermissionGroup.LOGISTICS, "logistics:write"),
 	DISPATCH_TEMPERATURE("dispatch.temperature", PermissionGroup.LOGISTICS, "logistics:write"),
+	DELIVERY_EXECUTION_HOLD_DISPOSE("delivery.execution_hold.dispose", PermissionGroup.LOGISTICS),
 	DISPATCH_INCIDENT("dispatch.incident", PermissionGroup.LOGISTICS, "logistics:write"),
 	DISPATCH_REPROGRAM("dispatch.reprogram", PermissionGroup.LOGISTICS, "logistics:write"),
 	DISPATCH_COMPLETE("dispatch.complete", PermissionGroup.LOGISTICS, "logistics:write"),

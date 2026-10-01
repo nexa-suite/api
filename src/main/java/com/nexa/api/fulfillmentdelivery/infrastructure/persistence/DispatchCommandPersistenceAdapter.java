@@ -415,6 +415,13 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         if (replay != null) return replay;
         Instant effectiveCompletedAt = completedAt == null ? Instant.now() : completedAt;
         DispatchRow row = locked(tenant, workspace, id, null);
+        List<UUID> deliveryIds = jdbc.query("select id from logistics.delivery where tenant_id=? and workspace_id=? and dispatch_order_id=? order by id for update",
+                (rs,n)->rs.getObject(1,UUID.class),tenant,workspace,id);
+        for (UUID deliveryId : deliveryIds) {
+            if (DeliveryExecutionHoldGate.blocking(jdbc,tenant,workspace,deliveryId)) {
+                throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING",false);
+            }
+        }
         requireVersion(row, version);
         List<ObligationLine> obligations = obligations(tenant, workspace, row.salesOrderId());
         List<LogisticsOperationsService.DeliveryLineCommand> finalLines = remainingAfter(obligations,

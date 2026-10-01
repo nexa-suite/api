@@ -83,7 +83,18 @@ public final class FulfillmentModels {
     public record TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
                                           UUID warehouseId, BigDecimal value, String unit,
                                           Instant occurredAt, UUID actorMembershipId, String status,
-                                          String source, Long fulfillmentVersion) {
+                                          String source, Long fulfillmentVersion, UUID evidenceObjectId,
+                                          Long expectedLotVersion, Long resultingLotVersion,
+                                          UUID inventoryTemperatureEvaluationId, String inventoryLotStatus,
+                                          BigDecimal affectedQuantity) {
+        public TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
+                                       UUID warehouseId, BigDecimal value, String unit,
+                                       Instant occurredAt, UUID actorMembershipId, String status,
+                                       String source, Long fulfillmentVersion) {
+            this(id, subjectType, subjectId, lotId, warehouseId, value, unit, occurredAt, actorMembershipId,
+                    status, source, fulfillmentVersion, null, null, null, null, null, null);
+        }
+
         public TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
                                        UUID warehouseId, BigDecimal value, String unit,
                                        Instant occurredAt, UUID actorMembershipId, String status, String source) {
@@ -106,5 +117,13 @@ public final class FulfillmentModels {
                                             boolean skuColdChainRequired, boolean requiredForFulfillment,
                                             BigDecimal minimumCelsius,
                                             BigDecimal maximumCelsius, String status,
-                                            TemperatureEvidenceView latestEvidence) { }
+                                            TemperatureEvidenceView latestEvidence, Long version) {
+        public FulfillmentTemperatureLot(UUID skuId, UUID lotId, UUID warehouseId, UUID zoneId,
+                                         boolean skuColdChainRequired, boolean requiredForFulfillment,
+                                         BigDecimal minimumCelsius, BigDecimal maximumCelsius, String status,
+                                         TemperatureEvidenceView latestEvidence) {
+            this(skuId, lotId, warehouseId, zoneId, skuColdChainRequired, requiredForFulfillment,
+                    minimumCelsius, maximumCelsius, status, latestEvidence, null);
+        }
+    }
 }

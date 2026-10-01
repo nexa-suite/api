@@ -191,6 +191,8 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
         }
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
         if (delivery == null) throw error("DELIVERY_NOT_FOUND", true);
+        if (DeliveryExecutionHoldGate.blocking(jdbc, request.tenantId(), request.workspaceId(), request.deliveryId()))
+            throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING", false);
         HandoffRow handoff = jdbc.query("select id,delivery_attempt_id,customer_account_id,expires_at,status from logistics.delivery_handoff_token where tenant_id=? and workspace_id=? and delivery_id=? and token_hash=? for update",
                 (rs, row) -> new HandoffRow(rs.getObject("id", UUID.class), request.deliveryId(), rs.getObject("delivery_attempt_id", UUID.class),
                         rs.getTimestamp("expires_at").toInstant(), rs.getString("status")), request.tenantId(), request.workspaceId(), request.deliveryId(), request.tokenHash())

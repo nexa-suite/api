@@ -24,9 +24,19 @@ public interface ColdChainPolicyQuery {
 
     record Range(BigDecimal minimumCelsius, BigDecimal maximumCelsius, String unit) { }
 
-    record LotTemperatureContext(UUID lotId, UUID warehouseId, UUID zoneId, Optional<Range> range, UUID skuId) {
+    record LotTemperatureContext(UUID lotId, UUID warehouseId, UUID zoneId, Optional<Range> range, UUID skuId,
+                                 long version, String inventoryLotStatus, boolean temperatureHoldOpen) {
         public LotTemperatureContext(UUID lotId, UUID warehouseId, UUID zoneId, Optional<Range> range) {
-            this(lotId, warehouseId, zoneId, range, null);
+            this(lotId, warehouseId, zoneId, range, null, 0, null, false);
+        }
+
+        public LotTemperatureContext(UUID lotId, UUID warehouseId, UUID zoneId, Optional<Range> range, UUID skuId) {
+            this(lotId, warehouseId, zoneId, range, skuId, 0, null, false);
+        }
+
+        public LotTemperatureContext(UUID lotId, UUID warehouseId, UUID zoneId, Optional<Range> range, UUID skuId,
+                                     long version) {
+            this(lotId, warehouseId, zoneId, range, skuId, version, null, false);
         }
     }
 }

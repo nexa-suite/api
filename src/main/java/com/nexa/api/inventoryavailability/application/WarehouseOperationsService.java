@@ -231,9 +231,14 @@ public class WarehouseOperationsService {
             this(id, lotId, catalogItemId, type, quantity, unit, quantityBefore, quantityAfter, reservedBefore, reservedAfter, reason, occurredAt, null);
         }
     }
-    public record Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) {
+    public record Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId, String temperatureEvidenceObjectId) {
+        public Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) {
+            this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit,
+                    temperatureReading, notes, skuId, null);
+        }
         public Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes) {
-            this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit, temperatureReading, notes, null);
+            this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit,
+                    temperatureReading, notes, null, null);
         }
     }
     public record Availability(String catalogItemId, String status, Instant asOf,

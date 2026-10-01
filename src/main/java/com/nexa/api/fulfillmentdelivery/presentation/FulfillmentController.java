@@ -346,7 +346,8 @@ public final class FulfillmentController {
         FulfillmentModels.TemperatureEvidenceView value = service.recordFulfillmentTemperatureEvidence(context,
                 fulfillmentId, version(ifMatch), idempotencyKey,
                 new FulfillmentLifecycleService.FulfillmentTemperatureEvidenceCommand(
-                        request.lotId(), request.value(), request.unit(), request.occurredAt()));
+                        request.lotId(), request.value(), request.unit(), request.occurredAt(),
+                        request.expectedLotVersion(), request.evidenceObjectId()));
         return ResponseEntity.status(201).eTag(etag(value.fulfillmentVersion())).body(value);
     }
 
@@ -432,7 +433,13 @@ public final class FulfillmentController {
     public record FulfillmentTemperatureEvidenceRequest(@NotNull UUID lotId,
                                                         @NotNull BigDecimal value,
                                                         @NotBlank @Size(max = 16) String unit,
-                                                        @NotNull Instant occurredAt) { }
+                                                        @NotNull Instant occurredAt,
+                                                        @jakarta.validation.constraints.PositiveOrZero Long expectedLotVersion,
+                                                        UUID evidenceObjectId) {
+        public FulfillmentTemperatureEvidenceRequest(UUID lotId, BigDecimal value, String unit, Instant occurredAt) {
+            this(lotId, value, unit, occurredAt, null, null);
+        }
+    }
 
     public record OutgoingDiscrepancyResolutionRequest(@NotNull UUID physicalAllocationId,
                                                          @PositiveOrZero long physicalAllocationVersion,

@@ -7,6 +7,7 @@ import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectType;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentDocumentSourceQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.InboundReceivingDiscrepancySubjectQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.payments.application.publicapi.PaymentDocumentSourceQuery;
 import com.nexa.api.salescommitment.application.publicapi.SalesDocumentSourceQuery;
 import org.springframework.context.annotation.Profile;
@@ -23,16 +24,19 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
     private final PaymentDocumentSourceQuery payments;
     private final FulfillmentDocumentSourceQuery fulfillment;
     private final InboundReceivingDiscrepancySubjectQuery inboundDiscrepancies;
+    private final WarehouseSelectionQuery warehouses;
 
     public DocumentSubjectCompositionAdapter(SalesDocumentSourceQuery sales,
             ReceivablePaymentAccess receivables, PaymentDocumentSourceQuery payments,
             FulfillmentDocumentSourceQuery fulfillment,
-            InboundReceivingDiscrepancySubjectQuery inboundDiscrepancies) {
+            InboundReceivingDiscrepancySubjectQuery inboundDiscrepancies,
+            WarehouseSelectionQuery warehouses) {
         this.sales = sales;
         this.receivables = receivables;
         this.payments = payments;
         this.fulfillment = fulfillment;
         this.inboundDiscrepancies = inboundDiscrepancies;
+        this.warehouses = warehouses;
     }
 
     @Override
@@ -51,7 +55,15 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
             case PROOF_OF_DELIVERY -> resolveProofOfDelivery(tenant, workspace, id, subject);
             case DELIVERY_INCIDENT -> resolveDeliveryIncident(tenant, workspace, id, subject);
             case INBOUND_RECEIVING_DISCREPANCY -> resolveInboundDiscrepancy(tenant, workspace, actor, id, subject);
+            case WAREHOUSE -> resolveWarehouse(tenant, workspace, id, subject);
         };
+    }
+
+    private DocumentSubjectSnapshot resolveWarehouse(UUID tenant, UUID workspace, UUID id,
+                                                      DocumentSubjectReference subject) {
+        return warehouses.existsInScope(tenant, workspace, id)
+                ? snapshot(tenant, workspace, subject.type(), id.toString(), null, "WAREHOUSE", true)
+                : absent(tenant, workspace, subject);
     }
 
     private DocumentSubjectSnapshot resolveInboundDiscrepancy(UUID tenant, UUID workspace, UUID actor, UUID id,
