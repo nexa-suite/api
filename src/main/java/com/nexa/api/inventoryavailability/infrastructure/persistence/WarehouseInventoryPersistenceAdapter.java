@@ -127,6 +127,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                 .stream().findFirst().orElse(new TemperatureRange(null, null));
         boolean temperatureExcursion = receipt.temperatureReading() != null
                 && (!range.accepts(receipt.temperatureReading()) || !skuRange.accepts(receipt.temperatureReading()));
+        if (temperatureExcursion) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP", false);
         InventoryLot lotAggregate = InventoryLot.rehydrate("new-lot", BigDecimal.ZERO, BigDecimal.ZERO, unit,
                 InventoryLotStatus.AVAILABLE);
         lotAggregate.receive(receipt.quantity());

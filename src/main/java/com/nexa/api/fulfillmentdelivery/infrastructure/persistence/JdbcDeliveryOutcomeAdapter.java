@@ -424,6 +424,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         }
         String unit = request.unit() == null || request.unit().isBlank() ? "CELSIUS" : request.unit().trim().toUpperCase(java.util.Locale.ROOT);
         String status = classify(request.tenantId(), request.workspaceId(), request.deliveryId(), request.lotId(), request.temperatureCelsius(), unit);
+        if ("OUT_OF_RANGE".equals(status)) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
         Instant recordedAt = request.recordedAt() == null ? clock.instant() : request.recordedAt();
         UUID evidenceId = UUID.randomUUID();
         jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,lot_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -474,6 +475,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
             ensureHash(prior.requestHash(), request.requestHash());
             return loadTemperatureEvidence(request.tenantId(), request.workspaceId(), prior.resourceId());
         }
+        if ("OUT_OF_RANGE".equals(request.status())) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
 
         Instant createdAt = clock.instant();
         UUID evidenceId = UUID.randomUUID();

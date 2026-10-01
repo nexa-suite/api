@@ -185,7 +185,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 Integer.class, "inbound-cross-scope-" + suffix)).isZero();
     }
 
-    @Test void outOfRangeReceiptIsHeldUntilExplicitDisposition() throws Exception {
+    @Test void outOfRangeReceiptIsRejectedBeforeInventoryWritesWhenEvidenceContractIsIncomplete() throws Exception {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         String warehouse = mockMvc.perform(post("/api/v1/warehouses").header("Authorization", "Bearer "+token)
@@ -195,24 +195,67 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String warehouseId = tools.jackson.databind.json.JsonMapper.shared().readTree(warehouse).get("id").asText();
         grantWarehouseAccess(accessToken(OWNER_EMAIL, "PLATFORM"), membershipId(WAREHOUSE_EMAIL), warehouseId);
         token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        var skuRanges = jdbc.query("select temperature_min,temperature_max from catalog_management.sellable_sku "
+                        + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0002'",
+                (rs, row) -> new java.math.BigDecimal[]{rs.getBigDecimal(1), rs.getBigDecimal(2)},
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        assertThat(skuRanges).hasSize(1);
+        java.math.BigDecimal skuMinimum = skuRanges.getFirst()[0];
+        java.math.BigDecimal skuMaximum = skuRanges.getFirst()[1];
+        java.math.BigDecimal zoneMinimum = java.math.BigDecimal.valueOf(-5);
+        java.math.BigDecimal zoneMaximum = java.math.BigDecimal.valueOf(5);
+        if (skuMinimum != null) {
+            zoneMinimum = zoneMinimum.min(skuMinimum);
+            zoneMaximum = zoneMaximum.max(skuMinimum);
+        }
+        if (skuMaximum != null) {
+            zoneMinimum = zoneMinimum.min(skuMaximum);
+            zoneMaximum = zoneMaximum.max(skuMaximum);
+        }
         String zone = mockMvc.perform(post("/api/v1/warehouses/"+warehouseId+"/zones").header("Authorization", "Bearer "+token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"C-"+suffix+"\",\"name\":\"Chilled QA\",\"type\":\"CHILLED\",\"temperatureMin\":-5,\"temperatureMax\":5}"))
+                        .content("{\"code\":\"C-"+suffix+"\",\"name\":\"Chilled QA\",\"type\":\"CHILLED\",\"temperatureMin\":"
+                                + zoneMinimum.toPlainString() + ",\"temperatureMax\":" + zoneMaximum.toPlainString() + "}"))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         String zoneId = tools.jackson.databind.json.JsonMapper.shared().readTree(zone).get("id").asText();
-        String receiptRequest = "{\"warehouseId\":\""+warehouseId+"\",\"zoneId\":\""+zoneId+"\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"H-"+suffix+"\",\"expirationDate\":\"2099-01-01\",\"quantity\":\"10\",\"unit\":\"UNIT\",\"temperatureReading\":10}";
-        MvcResult receipt = mockMvc.perform(post("/api/v1/inventory/inbound-receipts").header("Authorization", "Bearer "+token)
-                        .header("Idempotency-Key", "hold-receipt-"+suffix).contentType(MediaType.APPLICATION_JSON).content(receiptRequest))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("HOLD")).andReturn();
-        String lotId = tools.jackson.databind.json.JsonMapper.shared().readTree(receipt.getResponse().getContentAsString()).get("id").asText();
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select status from warehouse.inventory_temperature_evaluation where lot_id=?", String.class, java.util.UUID.fromString(lotId))).isEqualTo("OPEN");
-        String etag = receipt.getResponse().getHeader("ETag");
-        mockMvc.perform(post("/api/v1/inventory/lots/"+lotId+"/dispositions").header("Authorization", "Bearer "+token)
-                        .header("If-Match", etag).header("Idempotency-Key", "hold-disposition-"+suffix)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"disposition\":\"RELEASE\",\"reason\":\"QA cleared\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AVAILABLE"));
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select status from warehouse.inventory_temperature_evaluation where lot_id=?", String.class, java.util.UUID.fromString(lotId))).isEqualTo("RESOLVED");
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select disposition from warehouse.inventory_lot_disposition where lot_id=?", String.class, java.util.UUID.fromString(lotId))).isEqualTo("RELEASE");
+        java.math.BigDecimal acceptedMinimum = skuMinimum == null ? zoneMinimum : skuMinimum.max(zoneMinimum);
+        java.math.BigDecimal acceptedMaximum = skuMaximum == null ? zoneMaximum : skuMaximum.min(zoneMaximum);
+        assertThat(acceptedMinimum).isLessThanOrEqualTo(acceptedMaximum);
+
+        MvcResult inRange = postReceipt(token, "in-range-receipt-" + suffix,
+                receiptBody(warehouseId, zoneId, "I-" + suffix, "10",
+                        acceptedMinimum.add(acceptedMaximum).divide(java.math.BigDecimal.valueOf(2))))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AVAILABLE"))
+                .andReturn();
+        String inRangeLotId = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(inRange.getResponse().getContentAsString()).get("id").asText();
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?",
+                Integer.class, UUID.fromString(inRangeLotId))).isZero();
+
+        int lotsBefore = scopedWarehouseLotCount(warehouseId);
+        int movementsBefore = jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        int eventsBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        int evaluationsBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        String key = "excursion-receipt-" + suffix;
+        java.math.BigDecimal excursionReading = acceptedMaximum.add(java.math.BigDecimal.ONE);
+        postReceipt(token, key, receiptBody(warehouseId, zoneId, "H-" + suffix, "10", excursionReading))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP"));
+
+        assertThat(scopedWarehouseLotCount(warehouseId)).isEqualTo(lotsBefore);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where warehouse_id=? and batch_number=?",
+                Integer.class, UUID.fromString(warehouseId), "H-" + suffix)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(movementsBefore);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(eventsBefore);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where tenant_id=? and workspace_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(evaluationsBefore);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isZero();
     }
 
     private String createWarehouse(String token, String code) throws Exception {
@@ -250,6 +293,13 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"" + batchNumber
                 + "\",\"expirationDate\":\"2099-01-01\",\"quantity\":\"" + quantity
                 + "\",\"unit\":\"UNIT\"}";
+    }
+
+    private static String receiptBody(String warehouseId, String zoneId, String batchNumber, String quantity,
+                                      java.math.BigDecimal temperatureReading) {
+        String receipt = receiptBody(warehouseId, zoneId, batchNumber, quantity);
+        return receipt.substring(0, receipt.length() - 1) + ",\"temperatureReading\":"
+                + temperatureReading.toPlainString() + "}";
     }
 
     private ResultActions postReceipt(String token, String key, String body) throws Exception {
