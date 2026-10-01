@@ -131,6 +131,11 @@ public class WarehouseOperationsService {
                                            String key, String correlation) {
         return transferInventory.receive(context, id, expectedVersion, key, correlation);
     }
+    @Transactional public TransferReceiptObservation observeTransferReceiptDiscrepancy(
+            CurrentAccessContext context, String id, TransferReceiptObservationCommand command,
+            long expectedVersion, String key, String correlation) {
+        return transferInventory.observeReceiptDiscrepancy(context, id, command, expectedVersion, key, correlation);
+    }
     public ReservationPreview preview(CurrentAccessContext context, String orderId) { return prepareFulfillment.execute(context, orderId); }
     public ReservationDetail reserve(CurrentAccessContext context, String orderId, long expected, String key, String correlation) { return reserveInventory.execute(context, orderId, expected, key, correlation); }
     public ReservationDetail release(CurrentAccessContext context, String reservationId, long expected, String key, String reason, String correlation, boolean expiry) {
@@ -184,6 +189,23 @@ public class WarehouseOperationsService {
                                   String mode, String status, String reason, Instant createdAt,
                                   long sourceVersionBefore, Long sourceVersionAfter, Long destinationVersionAfter,
                                   long version, Instant dispatchedAt, Instant receivedAt) { }
+    public record TransferReceiptObservationCommand(String observedBatchNumber,
+                                                    LocalDate observedExpirationDate,
+                                                    BigDecimal observedQuantity, String unit) { }
+    public record TransferReceiptObservation(String id, String transferId, long transferVersion,
+                                             String sourceWarehouseId, String sourceZoneId, String sourceLotId,
+                                             String destinationWarehouseId, String destinationZoneId,
+                                             String expectedBatchNumber, LocalDate expectedExpirationDate,
+                                             BigDecimal expectedQuantity, String expectedUnit,
+                                             String observedBatchNumber, LocalDate observedExpirationDate,
+                                             BigDecimal observedQuantity, String observedUnit,
+                                             String actorMembershipId, Instant recordedAt) {
+        public boolean hasDifference() {
+            return !expectedBatchNumber.equals(observedBatchNumber)
+                    || (observedExpirationDate != null && !expectedExpirationDate.equals(observedExpirationDate))
+                    || expectedQuantity.compareTo(observedQuantity) != 0;
+        }
+    }
     public record MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt, String skuId) {
         public MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt) {
             this(id, lotId, catalogItemId, type, quantity, unit, quantityBefore, quantityAfter, reservedBefore, reservedAfter, reason, occurredAt, null);

@@ -52,4 +52,14 @@ public class TransferInventory {
         WarehouseApplicationAuthorization.write(context);
         return persistence.receive(context, transferId, expectedVersion, idempotencyKey, correlationId);
     }
+
+    @Transactional
+    public WarehouseOperationsService.TransferReceiptObservation observeReceiptDiscrepancy(
+            CurrentAccessContext context, String transferId,
+            WarehouseOperationsService.TransferReceiptObservationCommand command,
+            long expectedVersion, String idempotencyKey, String correlationId) {
+        WarehouseApplicationAuthorization.write(context);
+        return persistence.observeReceiptDiscrepancy(
+                context, transferId, command, expectedVersion, idempotencyKey, correlationId);
+    }
 }

@@ -366,6 +366,22 @@ public final class WarehouseController {
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
+    @PostMapping("/inventory/transfers/{id}/receipt-observations")
+    @Operation(operationId = "recordInventoryTransferReceiptObservation")
+    public ResponseEntity<TransferReceiptObservationResponse> observeTransferReceiptDiscrepancy(
+            @RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String id,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody TransferReceiptObservationRequest request,
+            @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        var command = new WarehouseOperationsService.TransferReceiptObservationCommand(
+                request.observedBatchNumber(), request.observedExpirationDate(), request.observedQuantity(), request.unit());
+        var value = transferReceiptObservation(service.observeTransferReceiptDiscrepancy(
+                c, id, command, version(ifMatch), key, String.valueOf(correlation)));
+        return ResponseEntity.status(201).eTag(etag(value.transferVersion())).body(value);
+    }
+
     @GetMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservation-preview")
     @Operation(operationId = "previewFulfillmentCandidateInventoryReservation")
     public ReservationPreviewResponse preview(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId) { return preview(service.preview(c, salesOrderId)); }
@@ -413,6 +429,15 @@ public final class WarehouseController {
     private MovementResponse movement(WarehouseOperationsService.MovementSummary x) { return new MovementResponse(x.id(), x.lotId(), x.catalogItemId(), x.type(), x.quantity(), x.unit(), x.quantityBefore(), x.quantityAfter(), x.reservedBefore(), x.reservedAfter(), x.reason(), x.occurredAt(), x.skuId()); }
     private SafetyStockResponse safetyStock(WarehouseOperationsService.SafetyStockSummary x) { return new SafetyStockResponse(x.id(), x.warehouseId(), x.skuId(), x.catalogItemId(), x.quantity(), x.unit(), x.version(), x.updatedAt()); }
     private TransferResponse transfer(WarehouseOperationsService.TransferSummary x) { return new TransferResponse(x.id(), x.sourceWarehouseId(), x.sourceZoneId(), x.sourceLotId(), x.destinationWarehouseId(), x.destinationZoneId(), x.destinationLotId(), x.skuId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.requestedQuantity(), x.transferredQuantity(), x.unit(), x.mode(), x.status(), x.reason(), x.createdAt(), x.sourceVersionBefore(), x.sourceVersionAfter(), x.destinationVersionAfter(), x.version(), x.dispatchedAt(), x.receivedAt()); }
+    private TransferReceiptObservationResponse transferReceiptObservation(
+            WarehouseOperationsService.TransferReceiptObservation x) {
+        return new TransferReceiptObservationResponse(x.id(), x.transferId(), x.transferVersion(),
+                x.sourceWarehouseId(), x.sourceZoneId(), x.sourceLotId(),
+                x.destinationWarehouseId(), x.destinationZoneId(),
+                x.expectedBatchNumber(), x.expectedExpirationDate(), x.expectedQuantity(), x.expectedUnit(),
+                x.observedBatchNumber(), x.observedExpirationDate(), x.observedQuantity(), x.observedUnit(),
+                x.hasDifference(), x.actorMembershipId(), x.recordedAt());
+    }
     private AvailabilityResponse availability(WarehouseOperationsService.Availability x) { return new AvailabilityResponse(x.catalogItemId(), x.status(), x.asOf(), x.physicalQuantity(), x.safetyStock(), x.sellableQuantity()); }
     private ReservationPreviewResponse preview(WarehouseOperationsService.ReservationPreview x) { return new ReservationPreviewResponse(x.salesOrderId(), x.orderNumber(), x.lines().stream().map(this::proposal).toList(), x.complete(), x.generatedAt(), x.notice()); }
     private ProposalLineResponse proposal(WarehouseOperationsService.ProposalLine x) { return new ProposalLineResponse(x.catalogItemId(), x.requested(), x.unit(), x.allocations().stream().map(this::allocation).toList(), x.shortage(), x.complete(), x.skuId()); }
@@ -450,6 +475,15 @@ public final class WarehouseController {
                                    String mode, String status, String reason, Instant createdAt,
                                    long sourceVersionBefore, Long sourceVersionAfter, Long destinationVersionAfter,
                                    long version, Instant dispatchedAt, Instant receivedAt) { }
+    public record TransferReceiptObservationResponse(
+            String observationId, String transferId, long transferVersion,
+            String sourceWarehouseId, String sourceZoneId, String sourceLotId,
+            String destinationWarehouseId, String destinationZoneId,
+            String expectedBatchNumber, LocalDate expectedExpirationDate,
+            BigDecimal expectedQuantity, String expectedUnit,
+            String observedBatchNumber, LocalDate observedExpirationDate,
+            BigDecimal observedQuantity, String observedUnit, boolean hasDifference,
+            String actorMembershipId, Instant recordedAt) { }
     public record ReservationPreviewResponse(String salesOrderId, String orderNumber, List<ProposalLineResponse> lines, boolean complete, Instant generatedAt, String notice) { }
     public record ProposalLineResponse(String catalogItemId, BigDecimal requested, String unit, List<AllocationResponse> allocations, BigDecimal shortage, boolean complete, String skuId) { }
     public record AllocationResponse(String lotId, BigDecimal quantity, String unit, LocalDate expirationDate) { }
@@ -497,4 +531,9 @@ public final class WarehouseController {
                                   @NotNull @DecimalMin("0.0001") BigDecimal quantity,
                                   @Size(max = 32) String unit,
                                   @NotBlank @Size(max = 2000) String reason) { }
+    public record TransferReceiptObservationRequest(
+            @NotBlank @Size(max = 80) String observedBatchNumber,
+            LocalDate observedExpirationDate,
+            @NotNull @DecimalMin("0.0") BigDecimal observedQuantity,
+            @NotBlank @Size(max = 32) String unit) { }
 }

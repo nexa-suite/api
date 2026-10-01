@@ -349,6 +349,106 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         return transfer(context, transfer.id().toString());
     }
 
+    @Override
+    @Transactional
+    public WarehouseOperationsService.TransferReceiptObservation observeReceiptDiscrepancy(
+            CurrentAccessContext context, String transferId,
+            WarehouseOperationsService.TransferReceiptObservationCommand command,
+            long expectedVersion, String idempotencyKey, String correlationId) {
+        requireWrite(context);
+        requireIdempotency(idempotencyKey);
+        if (command == null || expectedVersion < 0 || command.observedQuantity() == null
+                || !fitsTransferQuantity(command.observedQuantity()) || command.observedQuantity().signum() < 0) {
+            throw error("INVALID_REQUEST", false);
+        }
+        String observedBatch = bounded(command.observedBatchNumber(), "observedBatchNumber", 80);
+        String observedUnit = normalizedUnit(command.unit());
+        String operation = "inventory-transfer-receipt-observation";
+        String hashInput = lengthPrefixed(transferId)
+                + lengthPrefixed(Long.toString(expectedVersion))
+                + lengthPrefixed(observedBatch)
+                + lengthPrefixed(command.observedExpirationDate() == null
+                        ? null : command.observedExpirationDate().toString())
+                + lengthPrefixed(command.observedQuantity().toString())
+                + lengthPrefixed(observedUnit);
+        String hash = requestHash(operation, hashInput);
+        lockIdempotency(context, operation, idempotencyKey);
+
+        // This row lock serializes observations with dispatch/receipt while the active grants are rechecked.
+        TransferState transfer = transferState(context, transferId, true);
+        IdempotencyRecord prior = idempotent(context, operation, idempotencyKey);
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            return receiptObservation(context, prior.resourceId());
+        }
+        if (!"IN_TRANSIT".equals(transfer.status()) || transfer.version() != expectedVersion) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        if (!transfer.unit().equalsIgnoreCase(observedUnit)) throw error("INVENTORY_UNIT_MISMATCH", false);
+        boolean differs = !transfer.batchNumber().equals(observedBatch)
+                || (command.observedExpirationDate() != null
+                    && !transfer.expirationDate().equals(command.observedExpirationDate()))
+                || transfer.quantity().compareTo(command.observedQuantity()) != 0;
+        if (!differs) throw error("INVALID_REQUEST", false);
+
+        UUID observationId = UUID.randomUUID();
+        Timestamp recordedAt = now();
+        String correlation = correlationId == null || correlationId.isBlank() ? "unknown" : correlationId;
+        checkUpdated(jdbc.update("insert into warehouse.inventory_transfer_receipt_observation"
+                        + "(id,tenant_id,workspace_id,transfer_id,transfer_version,source_warehouse_id,source_zone_id,source_lot_id,"
+                        + "destination_warehouse_id,destination_zone_id,expected_batch_number,expected_expiration_date,expected_quantity,"
+                        + "expected_unit,observed_batch_number,observed_expiration_date,observed_quantity,observed_unit,"
+                        + "actor_membership_id,correlation_id,recorded_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                observationId, tenant(context), workspace(context), transfer.id(), transfer.version(),
+                transfer.sourceWarehouseId(), transfer.sourceZoneId(), transfer.sourceLotId(),
+                transfer.destinationWarehouseId(), transfer.destinationZoneId(), transfer.batchNumber(),
+                transfer.expirationDate(), transfer.quantity(), transfer.unit(), observedBatch,
+                command.observedExpirationDate(), command.observedQuantity(), observedUnit,
+                context.membershipId().value(), correlation, recordedAt),
+                "transfer receipt observation insert");
+        checkUpdated(jdbc.update("insert into warehouse.inventory_event"
+                        + "(id,tenant_id,workspace_id,aggregate_id,event_type,occurred_at,actor_membership_id,correlation_id)"
+                        + " values (?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), tenant(context), workspace(context), observationId,
+                "warehouse.inventory.transfer.receipt-observation-recorded", recordedAt,
+                context.membershipId().value(), correlation), "transfer receipt observation event insert");
+        saveIdempotency(context, operation, idempotencyKey, hash, observationId.toString());
+        return receiptObservation(context, observationId.toString());
+    }
+
+    private WarehouseOperationsService.TransferReceiptObservation receiptObservation(
+            CurrentAccessContext context, String id) {
+        return jdbc.query("select id,transfer_id,transfer_version,source_warehouse_id,source_zone_id,source_lot_id,"
+                                + "destination_warehouse_id,destination_zone_id,expected_batch_number,expected_expiration_date,"
+                                + "expected_quantity,expected_unit,observed_batch_number,observed_expiration_date,observed_quantity,"
+                                + "observed_unit,actor_membership_id,recorded_at from warehouse.inventory_transfer_receipt_observation"
+                                + " where tenant_id=? and workspace_id=? and id=?",
+                        (rs, row) -> new WarehouseOperationsService.TransferReceiptObservation(
+                                rs.getObject("id", UUID.class).toString(), rs.getObject("transfer_id", UUID.class).toString(),
+                                rs.getLong("transfer_version"), rs.getObject("source_warehouse_id", UUID.class).toString(),
+                                rs.getObject("source_zone_id", UUID.class).toString(), rs.getObject("source_lot_id", UUID.class).toString(),
+                                rs.getObject("destination_warehouse_id", UUID.class).toString(),
+                                rs.getObject("destination_zone_id", UUID.class).toString(), rs.getString("expected_batch_number"),
+                                rs.getObject("expected_expiration_date", LocalDate.class), rs.getBigDecimal("expected_quantity"),
+                                rs.getString("expected_unit"), rs.getString("observed_batch_number"),
+                                rs.getObject("observed_expiration_date", LocalDate.class), rs.getBigDecimal("observed_quantity"),
+                                rs.getString("observed_unit"), rs.getObject("actor_membership_id", UUID.class).toString(),
+                                instant(rs, "recorded_at")),
+                        tenant(context), workspace(context), uuid(id))
+                .stream().findFirst().orElseThrow(() -> error("INVENTORY_TRANSFER_NOT_FOUND", true));
+    }
+
+    private static boolean fitsTransferQuantity(BigDecimal quantity) {
+        BigDecimal normalized = quantity.stripTrailingZeros();
+        int fractionalDigits = Math.max(0, normalized.scale());
+        int integerDigits = normalized.precision() - normalized.scale();
+        return fractionalDigits <= 4 && integerDigits <= 15;
+    }
+
+    private static String lengthPrefixed(String value) {
+        return value == null ? "-1:" : value.length() + ":" + value;
+    }
+
     private TransferLot selectFefoSource(CurrentAccessContext context, UUID sourceWarehouseId, UUID skuId,
                                          String catalogItemId, BigDecimal quantity, String unit) {
         String legacy = catalogItemId == null || catalogItemId.isBlank() ? skuId.toString() : bounded(catalogItemId, "catalogItemId", 64);
