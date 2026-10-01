@@ -21,6 +21,32 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport {
     @Test
+    void pickingWorkListReturnsOnlyCurrentAllocatedWorkForFulfillmentReaders() throws Exception {
+        Fixture fixture = createFulfillment();
+        MvcResult listed = mockMvc.perform(get("/api/v1/fulfillments")
+                        .param("page", "0").param("size", "25")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(25))
+                .andExpect(jsonPath("$.asOf").isNotEmpty())
+                .andReturn();
+        var page = json(listed);
+        var item = java.util.stream.StreamSupport.stream(page.get("items").spliterator(), false)
+                .filter(value -> fixture.fulfillmentId().equals(value.get("fulfillmentId").asText()))
+                .findFirst().orElseThrow();
+        assertThat(item.get("status").asText()).isEqualTo("ALLOCATED");
+        assertThat(item.get("physicalAllocationId").asText()).isEqualTo(fixture.allocationId());
+        assertThat(item.get("allocationVersion").asLong()).isGreaterThanOrEqualTo(0);
+        assertThat(item.get("lineCount").asInt()).isEqualTo(1);
+
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        mockMvc.perform(get("/api/v1/fulfillments")
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void authorizedWarehouseReadsCurrentScopedAllocationAndBuyerCannotReadIt() throws Exception {
         Fixture fixture = createFulfillment();
         MvcResult allocation = readAllocation(fixture, fixture.warehouseToken())
