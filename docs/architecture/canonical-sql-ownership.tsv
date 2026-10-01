@@ -176,3 +176,4 @@ sales.field_visit_evidence	BC02	V113__customer_field_visit_evidence.sql:1 CREATE
 logistics.fulfillment_driver_assignment	BC06	V111__assign_driver_to_prepared_fulfillment.sql:1 CREATE TABLE; prepared fulfillment driver assignment.
 logistics.fulfillment_outgoing_goods_check	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
 logistics.fulfillment_outgoing_goods_check_line	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
+warehouse.inventory_transfer_receipt_observation	BC05	V115__record_transfer_receipt_observations.sql CREATE TABLE; attributable transfer receipt observations.
