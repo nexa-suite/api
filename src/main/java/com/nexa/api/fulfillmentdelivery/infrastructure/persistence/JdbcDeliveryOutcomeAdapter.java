@@ -139,9 +139,15 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         }
 
         Instant attemptedAt = request.attemptedAt() == null ? clock.instant() : request.attemptedAt();
-        int attemptNumber = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
-                Integer.class, request.tenantId(), request.workspaceId(), request.deliveryId());
-        UUID attemptId = UUID.randomUUID();
+        ActiveAttemptRow activeAttempt = jdbc.query("select id,attempt_number from logistics.delivery_active_attempt "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? for update",
+                (rs, row) -> new ActiveAttemptRow(rs.getObject("id", UUID.class), rs.getInt("attempt_number")),
+                request.tenantId(), request.workspaceId(), request.deliveryId()).stream().findFirst().orElse(null);
+        int attemptNumber = activeAttempt == null
+                ? jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
+                        Integer.class, request.tenantId(), request.workspaceId(), request.deliveryId())
+                : activeAttempt.attemptNumber();
+        UUID attemptId = activeAttempt == null ? UUID.randomUUID() : activeAttempt.id();
         String attemptStatus = switch (request.outcome()) {
             case DELIVERED -> "FINAL";
             case PARTIAL -> "PARTIAL";
@@ -154,6 +160,10 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                 attemptId, request.tenantId(), request.workspaceId(), request.deliveryId(), attemptNumber, attemptStatus,
                 failureReason, bounded(request.notes()), Timestamp.from(attemptedAt), Timestamp.from(attemptedAt),
                 request.outcome().name(), Timestamp.from(attemptedAt));
+        if (activeAttempt != null && jdbc.update("delete from logistics.delivery_active_attempt where tenant_id=? and workspace_id=? and delivery_id=? and id=?",
+                request.tenantId(), request.workspaceId(), request.deliveryId(), activeAttempt.id()) != 1) {
+            throw error("CONCURRENCY_CONFLICT");
+        }
 
         BigDecimal finalAdjustment = BigDecimal.ZERO;
         String adjustmentCurrency = null;
@@ -561,6 +571,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         }
     }
     private record FulfillmentRow(UUID id, UUID salesOrderId, UUID clientAccountId, long version, String status) { }
+    private record ActiveAttemptRow(UUID id, int attemptNumber) { }
     private record DeliveryRow(UUID id, UUID fulfillmentId, UUID salesOrderId, String status, String destinationSnapshot,
                                Instant scheduledAt, Instant dispatchedAt, Instant deliveredAt, long version) { }
 }
