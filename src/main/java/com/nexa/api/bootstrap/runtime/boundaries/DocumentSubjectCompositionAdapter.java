@@ -88,9 +88,9 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
     }
 
     private DocumentSubjectSnapshot resolveDeliveryIncident(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {
-        return fulfillment.findIncident(tenant, workspace, id)
+        return fulfillment.findIncidentSubject(tenant, workspace, id)
                 .map(value -> snapshot(tenant, workspace, subject.type(), value.id().toString(),
-                        nullable(value.customerAccountId()), value.resolution() == null ? "OPEN" : "RESOLVED", true))
+                        nullable(value.customerAccountId()), value.status(), true))
                 .orElseGet(() -> absent(tenant, workspace, subject));
     }
 
