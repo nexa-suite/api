@@ -75,7 +75,7 @@ public class DriverDeliveryService {
         if (expectedVersion < 0) throw new FulfillmentOperationException("VERSION_INVALID", false);
         persistence.requireAssignedAttempt(
                 tenant(context), workspace(context), actor(context), deliveryId, attemptId, idempotencyKey);
-        return lifecycle.recordAttempt(context, deliveryId, expectedVersion, idempotencyKey, command);
+        return lifecycle.recordDriverAttempt(context, deliveryId, expectedVersion, idempotencyKey, command);
     }
 
     private static UUID tenant(CurrentAccessContext context) { return context.tenantId().value(); }

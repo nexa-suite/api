@@ -653,7 +653,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 (rs, row) -> new AttemptOutcomeLine(rs.getObject("id", UUID.class),
                         rs.getObject("sku_id", UUID.class), rs.getBigDecimal("dispatched_quantity"),
                         rs.getString("unit")), fixture.deliveryId());
-        String body = "{\"outcome\":\"DELIVERED\",\"attemptedAt\":\"2026-09-30T12:30:00Z\",\"notes\":\"same delivery outcome\",\"lines\":[{\"fulfillmentLineId\":\""
+        String body = "{\"outcome\":\"DELIVERED\",\"failureReason\":\"a|b\",\"attemptedAt\":\"2026-09-30T12:30:00Z\",\"notes\":\"c\",\"lines\":[{\"fulfillmentLineId\":\""
                 + line.fulfillmentLineId() + "\",\"skuId\":\"" + line.skuId()
                 + "\",\"attemptedQuantity\":" + line.quantity().toPlainString()
                 + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
@@ -695,7 +695,15 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(post(path).header("Authorization", "Bearer " + logistics)
                         .header("If-Match", startEtag).header("Idempotency-Key", outcomeKey)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body.replace("same delivery outcome", "changed outcome")))
+                        .content(body.replace("\"notes\":\"c\"", "\"notes\":\"changed\"")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+
+        mockMvc.perform(post(path).header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", startEtag).header("Idempotency-Key", outcomeKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body.replace("\"failureReason\":\"a|b\"", "\"failureReason\":\"a\"")
+                                .replace("\"notes\":\"c\"", "\"notes\":\"b|c\"")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
 
