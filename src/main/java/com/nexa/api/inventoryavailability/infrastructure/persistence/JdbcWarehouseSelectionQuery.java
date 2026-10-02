@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static com.nexa.api.inventoryavailability.infrastructure.persistence.WarehousePersistenceSupport.sellableQuantitySql;
+
 @Repository
 @Profile("!test")
 public class JdbcWarehouseSelectionQuery implements WarehouseSelectionQuery {
@@ -91,12 +93,12 @@ public class JdbcWarehouseSelectionQuery implements WarehouseSelectionQuery {
         parameters.add(tenantId);
         parameters.add(workspaceId);
         Map<UUID, BigDecimal> result = new LinkedHashMap<>();
-        jdbc.query("with eligible as (select l.sku_id,l.warehouse_id,coalesce(sum(l.stock_quantity-l.reserved_quantity),0) available "
+        jdbc.query("with eligible as (select l.sku_id,l.warehouse_id,coalesce(sum(" + sellableQuantitySql("l") + "),0) available "
                         + "from warehouse.inventory_lot l join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
                         + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
                         + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
                         + "where l.tenant_id=? and l.workspace_id=?" + warehousePredicate
-                        + " and l.status='AVAILABLE' and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity "
+                        + " and l.status='AVAILABLE' and l.expiration_date>current_date and " + sellableQuantitySql("l") + ">0 "
                         + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
                         + "and coalesce(service.service_status,'OPERATIONAL')='OPERATIONAL' and l.sku_id in (" + placeholders + ") "
                         + "group by l.sku_id,l.warehouse_id), active_backing as ("

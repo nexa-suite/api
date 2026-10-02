@@ -35,6 +35,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -829,15 +830,16 @@ public class FulfillmentLifecycleService {
         UUID lotId = null;
         UUID warehouseId;
         UUID zoneId = null;
+        ColdChainPolicyQuery.LotTemperatureContext lotContext = null;
         java.util.Optional<ColdChainPolicyQuery.Range> range;
         if ("LOT".equals(subjectType)) {
-            ColdChainPolicyQuery.LotTemperatureContext lot = coldChain.temperatureContextForLot(
+            lotContext = coldChain.temperatureContextForLot(
                             tenant(context), workspace(context), command.subjectId())
                     .orElseThrow(() -> invalid("INVENTORY_LOT_NOT_FOUND"));
-            lotId = lot.lotId();
-            warehouseId = lot.warehouseId();
-            zoneId = lot.zoneId();
-            range = lot.range();
+            lotId = lotContext.lotId();
+            warehouseId = lotContext.warehouseId();
+            zoneId = lotContext.zoneId();
+            range = lotContext.range();
         } else if ("WAREHOUSE".equals(subjectType)) {
             warehouseId = command.subjectId();
             if (!warehouseSelection.existsInScope(tenant(context), workspace(context), warehouseId)) {
@@ -855,19 +857,127 @@ public class FulfillmentLifecycleService {
                         && celsius.compareTo(value.maximumCelsius()) <= 0
                 ? TemperatureReadingStatus.WITHIN_RANGE.name() : TemperatureReadingStatus.OUT_OF_RANGE.name())
                 .orElse(TemperatureReadingStatus.UNKNOWN.name());
-        String requestHash = hash("temperature-evidence-v1|" + command.subjectType() + "|" + command.subjectId()
-                + "|" + command.value().toPlainString() + "|" + command.unit() + "|" + command.occurredAt());
+        BigDecimal affectedQuantity = normalizeTemperatureHoldQuantity(command.affectedQuantity());
+        String reason = command.reason() == null || command.reason().isBlank() ? null : command.reason().trim();
+        if (reason != null && reason.length() > 2000) throw invalid("TEMPERATURE_REASON_INVALID");
+        String requestHash = hash("temperature-evidence-v2|" + subjectType + "|" + command.subjectId()
+                + "|" + command.value().toPlainString() + "|" + scale.name() + "|" + command.occurredAt()
+                + "|" + command.evidenceObjectId() + "|" + command.expectedLotVersion() + "|"
+                + (affectedQuantity == null ? "<null>" : affectedQuantity.toPlainString()) + "|"
+                + Objects.toString(reason, "<null>") + "|" + command.sourceEvidenceId());
+        TemperatureEvidenceView replay = deliveries.findStockTemperatureEvidenceReplay(tenant(context),
+                workspace(context), actor(context), idempotencyKey.trim(), requestHash).orElse(null);
+        if (replay != null) return enrichTemperatureEvidence(context, replay);
+
+        boolean outOfRange = TemperatureReadingStatus.OUT_OF_RANGE.name().equals(status);
+        UUID evidenceObjectId = command.evidenceObjectId();
+        TemperatureEvidenceView sourceEvidence = null;
+        if (command.sourceEvidenceId() != null) {
+            if (!"LOT".equals(subjectType) || !outOfRange) throw invalid("TEMPERATURE_SOURCE_EVIDENCE_INVALID");
+            sourceEvidence = deliveries.findWarehouseTemperatureSource(tenant(context), workspace(context),
+                            command.sourceEvidenceId(), warehouseId)
+                    .orElseThrow(() -> invalid("TEMPERATURE_SOURCE_EVIDENCE_NOT_FOUND"));
+            if (sourceEvidence.evidenceObjectId() == null) throw invalid("TEMPERATURE_SOURCE_EVIDENCE_INVALID");
+            if (evidenceObjectId == null) evidenceObjectId = sourceEvidence.evidenceObjectId();
+        }
+        if (outOfRange && ("WAREHOUSE".equals(subjectType) || "LOT".equals(subjectType))) {
+            if (evidenceObjectId == null || reason == null) throw invalid("TEMPERATURE_EXCURSION_EVIDENCE_REQUIRED");
+            if (!businessEvidence.isAvailablePhotoForSubject(tenant(context), workspace(context), evidenceObjectId,
+                    "WAREHOUSE", warehouseId)) throw invalid("BUSINESS_EVIDENCE_NOT_AVAILABLE");
+        }
+        if (outOfRange && "LOT".equals(subjectType)) {
+            if (command.expectedLotVersion() == null || command.expectedLotVersion() < 0 || affectedQuantity == null) {
+                throw invalid("TEMPERATURE_LOT_HOLD_DETAILS_REQUIRED");
+            }
+        } else if ("WAREHOUSE".equals(subjectType)
+                && (command.expectedLotVersion() != null || affectedQuantity != null || command.sourceEvidenceId() != null)) {
+            throw invalid("WAREHOUSE_TEMPERATURE_SELECTION_REQUIRED");
+        }
+
+        UUID evidenceId = UUID.randomUUID();
+        InventoryTemperatureHoldCommands.PreventiveHoldResult hold = null;
+        if (outOfRange && "LOT".equals(subjectType)) {
+            hold = temperatureHolds.recordStockTemperatureEvidenceHold(context,
+                    new InventoryTemperatureHoldCommands.StockEvidenceHoldRequest(lotId, warehouseId,
+                            command.expectedLotVersion(), evidenceId, command.sourceEvidenceId(), celsius,
+                            range.map(ColdChainPolicyQuery.Range::minimumCelsius).orElse(null),
+                            range.map(ColdChainPolicyQuery.Range::maximumCelsius).orElse(null), affectedQuantity,
+                            evidenceObjectId, reason, command.occurredAt()));
+        }
         TemperatureEvidenceView result = deliveries.recordTemperatureEvidence(new DeliveryPersistencePort.TemperatureEvidenceRequest(
                 tenant(context), workspace(context), subjectType, command.subjectId(), lotId, warehouseId, zoneId,
                 actor(context), idempotencyKey, requestHash, command.value(), celsius, scale.name(), status,
-                command.occurredAt()));
+                command.occurredAt(), null, evidenceId, evidenceObjectId,
+                hold == null && "LOT".equals(subjectType) ? command.expectedLotVersion()
+                        : hold == null ? null : command.expectedLotVersion(),
+                hold == null ? null : hold.resultingLotVersion(), hold == null ? null : hold.temperatureEvaluationId(),
+                hold == null ? null : hold.lotStatus(), hold == null ? affectedQuantity : hold.affectedQuantity(),
+                reason, command.sourceEvidenceId()));
         if (result.warehouseId() != null && !warehouseId.equals(result.warehouseId())
                 && !warehouseAccess.hasActiveGrant(context, result.warehouseId())) {
             throw new AccessPolicyViolation("Membership has no active grant for the recorded Warehouse");
         }
         trace(context, "TEMPERATURE_EVIDENCE_RECORDED", "TemperatureEvidence", result.id(), idempotencyKey,
                 Map.of("subjectType", result.subjectType(), "subjectId", result.subjectId(), "status", result.status()));
-        return result;
+        return enrichTemperatureEvidence(context, result);
+    }
+
+    @Transactional(readOnly = true)
+    public TemperatureEvidenceView temperatureEvidence(CurrentAccessContext context, UUID evidenceId) {
+        context.requirePermission(PermissionKey.INVENTORY_READ);
+        if (evidenceId == null) throw invalid("TEMPERATURE_EVIDENCE_NOT_FOUND");
+        TemperatureEvidenceView evidence = deliveries.findTemperatureEvidence(tenant(context), workspace(context), evidenceId)
+                .orElseThrow(() -> invalid("TEMPERATURE_EVIDENCE_NOT_FOUND"));
+        if (evidence.warehouseId() == null || !warehouseAccess.hasActiveGrant(context, evidence.warehouseId())) {
+            throw new AccessPolicyViolation("Membership has no active grant for the recorded Warehouse");
+        }
+        return enrichTemperatureEvidence(context, evidence);
+    }
+
+    private TemperatureEvidenceView enrichTemperatureEvidence(CurrentAccessContext context, TemperatureEvidenceView evidence) {
+        String evaluationStatus = evidence.evaluationStatus();
+        String disposition = evidence.disposition();
+        BigDecimal remainingHeldQuantity = evidence.remainingHeldQuantity();
+        if (evidence.inventoryTemperatureEvaluationId() != null) {
+            InventoryTemperatureHoldCommands.TemperatureEvaluationSnapshot snapshot =
+                    temperatureHolds.temperatureEvaluation(context, evidence.inventoryTemperatureEvaluationId());
+            evaluationStatus = snapshot.status();
+            disposition = snapshot.disposition();
+            remainingHeldQuantity = snapshot.remainingHeldQuantity();
+        }
+        List<FulfillmentModels.TemperatureEvidenceSelection> selections = evidence.selections().stream()
+                .map(selection -> {
+                    if (selection.inventoryTemperatureEvaluationId() == null) return selection;
+                    InventoryTemperatureHoldCommands.TemperatureEvaluationSnapshot snapshot =
+                            temperatureHolds.temperatureEvaluation(context, selection.inventoryTemperatureEvaluationId());
+                    return new FulfillmentModels.TemperatureEvidenceSelection(selection.temperatureEvidenceId(),
+                            selection.lotId(), selection.affectedQuantity(), snapshot.remainingHeldQuantity(),
+                            selection.expectedLotVersion(),
+                            selection.resultingLotVersion(), selection.inventoryTemperatureEvaluationId(),
+                            selection.inventoryLotStatus(), selection.actorMembershipId(), selection.occurredAt(),
+                            selection.evidenceObjectId(), selection.reason(), snapshot.status(), snapshot.disposition(),
+                            snapshot.blocksCommittedExecution());
+                }).toList();
+        return new TemperatureEvidenceView(evidence.id(), evidence.subjectType(), evidence.subjectId(), evidence.lotId(),
+                evidence.warehouseId(), evidence.value(), evidence.unit(), evidence.occurredAt(),
+                evidence.actorMembershipId(), evidence.status(), evidence.source(), evidence.fulfillmentVersion(),
+                evidence.evidenceObjectId(), evidence.expectedLotVersion(), evidence.resultingLotVersion(),
+                evidence.inventoryTemperatureEvaluationId(), evidence.inventoryLotStatus(), evidence.affectedQuantity(),
+                remainingHeldQuantity, evidence.reason(), evidence.sourceEvidenceId(), evidence.exceptionId(), evidence.exceptionStatus(),
+                evaluationStatus, disposition, selections);
+    }
+
+    private static BigDecimal normalizeTemperatureHoldQuantity(BigDecimal quantity) {
+        if (quantity == null) return null;
+        if (quantity.signum() <= 0) throw invalid("TEMPERATURE_AFFECTED_QUANTITY_INVALID");
+        try {
+            if (quantity.setScale(4, RoundingMode.UNNECESSARY).precision() > 19) {
+                throw invalid("TEMPERATURE_AFFECTED_QUANTITY_INVALID");
+            }
+        } catch (ArithmeticException exception) {
+            throw invalid("TEMPERATURE_AFFECTED_QUANTITY_INVALID");
+        }
+        return quantity;
     }
 
     private FulfillmentModels.FulfillmentTemperatureReadiness temperatureReadiness(
@@ -1237,7 +1347,14 @@ public class FulfillmentLifecycleService {
                                      String source, String evidenceMetadata, Instant recordedAt) { }
 
     public record TemperatureEvidenceCommand(String subjectType, UUID subjectId, BigDecimal value,
-                                             String unit, Instant occurredAt) { }
+                                             String unit, Instant occurredAt, UUID evidenceObjectId,
+                                             Long expectedLotVersion, BigDecimal affectedQuantity,
+                                             String reason, UUID sourceEvidenceId) {
+        public TemperatureEvidenceCommand(String subjectType, UUID subjectId, BigDecimal value,
+                                          String unit, Instant occurredAt) {
+            this(subjectType, subjectId, value, unit, occurredAt, null, null, null, null, null);
+        }
+    }
 
     public record FulfillmentTemperatureEvidenceCommand(UUID lotId, BigDecimal value,
                                                         String unit, Instant occurredAt,

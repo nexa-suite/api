@@ -123,7 +123,7 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
                 catch (IllegalStateException exception) { throw error("INVENTORY_SHORTAGE", false); }
                 checkUpdated(jdbc.update("insert into warehouse.inventory_reservation_allocation(id,reservation_line_id,lot_id,quantity,unit,expiration_date) values (?,?,?,?,?,?)",
                         UUID.randomUUID(), lineId, uuid(allocation.lotId()), allocation.quantity(), allocation.unit(), allocation.expirationDate()), "allocation insert");
-                checkUpdated(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity+?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and stock_quantity-reserved_quantity>=?",
+                checkUpdated(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity+?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and stock_quantity-reserved_quantity-" + temperatureHeldQuantitySql("inventory_lot") + ">=?",
                         allocation.quantity(), tenant(context), workspace(context), uuid(allocation.lotId()), lot.version(), allocation.quantity()), "lot reservation update", "INVENTORY_SHORTAGE");
                 insertMovement(context, uuid(lot.warehouseId()), uuid(lot.zoneId()), uuid(allocation.lotId()), lot.catalogItemId(), uuidNullable(lot.skuId()),
                         "RESERVATION", allocation.quantity(), allocation.unit(), lot.onHand(), lot.onHand(), lot.reserved(), lot.reserved().add(allocation.quantity()),

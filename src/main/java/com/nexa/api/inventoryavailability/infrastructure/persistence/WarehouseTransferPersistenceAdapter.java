@@ -151,7 +151,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (source.warehouseId().equals(destinationWarehouseId.toString())
                 && source.zoneId().equals(destinationZoneId.toString())) throw error("INVALID_REQUEST", false);
 
-        BigDecimal sourceAvailable = source.onHand().subtract(source.reserved());
+        BigDecimal sourceAvailable = source.available();
         if (quantity.compareTo(sourceAvailable) > 0) throw error("INSUFFICIENT_AVAILABLE_STOCK", false);
         if (source.status().equals("AVAILABLE") && !source.warehouseId().equals(destinationWarehouseId.toString())) {
             SafetyStockRow safetyStock = safetyStock(context, UUID.fromString(source.warehouseId()), source.skuId());
@@ -169,7 +169,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (destination != null && !destination.status().equals(source.status())
                 && !destination.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         UUID transferId = UUID.randomUUID();
-        String mode = quantity.compareTo(source.onHand()) == 0 && source.reserved().signum() == 0 ? "FULL" : "PARTIAL";
+        String mode = quantity.compareTo(source.onHand()) == 0 && source.reserved().signum() == 0
+                && source.heldQuantity().signum() == 0 ? "FULL" : "PARTIAL";
         Timestamp requested = now();
         String correlation = correlationId == null ? "unknown" : correlationId;
         checkUpdated(jdbc.update("insert into warehouse.inventory_transfer"
@@ -220,7 +221,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                 || !source.expirationDate().isAfter(LocalDate.now())) {
             throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         }
-        if (source.onHand().subtract(source.reserved()).compareTo(transfer.quantity()) < 0) {
+        if (source.available().compareTo(transfer.quantity()) < 0) {
             throw error("INSUFFICIENT_AVAILABLE_STOCK", false);
         }
         if (source.status().equals("AVAILABLE") && !source.warehouseUuid().equals(transfer.destinationWarehouseId())) {
@@ -231,7 +232,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             BigDecimal warehouseAvailable = usableWarehouseQuantity(context, source.warehouseUuid(), source.skuId());
             BigDecimal protectedQuantity = safetyStock == null ? BigDecimal.ZERO : safetyStock.quantity();
             BigDecimal transferable = warehouseAvailable.subtract(protectedQuantity).max(BigDecimal.ZERO)
-                    .min(source.onHand().subtract(source.reserved()));
+                    .min(source.available());
             if (transfer.quantity().compareTo(transferable) > 0) {
                 throw error("INVENTORY_SAFETY_STOCK_PROTECTED", false);
             }
@@ -463,7 +464,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
 
     private TransferLot loadTransferLot(CurrentAccessContext context, UUID id, boolean lock) {
         TransferLot lot = jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
-                                + "stock_quantity,reserved_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
+                                + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
+                                + " temperature_held_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?"
                                 + (lock ? " for update" : ""), (rs, row) -> transferLot(rs),
                         tenant(context), workspace(context), id)
@@ -496,7 +498,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     private TransferLot destinationLot(CurrentAccessContext context, UUID warehouseId, UUID skuId,
                                        String batchNumber, UUID sourceLotId, boolean lock) {
         return jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
-                                + "stock_quantity,reserved_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
+                                + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
+                                + " temperature_held_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=? and sku_id=?"
                                 + " and batch_number=? and id<>?" + (lock ? " for update" : ""),
                         (rs, row) -> transferLot(rs), tenant(context), workspace(context), warehouseId, skuId, batchNumber, sourceLotId)
@@ -529,12 +532,12 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private BigDecimal usableWarehouseQuantity(CurrentAccessContext context, UUID warehouseId, UUID skuId) {
-        BigDecimal value = jdbc.queryForObject("select coalesce(sum(l.stock_quantity-l.reserved_quantity),0)"
+        BigDecimal value = jdbc.queryForObject("select coalesce(sum(" + sellableQuantitySql("l") + "),0)"
                         + " from warehouse.inventory_lot l"
                         + " join warehouse.warehouse w on w.id=l.warehouse_id and w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id"
                         + " join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id"
                         + " where l.tenant_id=? and l.workspace_id=? and l.warehouse_id=? and l.sku_id=?"
-                        + " and l.status='AVAILABLE' and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity"
+                        + " and l.status='AVAILABLE' and l.expiration_date>current_date and " + sellableQuantitySql("l") + ">0"
                         + " and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE'",
                 BigDecimal.class, tenant(context), workspace(context), warehouseId, skuId);
         return value == null ? BigDecimal.ZERO : value;
@@ -578,7 +581,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                 rs.getObject("zone_id", UUID.class), rs.getString("catalog_item_id"),
                 rs.getObject("sku_id", UUID.class), rs.getString("batch_number"),
                 rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
-                rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getString("unit"),
+                rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"),
+                rs.getBigDecimal("temperature_held_quantity"), rs.getString("unit"),
                 rs.getString("status"), rs.getLong("version"), rs.getString("temperature_range_snapshot"),
                 rs.getBigDecimal("temperature_value"));
     }
@@ -613,8 +617,10 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
 
     private record TransferLot(UUID id, UUID warehouseUuid, UUID zoneUuid, String catalogItemId, UUID skuId,
                                String batchNumber, LocalDate expirationDate, java.time.Instant receivedAt,
-                               BigDecimal onHand, BigDecimal reserved, String unit, String status, long version,
+                               BigDecimal onHand, BigDecimal reserved, BigDecimal heldQuantity,
+                               String unit, String status, long version,
                                String temperatureRangeSnapshot, BigDecimal temperatureValue) {
+        BigDecimal available() { return onHand.subtract(reserved).subtract(heldQuantity).max(BigDecimal.ZERO); }
         String warehouseId() { return warehouseUuid.toString(); }
         String zoneId() { return zoneUuid.toString(); }
     }

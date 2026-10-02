@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Function;
 
 @RestController
@@ -291,6 +292,10 @@ public final class WarehouseController {
                                                    @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                    @RequestBody DispositionRequest r,
                                                    @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        if (r.affectedQuantity() != null || r.temperatureEvaluationId() != null) {
+            return mutation(service.disposeTemperatureQuantity(c, lotId, r.disposition(), r.affectedQuantity(),
+                    r.temperatureEvaluationId(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+        }
         return mutation(service.disposeLot(c, lotId, r.disposition(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
     }
 
@@ -559,7 +564,12 @@ public final class WarehouseController {
                                  String temperatureEvidenceObjectId) { }
     public record QuantityRequest(String lotId, BigDecimal quantity, String direction, String reason) { }
     public record ReasonRequest(String reason) { }
-    public record DispositionRequest(String disposition, String reason) { }
+    public record DispositionRequest(String disposition, String reason, BigDecimal affectedQuantity,
+                                     UUID temperatureEvaluationId) {
+        public DispositionRequest(String disposition, String reason) {
+            this(disposition, reason, null, null);
+        }
+    }
     public record SafetyStockRequest(@NotBlank @Size(max = 64) String warehouseId,
                                      @Size(max = 64) String skuId,
                                      @Size(max = 64) String catalogItemId,
