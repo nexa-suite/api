@@ -205,3 +205,4 @@ logistics.delivery_execution_disposition	BC06	V139__record_delivery_execution_te
 logistics.fulfillment_dispatch_window_plan	BC06	V138__append_dispatch_fulfillment_window_plans.sql:1 CREATE TABLE; append-only Dispatch planning for READY Fulfillments with no existing commercial window.
 logistics.operational_exception_coordination_transition	BC06	V141__append_bom_operational_exception_coordination.sql:1 CREATE TABLE; append-only Business Operations Manager coordination; no Delivery outcome or stock authority.
 logistics.delivery_active_attempt	BC06	V110__driver_delivery_active_attempt.sql:4 CREATE TABLE; current attempt marker for an active Driver Delivery execution.
+logistics.stock_temperature_exception	BC06	V142__record_stock_temperature_exceptions_and_partial_holds.sql:12 CREATE TABLE; scoped stock-temperature exception source fact; BC05 retains lot-selection and inventory-disposition authority.
