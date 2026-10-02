@@ -77,6 +77,17 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
                 .isEqualTo("acknowledgeCurrentDriverDeliveryInstructions");
         assertThat(document.at("/paths/~1api~1v1~1deliveries~1{deliveryId}~1instructions/post/operationId").asText())
                 .isEqualTo("publishOperationalDeliveryInstruction");
+        for (String path : java.util.List.of(
+                "/api/v1/driver/workdays/current", "/api/v1/driver/workdays",
+                "/api/v1/driver/workdays/{id}/locations", "/api/v1/driver/workdays/{id}/ends",
+                "/api/v1/buyer/deliveries/{deliveryId}/live-location", "/api/v1/dispatch/drivers/{membershipId}/location",
+                "/api/v1/dispatch/loads", "/api/v1/driver/loads", "/api/v1/driver/loads/{loadId}/acceptances",
+                "/api/v1/sales-orders/{orderId}/customer-delivery-instructions",
+                "/api/v1/buyer/sales-orders/{orderId}/customer-delivery-instructions",
+                "/api/v1/driver/deliveries/{deliveryId}/operational-exceptions/{exceptionId}/resolutions",
+                "/api/v1/driver/deliveries/{deliveryId}/operational-exceptions/{exceptionId}/closures")) {
+            assertThat(document.get("paths").has(path)).as("current mobile contract: %s", path).isTrue();
+        }
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/handoff-tokens")).isTrue();
         assertThat(document.get("paths").has("/api/v1/delivery-handoff/validations")).isTrue();
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/buyer-receipts")).isTrue();

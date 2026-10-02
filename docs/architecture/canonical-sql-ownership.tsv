@@ -174,22 +174,34 @@ warehouse.warehouse	BC05	V15__create_warehouse_inventory.sql:3 CREATE TABLE; own
 warehouse.warehouse_service_configuration	BC05	V36__create_business_commerce_foundations.sql:271 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 sales.field_visit_evidence	BC02	V113__customer_field_visit_evidence.sql:1 CREATE TABLE; customer relationship field visit evidence.
 logistics.fulfillment_driver_assignment	BC06	V111__assign_driver_to_prepared_fulfillment.sql:1 CREATE TABLE; prepared fulfillment driver assignment.
-logistics.fulfillment_outgoing_goods_check	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
-logistics.fulfillment_outgoing_goods_check_line	BC06	V114__record_outgoing_goods_checks.sql CREATE TABLE; attributable outgoing verification facts.
-warehouse.inventory_transfer_receipt_observation	BC05	V115__record_transfer_receipt_observations.sql CREATE TABLE; attributable transfer receipt observations.
-warehouse.inventory_cycle_count	BC05	V117__record_cycle_counts_and_corrections.sql CREATE TABLE; attributable count and authorized correction facts.
-warehouse.inventory_cycle_count_correction	BC05	V117__record_cycle_counts_and_corrections.sql CREATE TABLE; attributable count and authorized correction facts.
-logistics.fulfillment_handoff_evidence	BC06	V116__record_warehouse_driver_handoff_evidence.sql CREATE TABLE; immutable warehouse-to-driver handoff facts.
-logistics.fulfillment_outgoing_discrepancy_resolution	BC06	V121__dispatch_exception_evidence_and_schedule.sql CREATE TABLE; immutable linked reinspection resolution evidence.
+logistics.fulfillment_outgoing_goods_check	BC06	V114__record_outgoing_goods_checks.sql:1 CREATE TABLE; attributable outgoing verification facts.
+logistics.fulfillment_outgoing_goods_check_line	BC06	V114__record_outgoing_goods_checks.sql:30 CREATE TABLE; attributable outgoing verification facts.
+warehouse.inventory_transfer_receipt_observation	BC05	V115__record_transfer_receipt_observations.sql:1 CREATE TABLE; attributable transfer receipt observations.
+warehouse.inventory_cycle_count	BC05	V117__record_cycle_counts_and_corrections.sql:1 CREATE TABLE; attributable count and authorized correction facts.
+warehouse.inventory_cycle_count_correction	BC05	V117__record_cycle_counts_and_corrections.sql:42 CREATE TABLE; attributable count and authorized correction facts.
+logistics.fulfillment_handoff_evidence	BC06	V116__record_warehouse_driver_handoff_evidence.sql:1 CREATE TABLE; immutable warehouse-to-driver handoff facts.
+logistics.fulfillment_outgoing_discrepancy_resolution	BC06	V121__dispatch_exception_evidence_and_schedule.sql:1 CREATE TABLE; immutable linked reinspection resolution evidence.
 warehouse.physical_allocation_substitution_request	BC05	V120__record_physical_allocation_substitution_requests.sql:1 CREATE TABLE; immutable authorized substitution request fact.
-logistics.driver_delivery_incident	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
-logistics.driver_delivery_incident_evidence	BC06	V119__append_driver_delivery_incidents.sql CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
-warehouse.inbound_receiving_discrepancy_case	BC05	V123__record_inbound_receiving_discrepancy_cases.sql CREATE TABLE; immutable receiving discrepancy observations and evidence-gated review requests.
+logistics.driver_delivery_incident	BC06	V119__append_driver_delivery_incidents.sql:2 CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
+logistics.driver_delivery_incident_evidence	BC06	V119__append_driver_delivery_incidents.sql:58 CREATE TABLE; immutable driver incident facts and exact-subject evidence links.
+warehouse.inbound_receiving_discrepancy_case	BC05	V123__record_inbound_receiving_discrepancy_cases.sql:1 CREATE TABLE; immutable receiving discrepancy observations and evidence-gated review requests.
 logistics.dispatch_handoff_identity	BC06	V126__create_dispatch_handoff_identity.sql:8 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
-logistics.delivery_instruction_revision	BC06	V130__operational_delivery_instructions.sql CREATE TABLE; immutable operational dispatch instruction revisions.
-logistics.delivery_instruction_acknowledgement	BC06	V130__operational_delivery_instructions.sql CREATE TABLE; immutable actor acknowledgements bound to exact instruction revisions.
-logistics.operational_exception_case	BC06	V131__append_delivery_operational_exceptions.sql CREATE TABLE; append-only cases projected from exact actor-attributed Delivery incidents.
-logistics.operational_exception_transition	BC06	V131__append_delivery_operational_exceptions.sql CREATE TABLE; append-only OPEN, Driver claim, and review transitions.
-logistics.driver_workday	BC06	V135__driver_operational_workdays_and_location_ttl.sql CREATE TABLE; scope-bound operational Driver workdays.
-logistics.driver_workday_event	BC06	V135__driver_operational_workdays_and_location_ttl.sql CREATE TABLE; immutable workday facts without coordinates.
-logistics.driver_coordinate	BC06	V135__driver_operational_workdays_and_location_ttl.sql CREATE TABLE; operational coordinates with maximum 24-hour TTL and retention-only deletion.
+logistics.delivery_instruction_revision	BC06	V130__operational_delivery_instructions.sql:5 CREATE TABLE; immutable operational dispatch instruction revisions.
+logistics.delivery_instruction_acknowledgement	BC06	V130__operational_delivery_instructions.sql:45 CREATE TABLE; immutable actor acknowledgements bound to exact instruction revisions.
+logistics.operational_exception_case	BC06	V131__append_delivery_operational_exceptions.sql:20 CREATE TABLE; append-only cases projected from exact actor-attributed Delivery incidents.
+logistics.operational_exception_transition	BC06	V131__append_delivery_operational_exceptions.sql:79 CREATE TABLE; append-only OPEN, Driver claim, and review transitions.
+logistics.driver_workday	BC06	V135__driver_operational_workdays_and_location_ttl.sql:1 CREATE TABLE; scope-bound operational Driver workdays.
+logistics.driver_workday_event	BC06	V135__driver_operational_workdays_and_location_ttl.sql:10 CREATE TABLE; immutable workday facts without coordinates.
+logistics.driver_coordinate	BC06	V135__driver_operational_workdays_and_location_ttl.sql:24 CREATE TABLE; operational coordinates with maximum 24-hour TTL and retention-only deletion.
+logistics.customer_instruction_set	BC06	V134__customer_delivery_instruction_provenance.sql:1 CREATE TABLE; versioned Customer delivery instruction set anchored to a SalesOrder.
+logistics.customer_instruction_revision	BC06	V134__customer_delivery_instruction_provenance.sql:6 CREATE TABLE; append-only Customer/Buyer instruction provenance and revisions.
+logistics.delivery_load	BC06	V132__create_delivery_loads.sql:1 CREATE TABLE; current grouped Delivery assignment and dual-confirmation lifecycle.
+logistics.delivery_load_stop	BC06	V132__create_delivery_loads.sql:67 CREATE TABLE; current ordered Fulfillment-to-Delivery membership for grouped loads.
+logistics.delivery_load_event	BC06	V132__create_delivery_loads.sql:97 CREATE TABLE; append-only grouped-load decisions and compatibility attestations.
+logistics.delivery_load_command_idempotency	BC06	V132__create_delivery_loads.sql:140 CREATE TABLE; actor-scoped durable load command replay.
+logistics.delivery_execution_temperature_evidence	BC06	V139__record_delivery_execution_temperature_holds.sql:1 CREATE TABLE; immutable in-transit temperature, execution hold and disposition facts.
+logistics.delivery_execution_hold	BC06	V139__record_delivery_execution_temperature_holds.sql:19 CREATE TABLE; immutable in-transit temperature, execution hold and disposition facts.
+logistics.delivery_execution_disposition	BC06	V139__record_delivery_execution_temperature_holds.sql:26 CREATE TABLE; immutable in-transit temperature, execution hold and disposition facts.
+logistics.fulfillment_dispatch_window_plan	BC06	V138__append_dispatch_fulfillment_window_plans.sql:1 CREATE TABLE; append-only Dispatch planning for READY Fulfillments with no existing commercial window.
+logistics.operational_exception_coordination_transition	BC06	V141__append_bom_operational_exception_coordination.sql:1 CREATE TABLE; append-only Business Operations Manager coordination; no Delivery outcome or stock authority.
+logistics.delivery_active_attempt	BC06	V110__driver_delivery_active_attempt.sql:4 CREATE TABLE; current attempt marker for an active Driver Delivery execution.

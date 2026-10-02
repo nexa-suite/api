@@ -107,8 +107,7 @@ public class JdbcOperationalExceptionPersistenceAdapter implements OperationalEx
         validateCommand(request);
         lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(), operation, request.idempotencyKey());
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
-        if (delivery == null || !isDriverActive(delivery.status())
-                || !isAssigned(request.tenantId(), request.workspaceId(), request.deliveryId(), request.actorMembershipId())) {
+        if (delivery == null || !isAssigned(request.tenantId(), request.workspaceId(), request.deliveryId(), request.actorMembershipId())) {
             throw error("DELIVERY_NOT_FOUND", true);
         }
         IdempotencyRow prior = idempotency(request);
@@ -116,6 +115,7 @@ public class JdbcOperationalExceptionPersistenceAdapter implements OperationalEx
             ensureHash(prior.requestHash(), request.requestHash());
             return resultForTransition(request.tenantId(), request.workspaceId(), request.deliveryId(), prior.resourceId(), true);
         }
+        if (!isDriverActive(delivery.status())) throw error("DELIVERY_NOT_FOUND", true);
         if (delivery.version() != request.expectedDeliveryVersion()) throw error("CONCURRENCY_CONFLICT", false);
         ExceptionState current = currentState(request.tenantId(), request.workspaceId(), request.deliveryId(), request.exceptionId());
         String[] source = jdbc.query("select type,severity from logistics.operational_exception_case where tenant_id=? "

@@ -7,6 +7,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
@@ -14,6 +15,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -185,7 +187,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 Integer.class, "inbound-cross-scope-" + suffix)).isZero();
     }
 
-    @Test void outOfRangeReceiptIsRejectedBeforeInventoryWritesWhenEvidenceContractIsIncomplete() throws Exception {
+    @Test void outOfRangeReceiptRequiresExactWarehousePhotoThenCreatesAtomicPreventiveHold() throws Exception {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         String warehouse = mockMvc.perform(post("/api/v1/warehouses").header("Authorization", "Bearer "+token)
@@ -242,8 +244,8 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String key = "excursion-receipt-" + suffix;
         java.math.BigDecimal excursionReading = acceptedMaximum.add(java.math.BigDecimal.ONE);
         postReceipt(token, key, receiptBody(warehouseId, zoneId, "H-" + suffix, "10", excursionReading))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BUSINESS_EVIDENCE_NOT_AVAILABLE"));
 
         assertThat(scopedWarehouseLotCount(warehouseId)).isEqualTo(lotsBefore);
         assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where warehouse_id=? and batch_number=?",
@@ -256,6 +258,36 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(evaluationsBefore);
         assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isZero();
+
+        String evidence = mockMvc.perform(multipart("/api/v1/business-document-evidence")
+                        .file(new MockMultipartFile("file", "receiving-photo.png", "image/png",
+                                java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/g5sAAAAASUVORK5CYII=")))
+                        .param("subjectType", "WAREHOUSE").param("subjectId", warehouseId)
+                        .header("Authorization", "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM"))
+                        .header("Idempotency-Key", "receiving-photo-" + suffix))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String evidenceId = tools.jackson.databind.json.JsonMapper.shared().readTree(evidence).get("id").asText();
+        MvcResult heldReceipt = postReceipt(token, key,
+                        receiptBody(warehouseId, zoneId, "H-" + suffix, "10", excursionReading)
+                                .replace("\"temperatureReading\":" + excursionReading.toPlainString(),
+                                        "\"temperatureReading\":" + excursionReading.toPlainString()
+                                                + ",\"temperatureEvidenceObjectId\":\"" + evidenceId + "\""))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("HOLD"))
+                .andExpect(jsonPath("$.available").value(0)).andExpect(jsonPath("$.onHand").value(10))
+                .andReturn();
+        String heldLotId = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(heldReceipt.getResponse().getContentAsString()).get("id").asText();
+        assertThat(jdbc.queryForObject("select temperature_evidence_object_id from warehouse.inventory_lot where id=?",
+                UUID.class, UUID.fromString(heldLotId))).isEqualTo(UUID.fromString(evidenceId));
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where id=? "
+                        + "and temperature_recorded_by_membership_id is not null and temperature_recorded_at is not null",
+                Integer.class, UUID.fromString(heldLotId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation "
+                        + "where lot_id=? and status='OPEN' and disposition='HOLD' and evidence_object_id=? "
+                        + "and affected_quantity=10 and actor_membership_id is not null",
+                Integer.class, UUID.fromString(heldLotId), UUID.fromString(evidenceId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='INBOUND_RECEIPT'",
+                Integer.class, UUID.fromString(heldLotId))).isEqualTo(1);
     }
 
     private String createWarehouse(String token, String code) throws Exception {

@@ -7,6 +7,7 @@
                 "BC-03-catalog-commercial-policy :: catalog-availability-source",
                 "BC-03-catalog-commercial-policy :: catalog-snapshots",
                 "BC-03-catalog-commercial-policy :: sales-catalog",
+                "BC-09-business-documents :: documents-public",
                 "BC-11-business-traceability :: traceability-public",
                 "shared :: shared-context",
                 "shared :: shared-technical-out"
