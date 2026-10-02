@@ -169,16 +169,32 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
                 + line.get("physicalAllocationLineId").asText() + "\",\"observedLotId\":\""
                 + line.get("lotId").asText() + "\",\"observedQuantity\":"
                 + line.get("remainingQuantity").asText() + "}]}";
-        mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/outgoing-checks")
-                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        MvcResult assignment = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/driver-assignments")
+                        .header("Authorization", "Bearer " + logistics)
                         .header("If-Match", ready.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "physical-read-assignment-" + suffix())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"responsibleMembershipId\":\"" + membershipId(LOGISTICS_EMAIL)
+                                + "\",\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong() + "}"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult outgoing = mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/outgoing-checks")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("If-Match", assignment.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "physical-read-outgoing-" + suffix())
                         .contentType(MediaType.APPLICATION_JSON).content(outgoingBody))
-                .andExpect(status().isCreated());
+                .andExpect(status().isCreated()).andReturn();
+        String handoverBody = "{\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong()
+                + ",\"driverAssignmentId\":\"" + json(assignment).get("id").asText()
+                + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
+                + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
         mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
                         .header("Authorization", "Bearer " + fixture.warehouseToken())
-                        .header("If-Match", ready.getResponse().getHeader("ETag"))
-                        .header("Idempotency-Key", "physical-read-dispatch-" + suffix()))
+                        .header("If-Match", assignment.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "physical-read-dispatch-" + suffix())
+                        .contentType(MediaType.APPLICATION_JSON).content(handoverBody))
                 .andExpect(status().isOk());
 
         MvcResult consumed = readAllocation(fixture, fixture.warehouseToken())
@@ -215,7 +231,8 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
                         + "where b.tenant_id=? and b.workspace_id=? and c.sales_order_id=? and b.status='BACKED'",
                 (rs, row) -> rs.getObject(1, UUID.class), UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(orderId));
         for (UUID backingWarehouse : backingWarehouses) {
-            grant(owner, backingWarehouse.toString(), membershipId(WAREHOUSE_EMAIL));
+            ensureWarehouseGrant(owner, backingWarehouse, membershipId(WAREHOUSE_EMAIL));
+            ensureWarehouseGrant(owner, backingWarehouse, membershipId(LOGISTICS_EMAIL));
         }
         warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult fulfillment = mockMvc.perform(post("/api/v1/sales-orders/" + orderId + "/fulfillments")
@@ -296,6 +313,27 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"membershipId\":\"" + memberId + "\"}"))
                 .andExpect(status().isOk()).andReturn();
+    }
+
+    private void ensureWarehouseGrant(String owner, UUID warehouseId, String memberId) throws Exception {
+        var grants = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn());
+        for (var grant : grants) {
+            if (!memberId.equals(grant.path("membershipId").asText())) continue;
+            if ("ACTIVE".equals(grant.path("status").asText())) return;
+            mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                            .header("Authorization", "Bearer " + owner)
+                            .header("If-Match", "\"" + grant.path("version").asLong() + "\"")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"membershipId\":\"" + memberId + "\"}"))
+                    .andExpect(status().isOk());
+            return;
+        }
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"membershipId\":\"" + memberId + "\"}"))
+                .andExpect(status().isOk());
     }
 
     private String suffix() {

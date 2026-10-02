@@ -10,11 +10,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -32,6 +34,7 @@ class FulfillmentTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
         UUID orderId = UUID.fromString(order.id());
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
+        ensureBackingWarehouseGrants(orderId);
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         UUID backingId = jdbc.queryForObject(
                 "select b.id from warehouse.inventory_backing b "
@@ -86,5 +89,41 @@ class FulfillmentTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
                                 + "\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":1,\"unit\":\"UNIT\"}]}"))
                 .andExpect(status().isCreated()).andReturn();
         return new SalesOrderResource(json(created).get("id").asText(), created.getResponse().getHeader("ETag"), sales);
+    }
+
+    private void ensureBackingWarehouseGrants(UUID salesOrderId) throws Exception {
+        var warehouseIds = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+                        + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
+                        + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
+                        + "join warehouse.inventory_backing_position p on p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.backing_line_id=l.id "
+                        + "where b.tenant_id=? and b.workspace_id=? and c.sales_order_id=? and b.status='BACKED'",
+                (rs, row) -> rs.getObject(1, UUID.class), UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), salesOrderId);
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        for (UUID warehouseId : warehouseIds) {
+            for (String target : List.of(membershipId(WAREHOUSE_EMAIL), membershipId(LOGISTICS_EMAIL))) {
+                ensureWarehouseGrant(warehouseId, target, owner);
+            }
+        }
+    }
+
+    private void ensureWarehouseGrant(UUID warehouseId, String target, String owner) throws Exception {
+        var grants = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn());
+        for (var grant : grants) {
+            if (!target.equals(grant.path("membershipId").asText())) continue;
+            if ("ACTIVE".equals(grant.path("status").asText())) return;
+            mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                            .header("Authorization", "Bearer " + owner)
+                            .header("If-Match", "\"" + grant.path("version").asLong() + "\"")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"membershipId\":\"" + target + "\"}"))
+                    .andExpect(status().isOk());
+            return;
+        }
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + target + "\"}"))
+                .andExpect(status().isOk());
     }
 }

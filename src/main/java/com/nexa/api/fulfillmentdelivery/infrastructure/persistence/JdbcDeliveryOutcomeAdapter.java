@@ -441,8 +441,8 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         if ("OUT_OF_RANGE".equals(status)) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
         Instant recordedAt = request.recordedAt() == null ? clock.instant() : request.recordedAt();
         UUID evidenceId = UUID.randomUUID();
-        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,lot_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                evidenceId, request.tenantId(), request.workspaceId(), request.deliveryId(), request.lotId(), request.temperatureCelsius(),
+        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,subject_type,subject_id,lot_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) values (?,?,?,?,'DELIVERY',?,?,?,?,?,?,?,?,?,?,?,?)",
+                evidenceId, request.tenantId(), request.workspaceId(), request.deliveryId(), request.deliveryId(), request.lotId(), request.temperatureCelsius(),
                 request.temperatureCelsius(), unit, Timestamp.from(recordedAt), boundedOrDefault(request.source(), "MANUAL"),
                 bounded(request.evidenceMetadata()), status, null, request.actorMembershipId(), Timestamp.from(recordedAt));
         if (jdbc.update("update logistics.delivery set updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
