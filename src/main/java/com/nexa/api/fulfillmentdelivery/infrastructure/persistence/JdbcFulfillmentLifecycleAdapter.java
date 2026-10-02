@@ -448,6 +448,10 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         }
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         requireTransition(current.status(), "HANDED_OVER");
+        boolean groupedLoad = isGroupedLoad(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        if (groupedLoad && !hasTransferredGroupedLoad(request.tenantId(), request.workspaceId(), request.fulfillmentId())) {
+            throw error("FULFILLMENT_TRANSITION_INVALID");
+        }
         if (current.version() != request.expectedVersion()
                 || !Objects.equals(current.physicalAllocationId(), request.physicalAllocationId())) {
             throw error("DISPATCH_SNAPSHOT_CONCURRENCY_CONFLICT");
@@ -490,15 +494,19 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                 Timestamp.from(now), Timestamp.from(now), request.tenantId(), request.workspaceId(), request.fulfillmentId(), request.expectedVersion()) != 1) {
             throw error("CONCURRENCY_CONFLICT");
         }
-        UUID deliveryId = UUID.randomUUID();
-        jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,fulfillment_id,status,destination_snapshot,dispatched_at,created_at,updated_at,version) values (?,?,?,?, 'DISPATCHED',?,?,?, ?,0)",
-                deliveryId, request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.destinationSnapshot(),
-                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        UUID deliveryId = materializeDispatchedDelivery(request.tenantId(), request.workspaceId(), current,
+                request.fulfillmentId(), now);
         if (assignment != null) {
-            jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,assigned_at,actor_membership_id,fulfillment_driver_assignment_id) values (?,?,?,?,?,?,?,?,?)",
-                    UUID.randomUUID(), request.tenantId(), request.workspaceId(), deliveryId,
-                    assignment.responsibleMembershipId(), assignment.responsibleUserId(),
-                    Timestamp.from(assignment.assignedAt()), assignment.actorMembershipId(), assignment.id());
+            if (groupedLoad) {
+                requireExistingLoadDriverAssignment(request.tenantId(), request.workspaceId(), deliveryId, assignment);
+            } else {
+                jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,assigned_at,actor_membership_id,fulfillment_driver_assignment_id) values (?,?,?,?,?,?,?,?,?)",
+                        UUID.randomUUID(), request.tenantId(), request.workspaceId(), deliveryId,
+                        assignment.responsibleMembershipId(), assignment.responsibleUserId(),
+                        Timestamp.from(assignment.assignedAt()), assignment.actorMembershipId(), assignment.id());
+            }
+        } else if (groupedLoad) {
+            throw error("FULFILLMENT_DRIVER_ASSIGNMENT_REQUIRED");
         }
         jdbc.update("insert into logistics.fulfillment_handoff_evidence "
                         + "(id,tenant_id,workspace_id,fulfillment_id,delivery_id,fulfillment_version,"
@@ -516,6 +524,58 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "HAND_OVER",
                 request.idempotencyKey(), request.requestHash(), request.fulfillmentId(), now);
         return load(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+    }
+
+    private UUID materializeDispatchedDelivery(UUID tenantId, UUID workspaceId, FulfillmentRow fulfillment,
+                                               UUID fulfillmentId, Instant now) {
+        List<DeliveryMaterialization> existing = jdbc.query("select id,status from logistics.delivery "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_id=? for update",
+                (rs, row) -> new DeliveryMaterialization(rs.getObject("id", UUID.class), rs.getString("status")),
+                tenantId, workspaceId, fulfillmentId);
+        UUID deliveryId;
+        if (existing.isEmpty()) {
+            deliveryId = UUID.randomUUID();
+            jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,fulfillment_id,status,destination_snapshot,"
+                            + "dispatched_at,created_at,updated_at,version) values (?,?,?,?, 'DISPATCHED',?,?,?, ?,0)",
+                    deliveryId, tenantId, workspaceId, fulfillmentId, fulfillment.destinationSnapshot(),
+                    Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        } else {
+            if (existing.size() != 1 || !"PLANNED".equals(existing.getFirst().status())) {
+                throw error("DELIVERY_TRANSITION_INVALID");
+            }
+            deliveryId = existing.getFirst().id();
+            if (jdbc.update("update logistics.delivery set status='DISPATCHED',dispatched_at=?,updated_at=?,version=version+1 "
+                            + "where tenant_id=? and workspace_id=? and id=? and status='PLANNED'",
+                    Timestamp.from(now), Timestamp.from(now), tenantId, workspaceId, deliveryId) != 1) {
+                throw error("CONCURRENCY_CONFLICT");
+            }
+        }
+        CustomerInstructionDeliveryProjection.copy(jdbc, tenantId, workspaceId, fulfillment.salesOrderId(), deliveryId, now);
+        return deliveryId;
+    }
+
+    private boolean isGroupedLoad(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.delivery_load_stop "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_id=?)", Boolean.class,
+                tenantId, workspaceId, fulfillmentId));
+    }
+
+    private boolean hasTransferredGroupedLoad(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.delivery_load_stop s "
+                        + "join logistics.delivery_load l on l.tenant_id=s.tenant_id and l.workspace_id=s.workspace_id "
+                        + "and l.id=s.load_id where s.tenant_id=? and s.workspace_id=? and s.fulfillment_id=? "
+                        + "and l.status='RESPONSIBILITY_TRANSFERRED')", Boolean.class,
+                tenantId, workspaceId, fulfillmentId));
+    }
+
+    private void requireExistingLoadDriverAssignment(UUID tenantId, UUID workspaceId, UUID deliveryId,
+                                                    DriverAssignmentRow assignment) {
+        Boolean matches = jdbc.queryForObject("select exists(select 1 from logistics.delivery_assignment "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and responsible_membership_id=? "
+                        + "and fulfillment_driver_assignment_id=? and actor_membership_id=?)", Boolean.class,
+                tenantId, workspaceId, deliveryId, assignment.responsibleMembershipId(), assignment.id(),
+                assignment.actorMembershipId());
+        if (!Boolean.TRUE.equals(matches)) throw error("FULFILLMENT_DRIVER_ASSIGNMENT_REQUIRED");
     }
 
     @Override
@@ -898,6 +958,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                                       UUID driverMembershipId, UUID physicalAllocationId,
                                       long physicalAllocationVersion, UUID outgoingGoodsCheckId,
                                       Instant occurredAt) { }
+    private record DeliveryMaterialization(UUID id, String status) { }
     private record FulfillmentLineRow(UUID id, UUID skuId, BigDecimal allocatedQuantity,
                                       BigDecimal pickedQuantity, BigDecimal unfulfilledQuantity, String unit) { }
     private record DiscrepancyRow(UUID id, BigDecimal quantity) { }

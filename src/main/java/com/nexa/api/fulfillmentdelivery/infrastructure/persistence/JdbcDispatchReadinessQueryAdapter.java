@@ -10,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,10 +26,24 @@ public class JdbcDispatchReadinessQueryAdapter implements DispatchReadinessPersi
     private static final String CANDIDATES = "select f.id fulfillment_id,f.sales_order_id,f.physical_allocation_id,"
             + "f.status fulfillment_status,f.version fulfillment_version,d.id delivery_id,d.status delivery_status,"
             + "d.version delivery_version,l.id fulfillment_line_id,l.sku_id,l.catalog_item_id,"
+            + "case when ord.delivery_window_start is not null or ord.delivery_window_end is not null "
+            + "then ord.delivery_window_start else planned.window_start end window_start,"
+            + "case when ord.delivery_window_start is not null or ord.delivery_window_end is not null "
+            + "then ord.delivery_window_end else planned.window_end end window_end,"
+            + "case when ord.delivery_window_start is not null or ord.delivery_window_end is not null then 'COMMERCIAL' "
+            + "when planned.id is not null then 'DISPATCH_PLAN' else null end window_source,"
             + "l.allocated_quantity,l.picked_quantity,l.unit "
             + "from logistics.fulfillment f "
             + "left join logistics.delivery d on d.tenant_id=f.tenant_id and d.workspace_id=f.workspace_id "
             + "and d.fulfillment_id=f.id "
+            + "left join lateral (select selected.id,selected.delivery_window_start,selected.delivery_window_end "
+            + "from logistics.dispatch_order selected where selected.tenant_id=f.tenant_id and selected.workspace_id=f.workspace_id "
+            + "and ((d.dispatch_order_id is not null and selected.id=d.dispatch_order_id) "
+            + "or (d.dispatch_order_id is null and selected.sales_order_id=f.sales_order_id)) "
+            + "order by case when selected.id=d.dispatch_order_id then 0 else 1 end,selected.created_at desc,selected.id desc limit 1) ord on true "
+            + "left join lateral (select p.id,p.window_start,p.window_end from logistics.fulfillment_dispatch_window_plan p "
+            + "where p.tenant_id=f.tenant_id and p.workspace_id=f.workspace_id and p.fulfillment_id=f.id "
+            + "order by p.revision desc limit 1) planned on true "
             + "left join logistics.fulfillment_line l on l.tenant_id=f.tenant_id "
             + "and l.workspace_id=f.workspace_id and l.fulfillment_id=f.id "
             + "where f.tenant_id=? and f.workspace_id=? and f.status not in ('COMPLETED','CANCELLED')";
@@ -94,7 +110,9 @@ public class JdbcDispatchReadinessQueryAdapter implements DispatchReadinessPersi
                         rs.getLong("fulfillment_version"),
                         deliveryId,
                         deliveryId == null ? null : rs.getString("delivery_status"),
-                        deliveryId == null ? null : rs.getLong("delivery_version"));
+                        deliveryId == null ? null : rs.getLong("delivery_version"),
+                        instant(rs.getTimestamp("window_start")), instant(rs.getTimestamp("window_end")),
+                        rs.getString("window_source"));
             } catch (SQLException exception) {
                 throw new IllegalStateException("Could not read dispatch-readiness candidate", exception);
             }
@@ -120,11 +138,15 @@ public class JdbcDispatchReadinessQueryAdapter implements DispatchReadinessPersi
         private final UUID deliveryId;
         private final String deliveryStatus;
         private final Long deliveryVersion;
+        private final Instant windowStart;
+        private final Instant windowEnd;
+        private final String windowSource;
         private final List<FulfillmentLine> lines = new ArrayList<>();
 
         private CandidateBuilder(UUID id, UUID salesOrderId, UUID physicalAllocationId,
                                  String status, long version, UUID deliveryId,
-                                 String deliveryStatus, Long deliveryVersion) {
+                                 String deliveryStatus, Long deliveryVersion,
+                                 Instant windowStart, Instant windowEnd, String windowSource) {
             this.id = id;
             this.salesOrderId = salesOrderId;
             this.physicalAllocationId = physicalAllocationId;
@@ -133,11 +155,17 @@ public class JdbcDispatchReadinessQueryAdapter implements DispatchReadinessPersi
             this.deliveryId = deliveryId;
             this.deliveryStatus = deliveryStatus;
             this.deliveryVersion = deliveryVersion;
+            this.windowStart = windowStart;
+            this.windowEnd = windowEnd;
+            this.windowSource = windowSource;
         }
 
         private PreparedFulfillment build() {
             return new PreparedFulfillment(id, salesOrderId, physicalAllocationId,
-                    status, version, deliveryId, deliveryStatus, deliveryVersion, lines);
+                    status, version, deliveryId, deliveryStatus, deliveryVersion,
+                    windowStart, windowEnd, windowSource, lines);
         }
     }
+
+    private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }
 }

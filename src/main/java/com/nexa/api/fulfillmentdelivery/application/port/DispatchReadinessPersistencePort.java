@@ -1,6 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.application.port;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,6 +22,9 @@ public interface DispatchReadinessPersistencePort {
                               UUID deliveryId,
                               String deliveryStatus,
                               Long deliveryVersion,
+                              Instant windowStart,
+                              Instant windowEnd,
+                              String windowSource,
                               List<FulfillmentLine> lines) {
         public PreparedFulfillment {
             lines = List.copyOf(lines == null ? List.of() : lines);

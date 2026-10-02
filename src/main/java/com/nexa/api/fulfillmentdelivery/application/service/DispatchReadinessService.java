@@ -214,7 +214,8 @@ public class DispatchReadinessService {
         Instant asOf = clock.instant();
         return new Readiness(PREPARED_FULFILLMENT, candidate.id(), candidate.version(), candidate.status(),
                 allocation.allocationId(), allocation.status(), allocation.version(), candidate.deliveryId(),
-                candidate.deliveryStatus(), candidate.deliveryVersion(), allocationComplete, pickingComplete,
+                candidate.deliveryStatus(), candidate.deliveryVersion(), candidate.windowStart(), candidate.windowEnd(),
+                candidate.windowSource(), allocationComplete, pickingComplete,
                 pickingEvidenceComplete, reasons.isEmpty(), reasons, lines, asOf);
     }
 
