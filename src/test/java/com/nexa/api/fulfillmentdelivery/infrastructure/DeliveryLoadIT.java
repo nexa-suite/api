@@ -23,7 +23,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
 
     @Override
     protected void ensureCommercialInventory() throws Exception {
-        super.ensureCommercialInventory(LocalDate.now().plusDays(1));
+        super.ensureCommercialInventory(LocalDate.now().plusDays(1), "CAT-0004");
     }
 
     @Test
@@ -268,7 +268,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                         .content("{\"clientAccountId\":\"" + buyerClientAccountId()
                                 + "\",\"priority\":\"NORMAL\",\"requestedDeliveryDate\":\"2099-12-31\","
                                 + "\"deliveryProfileSnapshot\":\"Delivery load integration\",\"paymentOption\":\"IMMEDIATE\","
-                                + "\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
+                                + "\"lines\":[{\"catalogItemId\":\"CAT-0004\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
                 .andExpect(status().isCreated()).andReturn();
         UUID salesOrderId = UUID.fromString(json(order).get("id").asText());
         var backingWarehouses = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "

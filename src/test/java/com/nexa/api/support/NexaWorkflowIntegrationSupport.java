@@ -39,11 +39,11 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
 
     /** Seeds real sellable inventory for v0.14 commercial backing scenarios. */
     protected void ensureCommercialInventory() throws Exception {
-        ensureCommercialInventory(LocalDate.of(2099, 1, 1));
+        ensureCommercialInventory(LocalDate.of(2099, 1, 1), "CAT-0002");
     }
 
-    /** Seeds sellable inventory with the requested expiry for deterministic FEFO scenarios. */
-    protected void ensureCommercialInventory(LocalDate expirationDate) throws Exception {
+    /** Seeds sellable inventory with the requested expiry and catalog item for deterministic FEFO scenarios. */
+    protected void ensureCommercialInventory(LocalDate expirationDate, String catalogItemId) throws Exception {
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         MvcResult createdWarehouse = mockMvc.perform(post("/api/v1/warehouses")
@@ -65,7 +65,7 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .header("Idempotency-Key", "commercial-inbound-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId
-                                + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"B-COM-" + suffix
+                                + "\",\"catalogItemId\":\"" + catalogItemId + "\",\"batchNumber\":\"B-COM-" + suffix
                                 + "\",\"expirationDate\":\"" + expirationDate + "\",\"quantity\":100,\"unit\":\"UNIT\"}"))
                 .andExpect(status().isCreated());
     }
