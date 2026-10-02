@@ -12,6 +12,9 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -222,6 +225,62 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         } finally {
             RlsRequestScope.clear();
         }
+    }
+
+    @Test
+    void invitationAcceptanceLookupInstallsScopeBeforeLockingUnderRuntimeRls() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "runtime-rls-invitation-" + uuid().substring(0, 8) + "@example.test";
+        createInvitation(owner, email, "Runtime RLS invitee", "runtime-rls-invitation-" + uuid());
+        String tokenHash = opaqueTokens.sha256(invitationToken(email));
+
+        var runtimeDataSource = new DriverManagerDataSource(runtimeJdbcUrl(), RUNTIME_USERNAME, RUNTIME_PASSWORD);
+        var runtimeJdbc = new JdbcTemplate(runtimeDataSource);
+        var runtimeTransactionManager = new DataSourceTransactionManager(runtimeDataSource);
+        var runtimeInvitationPersistence = new JdbcInvitationPersistenceAdapter(runtimeJdbc, runtimeTransactionManager);
+
+        RlsRequestScope.clear();
+        RlsRequestScope.enableCrossScopeWorkspaceScan();
+        try {
+            assertThatThrownBy(() -> new TransactionTemplate(runtimeTransactionManager).execute(status -> {
+                assertThat(runtimeJdbc.queryForObject("select current_user", String.class)).isEqualTo(RUNTIME_USERNAME);
+                assertThat(runtimeJdbc.queryForObject(
+                        "select rolbypassrls from pg_roles where rolname=current_user", Boolean.class)).isFalse();
+
+                runtimeJdbc.queryForObject("select set_config('app.invitation_accept_token_hash', ?, true)",
+                        String.class, tokenHash);
+                assertThat(runtimeJdbc.queryForObject(
+                        "select count(*) from tenant_management.organization_invitation where token_hash=? and status='PENDING'",
+                        Integer.class, tokenHash)).isEqualTo(1);
+                assertThat(runtimeJdbc.queryForObject(
+                        "select count(*) from (select id from tenant_management.organization_invitation where token_hash=? and status='PENDING' for update) locked",
+                        Integer.class, tokenHash)).isZero();
+
+                var snapshot = runtimeInvitationPersistence.findForUpdateByTokenHash(tokenHash);
+                assertThat(snapshot).isPresent();
+                assertThat(snapshot.orElseThrow().invitation().tenantId().value().toString()).isEqualTo(tenantId());
+                assertThat(snapshot.orElseThrow().invitation().workspaceId().value().toString()).isEqualTo(workspaceId());
+                assertThat(runtimeJdbc.queryForObject(
+                        "select current_setting('app.current_tenant_id', true)", String.class)).isEqualTo(tenantId());
+                assertThat(runtimeJdbc.queryForObject(
+                        "select current_setting('app.current_workspace_id', true)", String.class)).isEqualTo(workspaceId());
+                assertThat(runtimeJdbc.queryForObject(
+                        "select current_setting('app.cross_scope_workspace_scan', true)", String.class)).isEmpty();
+                assertThat(RlsRequestScope.current()).isEqualTo(
+                        new RlsRequestScope.Scope(UUID.fromString(tenantId()), UUID.fromString(workspaceId())));
+                assertThat(RlsRequestScope.crossScopeWorkspaceScanEnabled()).isFalse();
+
+                throw new IllegalStateException("rollback runtime RLS invitation scope test");
+            })).isInstanceOf(IllegalStateException.class).hasMessage("rollback runtime RLS invitation scope test");
+
+            assertThat(RlsRequestScope.current()).as("null request scope is restored after rollback").isNull();
+            assertThat(RlsRequestScope.crossScopeWorkspaceScanEnabled())
+                    .as("pre-existing cross-scope flag is restored after rollback").isTrue();
+        } finally {
+            RlsRequestScope.clear();
+        }
+        assertThat(RlsRequestScope.current()).isNull();
+        assertThat(RlsRequestScope.crossScopeWorkspaceScanEnabled()).isFalse();
     }
 
     @Test
