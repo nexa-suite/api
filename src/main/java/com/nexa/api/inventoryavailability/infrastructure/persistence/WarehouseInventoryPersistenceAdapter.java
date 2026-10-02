@@ -190,16 +190,18 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         String order = sort(sort, Map.of("expirationDate", "expiration_date", "receivedAt", "received_at",
                 "batchNumber", "batch_number", "status", "status", "quantityAvailable", "greatest(stock_quantity-reserved_quantity-" + temperatureHeldQuantitySql("inventory_lot") + ",0)",
                 "createdAt", "received_at"), "expirationDate");
+        StringBuilder from = new StringBuilder(" from warehouse.inventory_lot where tenant_id=? and workspace_id=?");
+        List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        from.append(warehouseIdPredicate(context, "warehouse_id", args));
+        if (catalogItemId != null && !catalogItemId.isBlank()) { from.append(" and catalog_item_id=?"); args.add(catalogItemId.trim()); }
+        if (warehouseId != null && !warehouseId.isBlank()) { from.append(" and warehouse_id=?"); args.add(uuid(warehouseId)); }
+        if (zoneId != null && !zoneId.isBlank()) { from.append(" and zone_id=?"); args.add(uuid(zoneId)); }
+        if (status != null && !status.isBlank()) { from.append(" and status=?"); args.add(enumValue(status, "status", "AVAILABLE", "BLOCKED", "QUARANTINED", "HOLD", "EXPIRED", "DEPLETED")); }
+        String scopedFrom = from.toString();
+        String countSql = "select count(*)" + scopedFrom;
         StringBuilder query = new StringBuilder("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
                 + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
-                + " temperature_held_quantity,unit,status,version from warehouse.inventory_lot where tenant_id=? and workspace_id=?");
-        List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
-        query.append(warehouseIdPredicate(context, "warehouse_id", args));
-        if (catalogItemId != null && !catalogItemId.isBlank()) { query.append(" and catalog_item_id=?"); args.add(catalogItemId.trim()); }
-        if (warehouseId != null && !warehouseId.isBlank()) { query.append(" and warehouse_id=?"); args.add(uuid(warehouseId)); }
-        if (zoneId != null && !zoneId.isBlank()) { query.append(" and zone_id=?"); args.add(uuid(zoneId)); }
-        if (status != null && !status.isBlank()) { query.append(" and status=?"); args.add(enumValue(status, "status", "AVAILABLE", "BLOCKED", "QUARANTINED", "HOLD", "EXPIRED", "DEPLETED")); }
-        String countSql = query.toString().replace("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,version", "select count(*)");
+                + " temperature_held_quantity,unit,status,version" + scopedFrom);
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size); pageArgs.add(page * size);
         query.append(" order by ").append(order).append(",id asc limit ? offset ?");
