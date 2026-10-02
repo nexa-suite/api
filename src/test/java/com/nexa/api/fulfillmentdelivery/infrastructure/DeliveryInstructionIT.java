@@ -1,12 +1,14 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure;
 
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,6 +22,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 @TestPropertySource(properties = "spring.datasource.hikari.minimum-idle=1")
 class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
+
+    private UUID temperatureFixtureSku;
+    private BigDecimal originalTemperatureMinimum;
+    private BigDecimal originalTemperatureMaximum;
+
+    @AfterEach
+    void restoreChangedSkuTemperaturePolicy() {
+        if (temperatureFixtureSku != null) {
+            jdbc.update("update catalog_management.sellable_sku set temperature_min=?,temperature_max=? where id=?",
+                    originalTemperatureMinimum, originalTemperatureMaximum, temperatureFixtureSku);
+        }
+    }
 
     @Test
     void criticalAcknowledgementsGateNewAttemptAndBindToCurrentRevisionAndActor() throws Exception {
@@ -176,6 +190,11 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
         UUID fulfillment = jdbc.queryForObject("select fulfillment_id from logistics.delivery where id=?", UUID.class, fixture.deliveryId());
         UUID line = jdbc.queryForObject("select id from logistics.fulfillment_line where fulfillment_id=?", UUID.class, fulfillment);
         UUID sku = jdbc.queryForObject("select sku_id from logistics.fulfillment_line where id=?", UUID.class, line);
+        originalTemperatureMinimum = jdbc.queryForObject(
+                "select temperature_min from catalog_management.sellable_sku where id=?", BigDecimal.class, sku);
+        originalTemperatureMaximum = jdbc.queryForObject(
+                "select temperature_max from catalog_management.sellable_sku where id=?", BigDecimal.class, sku);
+        temperatureFixtureSku = sku;
         jdbc.update("update catalog_management.sellable_sku set temperature_min=0,temperature_max=8 where id=?", sku);
         String path = "/api/v1/driver/deliveries/" + fixture.deliveryId() + "/execution-temperature-readings";
         MvcResult snapshot = mockMvc.perform(get(path).header("Authorization", bearer(fixture.token())))
