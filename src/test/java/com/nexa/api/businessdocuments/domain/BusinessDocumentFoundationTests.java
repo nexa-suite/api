@@ -21,7 +21,8 @@ class BusinessDocumentFoundationTests {
     @Test void supportedTypesAreClosedAndAudiencesAreExplicit() {
         assertEquals(EnumSet.of(DocumentSubjectType.SALES_ORDER, DocumentSubjectType.PURCHASE_REQUEST,
                 DocumentSubjectType.RECEIVABLE, DocumentSubjectType.PAYMENT, DocumentSubjectType.DISPATCH_ORDER,
-                DocumentSubjectType.PROOF_OF_DELIVERY, DocumentSubjectType.DELIVERY_INCIDENT),
+                DocumentSubjectType.PROOF_OF_DELIVERY, DocumentSubjectType.DELIVERY_INCIDENT,
+                DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY, DocumentSubjectType.WAREHOUSE),
                 EnumSet.allOf(DocumentSubjectType.class));
         assertEquals(EnumSet.of(DocumentAudience.INTERNAL, DocumentAudience.BUYER), EnumSet.allOf(DocumentAudience.class));
     }
