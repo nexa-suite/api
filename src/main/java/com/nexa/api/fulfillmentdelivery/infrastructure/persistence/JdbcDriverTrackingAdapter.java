@@ -13,6 +13,11 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.UUID;
 import static com.nexa.api.fulfillmentdelivery.application.service.DriverTrackingService.error;
 
@@ -26,6 +31,7 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
  }
  @Override @Transactional(propagation=Propagation.MANDATORY)
  public Workday command(WorkdayCommand r){
+  Instant now=r.now().truncatedTo(ChronoUnit.MICROS);
   jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))",(org.springframework.jdbc.core.ResultSetExtractor<Void>)rs->null,r.tenantId()+"|"+r.workspaceId()+"|driver-workday|"+r.actorMembershipId());
   var previous=jdbc.query("select * from logistics.driver_workday_event where tenant_id=? and workspace_id=? and actor_membership_id=? and idempotency_key=?",(rs,n)->{
    if(!r.requestHash().equals(rs.getString("request_hash")))throw error("IDEMPOTENCY_PAYLOAD_CONFLICT",false);
@@ -35,17 +41,17 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   Workday day;
   if("START".equals(r.action())){
    if(current(r.tenantId(),r.workspaceId(),r.actorMembershipId())!=null)throw error("DRIVER_WORKDAY_ALREADY_ACTIVE",false);
-   day=new Workday(UUID.randomUUID(),0,"ACTIVE",r.now(),null,true);
-   jdbc.update("insert into logistics.driver_workday(id,tenant_id,workspace_id,actor_membership_id,version,status,started_at) values(?,?,?,?,0,'ACTIVE',?)",day.id(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),Timestamp.from(r.now()));
+   day=new Workday(UUID.randomUUID(),0,"ACTIVE",now,null,true);
+   jdbc.update("insert into logistics.driver_workday(id,tenant_id,workspace_id,actor_membership_id,version,status,started_at) values(?,?,?,?,0,'ACTIVE',?)",day.id(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),Timestamp.from(now));
   }else{
    Workday old=lockDay(r.tenantId(),r.workspaceId(),r.actorMembershipId(),r.workdayId());
    if(old==null || "CLOSED".equals(old.status()))throw error("DRIVER_WORKDAY_NOT_FOUND",true);
    if(old.version()!=r.expectedVersion())throw error("CONCURRENCY_CONFLICT",false);
    String status="END".equals(r.action())?"CLOSED":("AVAILABLE".equals(r.action())?"ACTIVE":"LOCATION_UNAVAILABLE");
-   day=new Workday(old.id(),old.version()+1,status,old.startedAt(),"CLOSED".equals(status)?r.now():null,"ACTIVE".equals(status));
+   day=new Workday(old.id(),old.version()+1,status,old.startedAt(),"CLOSED".equals(status)?now:null,"ACTIVE".equals(status));
    jdbc.update("update logistics.driver_workday set version=version+1,status=?,ended_at=? where tenant_id=? and workspace_id=? and id=?",status,ts(day.endedAt()),r.tenantId(),r.workspaceId(),day.id());
   }
-  jdbc.update("insert into logistics.driver_workday_event(id,tenant_id,workspace_id,actor_membership_id,workday_id,workday_version,action,status,started_at,ended_at,occurred_at,idempotency_key,request_hash) values(?,?,?,?,?,?,?,?,?,?,?,?,?)",UUID.randomUUID(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),day.id(),day.version(),r.action(),day.status(),ts(day.startedAt()),ts(day.endedAt()),ts(r.now()),r.idempotencyKey(),r.requestHash());
+  jdbc.update("insert into logistics.driver_workday_event(id,tenant_id,workspace_id,actor_membership_id,workday_id,workday_version,action,status,started_at,ended_at,occurred_at,idempotency_key,request_hash) values(?,?,?,?,?,?,?,?,?,?,?,?,?)",UUID.randomUUID(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),day.id(),day.version(),r.action(),day.status(),ts(day.startedAt()),ts(day.endedAt()),ts(now),r.idempotencyKey(),r.requestHash());
   return day;
  }
  @Override @Transactional(propagation=Propagation.MANDATORY)
@@ -54,16 +60,24 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   if(day==null || !"ACTIVE".equals(day.status()))throw error("DRIVER_LOCATION_UNAVAILABLE",false);
   Coordinate c=r.coordinate();
   if(!DriverLocationPolicy.valid(c.latitude(),c.longitude(),c.accuracyMeters(),c.capturedAt(),day.startedAt(),r.now()))throw error("DRIVER_COORDINATE_INVALID",false);
-  var old=jdbc.query("select * from logistics.driver_coordinate where tenant_id=? and workspace_id=? and sample_id=?",(rs,n)->coordinate(rs),r.tenantId(),r.workspaceId(),c.sampleId());
+  String requestHash=coordinateHash(r);
+  var old=jdbc.query("select * from logistics.driver_coordinate where tenant_id=? and workspace_id=? and sample_id=? for update",
+          (rs,n)->new StoredCoordinate(coordinate(rs),rs.getString("request_hash"),rs.getObject("actor_membership_id",UUID.class),rs.getObject("workday_id",UUID.class)),
+          r.tenantId(),r.workspaceId(),c.sampleId());
   if(!old.isEmpty()){
-   Coordinate prior=old.getFirst();
-   boolean sameActor=Boolean.TRUE.equals(jdbc.queryForObject("select actor_membership_id=? and workday_id=? from logistics.driver_coordinate where tenant_id=? and workspace_id=? and sample_id=?",Boolean.class,r.actorMembershipId(),r.workdayId(),r.tenantId(),r.workspaceId(),c.sampleId()));
-   if(!sameActor || prior.latitude()!=c.latitude() || prior.longitude()!=c.longitude() || prior.accuracyMeters()!=c.accuracyMeters() || !prior.capturedAt().equals(c.capturedAt()))throw error("IDEMPOTENCY_PAYLOAD_CONFLICT",false);
+   StoredCoordinate stored=old.getFirst();
+   Coordinate prior=stored.coordinate();
+   boolean sameActor=stored.actor().equals(r.actorMembershipId()) && stored.workday().equals(r.workdayId());
+   boolean samePayload=stored.requestHash()!=null ? stored.requestHash().equals(requestHash)
+           : prior.latitude()==c.latitude() && prior.longitude()==c.longitude() && prior.accuracyMeters()==c.accuracyMeters() && prior.capturedAt().equals(c.capturedAt());
+   if(!sameActor || !samePayload)throw error("IDEMPOTENCY_PAYLOAD_CONFLICT",false);
    return prior;
   }
-  Instant expiry=c.capturedAt().plus(DriverLocationPolicy.MAX_RETENTION);
-  jdbc.update("insert into logistics.driver_coordinate(sample_id,tenant_id,workspace_id,actor_membership_id,workday_id,latitude,longitude,accuracy_meters,captured_at,received_at,expires_at) values(?,?,?,?,?,?,?,?,?,?,?)",c.sampleId(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),r.workdayId(),c.latitude(),c.longitude(),c.accuracyMeters(),ts(c.capturedAt()),ts(r.now()),ts(expiry));
-  return new Coordinate(c.sampleId(),c.latitude(),c.longitude(),c.accuracyMeters(),c.capturedAt(),expiry);
+  Instant capturedAt=c.capturedAt().truncatedTo(ChronoUnit.MICROS);
+  Instant expiry=capturedAt.plus(DriverLocationPolicy.MAX_RETENTION);
+  jdbc.update("insert into logistics.driver_coordinate(sample_id,tenant_id,workspace_id,actor_membership_id,workday_id,latitude,longitude,accuracy_meters,captured_at,received_at,expires_at,request_hash) values(?,?,?,?,?,?,?,?,?,?,?,?)",
+          c.sampleId(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),r.workdayId(),c.latitude(),c.longitude(),c.accuracyMeters(),ts(capturedAt),ts(r.now().truncatedTo(ChronoUnit.MICROS)),ts(expiry),requestHash);
+  return new Coordinate(c.sampleId(),c.latitude(),c.longitude(),c.accuracyMeters(),capturedAt,expiry);
  }
  @Override public Coordinate latest(UUID t,UUID w,UUID a,Instant now){
   return jdbc.query("select p.* from logistics.driver_coordinate p join logistics.driver_workday d on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id and d.id=p.workday_id where p.tenant_id=? and p.workspace_id=? and p.actor_membership_id=? and d.status='ACTIVE' and p.expires_at>? order by p.captured_at desc,p.received_at desc limit 1",(rs,n)->coordinate(rs),t,w,a,ts(now)).stream().findFirst().orElse(null);
@@ -75,6 +89,13 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
  private Workday lockDay(UUID t,UUID w,UUID a,UUID id){return jdbc.query("select * from logistics.driver_workday where tenant_id=? and workspace_id=? and actor_membership_id=? and id=? for update",(rs,n)->day(rs),t,w,a,id).stream().findFirst().orElse(null);}
  private static Workday day(ResultSet rs)throws SQLException{return new Workday(rs.getObject("id",UUID.class),rs.getLong("version"),rs.getString("status"),rs.getTimestamp("started_at").toInstant(),instant(rs,"ended_at"),"ACTIVE".equals(rs.getString("status")));}
  private static Coordinate coordinate(ResultSet rs)throws SQLException{return new Coordinate(rs.getObject("sample_id",UUID.class),rs.getDouble("latitude"),rs.getDouble("longitude"),rs.getDouble("accuracy_meters"),rs.getTimestamp("captured_at").toInstant(),rs.getTimestamp("expires_at").toInstant());}
+ private record StoredCoordinate(Coordinate coordinate,String requestHash,UUID actor,UUID workday) { }
+ private static String coordinateHash(SampleCommand request){
+  Coordinate c=request.coordinate();
+  String payload=request.tenantId()+"|"+request.workspaceId()+"|"+request.actorMembershipId()+"|"+request.workdayId()+"|"+c.sampleId()+"|"+c.latitude()+"|"+c.longitude()+"|"+c.accuracyMeters()+"|"+c.capturedAt();
+  try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload.getBytes(StandardCharsets.UTF_8)));}
+  catch(NoSuchAlgorithmException failure){throw new IllegalStateException(failure);}
+ }
  private static Instant instant(ResultSet rs,String field)throws SQLException{var t=rs.getTimestamp(field);return t==null?null:t.toInstant();}
  private static Timestamp ts(Instant value){return value==null?null:Timestamp.from(value);}
 }

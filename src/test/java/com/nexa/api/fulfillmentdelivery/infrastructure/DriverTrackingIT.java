@@ -32,12 +32,21 @@ class DriverTrackingIT extends NexaWorkflowIntegrationSupport {
         String version = started.getResponse().getHeader("ETag");
         mockMvc.perform(post("/api/v1/driver/workdays").header("Authorization",auth)
                 .header("Idempotency-Key",key).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"locationAvailable\":true}")).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id));
-        String sample = "{\"sampleId\":\""+UUID.randomUUID()+"\",\"latitude\":-12.1,\"longitude\":-77.0,\"accuracyMeters\":5,\"capturedAt\":\""+Instant.now()+"\"}";
+                .content("{\"locationAvailable\":true}")).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.startedAt").value(json(started).get("startedAt").asText()));
+        Instant capturedAt = Instant.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).plusNanos(123456789);
+        String sample = "{\"sampleId\":\""+UUID.randomUUID()+"\",\"latitude\":-12.1,\"longitude\":-77.0,\"accuracyMeters\":5,\"capturedAt\":\""+capturedAt+"\"}";
+        var firstSample = mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/locations").header("Authorization",auth)
+                .contentType(MediaType.APPLICATION_JSON).content(sample)).andExpect(status().isOk()).andReturn();
+        var replayedSample = mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/locations").header("Authorization",auth)
+                .contentType(MediaType.APPLICATION_JSON).content(sample)).andExpect(status().isOk()).andReturn();
+        assertThat(json(replayedSample)).isEqualTo(json(firstSample));
+        assertThat(json(firstSample).get("capturedAt").asText()).isEqualTo(
+                capturedAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString());
+        String changedNanoSample = sample.replace(capturedAt.toString(), capturedAt.plusNanos(1).toString());
         mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/locations").header("Authorization",auth)
-                .contentType(MediaType.APPLICATION_JSON).content(sample)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/locations").header("Authorization",auth)
-                .contentType(MediaType.APPLICATION_JSON).content(sample)).andExpect(status().isOk());
+                .contentType(MediaType.APPLICATION_JSON).content(changedNanoSample))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
         mockMvc.perform(get("/api/v1/driver/location").header("Authorization",auth)).andExpect(status().isOk()).andExpect(jsonPath("$.latitude").value(-12.1));
         var paused = mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/location-availability").header("Authorization",auth)
                 .header("If-Match",version).header("Idempotency-Key","pause-"+UUID.randomUUID())
