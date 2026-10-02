@@ -270,7 +270,7 @@ class ModernPostgresMigrationTests {
 	private static void assertTenantWorkspaceRls(java.sql.Connection connection) throws Exception {
 		Set<String> expectedTables = new java.util.HashSet<>();
 		Set<String> expectedTenantWorkspaceTables = new java.util.HashSet<>();
-		var inventory = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v108.tsv"));
+		var inventory = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v142.tsv"));
 		for (String line : inventory.subList(1, inventory.size())) {
 			String[] fields = line.split("\\t", -1);
 			assertThat(fields).hasSize(7);
@@ -281,6 +281,11 @@ class ModernPostgresMigrationTests {
 				if (fields[2].equals("t") && fields[3].equals("t")) expectedTenantWorkspaceTables.add(fields[0]);
 			}
 		}
+		assertThat(expectedTables).as("V142 classifies stock-temperature exceptions as forced RLS")
+				.contains("logistics.stock_temperature_exception");
+		assertThat(expectedTenantWorkspaceTables)
+				.as("V142 classifies stock-temperature exceptions with direct Tenant/Workspace scope")
+				.contains("logistics.stock_temperature_exception");
 		Set<String> actualTables = new java.util.HashSet<>();
 		Set<String> policyTables = new java.util.HashSet<>();
 		Set<String> scopedPolicyTables = new java.util.HashSet<>();
@@ -302,7 +307,7 @@ class ModernPostgresMigrationTests {
 				}
 			}
 		}
-		assertThat(actualTables).as("forced RLS tables exactly match the V108 direct-scope inventory")
+		assertThat(actualTables).as("forced RLS tables exactly match the V142 direct-scope inventory")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
 		assertThat(policyTables).as("every forced direct-scope table has an explicit policy")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
