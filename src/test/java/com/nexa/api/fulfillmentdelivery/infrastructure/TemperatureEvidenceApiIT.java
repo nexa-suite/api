@@ -190,8 +190,9 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                                 versionBefore, BigDecimal.ONE, "Stale version must not hold stock", null))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CONCURRENCY_CONFLICT"));
-        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid and workspace_id=?::uuid",
-                Integer.class, tenantId(), workspaceId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid "
+                        + "and workspace_id=?::uuid and subject_type='LOT' and subject_id=?",
+                Integer.class, tenantId(), workspaceId(), subject.lotId())).isEqualTo(1);
 
         String warehousePhoto = uploadWarehousePhoto(subject.warehouseId(), "temperature-warehouse-photo-" + uuid());
         String warehouseKey = "temperature-evidence-" + uuid();
@@ -322,8 +323,8 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
     @Test
     void marksLotTemperatureHoldAsExecutionBlockingWhenReservedQuantityIsAffected() throws Exception {
         ensureCommercialInventory();
-        TemperatureSubject subject = createTemperatureSubject("2098-01-01");
-        PurchaseRequestResource purchaseRequest = createApprovedPurchaseRequest();
+        TemperatureSubject subject = createTemperatureSubject("2098-01-01", "CAT-0001");
+        PurchaseRequestResource purchaseRequest = createApprovedPurchaseRequestForItem("CAT-0001");
         SalesOrderResource order = convert(purchaseRequest, "thermal-reserve-convert-" + uuid());
         MvcResult confirmed = mockMvc.perform(post("/api/v1/sales-orders/" + order.id() + "/confirmations")
                         .header("Authorization", "Bearer " + order.salesToken())
@@ -383,6 +384,10 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
     }
 
     private TemperatureSubject createTemperatureSubject(String expirationDate) throws Exception {
+        return createTemperatureSubject(expirationDate, "CAT-0002");
+    }
+
+    private TemperatureSubject createTemperatureSubject(String expirationDate, String catalogItemId) throws Exception {
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         String warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult createdWarehouse = mockMvc.perform(post("/api/v1/warehouses")
@@ -411,12 +416,38 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "temperature-inbound-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId
-                                + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"" + batch
+                                + "\",\"catalogItemId\":\"" + catalogItemId + "\",\"batchNumber\":\"" + batch
                                 + "\",\"expirationDate\":\"" + expirationDate + "\",\"quantity\":10,\"unit\":\"UNIT\"}"))
                 .andExpect(status().isCreated());
         UUID lotId = jdbc.queryForObject("select id from warehouse.inventory_lot where tenant_id=?::uuid and workspace_id=?::uuid and warehouse_id=? and batch_number=?",
                 UUID.class, tenantId(), workspaceId(), warehouseId, batch);
         return new TemperatureSubject(warehouseId, zoneId, lotId, warehouseToken);
+    }
+
+    private PurchaseRequestResource createApprovedPurchaseRequestForItem(String catalogItemId) throws Exception {
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
+                        .header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[{\"catalogItemId\":\"" + catalogItemId
+                                + "\",\"quantity\":1,\"unit\":\"UNIT\"}]}"))
+                .andExpect(status().isCreated()).andReturn();
+        String requestId = json(created).get("id").asText();
+        MvcResult submitted = mockMvc.perform(post("/api/v1/purchase-requests/" + requestId + "/submissions")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "temperature-submit-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        MvcResult inReview = mockMvc.perform(post("/api/v1/purchase-requests/" + requestId + "/reviews")
+                        .header("Authorization", "Bearer " + sales)
+                        .header("If-Match", submitted.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult approved = mockMvc.perform(post("/api/v1/purchase-requests/" + requestId + "/approvals")
+                        .header("Authorization", "Bearer " + sales)
+                        .header("If-Match", inReview.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andReturn();
+        return new PurchaseRequestResource(requestId, approved.getResponse().getHeader("ETag"), sales);
     }
 
     private UUID createForeignWarehouse() {
