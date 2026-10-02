@@ -141,6 +141,37 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
     }
 
     @Test
+    void businessOperationsManagerInvitationCanBeAcceptedWithOnlyCoordinationPermissions() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "business-operations-manager-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult created = mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
+                        .header("Idempotency-Key", "business-operations-manager-" + uuid()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"displayName\":\"Business Operations Manager\",\"roles\":[\"BUSINESS_OPERATIONS_MANAGER\"]}"))
+                .andExpect(status().isCreated()).andReturn();
+        String invitationId = json(created).get("id").asText();
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.organization_invitation_role where invitation_id=? and role=?",
+                Integer.class, UUID.fromString(invitationId), "BUSINESS_OPERATIONS_MANAGER")).isEqualTo(1);
+
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + invitationToken(email) + "\",\"password\":\"" + TEST_PASSWORD
+                                + "\",\"displayName\":\"Business Operations Manager\"}"))
+                .andExpect(status().isCreated());
+
+        String invited = accessToken(email, "PLATFORM");
+        MvcResult session = mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + invited))
+                .andExpect(status().isOk()).andReturn();
+        var membership = json(session).get("membership");
+        List<String> roles = new java.util.ArrayList<>();
+        membership.get("roles").forEach(role -> roles.add(role.asText()));
+        assertThat(roles).containsExactly("BUSINESS_OPERATIONS_MANAGER");
+
+        List<String> permissions = new java.util.ArrayList<>();
+        membership.get("permissions").forEach(permission -> permissions.add(permission.asText()));
+        assertThat(permissions).contains("delivery.exception.read", "delivery.exception.coordinate")
+                .doesNotContain("inventory.release", "dispatch.assign", "dispatch.temperature");
+    }
+
+    @Test
     void invitationsPersistOnlyHashesCoordinateOutboxAndRejectReplay() throws Exception {
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
         String email = "invited-" + uuid().substring(0, 8) + "@example.test";

@@ -131,7 +131,7 @@ tenant_management.notification_preference	BC10	V29__create_tenant_administration
 tenant_management.operational_settings	BC01	V29__create_tenant_administration_configuration.sql:78 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.organization_invitation	BC01	V29__create_tenant_administration_configuration.sql:183 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.organization_invitation_idempotency	SHARED_TECHNICAL	V29__create_tenant_administration_configuration.sql:228 CREATE TABLE; explicit shared technical idempotency table.
-tenant_management.organization_invitation_role	BC01	V29__create_tenant_administration_configuration.sql:219 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.organization_invitation_role	BC01	V29__create_tenant_administration_configuration.sql:219 CREATE TABLE; V144__allow_business_operations_manager_invitations.sql:1 ALTER TABLE expands the check to current internal assignable roles, including BUSINESS_OPERATIONS_MANAGER; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.organization_registration	BC01	V25__create_organization_registration.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.organization_registration_draft_idempotency	SHARED_TECHNICAL	V86__create_organization_onboarding_drafts.sql:28 CREATE TABLE; explicit shared technical idempotency table.
 tenant_management.organization_settings	BC01	V29__create_tenant_administration_configuration.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
