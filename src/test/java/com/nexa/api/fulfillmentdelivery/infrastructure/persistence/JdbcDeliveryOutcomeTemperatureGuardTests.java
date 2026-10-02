@@ -6,6 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort
 import com.nexa.api.inventoryavailability.application.publicapi.ColdChainPolicyQuery;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.RowMapper;
@@ -59,7 +60,15 @@ class JdbcDeliveryOutcomeTemperatureGuardTests {
         TemperatureView result = fixture.adapter().recordTemperature(request("2"));
 
         assertThat(result.status()).isEqualTo("WITHIN_RANGE");
-        verify(fixture.jdbc()).update(eq("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,lot_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"), any(Object[].class));
+        String insert = "insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,subject_type,subject_id,lot_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at) values (?,?,?,?,'DELIVERY',?,?,?,?,?,?,?,?,?,?,?,?)";
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(fixture.jdbc()).update(eq(insert), arguments.capture());
+        assertThat(arguments.getValue()).hasSize(16);
+        assertThat(arguments.getValue()[1]).isEqualTo(TENANT);
+        assertThat(arguments.getValue()[2]).isEqualTo(WORKSPACE);
+        assertThat(arguments.getValue()[3]).isEqualTo(DELIVERY);
+        assertThat(arguments.getValue()[4]).isEqualTo(DELIVERY);
+        assertThat(arguments.getValue()[5]).isEqualTo(LOT);
     }
 
     private static Fixture fixture() throws Exception {
