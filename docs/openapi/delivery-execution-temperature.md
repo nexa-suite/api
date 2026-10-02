@@ -17,7 +17,7 @@ All routes use authenticated Tenant/Workspace. Commands require a strong numeric
 
 GET returns Delivery version/status, active attempt if present, actual origin Warehouse, remaining Fulfillment lines with SKU/unit/range, and current HOLDs. The ETag is the current Delivery version.
 
-Reading request fields: `fulfillmentLineId`, `skuId`, positive `affectedQuantity`, `value`, `unit` (`CELSIUS`), `occurredAt`, nullable `sourceIncidentId` and `evidenceObjectId`. Fresh capture must be no more than 24 hours old and not in the future. Quantity cannot exceed remaining physical quantity; SKU and line must belong to this Fulfillment. Server obtains the current authoritative SKU cold-chain range.
+Reading request fields: `fulfillmentLineId`, `skuId`, positive `affectedQuantity`, `value`, `unit` (`CELSIUS`), `occurredAt`, nullable `sourceIncidentId` and `evidenceObjectId`. Capture cannot be in the future. Coordinate retention policy does not impose a retention or reporting deadline on temperature evidence. Quantity cannot exceed remaining physical quantity; SKU and line must belong to this Fulfillment. Server obtains the current authoritative SKU cold-chain range.
 
 An excursion requires an actual Driver `TEMPERATURE_EXCURSION` incident for this Delivery and reporter, its CRITICAL exception, and an AVAILABLE photo belonging to that exact `DELIVERY_INCIDENT` subject. Reporting severity remains server-derived. A previously held incident cannot create another HOLD. In-range readings do not fabricate incidents or HOLDs.
 

@@ -170,6 +170,46 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DELIVERY_CRITICAL_INSTRUCTION_ACK_REQUIRED"));
     }
 
+    @Test
+    void transitTemperatureReplaysImmutableReadingAndDoesNotGrantDriverDisposition() throws Exception {
+        AssignedDelivery fixture = createAssignedDelivery();
+        UUID fulfillment = jdbc.queryForObject("select fulfillment_id from logistics.delivery where id=?", UUID.class, fixture.deliveryId());
+        UUID line = jdbc.queryForObject("select id from logistics.fulfillment_line where fulfillment_id=?", UUID.class, fulfillment);
+        UUID sku = jdbc.queryForObject("select sku_id from logistics.fulfillment_line where id=?", UUID.class, line);
+        jdbc.update("update catalog_management.sellable_sku set temperature_min=0,temperature_max=8 where id=?", sku);
+        String path = "/api/v1/driver/deliveries/" + fixture.deliveryId() + "/execution-temperature-readings";
+        MvcResult snapshot = mockMvc.perform(get(path).header("Authorization", bearer(fixture.token())))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].skuId").value(sku.toString())).andReturn();
+        String key = "transit-reading-" + UUID.randomUUID();
+        String body = "{\"fulfillmentLineId\":\"" + line + "\",\"skuId\":\"" + sku
+                + "\",\"affectedQuantity\":1,\"value\":4,\"unit\":\"CELSIUS\",\"occurredAt\":\""
+                + java.time.Instant.now().minusSeconds(1) + "\"}";
+        MvcResult recorded = mockMvc.perform(post(path).header("Authorization", bearer(fixture.token()))
+                        .header("If-Match", snapshot.getResponse().getHeader("ETag")).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("WITHIN_RANGE"))
+                .andExpect(jsonPath("$.temperatureUnit").value("CELSIUS")).andReturn();
+        jdbc.update("update catalog_management.sellable_sku set temperature_min=5,temperature_max=9 where id=?", sku);
+        MvcResult replay = mockMvc.perform(post(path).header("Authorization", bearer(fixture.token()))
+                        .header("If-Match", snapshot.getResponse().getHeader("ETag")).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.replayed").value(true))
+                .andExpect(jsonPath("$.minimumCelsius").value(0)).andReturn();
+        assertThat(json(replay).get("id").asText()).isEqualTo(json(recorded).get("id").asText());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_execution_temperature_evidence where delivery_id=?", Integer.class, fixture.deliveryId())).isEqualTo(1);
+        mockMvc.perform(post(path).header("Authorization", bearer(fixture.token()))
+                        .header("If-Match", recorded.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "transit-no-photo-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/execution-holds/" + UUID.randomUUID() + "/dispositions")
+                        .header("Authorization", bearer(fixture.token())).header("If-Match", recorded.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "transit-denied-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"disposition\":\"RELEASE\",\"reason\":\"Driver report is not disposition authority\"}"))
+                .andExpect(status().isForbidden());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_execution_hold where delivery_id=?", Integer.class, fixture.deliveryId())).isZero();
+    }
+
     private AssignedDelivery createAssignedDelivery() throws Exception { return createAssignedDelivery(false); }
 
     private AssignedDelivery createAssignedDelivery(boolean customerInstruction) throws Exception {

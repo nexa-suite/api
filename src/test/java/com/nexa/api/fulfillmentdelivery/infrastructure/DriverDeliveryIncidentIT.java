@@ -260,6 +260,18 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
         assertThat(jdbc.queryForObject("select status from logistics.delivery where id=?", String.class, fixture.deliveryId())).isEqualTo("IN_TRANSIT");
         assertThat(jdbc.queryForObject("select i.incident_type from logistics.driver_delivery_incident i join logistics.operational_exception_case c on c.source_driver_incident_id=i.id where c.id=?",
                 String.class, UUID.fromString(exceptionId))).isEqualTo("DELAY");
+        // Simulate later terminalization independently of the already persisted WARNING command.
+        jdbc.update("update logistics.delivery set status='CANCELLED',version=version+1 where id=?", fixture.deliveryId());
+        mockMvc.perform(post(path + "/resolutions").header("Authorization", "Bearer " + fixture.token())
+                        .header("If-Match", reviewTag).header("Idempotency-Key", resolutionKey)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"resolution\":\"Congestion cleared; normal travel resumed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exception.status").value("RESOLVED"))
+                .andExpect(jsonPath("$.replayed").value(true));
+        mockMvc.perform(post(path + "/closures").header("Authorization", "Bearer " + fixture.token())
+                        .header("If-Match", resolvedTag).header("Idempotency-Key", "fresh-terminal-close-" + UUID.randomUUID()))
+                .andExpect(status().isNotFound());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.operational_exception_transition where exception_id=?",
+                Integer.class, UUID.fromString(exceptionId))).isEqualTo(5);
     }
 
     private ActiveDelivery createActiveDelivery() throws Exception {

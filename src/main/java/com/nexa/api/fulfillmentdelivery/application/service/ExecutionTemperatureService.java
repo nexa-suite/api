@@ -51,6 +51,8 @@ public class ExecutionTemperatureService {
         validate(version,key);
         if (command==null || command.fulfillmentLineId()==null || command.skuId()==null || command.value()==null
                 || command.affectedQuantity()==null || command.affectedQuantity().signum()<=0
+                || command.affectedQuantity().scale()>6 || command.affectedQuantity().precision()>19
+                || command.value().scale()>6
                 || !"CELSIUS".equals(command.unit()) || command.occurredAt()==null
                 || command.value().abs().compareTo(new BigDecimal("1000"))>=0
 ) fail("INVALID_REQUEST");
@@ -58,7 +60,7 @@ public class ExecutionTemperatureService {
         String hash=hash("execution-temperature-v1|"+deliveryId+"|"+version+"|"+command);
         Reading prior=persistence.replay(s,"EXECUTION_TEMPERATURE",key,hash);
         if (prior!=null) return prior;
-        if (command.occurredAt().isAfter(clock.instant()) || command.occurredAt().isBefore(clock.instant().minusSeconds(86400))) fail("INVALID_REQUEST");
+        if (command.occurredAt().isAfter(clock.instant())) fail("INVALID_REQUEST");
         if (!Set.of("DISPATCHED","IN_TRANSIT","PARTIAL").contains(d.status())) fail("DELIVERY_NOT_ACTIVE");
         if (d.version()!=version) fail("CONCURRENCY_CONFLICT");
         RawLine line=persistence.lines(s,d.fulfillmentId()).stream().filter(l->l.id().equals(command.fulfillmentLineId())
