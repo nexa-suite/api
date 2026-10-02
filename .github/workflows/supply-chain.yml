@@ -3,7 +3,7 @@ name: API Supply Chain
 on:
   pull_request:
   push:
-    branches: [main, develop, "feature/**", "release/**", "integration/**"]
+    branches: [main, develop, "feature/**", "fix/**", "release/**", "integration/**"]
 
 permissions:
   contents: read
