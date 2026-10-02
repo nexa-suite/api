@@ -151,7 +151,8 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test void temperatureExcursionCreatesIncidentAndBuyerSeesOnlyMappedReview() throws Exception {
-        var dispatch = ready(schedule(assign(prepare(createReservedDispatch()))));
+        var dispatch = ready(schedule(assign(prepare(
+                createReservedDispatch("CAT-0005", java.time.LocalDate.now().plusDays(1))))));
         dispatch = mutate(dispatch, "/route-starts", "{}", "route-temperature");
         MvcResult reading = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/temperature-readings")
                         .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", dispatch.etag()).header("Idempotency-Key", "temperature-1")

@@ -104,7 +104,19 @@ class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
                         .header("Authorization", "Bearer " + activeWarehouse))
                 .andExpect(status().isOk()).andReturn();
         var listJson = json(list);
-        assertThat(listJson.get("items").toString()).contains(visibleWarehouse).doesNotContain(hiddenWarehouse);
+        java.util.Set<String> listedWarehouses = new java.util.HashSet<>();
+        listJson.get("items").forEach(item -> listedWarehouses.add(item.get("id").asText()));
+        long totalWarehouses = listJson.get("total").asLong();
+        for (int page = 1; page * 100L < totalWarehouses; page++) {
+            MvcResult next = mockMvc.perform(get("/api/v1/warehouses")
+                            .param("page", Integer.toString(page)).param("size", "100")
+                            .header("Authorization", "Bearer " + activeWarehouse))
+                    .andExpect(status().isOk()).andReturn();
+            assertThat(json(next).get("total").asLong()).isEqualTo(totalWarehouses);
+            json(next).get("items").forEach(item -> listedWarehouses.add(item.get("id").asText()));
+        }
+        assertThat(listedWarehouses).contains(visibleWarehouse).doesNotContain(hiddenWarehouse);
+        assertThat((long) listedWarehouses.size()).isEqualTo(totalWarehouses);
         assertThat(listJson.get("total").asLong()).isEqualTo(jdbc.queryForObject(
                 "select count(distinct warehouse_id) from tenant_management.warehouse_access_grant "
                         + "where tenant_id=? and workspace_id=? and membership_id=? and status='ACTIVE'",
