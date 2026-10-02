@@ -115,7 +115,7 @@ class ModernPostgresMigrationTests {
 	}
 
 	private static void assertCurrentSchemaRlsInventory(java.sql.Connection connection) throws Exception {
-		var lines = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v108.tsv"));
+		var lines = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v142.tsv"));
 		assertThat(lines.getFirst()).isEqualTo("table\tcategory\ttenant_id\tworkspace_id\trls_enabled\trls_forced\tpolicy");
 		assertThat(lines).isNotEmpty();
 		Map<String, List<String>> expected = new LinkedHashMap<>();
