@@ -129,7 +129,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         assertThat(json(pendingPod).toString()).doesNotContain(dispatch.id());
 
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        MvcResult buyerView = mockMvc.perform(get("/api/v1/my-deliveries/" + dispatch.id())
+        MvcResult buyerView = mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id())
                         .header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
         assertThat(json(buyerView).get("status").asText()).isEqualTo("PARTIAL");
         assertThat(json(buyerView).get("reservationId").isNull()).isTrue();
@@ -161,7 +161,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         final String temperatureDispatchId = dispatch.id();
         assertThatThrownBy(() -> jdbc.update("update logistics.temperature_reading set source='tampered' where dispatch_order_id=?", java.util.UUID.fromString(temperatureDispatchId))).isInstanceOf(RuntimeException.class);
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        MvcResult events = mockMvc.perform(get("/api/v1/my-deliveries/" + dispatch.id() + "/events").header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
+        MvcResult events = mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id() + "/events").header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
         assertThat(json(events).toString()).contains("DELIVERY_REVIEW");
         assertThat(json(events).toString()).doesNotContain("Temperature excursion");
     }
@@ -219,7 +219,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
     @Test void buyerTrackingStripsInternalDispatchFieldsAndAnalyticsIsServerBacked() throws Exception {
         var dispatch = createReservedDispatch();
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        MvcResult buyerView = mockMvc.perform(get("/api/v1/my-deliveries/" + dispatch.id()).header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
+        MvcResult buyerView = mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id()).header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
         assertThat(json(buyerView).get("reservationId").isNull()).isTrue();
         assertThat(json(buyerView).get("assignment").isNull()).isTrue();
         mockMvc.perform(get("/api/v1/logistics/operations-dashboard").header("Authorization", "Bearer " + dispatch.logisticsToken())).andExpect(status().isOk());

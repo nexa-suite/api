@@ -453,18 +453,26 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         fulfillmentEtag = staged.getResponse().getHeader("ETag");
         MvcResult ready = transition(flow.fulfillmentId(), "/ready-for-dispatch", warehouse, fulfillmentEtag, "handoff-ready-" + uuid());
         fulfillmentEtag = ready.getResponse().getHeader("ETag");
-        recordMatchingOutgoingCheck(flow.fulfillmentId(), warehouse, fulfillmentEtag, "handoff-outgoing-" + uuid());
+        MvcResult assignment = assignDriver(flow.fulfillmentId(), warehouse, logistics, fulfillmentEtag,
+                UUID.fromString(membershipId(LOGISTICS_EMAIL)), "handoff-assignment-" + uuid());
+        fulfillmentEtag = assignment.getResponse().getHeader("ETag");
+        MvcResult outgoing = recordMatchingOutgoingCheck(flow.fulfillmentId(), warehouse, fulfillmentEtag,
+                "handoff-outgoing-" + uuid());
+        var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + flow.fulfillmentId() + "/physical-allocation")
+                        .header("Authorization", "Bearer " + warehouse))
+                .andExpect(status().isOk()).andReturn());
+        String dispatchBody = "{\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong()
+                + ",\"driverAssignmentId\":\"" + json(assignment).get("id").asText()
+                + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
+                + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/dispatches")
                         .header("Authorization", "Bearer " + warehouse).header("If-Match", fulfillmentEtag)
-                        .header("Idempotency-Key", "handoff-dispatch-" + uuid()))
+                        .header("Idempotency-Key", "handoff-dispatch-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk()).andReturn();
         String deliveryId = json(dispatched).get("deliveryId").asText();
-        UUID logisticsMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
-        UUID logisticsUser = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?", UUID.class, logisticsMembership);
         UUID delivery = UUID.fromString(deliveryId);
-        jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,vehicle_reference,route_name,assigned_at,actor_membership_id) values (?,?,?,?,?,?,?, ?,current_timestamp,?)",
-                UUID.randomUUID(), UUID.fromString(tenantId()), UUID.fromString(workspaceId()), delivery, logisticsMembership, logisticsUser,
-                "VAN-MOBILE-1", "ICISA-MOBILE", logisticsMembership);
 
         MvcResult deliveryView = mockMvc.perform(get("/api/v1/deliveries/" + deliveryId)
                         .header("Authorization", "Bearer " + logistics)).andExpect(status().isOk()).andReturn();
@@ -716,8 +724,11 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
-        UUID otherMembership = UUID.fromString(membershipId(WAREHOUSE_EMAIL));
-        DriverDeliveryFixture fixture = createDriverDelivery(warehouse, sales, otherMembership, "driver-other-" + uuid());
+        String otherDriverEmail = createOtherLogisticsDriver();
+        String otherDriver = accessToken(otherDriverEmail, "PLATFORM");
+        UUID otherDriverMembership = UUID.fromString(membershipId(otherDriverEmail));
+        DriverDeliveryFixture fixture = createDriverDelivery(warehouse, sales, logistics, otherDriverMembership,
+                "driver-other-" + uuid());
 
         MvcResult currentList = mockMvc.perform(get("/api/v1/driver/deliveries")
                         .header("Authorization", "Bearer " + logistics))
@@ -733,6 +744,9 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(get("/api/v1/my-deliveries/" + fixture.deliveryId())
                         .header("Authorization", "Bearer " + logistics))
                 .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + otherDriver))
+                .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
                         .header("Authorization", "Bearer " + logistics).header("If-Match", fixture.etag())
                         .header("Idempotency-Key", "driver-wrong-assignment-" + uuid())
@@ -1083,6 +1097,12 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
     private DriverDeliveryFixture createDriverDelivery(String warehouse, String sales, UUID assignedMembership,
                                                        String key) throws Exception {
+        return createDriverDelivery(warehouse, sales, accessToken(LOGISTICS_EMAIL, "PLATFORM"), assignedMembership, key);
+    }
+
+    private DriverDeliveryFixture createDriverDelivery(String warehouse, String sales, String logistics,
+                                                       UUID assignedMembership, String key) throws Exception {
+        ensureActiveDriverWorkday(logistics, key + "-workday");
         PhysicalFlow flow = createPickingFlow(warehouse, sales, key, "2");
         String picked = pick(flow, warehouse, key + "-pick");
         MvcResult packed = transition(flow.fulfillmentId(), "/packing", warehouse, picked, key + "-pack");
@@ -1090,22 +1110,93 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 packed.getResponse().getHeader("ETag"), key + "-stage");
         MvcResult ready = transition(flow.fulfillmentId(), "/ready-for-dispatch", warehouse,
                 staged.getResponse().getHeader("ETag"), key + "-ready");
+        MvcResult assignment = assignDriver(flow.fulfillmentId(), warehouse, logistics,
+                ready.getResponse().getHeader("ETag"), assignedMembership, key + "-assignment");
+        String assignedEtag = assignment.getResponse().getHeader("ETag");
+        MvcResult outgoing = recordMatchingOutgoingCheck(flow.fulfillmentId(), warehouse, assignedEtag,
+                key + "-outgoing");
+        var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + flow.fulfillmentId() + "/physical-allocation")
+                        .header("Authorization", "Bearer " + warehouse))
+                .andExpect(status().isOk()).andReturn());
+        String dispatchBody = "{\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong()
+                + ",\"driverAssignmentId\":\"" + json(assignment).get("id").asText()
+                + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
+                + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/dispatches")
                         .header("Authorization", "Bearer " + warehouse)
-                        .header("If-Match", ready.getResponse().getHeader("ETag"))
-                        .header("Idempotency-Key", key + "-dispatch"))
+                        .header("If-Match", assignedEtag)
+                        .header("Idempotency-Key", key + "-dispatch")
+                        .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk()).andReturn();
         UUID deliveryId = UUID.fromString(json(dispatched).get("deliveryId").asText());
+        long version = jdbc.queryForObject("select version from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
+                Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), deliveryId);
+        return new DriverDeliveryFixture(deliveryId, version);
+    }
+
+    private String createOtherLogisticsDriver() {
+        String email = "logistics-other-" + uuid().substring(0, 12) + "@icisa-test.local";
+        UUID userId = UUID.randomUUID();
+        UUID membershipId = UUID.randomUUID();
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID assignedUser = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
-                UUID.class, assignedMembership);
-        jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,vehicle_reference,route_name,assigned_at,actor_membership_id) values (?,?,?,?,?,?,?, ?,current_timestamp,?)",
-                UUID.randomUUID(), tenant, workspace, deliveryId, assignedMembership, assignedUser,
-                "VAN-DRIVER-1", "DRIVER-TEST", assignedMembership);
-        long version = jdbc.queryForObject("select version from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
-                Long.class, tenant, workspace, deliveryId);
-        return new DriverDeliveryFixture(deliveryId, version);
+        UUID sourceMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        UUID sourceUser = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
+                UUID.class, sourceMembership);
+        jdbc.update("insert into iam.user_account(id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,?,?,'es','ACTIVE',current_timestamp,current_timestamp,0)",
+                userId, email, email, email, email, "Other logistics driver");
+        jdbc.update("insert into iam.password_credential(user_id,password_hash,algorithm,changed_at) "
+                        + "select ?,password_hash,algorithm,current_timestamp from iam.password_credential where user_id=?",
+                userId, sourceUser);
+        jdbc.update("insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "values (?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+                membershipId, workspace, userId);
+        jdbc.update("insert into tenant_management.membership_role_definition(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
+                        + "select ?,?,?,r.id,?,current_timestamp from tenant_management.role_definition r "
+                        + "where r.code='logistics' and r.tenant_id is null and r.workspace_id is null",
+                membershipId, tenant, workspace, sourceMembership);
+        jdbc.update("insert into tenant_management.membership_authorization_state(membership_id,tenant_id,workspace_id,authorization_version,updated_at) "
+                        + "values (?,?,?,0,current_timestamp) on conflict(membership_id) do nothing",
+                membershipId, tenant, workspace);
+        return email;
+    }
+
+    private void ensureActiveDriverWorkday(String logistics, String key) throws Exception {
+        MvcResult current = mockMvc.perform(get("/api/v1/driver/workdays/current")
+                        .header("Authorization", "Bearer " + logistics)).andReturn();
+        if (current.getResponse().getStatus() == 204) {
+            mockMvc.perform(post("/api/v1/driver/workdays")
+                            .header("Authorization", "Bearer " + logistics)
+                            .header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"locationAvailable\":true}"))
+                    .andExpect(status().isOk());
+            return;
+        }
+        if ("LOCATION_UNAVAILABLE".equals(json(current).path("status").asText())) {
+            mockMvc.perform(post("/api/v1/driver/workdays/" + json(current).get("id").asText()
+                            + "/location-availability")
+                            .header("Authorization", "Bearer " + logistics)
+                            .header("If-Match", current.getResponse().getHeader("ETag"))
+                            .header("Idempotency-Key", key + "-availability")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"locationAvailable\":true}"))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    private MvcResult assignDriver(UUID fulfillmentId, String warehouse, String logistics, String fulfillmentEtag,
+                                   UUID responsibleMembershipId, String key) throws Exception {
+        var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + fulfillmentId + "/physical-allocation")
+                        .header("Authorization", "Bearer " + warehouse))
+                .andExpect(status().isOk()).andReturn());
+        String body = "{\"responsibleMembershipId\":\"" + responsibleMembershipId
+                + "\",\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong() + "}";
+        return mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/driver-assignments")
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andReturn();
     }
 
     private record DriverDeliveryFixture(UUID deliveryId, long version) {
@@ -1129,11 +1220,11 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 (rs, row) -> new String[]{rs.getString(1), rs.getString(2)},
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String warehouseMembership = membershipId(WAREHOUSE_EMAIL);
+        String logisticsMembership = membershipId(LOGISTICS_EMAIL);
         for (String[] location : locations) {
-            mockMvc.perform(post("/api/v1/warehouses/" + location[0] + "/access-grants")
-                            .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
-                    .andExpect(status().isOk());
+            ensureWarehouseGrant(location[0], warehouseMembership, owner);
+            ensureWarehouseGrant(location[0], logisticsMembership, owner);
         }
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         for (String[] location : locations) {
@@ -1146,6 +1237,27 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                                     + "\",\"quantity\":1000,\"unit\":\"UNIT\"}"))
                     .andExpect(status().isCreated());
         }
+    }
+
+    private void ensureWarehouseGrant(String warehouseId, String targetMembershipId, String owner) throws Exception {
+        var grants = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn());
+        for (var grant : grants) {
+            if (!targetMembershipId.equals(grant.path("membershipId").asText())) continue;
+            if ("ACTIVE".equals(grant.path("status").asText())) return;
+            mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                            .header("Authorization", "Bearer " + owner)
+                            .header("If-Match", "\"" + grant.path("version").asLong() + "\"")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"membershipId\":\"" + targetMembershipId + "\"}"))
+                    .andExpect(status().isOk());
+            return;
+        }
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + targetMembershipId + "\"}"))
+                .andExpect(status().isOk());
     }
 
     private PhysicalFlow createPickingFlow(String warehouse, String sales, String key, String quantity) throws Exception {
