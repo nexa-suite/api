@@ -10,6 +10,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 import java.util.Base64;
 
@@ -323,7 +324,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
     @Test
     void marksLotTemperatureHoldAsExecutionBlockingWhenReservedQuantityIsAffected() throws Exception {
         ensureCommercialInventory();
-        TemperatureSubject subject = createTemperatureSubject("2098-01-01", "CAT-0003");
+        TemperatureSubject subject = createTemperatureSubject(LocalDate.now().plusDays(1).toString(), "CAT-0003");
         PurchaseRequestResource purchaseRequest = createApprovedPurchaseRequestForItem("CAT-0003");
         SalesOrderResource order = convert(purchaseRequest, "thermal-reserve-convert-" + uuid());
         MvcResult confirmed = mockMvc.perform(post("/api/v1/sales-orders/" + order.id() + "/confirmations")
