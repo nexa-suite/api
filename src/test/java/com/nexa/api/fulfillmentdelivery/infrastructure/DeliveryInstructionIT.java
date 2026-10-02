@@ -9,6 +9,8 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -81,6 +83,8 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.acknowledgements[0].acknowledgedByMembershipId").value(fixture.membershipId().toString()))
                 .andExpect(jsonPath("$.replayed").value(false)).andReturn();
         String acknowledgedAt = json(acknowledged).get("acknowledgements").get(0).get("acknowledgedAt").asText();
+        assertThat(Instant.parse(acknowledgedAt).truncatedTo(ChronoUnit.MICROS))
+                .isEqualTo(Instant.parse(acknowledgedAt));
 
         mockMvc.perform(post(driverPath(fixture) + "/instruction-acknowledgements")
                         .header("Authorization", bearer(fixture.token())).header("If-Match", instructionEtag)

@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -221,7 +222,8 @@ public class JdbcDeliveryInstructionPersistenceAdapter implements DeliveryInstru
                     request.deliveryId(), instructionId);
             if (revision == null) throw error("DELIVERY_INSTRUCTION_NOT_FOUND");
             if (!revision.kind().isCritical()) throw error("DELIVERY_INSTRUCTION_NOT_CRITICAL");
-            Instant acknowledgedAt = request.acknowledgedAt() == null ? Instant.now() : request.acknowledgedAt();
+            Instant acknowledgedAt = (request.acknowledgedAt() == null ? Instant.now() : request.acknowledgedAt())
+                    .truncatedTo(ChronoUnit.MICROS);
             jdbc.update("insert into logistics.delivery_instruction_acknowledgement(acknowledgement_id,tenant_id,workspace_id,"
                             + "delivery_id,instruction_id,instruction_version,instruction_set_version,kind_snapshot,content_snapshot,"
                             + "acknowledged_by_membership_id,acknowledged_at,idempotency_key,request_hash) "
@@ -233,7 +235,8 @@ public class JdbcDeliveryInstructionPersistenceAdapter implements DeliveryInstru
             acknowledgements.add(new AcknowledgementView(instructionId, revision.instructionVersion(),
                     request.actorMembershipId(), acknowledgedAt));
         }
-        Instant commandAt = request.acknowledgedAt() == null ? Instant.now() : request.acknowledgedAt();
+        Instant commandAt = (request.acknowledgedAt() == null ? Instant.now() : request.acknowledgedAt())
+                .truncatedTo(ChronoUnit.MICROS);
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), ACK_OPERATION,
                 request.idempotencyKey(), request.requestHash(), request.deliveryId(), commandAt);
         return new AcknowledgementResult(request.deliveryId(), request.expectedInstructionSetVersion(),

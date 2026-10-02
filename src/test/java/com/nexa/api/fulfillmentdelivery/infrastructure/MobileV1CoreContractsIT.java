@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -904,6 +905,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.replayed").value(false)).andReturn();
         String eventId = json(first).get("id").asText();
         String arrivedAt = json(first).get("arrivedAt").asText();
+        assertThat(Instant.parse(arrivedAt).truncatedTo(ChronoUnit.MICROS)).isEqualTo(Instant.parse(arrivedAt));
         long arrivalVersion = json(first).get("deliveryVersion").asLong();
         assertThat(arrivalVersion).isEqualTo(Long.parseLong(started.getResponse().getHeader("ETag").replace("\"", "")) + 1);
 

@@ -20,6 +20,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -204,7 +205,8 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
         }
 
         UUID eventId = UUID.randomUUID();
-        Instant arrivedAt = request.arrivedAt() == null ? Instant.now() : request.arrivedAt();
+        Instant arrivedAt = (request.arrivedAt() == null ? Instant.now() : request.arrivedAt())
+                .truncatedTo(ChronoUnit.MICROS);
         jdbc.update("insert into logistics.delivery_event(id,tenant_id,workspace_id,delivery_id,event_type,actor_membership_id,reason,occurred_at,attempt_id) values (?,?,?,?,?,?,?,?,?)",
                 eventId, request.tenantId(), request.workspaceId(), request.deliveryId(), "DRIVER_ARRIVED",
                 request.actorMembershipId(), "Driver signaled arrival", Timestamp.from(arrivedAt), request.attemptId());
