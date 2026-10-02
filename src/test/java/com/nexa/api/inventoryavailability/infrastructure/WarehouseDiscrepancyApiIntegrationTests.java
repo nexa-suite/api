@@ -5,12 +5,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -335,10 +337,21 @@ class WarehouseDiscrepancyApiIntegrationTests extends PostgresIntegrationSupport
                         .header(HttpHeaders.AUTHORIZATION, bearer(token)).contentType(MediaType.APPLICATION_JSON).content(zoneRequest))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         String zoneId = tools.jackson.databind.json.JsonMapper.shared().readTree(zoneBody).get("id").asText();
+        String evidenceId = null;
+        if (temperatureExcursion) {
+            String evidenceBody = mockMvc.perform(multipart("/api/v1/business-document-evidence")
+                            .file(new MockMultipartFile("file", "receiving-photo.png", "image/png",
+                                    java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/g5sAAAAASUVORK5CYII=")))
+                            .param("subjectType", "WAREHOUSE").param("subjectId", warehouseId)
+                            .header(HttpHeaders.AUTHORIZATION, bearer(accessToken(OWNER_EMAIL, "PLATFORM")))
+                            .header("Idempotency-Key", "receiving-photo-" + suffix))
+                    .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+            evidenceId = tools.jackson.databind.json.JsonMapper.shared().readTree(evidenceBody).get("id").asText();
+        }
         String receipt = "{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId
                 + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"DISC-" + suffix
                 + "\",\"expirationDate\":\"2099-01-01\",\"quantity\":\"10\",\"unit\":\"UNIT\""
-                + (temperatureExcursion ? ",\"temperatureReading\":10}" : "}");
+                + (temperatureExcursion ? ",\"temperatureReading\":10,\"temperatureEvidenceObjectId\":\"" + evidenceId + "\"}" : "}");
         MvcResult received = mockMvc.perform(post("/api/v1/inventory/inbound-receipts")
                         .header(HttpHeaders.AUTHORIZATION, bearer(token)).header("Idempotency-Key", "receive-disc-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON).content(receipt))

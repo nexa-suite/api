@@ -119,12 +119,14 @@ final class WarehousePersistenceSupport {
     static WarehouseOperationsService.LotSummary lot(ResultSet rs) throws java.sql.SQLException {
         BigDecimal onHand = rs.getBigDecimal("stock_quantity");
         BigDecimal reserved = rs.getBigDecimal("reserved_quantity");
+        String status = rs.getString("status");
+        BigDecimal available = "AVAILABLE".equals(status) ? onHand.subtract(reserved) : BigDecimal.ZERO;
         return new WarehouseOperationsService.LotSummary(rs.getObject("id").toString(),
                 rs.getObject("warehouse_id").toString(), rs.getObject("zone_id").toString(),
                 rs.getString("catalog_item_id"), rs.getString("batch_number"),
                 rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
-                onHand, reserved, onHand.subtract(reserved), rs.getString("unit"),
-                rs.getString("status"), rs.getLong("version"), rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString());
+                onHand, reserved, available, rs.getString("unit"),
+                status, rs.getLong("version"), rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString());
     }
 
     static WarehouseOperationsService.MovementSummary movement(ResultSet rs) throws java.sql.SQLException {
