@@ -192,7 +192,7 @@ logistics.operational_exception_case	BC06	V131__append_delivery_operational_exce
 logistics.operational_exception_transition	BC06	V131__append_delivery_operational_exceptions.sql:79 CREATE TABLE; append-only OPEN, Driver claim, and review transitions.
 logistics.driver_workday	BC06	V135__driver_operational_workdays_and_location_ttl.sql:1 CREATE TABLE; scope-bound operational Driver workdays.
 logistics.driver_workday_event	BC06	V135__driver_operational_workdays_and_location_ttl.sql:10 CREATE TABLE; immutable workday facts without coordinates.
-logistics.driver_coordinate	BC06	V135__driver_operational_workdays_and_location_ttl.sql:24 CREATE TABLE; operational coordinates with maximum 24-hour TTL and retention-only deletion.
+logistics.driver_coordinate	BC06	V135__driver_operational_workdays_and_location_ttl.sql:24 CREATE TABLE; V143__preserve_driver_coordinate_payload_identity.sql:4 ADD COLUMN request_hash VARCHAR(64), :5 CHECK NULL or 64 lowercase hexadecimal characters; nullable SHA-256 coordinate-sample identity for idempotent replay, with earlier rows left NULL; operational coordinates retain maximum 24-hour TTL and retention-only deletion.
 logistics.customer_instruction_set	BC06	V134__customer_delivery_instruction_provenance.sql:1 CREATE TABLE; versioned Customer delivery instruction set anchored to a SalesOrder.
 logistics.customer_instruction_revision	BC06	V134__customer_delivery_instruction_provenance.sql:6 CREATE TABLE; append-only Customer/Buyer instruction provenance and revisions.
 logistics.delivery_load	BC06	V132__create_delivery_loads.sql:1 CREATE TABLE; current grouped Delivery assignment and dual-confirmation lifecycle.
