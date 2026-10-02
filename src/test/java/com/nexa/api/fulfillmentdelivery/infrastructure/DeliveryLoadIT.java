@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,6 +20,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** PostgreSQL and HTTP coverage for grouped load planning and transfer. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
+
+    @Override
+    protected void ensureCommercialInventory() throws Exception {
+        super.ensureCommercialInventory(LocalDate.now().plusDays(1));
+    }
 
     @Test
     void plansMissingReadyWindowAppendOnlyAndFeedsDispatchReadiness() throws Exception {
@@ -274,6 +280,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                         + "where b.tenant_id=? and b.workspace_id=? and c.sales_order_id=? and b.status='BACKED'",
                 (rs, row) -> rs.getObject(1, UUID.class), UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), salesOrderId);
+        assertThat(backingWarehouses).hasSize(1);
         for (UUID backingWarehouse : backingWarehouses) {
             ensureWarehouseGrant(backingWarehouse, membershipId(WAREHOUSE_EMAIL));
         }
@@ -288,6 +295,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
         var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + fulfillmentId + "/physical-allocation")
                         .header("Authorization", bearer(warehouse)))
                 .andExpect(status().isOk()).andReturn());
+        assertThat(allocation.get("lines")).hasSize(1);
         var line = allocation.get("lines").get(0);
         UUID warehouseId = UUID.fromString(line.get("warehouseId").asText());
         ensureWarehouseGrant(warehouseId, membershipId(LOGISTICS_EMAIL));
