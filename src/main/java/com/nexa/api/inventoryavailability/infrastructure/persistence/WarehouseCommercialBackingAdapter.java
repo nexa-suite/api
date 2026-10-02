@@ -21,6 +21,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static com.nexa.api.inventoryavailability.infrastructure.persistence.WarehousePersistenceSupport.sellableQuantitySql;
+
 /** Inventory-owned atomic availability backing for commercial commitments. */
 @Repository
 @Profile("!test")
@@ -118,7 +120,7 @@ public class WarehouseCommercialBackingAdapter implements InventoryBackingComman
         String predicate = requested.stream().map(line -> "(l.sku_id=? and l.catalog_item_id=? and l.unit=?)").collect(Collectors.joining(" or "));
         List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId));
         for (RequestedLine line : requested) { args.add(line.skuId()); args.add(line.catalogItemId()); args.add(line.unit()); }
-        return jdbc.query("with " + catalogSnapshots.cte() + " select l.id,l.sku_id,l.warehouse_id,(l.stock_quantity-l.reserved_quantity) available "
+        return jdbc.query("with " + catalogSnapshots.cte() + " select l.id,l.sku_id,l.warehouse_id," + sellableQuantitySql("l") + " available "
                         + "from warehouse.inventory_lot l "
                         + "join catalog_sku_snapshot sku on sku.tenant_id=l.tenant_id and sku.workspace_id=l.workspace_id and sku.id=l.sku_id "
                         + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
@@ -130,9 +132,8 @@ public class WarehouseCommercialBackingAdapter implements InventoryBackingComman
                         + "and (sku.temperature_min is null or (z.temperature_min is not null and z.temperature_min<=sku.temperature_min)) "
                         + "and (sku.temperature_max is null or (z.temperature_max is not null and z.temperature_max>=sku.temperature_max)) "
                         + "and ((sku.temperature_min is null and sku.temperature_max is null) or (l.temperature_value is not null and (sku.temperature_min is null or l.temperature_value>=sku.temperature_min) and (sku.temperature_max is null or l.temperature_value<=sku.temperature_max))) "
-                        + "and not exists (select 1 from warehouse.inventory_temperature_evaluation evaluation where evaluation.tenant_id=l.tenant_id and evaluation.workspace_id=l.workspace_id and evaluation.lot_id=l.id and evaluation.status='OPEN' and evaluation.disposition='HOLD') "
-                        + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
-                        + "and l.stock_quantity>l.reserved_quantity and (" + predicate + ") "
+                        + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id and disposition.temperature_evaluation_id is null order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
+                        + "and " + sellableQuantitySql("l") + ">0 and (" + predicate + ") "
                         + "order by " + WarehouseLotLockOrder.inventoryLot("l") + " for update of l",
                 (rs, row) -> new LotRow(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getBigDecimal(4)),
                 catalogSnapshots.prepend(args.toArray()));

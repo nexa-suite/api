@@ -120,7 +120,10 @@ final class WarehousePersistenceSupport {
         BigDecimal onHand = rs.getBigDecimal("stock_quantity");
         BigDecimal reserved = rs.getBigDecimal("reserved_quantity");
         String status = rs.getString("status");
-        BigDecimal available = "AVAILABLE".equals(status) ? onHand.subtract(reserved) : BigDecimal.ZERO;
+        BigDecimal held = rs.getBigDecimal("temperature_held_quantity");
+        BigDecimal available = "AVAILABLE".equals(status)
+                ? onHand.subtract(reserved).subtract(held == null ? BigDecimal.ZERO : held).max(BigDecimal.ZERO)
+                : BigDecimal.ZERO;
         return new WarehouseOperationsService.LotSummary(rs.getObject("id").toString(),
                 rs.getObject("warehouse_id").toString(), rs.getObject("zone_id").toString(),
                 rs.getString("catalog_item_id"), rs.getString("batch_number"),
@@ -145,5 +148,21 @@ final class WarehousePersistenceSupport {
 
     static Instant instantNullable(ResultSet rs, String column) throws java.sql.SQLException {
         return instant(rs, column);
+    }
+
+    static String temperatureHeldQuantitySql(String lotAlias) {
+        return "(select coalesce(sum(greatest(coalesce(e.affected_quantity," + lotAlias
+                + ".stock_quantity-" + lotAlias + ".reserved_quantity)-coalesce((select sum(d.quantity) "
+                + "from warehouse.inventory_lot_disposition d where d.tenant_id=e.tenant_id "
+                + "and d.workspace_id=e.workspace_id and d.temperature_evaluation_id=e.id "
+                + "and d.disposition in ('RELEASE','WASTE','RETURN_TO_SUPPLIER')),0),0)),0) "
+                + "from warehouse.inventory_temperature_evaluation e where e.tenant_id=" + lotAlias + ".tenant_id "
+                + "and e.workspace_id=" + lotAlias + ".workspace_id and e.lot_id=" + lotAlias + ".id "
+                + "and e.status='OPEN' and e.disposition='HOLD')";
+    }
+
+    static String sellableQuantitySql(String lotAlias) {
+        return "greatest(" + lotAlias + ".stock_quantity-" + lotAlias + ".reserved_quantity-"
+                + temperatureHeldQuantitySql(lotAlias) + ",0)";
     }
 }

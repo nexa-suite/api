@@ -187,7 +187,8 @@ abstract class WarehouseJdbcSupport {
     protected WarehouseOperationsService.LotSummary loadLot(UUID tenantId, UUID workspaceId, UUID id, boolean lock) {
         return jdbc.query(
                         "select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
-                                + "stock_quantity,reserved_quantity,unit,status,version from warehouse.inventory_lot "
+                                + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
+                                + " temperature_held_quantity,unit,status,version from warehouse.inventory_lot "
                                 + "where tenant_id=? and workspace_id=? and id=?" + (lock ? " for update" : ""),
                         (rs, row) -> lot(rs), tenantId, workspaceId, id)
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_LOT_NOT_FOUND", true));
@@ -256,7 +257,7 @@ abstract class WarehouseJdbcSupport {
         if (selectedWarehouseId != null) queryArguments.add(selectedWarehouseId);
         String grantPredicate = warehouseIdPredicate(context, "l.warehouse_id", queryArguments);
         List<FefoAllocationPolicy.LotSnapshot> candidates = jdbc.query(
-                "select l.id,l.sku_id,l.warehouse_id,l.status,l.stock_quantity-l.reserved_quantity available,l.unit,l.expiration_date,l.received_at "
+                "select l.id,l.sku_id,l.warehouse_id,l.status," + sellableQuantitySql("l") + " available,l.unit,l.expiration_date,l.received_at "
                         + "from warehouse.inventory_lot l "
                         + "join warehouse.warehouse w on w.id=l.warehouse_id and w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id "
                         + "join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
@@ -265,6 +266,7 @@ abstract class WarehouseJdbcSupport {
                         + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
                         // FEFO remains the selection policy below; it must not
                         // define the cross-route lock order.
+                        + "and " + sellableQuantitySql("l") + ">0 "
                         + warehousePredicate + grantPredicate + " order by " + WarehouseLotLockOrder.inventoryLot("l")
                         + (lock ? " for update of l" : ""),
                 (rs, row) -> new FefoAllocationPolicy.LotSnapshot(

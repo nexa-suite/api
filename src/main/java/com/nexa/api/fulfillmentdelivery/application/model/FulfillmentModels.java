@@ -86,7 +86,43 @@ public final class FulfillmentModels {
                                           String source, Long fulfillmentVersion, UUID evidenceObjectId,
                                           Long expectedLotVersion, Long resultingLotVersion,
                                           UUID inventoryTemperatureEvaluationId, String inventoryLotStatus,
-                                          BigDecimal affectedQuantity) {
+                                          BigDecimal affectedQuantity, BigDecimal remainingHeldQuantity,
+                                          String reason, UUID sourceEvidenceId,
+                                          UUID exceptionId, String exceptionStatus, String evaluationStatus,
+                                          String disposition, List<TemperatureEvidenceSelection> selections) {
+        public TemperatureEvidenceView {
+            selections = List.copyOf(selections == null ? List.of() : selections);
+        }
+
+        public TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
+                                       UUID warehouseId, BigDecimal value, String unit,
+                                       Instant occurredAt, UUID actorMembershipId, String status,
+                                       String source, Long fulfillmentVersion, UUID evidenceObjectId,
+                                       Long expectedLotVersion, Long resultingLotVersion,
+                                       UUID inventoryTemperatureEvaluationId, String inventoryLotStatus,
+                                       BigDecimal affectedQuantity) {
+            this(id, subjectType, subjectId, lotId, warehouseId, value, unit, occurredAt, actorMembershipId,
+                    status, source, fulfillmentVersion, evidenceObjectId, expectedLotVersion,
+                    resultingLotVersion, inventoryTemperatureEvaluationId, inventoryLotStatus,
+                    affectedQuantity, null, null, null, null, null, null, null, List.of());
+        }
+
+        public TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
+                                       UUID warehouseId, BigDecimal value, String unit,
+                                       Instant occurredAt, UUID actorMembershipId, String status,
+                                       String source, Long fulfillmentVersion, UUID evidenceObjectId,
+                                       Long expectedLotVersion, Long resultingLotVersion,
+                                       UUID inventoryTemperatureEvaluationId, String inventoryLotStatus,
+                                       BigDecimal affectedQuantity, String reason, UUID sourceEvidenceId,
+                                       UUID exceptionId, String exceptionStatus, String evaluationStatus,
+                                       String disposition, List<TemperatureEvidenceSelection> selections) {
+            this(id, subjectType, subjectId, lotId, warehouseId, value, unit, occurredAt, actorMembershipId,
+                    status, source, fulfillmentVersion, evidenceObjectId, expectedLotVersion,
+                    resultingLotVersion, inventoryTemperatureEvaluationId, inventoryLotStatus,
+                    affectedQuantity, null, reason, sourceEvidenceId, exceptionId, exceptionStatus,
+                    evaluationStatus, disposition, selections);
+        }
+
         public TemperatureEvidenceView(UUID id, String subjectType, UUID subjectId, UUID lotId,
                                        UUID warehouseId, BigDecimal value, String unit,
                                        Instant occurredAt, UUID actorMembershipId, String status,
@@ -100,6 +136,25 @@ public final class FulfillmentModels {
                                        Instant occurredAt, UUID actorMembershipId, String status, String source) {
             this(id, subjectType, subjectId, lotId, warehouseId, value, unit, occurredAt,
                     actorMembershipId, status, source, null);
+        }
+    }
+
+    public record TemperatureEvidenceSelection(UUID temperatureEvidenceId, UUID lotId,
+                                                BigDecimal affectedQuantity, BigDecimal remainingHeldQuantity,
+                                                Long expectedLotVersion,
+                                                Long resultingLotVersion, UUID inventoryTemperatureEvaluationId,
+                                                String inventoryLotStatus, UUID actorMembershipId, Instant occurredAt,
+                                                UUID evidenceObjectId, String reason, String evaluationStatus,
+                                                String disposition, boolean blocksCommittedExecution) {
+        public TemperatureEvidenceSelection(UUID temperatureEvidenceId, UUID lotId,
+                                            BigDecimal affectedQuantity, Long expectedLotVersion,
+                                            Long resultingLotVersion, UUID inventoryTemperatureEvaluationId,
+                                            String inventoryLotStatus, UUID actorMembershipId, Instant occurredAt,
+                                            UUID evidenceObjectId, String reason, String evaluationStatus,
+                                            String disposition, boolean blocksCommittedExecution) {
+            this(temperatureEvidenceId, lotId, affectedQuantity, null, expectedLotVersion, resultingLotVersion,
+                    inventoryTemperatureEvaluationId, inventoryLotStatus, actorMembershipId, occurredAt,
+                    evidenceObjectId, reason, evaluationStatus, disposition, blocksCommittedExecution);
         }
     }
 

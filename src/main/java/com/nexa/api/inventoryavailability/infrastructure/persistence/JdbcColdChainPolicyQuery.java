@@ -58,7 +58,8 @@ public class JdbcColdChainPolicyQuery implements ColdChainPolicyQuery {
     public Optional<LotTemperatureContext> temperatureContextForLot(UUID tenantId, UUID workspaceId, UUID lotId) {
         return jdbc.query("select l.id,l.warehouse_id,l.zone_id,z.temperature_min,z.temperature_max,l.sku_id,l.version,l.status inventory_lot_status, "
                         + "exists(select 1 from warehouse.inventory_temperature_evaluation e where e.tenant_id=l.tenant_id "
-                        + "and e.workspace_id=l.workspace_id and e.lot_id=l.id and e.status='OPEN' and e.disposition='HOLD') temperature_hold_open "
+                        + "and e.workspace_id=l.workspace_id and e.lot_id=l.id and e.status='OPEN' and e.disposition='HOLD' "
+                        + "and (e.source_type<>'STOCK_EVIDENCE' or e.blocks_committed_execution)) temperature_hold_open "
                         + "from warehouse.inventory_lot l join warehouse.storage_zone z "
                         + "on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
                         + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "

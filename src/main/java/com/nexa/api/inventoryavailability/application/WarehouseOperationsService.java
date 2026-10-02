@@ -107,6 +107,12 @@ public class WarehouseOperationsService {
     public LotSummary quarantineLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) { return quarantineLot.execute(context, lotId, expected, reason, key, correlation); }
     public LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) { return restoreLot.execute(context, lotId, expected, reason, key, correlation); }
     public LotSummary disposeLot(CurrentAccessContext context, String lotId, String disposition, long expected, String reason, String key, String correlation) { return inventory.disposeLot(context, lotId, disposition, expected, reason, key, correlation); }
+    @Transactional public LotSummary disposeTemperatureQuantity(CurrentAccessContext context, String lotId,
+            String disposition, BigDecimal affectedQuantity, java.util.UUID temperatureEvaluationId,
+            long expected, String reason, String key, String correlation) {
+        return inventory.disposeTemperatureQuantity(context, lotId, disposition, affectedQuantity,
+                temperatureEvaluationId, expected, reason, key, correlation);
+    }
     public CycleCountRecord recordCycleCount(CurrentAccessContext context, String lotId, CycleCountCommand command,
                                              long expectedLotVersion, String key, String correlation) {
         return cycleCountInventory.record(context, lotId, command, expectedLotVersion, key, correlation);

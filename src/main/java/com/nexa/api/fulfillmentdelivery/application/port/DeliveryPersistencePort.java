@@ -40,6 +40,22 @@ public interface DeliveryPersistencePort {
 
     TemperatureEvidenceView recordTemperatureEvidence(TemperatureEvidenceRequest request);
 
+    default Optional<TemperatureEvidenceView> findTemperatureEvidence(UUID tenantId, UUID workspaceId, UUID evidenceId) {
+        return Optional.empty();
+    }
+
+    default Optional<TemperatureEvidenceView> findWarehouseTemperatureSource(UUID tenantId, UUID workspaceId,
+                                                                              UUID evidenceId, UUID warehouseId) {
+        return Optional.empty();
+    }
+
+    default Optional<TemperatureEvidenceView> findStockTemperatureEvidenceReplay(UUID tenantId, UUID workspaceId,
+                                                                                  UUID actorMembershipId,
+                                                                                  String idempotencyKey,
+                                                                                  String requestHash) {
+        return Optional.empty();
+    }
+
     default Optional<TemperatureEvidenceView> findFulfillmentTemperatureEvidenceReplay(UUID tenantId,
                                                                                          UUID workspaceId,
                                                                                          UUID actorMembershipId,
@@ -97,7 +113,22 @@ public interface DeliveryPersistencePort {
                                       Instant occurredAt, Long fulfillmentVersion, UUID evidenceId,
                                       UUID evidenceObjectId, Long expectedLotVersion, Long resultingLotVersion,
                                       UUID inventoryTemperatureEvaluationId, String inventoryLotStatus,
-                                      BigDecimal affectedQuantity) {
+                                      BigDecimal affectedQuantity, String reason,
+                                      UUID sourceEvidenceId) {
+        public TemperatureEvidenceRequest(UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId,
+                                          UUID lotId, UUID warehouseId, UUID zoneId, UUID actorMembershipId,
+                                          String idempotencyKey, String requestHash, BigDecimal value,
+                                          BigDecimal temperatureCelsius, String unit, String status,
+                                          Instant occurredAt, Long fulfillmentVersion, UUID evidenceId,
+                                          UUID evidenceObjectId, Long expectedLotVersion, Long resultingLotVersion,
+                                          UUID inventoryTemperatureEvaluationId, String inventoryLotStatus,
+                                          BigDecimal affectedQuantity) {
+            this(tenantId, workspaceId, subjectType, subjectId, lotId, warehouseId, zoneId, actorMembershipId,
+                    idempotencyKey, requestHash, value, temperatureCelsius, unit, status, occurredAt,
+                    fulfillmentVersion, evidenceId, evidenceObjectId, expectedLotVersion, resultingLotVersion,
+                    inventoryTemperatureEvaluationId, inventoryLotStatus, affectedQuantity, null, null);
+        }
+
         public TemperatureEvidenceRequest(UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId,
                                           UUID lotId, UUID warehouseId, UUID zoneId, UUID actorMembershipId,
                                           String idempotencyKey, String requestHash, BigDecimal value,
@@ -105,7 +136,7 @@ public interface DeliveryPersistencePort {
                                           Instant occurredAt, Long fulfillmentVersion) {
             this(tenantId, workspaceId, subjectType, subjectId, lotId, warehouseId, zoneId, actorMembershipId,
                     idempotencyKey, requestHash, value, temperatureCelsius, unit, status, occurredAt,
-                    fulfillmentVersion, null, null, null, null, null, null, null);
+                    fulfillmentVersion, null, null, null, null, null, null, null, null, null);
         }
 
         public TemperatureEvidenceRequest(UUID tenantId, UUID workspaceId, String subjectType, UUID subjectId,
@@ -114,8 +145,8 @@ public interface DeliveryPersistencePort {
                                           BigDecimal temperatureCelsius, String unit, String status,
                                           Instant occurredAt) {
             this(tenantId, workspaceId, subjectType, subjectId, lotId, warehouseId, zoneId, actorMembershipId,
-                    idempotencyKey, requestHash, value, temperatureCelsius, unit, status, occurredAt, null,
-                    null, null, null, null, null, null, null);
+                    idempotencyKey, requestHash, value, temperatureCelsius, unit, status, occurredAt,
+                    null, null, null, null, null, null, null, null, null, null);
         }
     }
 }

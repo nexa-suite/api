@@ -321,8 +321,18 @@ public final class FulfillmentController {
             @Valid @RequestBody TemperatureEvidenceRequest request) {
         FulfillmentModels.TemperatureEvidenceView value = service.recordTemperatureEvidence(context, idempotencyKey,
                 new FulfillmentLifecycleService.TemperatureEvidenceCommand(request.subjectType(), request.subjectId(),
-                        request.value(), request.unit(), request.occurredAt()));
+                        request.value(), request.unit(), request.occurredAt(), request.evidenceObjectId(),
+                        request.expectedLotVersion(), request.affectedQuantity(), request.reason(),
+                        request.sourceEvidenceId()));
         return ResponseEntity.status(201).body(value);
+    }
+
+    @GetMapping("/temperature-evidence/{evidenceId}")
+    @Operation(operationId = "getStockTemperatureEvidence")
+    public ResponseEntity<FulfillmentModels.TemperatureEvidenceView> getStockTemperatureEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID evidenceId) {
+        return ResponseEntity.ok(service.temperatureEvidence(context, evidenceId));
     }
 
     @GetMapping("/fulfillments/{fulfillmentId}/temperature-evidence/current")
@@ -428,7 +438,12 @@ public final class FulfillmentController {
                                              @NotNull UUID subjectId,
                                              @NotNull BigDecimal value,
                                              @NotBlank @Size(max = 16) String unit,
-                                             @NotNull Instant occurredAt) { }
+                                             @NotNull Instant occurredAt,
+                                             UUID evidenceObjectId,
+                                             @PositiveOrZero Long expectedLotVersion,
+                                             @Positive BigDecimal affectedQuantity,
+                                             @Size(max = 2000) String reason,
+                                             UUID sourceEvidenceId) { }
 
     public record FulfillmentTemperatureEvidenceRequest(@NotNull UUID lotId,
                                                         @NotNull BigDecimal value,

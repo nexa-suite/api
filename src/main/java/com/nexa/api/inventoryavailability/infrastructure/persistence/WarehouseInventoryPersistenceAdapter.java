@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -63,7 +64,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         }
         WarehouseOperationsService.LotSummary lot = loadLot(context, lotId, true);
         if (!warehouseId.toString().equals(lot.warehouseId())) throw error("INVENTORY_LOT_NOT_FOUND", true);
-        if (lot.version() != expectedLotVersion) throw error("INVENTORY_LOT_CONCURRENCY_CONFLICT", false);
+        if (lot.version() != expectedLotVersion) throw error("CONCURRENCY_CONFLICT", false);
     }
 
     @Override
@@ -76,9 +77,9 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
             throw error("INVENTORY_LOT_NOT_FOUND", true);
         }
         if (lot.version() != request.expectedLotVersion()) {
-            throw error("INVENTORY_LOT_CONCURRENCY_CONFLICT", false);
+            throw error("CONCURRENCY_CONFLICT", false);
         }
-        if (!"AVAILABLE".equals(lot.status()) || request.affectedQuantity().compareTo(lot.onHand()) > 0) {
+        if (!"AVAILABLE".equals(lot.status())) {
             throw error("INVENTORY_TEMPERATURE_HOLD_CONFLICT", false);
         }
         if (!businessEvidence.isAvailablePhotoForSubject(tenant(context), workspace(context),
@@ -86,20 +87,23 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
             throw error("BUSINESS_EVIDENCE_NOT_AVAILABLE", false);
         }
 
-        InventoryLot aggregate = InventoryLot.rehydrate(lot.id(), lot.onHand(), lot.reserved(), lot.unit(),
-                InventoryLotStatus.valueOf(lot.status()));
-        try {
-            aggregate.markPreventiveTemperatureHold();
-        } catch (IllegalStateException exception) {
+        BigDecimal held = jdbc.queryForObject("select " + temperatureHeldQuantitySql("inventory_lot")
+                        + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?",
+                BigDecimal.class, tenant(context), workspace(context), request.lotId());
+        BigDecimal unheldStock = lot.onHand().subtract(held == null ? BigDecimal.ZERO : held);
+        if (request.affectedQuantity().compareTo(unheldStock) > 0) {
             throw error("INVENTORY_TEMPERATURE_HOLD_CONFLICT", false);
         }
+        BigDecimal sellableBefore = lot.onHand().subtract(lot.reserved())
+                .subtract(held == null ? BigDecimal.ZERO : held).max(BigDecimal.ZERO);
+        boolean blocksCommittedExecution = request.affectedQuantity().compareTo(sellableBefore) > 0;
 
         Timestamp createdAt = now();
         UUID evaluationId = UUID.randomUUID();
         checkUpdated(jdbc.update("update warehouse.inventory_lot set status='HOLD',version=version+1 "
                         + "where tenant_id=? and workspace_id=? and id=? and version=? and status='AVAILABLE'",
                 tenant(context), workspace(context), request.lotId(), request.expectedLotVersion()),
-                "preventive temperature hold", "INVENTORY_LOT_CONCURRENCY_CONFLICT");
+                "preventive temperature hold", "CONCURRENCY_CONFLICT");
         jdbc.update("insert into warehouse.inventory_temperature_evaluation(id,tenant_id,workspace_id,lot_id,received_value,expected_min,expected_max,status,disposition,created_at,evidence_object_id,affected_quantity,actor_membership_id,observed_value,source_type,source_subject_id,source_subject_version,temperature_evidence_id,expected_lot_version) "
                         + "values (?,?,?,?,?,?,?,'OPEN','HOLD',?,?,?,?,?,'FULFILLMENT',?,?,?,?)",
                 evaluationId, tenant(context), workspace(context), request.lotId(), null,
@@ -112,6 +116,71 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                 request.expectedLotVersion() + 1, request.affectedQuantity());
     }
 
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public InventoryTemperatureHoldCommands.PreventiveHoldResult recordStockTemperatureEvidenceHold(
+            CurrentAccessContext context, InventoryTemperatureHoldCommands.StockEvidenceHoldRequest request) {
+        if (context == null || request == null) throw error("TEMPERATURE_EVIDENCE_INVALID", false);
+        WarehouseOperationsService.LotSummary lot = loadLot(context, request.lotId(), true);
+        if (!request.warehouseId().toString().equals(lot.warehouseId())) {
+            throw error("INVENTORY_LOT_NOT_FOUND", true);
+        }
+        if (lot.version() != request.expectedLotVersion()) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        if (!"AVAILABLE".equals(lot.status())) {
+            throw error("INVENTORY_TEMPERATURE_HOLD_CONFLICT", false);
+        }
+        if (!businessEvidence.isAvailablePhotoForSubject(tenant(context), workspace(context),
+                request.evidenceObjectId(), "WAREHOUSE", request.warehouseId())) {
+            throw error("BUSINESS_EVIDENCE_NOT_AVAILABLE", false);
+        }
+        BigDecimal held = jdbc.queryForObject("select " + temperatureHeldQuantitySql("inventory_lot")
+                        + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?",
+                BigDecimal.class, tenant(context), workspace(context), request.lotId());
+        BigDecimal unheldStock = lot.onHand().subtract(held == null ? BigDecimal.ZERO : held);
+        if (request.affectedQuantity().compareTo(unheldStock) > 0) {
+            throw error("INVENTORY_TEMPERATURE_HOLD_CONFLICT", false);
+        }
+        boolean blocksCommittedExecution = request.affectedQuantity().compareTo(lot.available()) > 0;
+
+        UUID evaluationId = UUID.randomUUID();
+        Timestamp createdAt = Timestamp.from(request.occurredAt());
+        checkUpdated(jdbc.update("update warehouse.inventory_lot set version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and id=? and version=? and status='AVAILABLE'",
+                tenant(context), workspace(context), request.lotId(), request.expectedLotVersion()),
+                "stock temperature hold", "CONCURRENCY_CONFLICT");
+        jdbc.update("insert into warehouse.inventory_temperature_evaluation(id,tenant_id,workspace_id,lot_id,received_value,expected_min,expected_max,status,disposition,created_at,evidence_object_id,affected_quantity,actor_membership_id,observed_value,source_type,source_subject_id,source_subject_version,temperature_evidence_id,expected_lot_version,blocks_committed_execution) "
+                        + "values (?,?,?,?,?,?,?,'OPEN','HOLD',?,?,?,?,?,'STOCK_EVIDENCE',?,null,?,?,?)",
+                evaluationId, tenant(context), workspace(context), request.lotId(), null,
+                request.minimumCelsius(), request.maximumCelsius(), createdAt, request.evidenceObjectId(),
+                request.affectedQuantity(), context.membershipId().value(), request.valueCelsius(), request.lotId(),
+                request.temperatureEvidenceId(), request.expectedLotVersion(), blocksCommittedExecution);
+        appendEvent(context, request.lotId(), "warehouse.lot.temperature-hold", "lot", lot.status(), createdAt);
+        return new InventoryTemperatureHoldCommands.PreventiveHoldResult(evaluationId, request.lotId(), lot.status(),
+                request.expectedLotVersion() + 1, request.affectedQuantity(), blocksCommittedExecution);
+    }
+
+    @Override
+    @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
+    public InventoryTemperatureHoldCommands.TemperatureEvaluationSnapshot temperatureEvaluation(
+            CurrentAccessContext context, UUID evaluationId) {
+        if (context == null || evaluationId == null) throw error("TEMPERATURE_EVIDENCE_INVALID", false);
+        return jdbc.query("select e.id,e.lot_id,e.affected_quantity,e.status,e.disposition,e.temperature_evidence_id,"
+                        + "e.evidence_object_id,e.expected_lot_version,e.blocks_committed_execution,"
+                        + "greatest(coalesce(e.affected_quantity,0)-coalesce((select sum(d.quantity) from warehouse.inventory_lot_disposition d "
+                        + "where d.tenant_id=e.tenant_id and d.workspace_id=e.workspace_id and d.temperature_evaluation_id=e.id "
+                        + "and d.disposition in ('RELEASE','WASTE','RETURN_TO_SUPPLIER')),0),0) remaining_held "
+                        + "from warehouse.inventory_temperature_evaluation e where e.tenant_id=? and e.workspace_id=? and e.id=?",
+                (rs, row) -> new InventoryTemperatureHoldCommands.TemperatureEvaluationSnapshot(
+                        rs.getObject("id", UUID.class), rs.getObject("lot_id", UUID.class), rs.getBigDecimal("affected_quantity"),
+                        rs.getBigDecimal("remaining_held"), rs.getString("status"), rs.getString("disposition"),
+                        rs.getObject("temperature_evidence_id", UUID.class), rs.getObject("evidence_object_id", UUID.class),
+                        rs.getObject("expected_lot_version", Long.class), rs.getBoolean("blocks_committed_execution")),
+                tenant(context), workspace(context), evaluationId)
+                .stream().findFirst().orElseThrow(() -> error("TEMPERATURE_EVIDENCE_NOT_FOUND", true));
+    }
+
     @Transactional(readOnly = true)
     public WarehouseOperationsService.Page<WarehouseOperationsService.LotSummary> lots(
             CurrentAccessContext context, String catalogItemId, String warehouseId, String zoneId,
@@ -119,10 +188,11 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         requireRead(context);
         pageCheck(page, size);
         String order = sort(sort, Map.of("expirationDate", "expiration_date", "receivedAt", "received_at",
-                "batchNumber", "batch_number", "status", "status", "quantityAvailable", "(stock_quantity-reserved_quantity)",
+                "batchNumber", "batch_number", "status", "status", "quantityAvailable", "greatest(stock_quantity-reserved_quantity-" + temperatureHeldQuantitySql("inventory_lot") + ",0)",
                 "createdAt", "received_at"), "expirationDate");
         StringBuilder query = new StringBuilder("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
-                + "stock_quantity,reserved_quantity,unit,status,version from warehouse.inventory_lot where tenant_id=? and workspace_id=?");
+                + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
+                + " temperature_held_quantity,unit,status,version from warehouse.inventory_lot where tenant_id=? and workspace_id=?");
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
         query.append(warehouseIdPredicate(context, "warehouse_id", args));
         if (catalogItemId != null && !catalogItemId.isBlank()) { query.append(" and catalog_item_id=?"); args.add(catalogItemId.trim()); }
@@ -320,6 +390,89 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
     public WarehouseOperationsService.LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) {
         context.requirePermission(PermissionKey.INVENTORY_RELEASE);
         return transitionLot(context, lotId, "AVAILABLE", "warehouse.lot.restored", reason, expected, key, correlation);
+    }
+
+    @Override
+    @Transactional
+    public WarehouseOperationsService.LotSummary disposeTemperatureQuantity(CurrentAccessContext context, String lotId,
+            String disposition, BigDecimal affectedQuantity, UUID temperatureEvaluationId, long expected,
+            String reason, String key, String correlation) {
+        requireWrite(context);
+        requireIdempotency(key);
+        if (affectedQuantity == null || temperatureEvaluationId == null || expected < 0
+                || !fitsTemperatureDispositionQuantity(affectedQuantity)) {
+            throw error("INVALID_REQUEST", false);
+        }
+        String normalized = enumValue(disposition, "disposition", "RELEASE", "HOLD", "WASTE", "RETURN_TO_SUPPLIER");
+        context.requirePermission(normalized.equals("RELEASE")
+                ? PermissionKey.INVENTORY_RELEASE : PermissionKey.INVENTORY_WASTE);
+        String normalizedReason = bounded(reason, "reason", 2000);
+        BigDecimal quantity = affectedQuantity.setScale(4, RoundingMode.UNNECESSARY);
+        UUID id = uuid(lotId);
+        String operation = "lot-temperature-disposition";
+        String hash = requestHash(operation, id, temperatureEvaluationId, normalized, quantity, expected,
+                normalizedReason);
+        lockIdempotency(context, operation, key);
+        IdempotencyRecord prior = idempotent(context, operation, key);
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            return loadLot(context, uuid(prior.resourceId()), false);
+        }
+
+        WarehouseOperationsService.LotSummary lot = loadLot(context, id, true);
+        if (lot.version() != expected) throw error("CONCURRENCY_CONFLICT", false);
+        TemperatureEvaluationForDisposition evaluation = jdbc.query(
+                "select status,disposition,source_type,affected_quantity from warehouse.inventory_temperature_evaluation "
+                        + "where tenant_id=? and workspace_id=? and lot_id=? and id=? for update",
+                rs -> rs.next() ? new TemperatureEvaluationForDisposition(rs.getString("status"),
+                                rs.getString("disposition"), rs.getString("source_type"),
+                                rs.getBigDecimal("affected_quantity")) : null,
+                tenant(context), workspace(context), id, temperatureEvaluationId);
+        if (evaluation == null) throw error("TEMPERATURE_EVALUATION_NOT_FOUND", true);
+        if (!"OPEN".equals(evaluation.status()) || !"HOLD".equals(evaluation.disposition())
+                || !"STOCK_EVIDENCE".equals(evaluation.sourceType()) || evaluation.affectedQuantity() == null) {
+            throw error("TEMPERATURE_EVALUATION_NOT_DISPOSABLE", false);
+        }
+        BigDecimal alreadyDisposed = jdbc.queryForObject(
+                "select coalesce(sum(quantity),0) from warehouse.inventory_lot_disposition "
+                        + "where tenant_id=? and workspace_id=? and lot_id=? and temperature_evaluation_id=? "
+                        + "and disposition in ('RELEASE','WASTE','RETURN_TO_SUPPLIER')",
+                BigDecimal.class, tenant(context), workspace(context), id, temperatureEvaluationId);
+        BigDecimal remaining = evaluation.affectedQuantity().subtract(
+                alreadyDisposed == null ? BigDecimal.ZERO : alreadyDisposed);
+        if (quantity.compareTo(remaining) > 0) throw error("INVENTORY_TEMPERATURE_DISPOSITION_CONFLICT", false);
+        BigDecimal before = lot.onHand();
+        BigDecimal after = before;
+        String nextStatus = lot.status();
+        if (normalized.equals("WASTE") || normalized.equals("RETURN_TO_SUPPLIER")) {
+            after = before.subtract(quantity);
+            if (after.compareTo(lot.reserved()) < 0) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
+            if (after.signum() == 0) nextStatus = "DEPLETED";
+        }
+        checkUpdated(jdbc.update("update warehouse.inventory_lot set stock_quantity=?,status=?,version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and id=? and version=?",
+                after, nextStatus, tenant(context), workspace(context), id, expected),
+                "temperature lot disposition", "CONCURRENCY_CONFLICT");
+        jdbc.update("insert into warehouse.inventory_lot_disposition "
+                        + "(id,tenant_id,workspace_id,lot_id,disposition,reason,actor_membership_id,created_at,quantity,temperature_evaluation_id) "
+                        + "values (?,?,?,?,?,?,?,current_timestamp,?,?)",
+                UUID.randomUUID(), tenant(context), workspace(context), id, normalized, normalizedReason,
+                context.membershipId().value(), quantity, temperatureEvaluationId);
+        if (!after.equals(before)) {
+            insertMovement(context, uuid(lot.warehouseId()), uuid(lot.zoneId()), id, lot.catalogItemId(),
+                    uuidNullable(lot.skuId()), "WASTE", quantity, lot.unit(), before, after, lot.reserved(),
+                    lot.reserved(), normalizedReason, correlation, now());
+        }
+        BigDecimal outstandingAfter = remaining.subtract(quantity);
+        if (!normalized.equals("HOLD") && outstandingAfter.signum() == 0) {
+            jdbc.update("update warehouse.inventory_temperature_evaluation set status='RESOLVED',disposition=?,"
+                            + "resolution_reason=?,resolved_at=current_timestamp where tenant_id=? and workspace_id=? "
+                            + "and lot_id=? and id=? and status='OPEN'",
+                    normalized, normalizedReason, tenant(context), workspace(context), id, temperatureEvaluationId);
+        }
+        appendEvent(context, id, "warehouse.lot.disposition-recorded", "lot", nextStatus, now());
+        saveIdempotency(context, operation, key, hash, id.toString());
+        return loadLot(context, id, false);
     }
 
     @Override
@@ -557,6 +710,17 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         return quantity.stripTrailingZeros().toPlainString();
     }
 
+    private static boolean fitsTemperatureDispositionQuantity(BigDecimal quantity) {
+        try {
+            return quantity.signum() > 0 && quantity.setScale(4, RoundingMode.UNNECESSARY).precision() <= 19;
+        } catch (ArithmeticException exception) {
+            return false;
+        }
+    }
+
+    private record TemperatureEvaluationForDisposition(String status, String disposition, String sourceType,
+                                                       BigDecimal affectedQuantity) { }
+
     private static String lengthPrefixed(String value) {
         return value == null ? "-1:" : value.length() + ":" + value;
     }
@@ -666,15 +830,14 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                         + "select l.catalog_item_id,l.warehouse_id,"
                         + "coalesce(sum(l.stock_quantity),0) physical_quantity,"
                         + "coalesce(sum(case when l.status='AVAILABLE' and l.expiration_date>current_date "
-                        + "and l.stock_quantity>l.reserved_quantity and w.status='ACTIVE' and z.status='ACTIVE' "
+                        + "and " + sellableQuantitySql("l") + ">0 and w.status='ACTIVE' and z.status='ACTIVE' "
                         + "and z.zone_type<>'QUARANTINE' and coalesce(service.service_status,'OPERATIONAL')='OPERATIONAL' "
                         + "and sku.status='ACTIVE' "
                         + "and (sku.temperature_min is null or (z.temperature_min is not null and z.temperature_min<=sku.temperature_min)) "
                         + "and (sku.temperature_max is null or (z.temperature_max is not null and z.temperature_max>=sku.temperature_max)) "
                         + "and ((sku.temperature_min is null and sku.temperature_max is null) or (l.temperature_value is not null and (sku.temperature_min is null or l.temperature_value>=sku.temperature_min) and (sku.temperature_max is null or l.temperature_value<=sku.temperature_max))) "
-                        + "and not exists (select 1 from warehouse.inventory_temperature_evaluation evaluation where evaluation.tenant_id=l.tenant_id and evaluation.workspace_id=l.workspace_id and evaluation.lot_id=l.id and evaluation.status='OPEN' and evaluation.disposition='HOLD') "
-                        + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
-                        + "then l.stock_quantity-l.reserved_quantity else 0 end),0) eligible_quantity,"
+                        + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id and disposition.temperature_evaluation_id is null order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER') "
+                        + "then " + sellableQuantitySql("l") + " else 0 end),0) eligible_quantity,"
                         + "coalesce(max(ss.quantity),0) safety_stock,coalesce(max(active_backing.active_quantity),0) active_backing_quantity "
                         + "from warehouse.inventory_lot l "
                         + "join warehouse.warehouse w on w.id=l.warehouse_id and w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id "

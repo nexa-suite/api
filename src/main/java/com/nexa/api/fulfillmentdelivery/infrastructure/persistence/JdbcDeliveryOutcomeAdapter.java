@@ -496,13 +496,23 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                     && request.inventoryTemperatureEvaluationId() != null
                     && "HOLD".equals(request.inventoryLotStatus())
                     && request.affectedQuantity() != null && request.affectedQuantity().signum() > 0;
-            if (!fulfillmentExcursion) throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
+            boolean warehouseExcursion = warehouseSubject && request.evidenceObjectId() != null
+                    && request.reason() != null && !request.reason().isBlank();
+            boolean stockLotExcursion = lotSubject && request.evidenceId() != null
+                    && request.evidenceObjectId() != null && request.expectedLotVersion() != null
+                    && request.resultingLotVersion() != null && request.inventoryTemperatureEvaluationId() != null
+                    && request.inventoryLotStatus() != null && request.affectedQuantity() != null
+                    && request.affectedQuantity().signum() > 0 && request.reason() != null
+                    && !request.reason().isBlank();
+            if (!fulfillmentExcursion && !warehouseExcursion && !stockLotExcursion) {
+                throw error("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP");
+            }
         }
 
         Instant createdAt = clock.instant();
         UUID evidenceId = request.evidenceId() == null ? UUID.randomUUID() : request.evidenceId();
-        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,fulfillment_id,fulfillment_version,lot_id,warehouse_id,zone_id,subject_type,subject_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at,expected_lot_version,resulting_lot_version,inventory_temperature_evaluation_id,inventory_lot_status,affected_quantity) "
-                        + "values (?,?,?,null,?,?,?,?,?,?,?,?,?,?,?,'MANUAL',null,?,?,?, ?,?,?,?,?,?)",
+        jdbc.update("insert into logistics.temperature_evidence(id,tenant_id,workspace_id,delivery_id,fulfillment_id,fulfillment_version,lot_id,warehouse_id,zone_id,subject_type,subject_id,value,temperature_celsius,unit,recorded_at,source,evidence_metadata,status,evidence_object_id,actor_membership_id,created_at,expected_lot_version,resulting_lot_version,inventory_temperature_evaluation_id,inventory_lot_status,affected_quantity,reason,source_evidence_id) "
+                        + "values (?,?,?,null,?,?,?,?,?,?,?,?,?,?,?,'MANUAL',null,?,?,?, ?,?,?,?,?,?,?,?)",
                 evidenceId, request.tenantId(), request.workspaceId(),
                 fulfillmentSubject ? request.subjectId() : null,
                 fulfillmentSubject ? request.fulfillmentVersion() : null,
@@ -511,7 +521,15 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                 Timestamp.from(request.occurredAt()), request.status(), request.evidenceObjectId(),
                 request.actorMembershipId(), Timestamp.from(createdAt), request.expectedLotVersion(),
                 request.resultingLotVersion(), request.inventoryTemperatureEvaluationId(),
-                request.inventoryLotStatus(), request.affectedQuantity());
+                request.inventoryLotStatus(), request.affectedQuantity(), request.reason(), request.sourceEvidenceId());
+        if ("OUT_OF_RANGE".equals(request.status()) && !fulfillmentSubject
+                && request.sourceEvidenceId() == null) {
+            if (request.reason() == null || request.reason().isBlank()) throw error("TEMPERATURE_EVIDENCE_INVALID");
+            jdbc.update("insert into logistics.stock_temperature_exception(id,tenant_id,workspace_id,root_evidence_id,status,reason,actor_membership_id,occurred_at,created_at) "
+                            + "values (?,?,?,?,'OPEN',?,?,?,?)",
+                    UUID.randomUUID(), request.tenantId(), request.workspaceId(), evidenceId, request.reason(),
+                    request.actorMembershipId(), Timestamp.from(request.occurredAt()), Timestamp.from(createdAt));
+        }
         Map<String, Object> payload = new HashMap<>(Map.of("subjectType", request.subjectType(),
                 "subjectId", request.subjectId(), "value", request.value(), "unit", request.unit(),
                 "occurredAt", request.occurredAt(), "actorMembershipId", request.actorMembershipId(),
@@ -524,12 +542,47 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         }
         if (request.inventoryLotStatus() != null) payload.put("inventoryLotStatus", request.inventoryLotStatus());
         if (request.affectedQuantity() != null) payload.put("affectedQuantity", request.affectedQuantity());
+        if (request.reason() != null) payload.put("reason", request.reason());
+        if (request.sourceEvidenceId() != null) payload.put("sourceEvidenceId", request.sourceEvidenceId());
         canonicalOutbox.append("TemperatureEvidenceRecorded.v1", "TemperatureEvidence", evidenceId,
                 request.tenantId(), request.workspaceId(), request.occurredAt(), request.idempotencyKey(), null,
                 "1.0", request.idempotencyKey(), payload);
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), operation,
                 request.idempotencyKey(), request.requestHash(), evidenceId, createdAt);
         return loadTemperatureEvidence(request.tenantId(), request.workspaceId(), evidenceId);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public java.util.Optional<TemperatureEvidenceView> findStockTemperatureEvidenceReplay(
+            UUID tenantId, UUID workspaceId, UUID actorMembershipId, String idempotencyKey, String requestHash) {
+        validateScope(tenantId, workspaceId, actorMembershipId, idempotencyKey);
+        String operation = "STOCK_TEMPERATURE_EVIDENCE";
+        lockCommand(tenantId, workspaceId, actorMembershipId, operation, idempotencyKey);
+        IdempotencyRow prior = idempotency(tenantId, workspaceId, actorMembershipId, operation, idempotencyKey);
+        if (prior == null) return java.util.Optional.empty();
+        ensureHash(prior.requestHash(), requestHash);
+        return java.util.Optional.of(loadTemperatureEvidence(tenantId, workspaceId, prior.resourceId()));
+    }
+
+    @Override
+    @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
+    public java.util.Optional<TemperatureEvidenceView> findWarehouseTemperatureSource(
+            UUID tenantId, UUID workspaceId, UUID evidenceId, UUID warehouseId) {
+        return jdbc.query("select e.id,e.subject_type,e.subject_id,e.lot_id,e.warehouse_id,e.value,e.unit,e.recorded_at,e.actor_membership_id,e.status,e.source,e.fulfillment_version,e.evidence_object_id,e.expected_lot_version,e.resulting_lot_version,e.inventory_temperature_evaluation_id,e.inventory_lot_status,e.affected_quantity,e.reason,e.source_evidence_id,x.id exception_id,x.status exception_status "
+                        + "from logistics.temperature_evidence e join logistics.stock_temperature_exception x "
+                        + "on x.tenant_id=e.tenant_id and x.workspace_id=e.workspace_id and x.root_evidence_id=e.id "
+                        + "where e.tenant_id=? and e.workspace_id=? and e.id=? and e.subject_type='WAREHOUSE' "
+                        + "and e.warehouse_id=? and e.status='OUT_OF_RANGE' and x.status='OPEN'",
+                (rs, row) -> temperatureEvidenceRow(rs), tenantId, workspaceId, evidenceId, warehouseId)
+                .stream().findFirst();
+    }
+
+    @Override
+    @Transactional(readOnly = true, propagation = Propagation.MANDATORY)
+    public java.util.Optional<TemperatureEvidenceView> findTemperatureEvidence(
+            UUID tenantId, UUID workspaceId, UUID evidenceId) {
+        return java.util.Optional.of(loadTemperatureEvidence(tenantId, workspaceId, evidenceId));
     }
 
     @Override
@@ -674,19 +727,45 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     }
 
     private TemperatureEvidenceView loadTemperatureEvidence(UUID tenantId, UUID workspaceId, UUID evidenceId) {
-        return jdbc.query("select id,subject_type,subject_id,lot_id,warehouse_id,value,unit,recorded_at,actor_membership_id,status,source,fulfillment_version,evidence_object_id,expected_lot_version,resulting_lot_version,inventory_temperature_evaluation_id,inventory_lot_status,affected_quantity "
-                        + "from logistics.temperature_evidence where tenant_id=? and workspace_id=? and id=?",
-                (rs, row) -> new TemperatureEvidenceView(rs.getObject("id", UUID.class), rs.getString("subject_type"),
-                        rs.getObject("subject_id", UUID.class), rs.getObject("lot_id", UUID.class),
-                        rs.getObject("warehouse_id", UUID.class), rs.getBigDecimal("value"), rs.getString("unit"),
-                        instant(rs, "recorded_at"), rs.getObject("actor_membership_id", UUID.class),
-                        rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class),
-                        rs.getObject("evidence_object_id", UUID.class), rs.getObject("expected_lot_version", Long.class),
-                        rs.getObject("resulting_lot_version", Long.class),
-                        rs.getObject("inventory_temperature_evaluation_id", UUID.class),
-                        rs.getString("inventory_lot_status"), rs.getBigDecimal("affected_quantity")),
-                tenantId, workspaceId, evidenceId)
+        TemperatureEvidenceView root = jdbc.query("select e.id,e.subject_type,e.subject_id,e.lot_id,e.warehouse_id,e.value,e.unit,e.recorded_at,e.actor_membership_id,e.status,e.source,e.fulfillment_version,e.evidence_object_id,e.expected_lot_version,e.resulting_lot_version,e.inventory_temperature_evaluation_id,e.inventory_lot_status,e.affected_quantity,e.reason,e.source_evidence_id,x.id exception_id,x.status exception_status "
+                        + "from logistics.temperature_evidence e left join logistics.stock_temperature_exception x "
+                        + "on x.tenant_id=e.tenant_id and x.workspace_id=e.workspace_id "
+                        + "and x.root_evidence_id=coalesce(e.source_evidence_id,e.id) "
+                        + "where e.tenant_id=? and e.workspace_id=? and e.id=?",
+                (rs, row) -> temperatureEvidenceRow(rs), tenantId, workspaceId, evidenceId)
                 .stream().findFirst().orElseThrow(() -> error("TEMPERATURE_EVIDENCE_NOT_FOUND"));
+        if (!"WAREHOUSE".equals(root.subjectType())) return root;
+        List<FulfillmentModels.TemperatureEvidenceSelection> selections = jdbc.query(
+                "select id,lot_id,affected_quantity,expected_lot_version,resulting_lot_version,inventory_temperature_evaluation_id,inventory_lot_status,actor_membership_id,recorded_at,evidence_object_id,reason "
+                        + "from logistics.temperature_evidence where tenant_id=? and workspace_id=? and source_evidence_id=? "
+                        + "and warehouse_id=? and subject_type='LOT' order by created_at,id",
+                (rs, row) -> new FulfillmentModels.TemperatureEvidenceSelection(rs.getObject("id", UUID.class),
+                        rs.getObject("lot_id", UUID.class), rs.getBigDecimal("affected_quantity"),
+                        rs.getObject("expected_lot_version", Long.class), rs.getObject("resulting_lot_version", Long.class),
+                        rs.getObject("inventory_temperature_evaluation_id", UUID.class), rs.getString("inventory_lot_status"),
+                        rs.getObject("actor_membership_id", UUID.class), instant(rs, "recorded_at"),
+                        rs.getObject("evidence_object_id", UUID.class), rs.getString("reason"), null, null, false),
+                tenantId, workspaceId, root.id(), root.warehouseId());
+        return new TemperatureEvidenceView(root.id(), root.subjectType(), root.subjectId(), root.lotId(),
+                root.warehouseId(), root.value(), root.unit(), root.occurredAt(), root.actorMembershipId(), root.status(),
+                root.source(), root.fulfillmentVersion(), root.evidenceObjectId(), root.expectedLotVersion(),
+                root.resultingLotVersion(), root.inventoryTemperatureEvaluationId(), root.inventoryLotStatus(),
+                root.affectedQuantity(), root.reason(), root.sourceEvidenceId(), root.exceptionId(), root.exceptionStatus(),
+                root.evaluationStatus(), root.disposition(), selections);
+    }
+
+    private static TemperatureEvidenceView temperatureEvidenceRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new TemperatureEvidenceView(rs.getObject("id", UUID.class), rs.getString("subject_type"),
+                rs.getObject("subject_id", UUID.class), rs.getObject("lot_id", UUID.class),
+                rs.getObject("warehouse_id", UUID.class), rs.getBigDecimal("value"), rs.getString("unit"),
+                instant(rs, "recorded_at"), rs.getObject("actor_membership_id", UUID.class),
+                rs.getString("status"), rs.getString("source"), rs.getObject("fulfillment_version", Long.class),
+                rs.getObject("evidence_object_id", UUID.class), rs.getObject("expected_lot_version", Long.class),
+                rs.getObject("resulting_lot_version", Long.class),
+                rs.getObject("inventory_temperature_evaluation_id", UUID.class),
+                rs.getString("inventory_lot_status"), rs.getBigDecimal("affected_quantity"), rs.getString("reason"),
+                rs.getObject("source_evidence_id", UUID.class), rs.getObject("exception_id", UUID.class),
+                rs.getString("exception_status"), null, null, List.of());
     }
 
     private String classify(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID lotId, BigDecimal value, String unit) {
