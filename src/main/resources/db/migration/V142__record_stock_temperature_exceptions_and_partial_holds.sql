@@ -110,6 +110,7 @@ CREATE POLICY v142_stock_temperature_exception_scope ON logistics.stock_temperat
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='nexa_runtime') THEN
+        REVOKE DELETE ON logistics.stock_temperature_exception FROM nexa_runtime;
         GRANT SELECT,INSERT,UPDATE ON logistics.stock_temperature_exception TO nexa_runtime;
         GRANT SELECT,INSERT,UPDATE ON warehouse.inventory_temperature_evaluation TO nexa_runtime;
         GRANT SELECT,INSERT ON warehouse.inventory_lot_disposition TO nexa_runtime;
