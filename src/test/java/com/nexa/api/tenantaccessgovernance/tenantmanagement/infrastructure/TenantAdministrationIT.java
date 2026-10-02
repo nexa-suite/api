@@ -1,7 +1,11 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure;
 
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.notification.JdbcSecurityNotificationOutboxAdapter;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort;
 import com.nexa.api.support.PostgresIntegrationSupport;
+import com.nexa.api.shared.context.RlsRequestScope;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcInvitationPersistenceAdapter;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.InvitationExpirationJob;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -10,6 +14,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.UUID;
@@ -18,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,6 +41,18 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
 
     @Autowired
     private InvitationExpirationJob invitationExpirationJob;
+
+    @Autowired
+    private JdbcInvitationPersistenceAdapter invitationPersistence;
+
+    @Autowired
+    private TenantConfigurationPort tenantConfiguration;
+
+    @Autowired
+    private OpaqueSecurityTokenPort opaqueTokens;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void organizationSettingsAreTypedAuditedAndOptimisticallyConcurrent() throws Exception {
@@ -169,6 +189,39 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         membership.get("permissions").forEach(permission -> permissions.add(permission.asText()));
         assertThat(permissions).contains("delivery.exception.read", "delivery.exception.coordinate")
                 .doesNotContain("inventory.release", "dispatch.assign", "dispatch.temperature");
+        assertThat(RlsRequestScope.current()).as("acceptance scope is restored after success").isNull();
+
+        String rollbackEmail = "business-operations-manager-rollback-" + uuid().substring(0, 8) + "@example.test";
+        mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
+                        .header("Idempotency-Key", "business-operations-manager-rollback-" + uuid()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + rollbackEmail + "\",\"displayName\":\"Business Operations Manager Rollback\",\"roles\":[\"BUSINESS_OPERATIONS_MANAGER\"]}"))
+                .andExpect(status().isCreated());
+        String rollbackToken = invitationToken(rollbackEmail);
+        RlsRequestScope.Scope originalScope = new RlsRequestScope.Scope(UUID.randomUUID(), UUID.randomUUID());
+        RlsRequestScope.set(originalScope.tenantId(), originalScope.workspaceId());
+        try {
+            assertThatThrownBy(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                var snapshot = invitationPersistence.findForUpdateByTokenHash(opaqueTokens.sha256(rollbackToken));
+                assertThat(snapshot).isPresent();
+                assertThat(RlsRequestScope.current()).isNotNull();
+                assertThat(RlsRequestScope.current().tenantId().toString()).isEqualTo(tenantId());
+                assertThat(RlsRequestScope.current().workspaceId().toString()).isEqualTo(workspaceId());
+                assertThat(invitationPersistence.findForUpdateByTokenHash(opaqueTokens.sha256(rollbackToken))).isPresent();
+                TransactionTemplate newTransaction = new TransactionTemplate(transactionManager);
+                newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                String tenantScope = newTransaction.execute(inner -> jdbc.queryForObject(
+                        "select current_setting('app.current_tenant_id', true)", String.class));
+                String workspaceScope = newTransaction.execute(inner -> jdbc.queryForObject(
+                        "select current_setting('app.current_workspace_id', true)", String.class));
+                assertThat(tenantScope).isEqualTo(tenantId());
+                assertThat(workspaceScope).isEqualTo(workspaceId());
+                assertThat(tenantConfiguration.findTenantSecuritySettings(tenantId())).isPresent();
+                throw new IllegalStateException("rollback scoped acceptance lookup");
+            })).isInstanceOf(IllegalStateException.class).hasMessage("rollback scoped acceptance lookup");
+            assertThat(RlsRequestScope.current()).as("original scope is restored after rollback").isEqualTo(originalScope);
+        } finally {
+            RlsRequestScope.clear();
+        }
     }
 
     @Test

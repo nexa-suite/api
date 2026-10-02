@@ -16,6 +16,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -156,7 +158,35 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 		snapshot.ifPresent(value -> jdbc.queryForObject(
 				"select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true)",
 				String.class, value.invitation().tenantId().toString(), value.invitation().workspaceId().toString()));
+		snapshot.ifPresent(this::propagateAcceptanceScope);
 		return snapshot;
+	}
+
+	private void propagateAcceptanceScope(InvitationSnapshot snapshot) {
+		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+			throw new IllegalStateException("Invitation acceptance requires an active transaction");
+		}
+		boolean cleanupRegistered = TransactionSynchronizationManager.getSynchronizations().stream()
+				.anyMatch(AcceptanceScopeSynchronization.class::isInstance);
+		if (!cleanupRegistered) {
+			TransactionSynchronizationManager.registerSynchronization(new AcceptanceScopeSynchronization(
+					RlsRequestScope.current(), RlsRequestScope.crossScopeWorkspaceScanEnabled()));
+		}
+		UUID tenantId = snapshot.invitation().tenantId().value();
+		UUID workspaceId = snapshot.invitation().workspaceId().value();
+		RlsRequestScope.set(tenantId, workspaceId);
+	}
+
+	private record AcceptanceScopeSynchronization(RlsRequestScope.Scope previousScope,
+			boolean previousCrossScopeWorkspaceScan) implements TransactionSynchronization {
+		@Override
+		public void afterCompletion(int status) {
+			RlsRequestScope.clear();
+			if (previousScope != null) {
+				RlsRequestScope.set(previousScope.tenantId(), previousScope.workspaceId());
+			}
+			if (previousCrossScopeWorkspaceScan) RlsRequestScope.enableCrossScopeWorkspaceScan();
+		}
 	}
 
 	@Override
