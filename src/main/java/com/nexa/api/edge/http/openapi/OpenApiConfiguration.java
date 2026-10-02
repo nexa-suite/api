@@ -15,6 +15,10 @@ import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.core.converter.AnnotatedType;
+import io.swagger.v3.core.converter.ModelConverter;
+import io.swagger.v3.core.converter.ModelConverterContext;
+import io.swagger.v3.core.util.Json;
 import org.springdoc.core.customizers.GlobalOpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,10 +29,39 @@ import org.springframework.boot.info.BuildProperties;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Iterator;
 
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 public class OpenApiConfiguration {
+	@Bean
+	ModelConverter applicationResponseSchemaNames() {
+		return new ModelConverter() {
+			private final Map<String, String> schemaNames = Map.of(
+					"com.nexa.api.fulfillmentdelivery.application.model.OutgoingGoodsCheckModels$Line",
+					"OutgoingGoodsCheckLine",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Line",
+					"ExecutionTemperatureLine",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Snapshot",
+					"ExecutionTemperatureSnapshot",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Reading",
+					"ExecutionTemperatureReading",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Hold",
+					"ExecutionTemperatureHold");
+
+			@Override
+			public Schema<?> resolve(AnnotatedType type, ModelConverterContext context,
+					Iterator<ModelConverter> chain) {
+				if (type != null && type.getType() != null) {
+					String typeName = Json.mapper().constructType(type.getType()).getRawClass().getName();
+					String schemaName = schemaNames.get(typeName);
+					if (schemaName != null) type.name(schemaName);
+				}
+				return chain.hasNext() ? chain.next().resolve(type, context, chain) : null;
+			}
+		};
+	}
+
 	@Bean
 	OpenAPI nexaOpenAPI(ObjectProvider<BuildProperties> buildProperties,
 			@Value("${spring.application.version:unknown}") String configuredVersion) {

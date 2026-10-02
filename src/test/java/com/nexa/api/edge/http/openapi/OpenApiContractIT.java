@@ -17,6 +17,7 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
     @Test void runtimeOpenApiContainsWarehouseAndLogisticsContracts() throws Exception {
         var result = mockMvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         var document = json(result);
+        Path snapshotPath = Path.of("docs/openapi/openapi.json");
         assertThat(document.get("openapi").asText()).isEqualTo("3.1.0");
         assertThat(document.get("paths").has("/api/v1/authentication/identity-sign-in")).isTrue();
         assertThat(document.get("paths").has("/api/v1/me/access-contexts")).isTrue();
@@ -94,6 +95,61 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions")).isTrue();
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions/{subscriptionId}/disable")).isTrue();
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions/{subscriptionId}")).isTrue();
+        assertSchemaRef(document, "/api/v1/public/contact-requests", "post", "requestBody",
+                "#/components/schemas/Request");
+        assertThat(document.at("/components/schemas/Request/properties").has("requestType")).isTrue();
+        assertThat(document.at("/components/schemas/Request/properties").has("message")).isTrue();
+        assertSchemaRef(document, "/api/v1/purchase-requests/field-submissions", "post", "requestBody",
+                "#/components/schemas/FieldPurchaseRequestSubmissionRequest");
+        assertThat(document.at("/components/schemas/FieldPurchaseRequestSubmissionRequest/properties/lines/items/$ref")
+                .asText()).isEqualTo("#/components/schemas/FieldPurchaseRequestLine");
+        assertThat(document.at("/components/schemas/FieldPurchaseRequestLine/properties").has("expectedUnitPrice")).isTrue();
+        assertThat(document.at("/components/schemas/Line/properties/itemName").isMissingNode()).isFalse();
+        assertSchemaRef(document, "/api/v1/dispatch-orders/{id}/assignments", "post", "requestBody",
+                "#/components/schemas/AssignmentRequest");
+        assertThat(document.at("/components/schemas/AssignmentRequest/properties/vehicleReference").isMissingNode())
+                .isFalse();
+        assertThat(document.at("/components/schemas/AssignmentRequest/properties/routeName").isMissingNode()).isFalse();
+        assertSchemaRef(document, "/api/v1/fulfillments/{fulfillmentId}/driver-assignments", "post",
+                "requestBody", "#/components/schemas/FulfillmentDriverAssignmentRequest");
+        assertThat(document.at("/components/schemas/Check/properties/lines/items/$ref").asText())
+                .isEqualTo("#/components/schemas/OutgoingGoodsCheckLine");
+        assertResponseSchemaRef(document, "/api/v1/driver/deliveries/{deliveryId}/execution-temperature-readings",
+                "get", "200", "#/components/schemas/ExecutionTemperatureSnapshot");
+        assertThat(document.at("/components/schemas/ExecutionTemperatureSnapshot/properties/lines/items/$ref")
+                .asText())
+                .isEqualTo("#/components/schemas/ExecutionTemperatureLine");
+        assertThat(document.at("/components/schemas/ExecutionTemperatureSnapshot/properties/holds/items/$ref")
+                .asText()).isEqualTo("#/components/schemas/ExecutionTemperatureHold");
+        assertResponseSchemaRef(document, "/api/v1/driver/deliveries/{deliveryId}/execution-temperature-readings",
+                "post", "200", "#/components/schemas/ExecutionTemperatureReading");
+        assertThat(document.at("/components/schemas/ExecutionTemperatureReading/properties/hold/$ref").asText())
+                .isEqualTo("#/components/schemas/ExecutionTemperatureHold");
+        assertThat(document.at("/components/schemas/Line/properties/itemName").isMissingNode()).isFalse();
+        assertSchemaRef(document, "/api/v1/operational-exceptions/{exceptionId}/assignments", "post",
+                "requestBody", "#/components/schemas/OperationalExceptionAssignmentRequest");
+        assertSchemaRef(document, "/api/v1/operational-exceptions/{exceptionId}/resolutions", "post",
+                "requestBody", "#/components/schemas/OperationalExceptionReasonRequest");
+        assertSchemaRef(document, "/api/v1/inventory/lots/{lotId}/quarantines", "post", "requestBody",
+                "#/components/schemas/ReasonRequest");
+        assertThat(document.at("/components/schemas/ReasonRequest/required").isMissingNode()).isTrue();
+        var issueResponse = document.get("paths").get("/api/v1/deliveries/{deliveryId}/handoff-tokens")
+                .get("post").get("responses");
+        var issueSchema = issueResponse.get("201").get("content").get("*/*").get("schema");
+        assertThat(issueSchema.get("oneOf").toString()).contains("IssuedHandoffResponse",
+                "IssuedDispatchHandoffResponse");
+        assertThat(issueSchema.get("properties").has("attemptId")).isTrue();
+        assertThat(issueSchema.get("properties").has("assignmentId")).isTrue();
+        assertThat(issueSchema.get("properties").has("token")).isTrue();
+        assertThat(issueSchema.has("required")).isFalse();
+        assertThat(issueResponse.get("200").get("description").asText()).contains("token is omitted");
+        var validationSchema = document.get("paths").get("/api/v1/delivery-handoff/validations")
+                .get("post").get("responses").get("200").get("content").get("*/*").get("schema");
+        assertThat(validationSchema.get("oneOf").toString()).contains("HandoffValidation",
+                "DispatchHandoffValidationResponse");
+        assertThat(validationSchema.get("properties").has("attemptId")).isTrue();
+        assertThat(validationSchema.get("properties").has("assignmentId")).isTrue();
+        assertThat(validationSchema.has("required")).isFalse();
         assertRequiredHeader(document, "/api/v1/deliveries/{deliveryId}/handoff-tokens", "post", "Idempotency-Key");
         assertRequiredHeader(document, "/api/v1/deliveries/{deliveryId}/buyer-receipts", "post", "Idempotency-Key");
         assertRequiredHeader(document, "/api/v1/notifications/push-subscriptions", "post", "X-Nexa-Client");
@@ -142,7 +198,6 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
 
         assertThat(document.get("paths").has("/api/v1/warehouses/{warehouseId}/inventory-availability")).isTrue();
 
-        Path snapshotPath = Path.of("docs/openapi/openapi.json");
         if (Boolean.getBoolean("nexa.openapi.write-snapshot")) {
             Files.writeString(snapshotPath, document.toString() + System.lineSeparator());
         }
@@ -168,6 +223,18 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
             return value.decimalValue().stripTrailingZeros().toPlainString();
         }
         return value.toString();
+    }
+
+    private static void assertSchemaRef(tools.jackson.databind.JsonNode document, String path, String method,
+                                        String body, String expected) {
+        assertThat(document.get("paths").get(path).get(method).get(body).get("content")
+                .get("application/json").get("schema").get("$ref").asText()).isEqualTo(expected);
+    }
+
+    private static void assertResponseSchemaRef(tools.jackson.databind.JsonNode document, String path, String method,
+                                                String status, String expected) {
+        assertThat(document.get("paths").get(path).get(method).get("responses").get(status)
+                .get("content").get("*/*").get("schema").get("$ref").asText()).isEqualTo(expected);
     }
 
     private static void assertRequiredHeader(tools.jackson.databind.JsonNode document, String path,

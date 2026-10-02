@@ -4,6 +4,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistenceP
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentDriverAssignmentService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -115,6 +116,7 @@ public final class FulfillmentDriverAssignmentController {
         }
     }
 
+    @Schema(name = "FulfillmentDriverAssignmentRequest")
     public record AssignmentRequest(@NotNull UUID responsibleMembershipId,
                                     @NotNull UUID physicalAllocationId,
                                     @NotNull @PositiveOrZero Long physicalAllocationVersion) { }

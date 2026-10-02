@@ -7,6 +7,7 @@ import com.nexa.api.salescommitment.presentation.purchaserequest.mapper.Purchase
 import com.nexa.api.salescommitment.presentation.purchaserequest.response.PurchaseRequestDetailResponse;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -42,10 +43,12 @@ public class FieldPurchaseRequestController {
         var result = service.submit(context, command, key);
         return ResponseEntity.status(201).eTag(SalesHttpHeaders.etag(result.version())).body(mapper.detail(result));
     }
+    @Schema(name = "FieldPurchaseRequestSubmissionRequest")
     public record Request(@NotBlank @Size(max = 64) String clientAccountId, @Size(max = 32) String priority,
             @FutureOrPresent LocalDate requestedDeliveryDate, @Size(max = 2000) String deliveryProfileSnapshot,
             @Size(max = 80) String paymentOption, @Size(max = 2000) String comment,
             @NotEmpty @Size(max = 100) List<@NotNull @Valid Line> lines) { }
+    @Schema(name = "FieldPurchaseRequestLine")
     public record Line(@NotBlank @Pattern(regexp = "(?i)CAT-[A-Z0-9-]{1,63}") String catalogItemId,
             @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal quantity,
             @NotBlank @Size(max = 32) String unit, @Size(max = 2000) String notes,

@@ -6,6 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.service.MobileDeliveryContra
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.StringToClassMapItem;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -49,10 +50,28 @@ public final class MobileDeliveryController {
     @Operation(operationId = "issueDeliveryBuyerHandoffToken", responses = {
             @ApiResponse(responseCode = "201", description = "Handoff identity issued",
                     content = @Content(schema = @Schema(oneOf = {IssuedHandoffResponse.class,
-                            IssuedDispatchHandoffResponse.class}))),
+                            IssuedDispatchHandoffResponse.class}, properties = {
+                            @StringToClassMapItem(key = "purpose", value = String.class),
+                            @StringToClassMapItem(key = "handoffId", value = UUID.class),
+                            @StringToClassMapItem(key = "deliveryId", value = UUID.class),
+                            @StringToClassMapItem(key = "attemptId", value = UUID.class),
+                            @StringToClassMapItem(key = "assignmentId", value = UUID.class),
+                            @StringToClassMapItem(key = "deliveryVersion", value = Long.class),
+                            @StringToClassMapItem(key = "expiresAt", value = Instant.class),
+                            @StringToClassMapItem(key = "status", value = String.class),
+                            @StringToClassMapItem(key = "token", value = String.class)}))),
             @ApiResponse(responseCode = "200", description = "Idempotent replay; token is omitted",
                     content = @Content(schema = @Schema(oneOf = {IssuedHandoffResponse.class,
-                            IssuedDispatchHandoffResponse.class})))
+                            IssuedDispatchHandoffResponse.class}, properties = {
+                            @StringToClassMapItem(key = "purpose", value = String.class),
+                            @StringToClassMapItem(key = "handoffId", value = UUID.class),
+                            @StringToClassMapItem(key = "deliveryId", value = UUID.class),
+                            @StringToClassMapItem(key = "attemptId", value = UUID.class),
+                            @StringToClassMapItem(key = "assignmentId", value = UUID.class),
+                            @StringToClassMapItem(key = "deliveryVersion", value = Long.class),
+                            @StringToClassMapItem(key = "expiresAt", value = Instant.class),
+                            @StringToClassMapItem(key = "status", value = String.class),
+                            @StringToClassMapItem(key = "token", value = String.class)})))
     })
     public ResponseEntity<?> issue(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
@@ -78,7 +97,17 @@ public final class MobileDeliveryController {
     @Operation(operationId = "validateDeliveryBuyerHandoffToken", responses = {
             @ApiResponse(responseCode = "200", description = "Validated handoff identity",
                     content = @Content(schema = @Schema(oneOf = {MobileDeliveryContractPort.HandoffValidation.class,
-                            DispatchHandoffValidationResponse.class})))
+                            DispatchHandoffValidationResponse.class}, properties = {
+                            @StringToClassMapItem(key = "purpose", value = String.class),
+                            @StringToClassMapItem(key = "handoffId", value = UUID.class),
+                            @StringToClassMapItem(key = "deliveryId", value = UUID.class),
+                            @StringToClassMapItem(key = "attemptId", value = UUID.class),
+                            @StringToClassMapItem(key = "assignmentId", value = UUID.class),
+                            @StringToClassMapItem(key = "deliveryVersion", value = Long.class),
+                            @StringToClassMapItem(key = "expiresAt", value = Instant.class),
+                            @StringToClassMapItem(key = "deliveryStatus", value = String.class),
+                            @StringToClassMapItem(key = "deliveredQuantity", value = BigDecimal.class),
+                            @StringToClassMapItem(key = "status", value = String.class)})))
     })
     public Object validate(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
@@ -122,9 +151,11 @@ public final class MobileDeliveryController {
                                       @Size(max = 2000) String reason) { }
     public record IssuedHandoffResponse(UUID handoffId, UUID deliveryId, UUID attemptId,
                                         Instant expiresAt, String status, String token) { }
+    @Schema(name = "IssuedDispatchHandoffResponse")
     public record IssuedDispatchHandoffResponse(String purpose, UUID handoffId, UUID deliveryId,
                                                 UUID assignmentId, long deliveryVersion, Instant expiresAt,
                                                 String status, String token) { }
+    @Schema(name = "DispatchHandoffValidationResponse")
     public record DispatchHandoffValidationResponse(String purpose, UUID handoffId, UUID deliveryId,
                                                     UUID assignmentId, long deliveryVersion, Instant expiresAt,
                                                     String status) { }

@@ -6,6 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.BomOperationalExceptio
 import com.nexa.api.fulfillmentdelivery.application.service.BomOperationalExceptionService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -50,7 +51,9 @@ public final class BomOperationalExceptionController {
         return service.assignees(context, exceptionId);
     }
 
+    @Schema(name = "OperationalExceptionReasonRequest")
     public record ReasonRequest(@NotBlank @Size(max = 500) String reason) { }
+    @Schema(name = "OperationalExceptionAssignmentRequest")
     public record AssignmentRequest(@NotBlank @Size(max = 500) String reason, UUID responsibleMembershipId) { }
     public record FollowUpRequest(@NotBlank @Size(max = 500) String reason, @Size(max = 2000) String note) { }
 
