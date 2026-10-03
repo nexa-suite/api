@@ -33,6 +33,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-SS-" + suffix, "Safety stock warehouse");
+        token = source.token();
         zone(token, source.warehouseId(), "Z-SS-" + suffix, "Ambient");
         MvcResult baselineAvailability = mockMvc.perform(get("/api/v1/inventory-availability")
                         .header("Authorization", "Bearer " + token)
@@ -89,6 +90,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                 .andExpect(status().isPreconditionFailed());
 
         WarehouseLocation destination = warehouse(token, "WH-SS-D-" + suffix, "Safety stock destination");
+        token = destination.token();
         String destinationZone = zone(token, destination.warehouseId(), "Z-SS-D-" + suffix, "Ambient");
         String lotId = json(receipt).get("id").asText();
         String transferBody = "{\"sourceLotId\":\"" + lotId + "\",\"sourceWarehouseId\":\""
@@ -109,8 +111,10 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-TR-" + suffix, "Transfer source");
+        token = source.token();
         String sourceZone = zone(token, source.warehouseId(), "Z-TR-" + suffix, "Ambient");
         WarehouseLocation destination = warehouse(token, "WH-TR-D-" + suffix, "Transfer destination");
+        token = destination.token();
         String destinationZone = zone(token, destination.warehouseId(), "Z-TR-D-" + suffix, "Ambient");
         MvcResult receipt = receive(token, source, "B-TR-" + suffix, "10", "tr-receipt-" + suffix);
         String lotId = json(receipt).get("id").asText();
@@ -211,6 +215,105 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                 .andExpect(status().isPreconditionFailed());
     }
 
+    @Test
+    void transferReceiptObservationIsAttributableIdempotentAndNeverReceivesStock() throws Exception {
+        String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String suffix = suffix();
+        WarehouseLocation source = warehouse(token, "WH-OBS-" + suffix, "Observation source");
+        token = source.token();
+        String sourceZone = zone(token, source.warehouseId(), "Z-OBS-" + suffix, "Ambient");
+        WarehouseLocation destination = warehouse(token, "WH-OBS-D-" + suffix, "Observation destination");
+        token = destination.token();
+        String destinationZone = zone(token, destination.warehouseId(), "Z-OBS-D-" + suffix, "Ambient");
+        MvcResult receivedSource = receive(token, source, "B-OBS-" + suffix, "10", "obs-source-" + suffix);
+        MvcResult created = createTransfer(token, source, sourceZone, destination, destinationZone,
+                receivedSource, "obs-transfer-" + suffix);
+        String transferId = json(created).get("id").asText();
+        MvcResult dispatched = mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/dispatches")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "obs-dispatch-" + suffix))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_TRANSIT"))
+                .andReturn();
+        String sourceLotId = json(receivedSource).get("id").asText();
+        String body = "{\"observedBatchNumber\":\"B-OBSERVED-" + suffix
+                + "\",\"observedExpirationDate\":\"2099-01-02\",\"observedQuantity\":\"3\",\"unit\":\"UNIT\"}";
+        String key = "obs-record-" + suffix;
+        String path = "/api/v1/inventory/transfers/" + transferId + "/receipt-observations";
+
+        MvcResult observed = mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", dispatched.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.transferVersion").value(1))
+                .andExpect(jsonPath("$.expectedBatchNumber").value("B-OBS-" + suffix))
+                .andExpect(jsonPath("$.expectedQuantity").value(4))
+                .andExpect(jsonPath("$.observedBatchNumber").value("B-OBSERVED-" + suffix))
+                .andExpect(jsonPath("$.observedQuantity").value(3))
+                .andExpect(jsonPath("$.hasDifference").value(true))
+                .andExpect(jsonPath("$.actorMembershipId").value(membershipId(WAREHOUSE_EMAIL)))
+                .andExpect(jsonPath("$.recordedAt").isNotEmpty())
+                .andReturn();
+        String observationId = json(observed).get("observationId").asText();
+        assertThat(json(observed).get("sourceLotId").asText()).isEqualTo(sourceLotId);
+
+        MvcResult replay = mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", dispatched.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn();
+        assertThat(json(replay).get("observationId").asText()).isEqualTo(observationId);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_transfer_receipt_observation"
+                        + " where tenant_id=? and workspace_id=? and transfer_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(transferId))).isEqualTo(1);
+
+        mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", dispatched.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body.replace("\"3\"", "\"2\"")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+        mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "obs-stale-" + suffix)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isPreconditionFailed());
+
+        MvcResult current = mockMvc.perform(get("/api/v1/inventory/transfers/" + transferId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_TRANSIT"))
+                .andExpect(jsonPath("$.version").value(1))
+                .andReturn();
+        assertThat(json(current).get("destinationLotId").isNull()).isTrue();
+        assertThat(stock(sourceLotId)).isEqualByComparingTo("6");
+        assertThat(destinationLotCount(destination.warehouseId(), destinationZone, "B-OBSERVED-" + suffix)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?"
+                        + " and movement_type='TRANSFER_OUT'", Integer.class, UUID.fromString(sourceLotId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=?"
+                        + " and event_type='warehouse.inventory.transfer.receipt-observation-recorded'",
+                Integer.class, UUID.fromString(observationId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select array_to_string(array_agg(to_status order by transfer_version), ',')"
+                        + " from warehouse.inventory_transfer_history where transfer_id=?",
+                String.class, UUID.fromString(transferId))).isEqualTo("REQUESTED,IN_TRANSIT");
+
+        String ungrantedToken = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        mockMvc.perform(post(path)
+                        .header("Authorization", "Bearer " + ungrantedToken)
+                        .header("If-Match", dispatched.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "obs-ungranted-" + suffix)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().is4xxClientError());
+        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_transfer_receipt_observation"
+                        + " where transfer_id=?", Integer.class, UUID.fromString(transferId))).isEqualTo(1);
+    }
+
     private tools.jackson.databind.JsonNode availability(String token) throws Exception {
         MvcResult result = mockMvc.perform(get("/api/v1/inventory-availability")
                         .header("Authorization", "Bearer " + token)
@@ -241,8 +344,10 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = suffix();
         WarehouseLocation source = warehouse(token, "WH-LIST-" + suffix, "Transfer listing source");
+        token = source.token();
         String sourceZone = zone(token, source.warehouseId(), "Z-LIST-" + suffix, "Ambient");
         WarehouseLocation destination = warehouse(token, "WH-LIST-D-" + suffix, "Transfer listing destination");
+        token = destination.token();
         String destinationZone = zone(token, destination.warehouseId(), "Z-LIST-D-" + suffix, "Ambient");
 
         mockMvc.perform(get("/api/v1/inventory/transfers")
@@ -298,7 +403,14 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"" + code + "\",\"name\":\"" + name + "\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
-        return new WarehouseLocation(json(result).get("id").asText());
+        String warehouseId = json(result).get("id").asText();
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                .andExpect(status().isOk());
+        return new WarehouseLocation(warehouseId, accessToken(WAREHOUSE_EMAIL, "PLATFORM"));
     }
 
     private String zone(String token, String warehouseId, String code, String name) throws Exception {
@@ -353,5 +465,5 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         return UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
-    private record WarehouseLocation(String warehouseId) { }
+    private record WarehouseLocation(String warehouseId, String token) { }
 }

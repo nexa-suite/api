@@ -1,5 +1,6 @@
 package com.nexa.api.edge.problem;
 
+import com.nexa.api.customerbuyerrelationships.application.exception.FieldVisitStaleException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidCredentialsException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidRefreshTokenException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidAccessContextTicketException;
@@ -13,6 +14,7 @@ import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
+import com.nexa.api.businessdocuments.application.exception.BusinessEvidenceIdempotencyConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -442,6 +444,11 @@ public final class GlobalExceptionHandler {
 
 	@ExceptionHandler(SalesConcurrencyConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesConcurrency(SalesConcurrencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Resource changed by another request", request); }
+    @ExceptionHandler(FieldVisitStaleException.class)
+    public ResponseEntity<ProblemDetail> handleFieldVisitStale(FieldVisitStaleException exception, HttpServletRequest request) {
+        return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.CONCURRENCY_CONFLICT, "Customer changed; review the current relationship", request);
+    }
+
 	@ExceptionHandler(CustomerRelationshipConflictException.class)
 	public ResponseEntity<ProblemDetail> handleCustomerRelationshipConflict(CustomerRelationshipConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.CONCURRENCY_CONFLICT, "Customer relationship changed by another request", request); }
 	@ExceptionHandler(CustomerRelationshipPreconditionRequiredException.class)
@@ -459,6 +466,8 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftInvariant(PurchaseRequestDraftInvariantException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Purchase request draft is not ready to submit", request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
+	@ExceptionHandler(BusinessEvidenceIdempotencyConflictException.class)
+	public ResponseEntity<ProblemDetail> handleBusinessEvidenceIdempotencyPayload(BusinessEvidenceIdempotencyConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with different evidence metadata or bytes", request); }
 	@ExceptionHandler(PurchaseRequestAlreadyConvertedException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestAlreadyConverted(PurchaseRequestAlreadyConvertedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_ALREADY_CONVERTED, "Purchase request has already been converted", request); }
 	@ExceptionHandler(SalesPreconditionRequiredException.class)
@@ -483,7 +492,7 @@ public final class GlobalExceptionHandler {
 			if (!exception.notFound() && "CONCURRENCY_CONFLICT".equals(exception.code()) && request.getHeader("If-Match") != null) {
 				return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Warehouse resource changed by another request", request);
 			}
-			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INSUFFICIENT_AVAILABLE_STOCK", "INSUFFICIENT_SELLABLE_AVAILABILITY", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS", "STALE_ALLOCATION", "NOT_ALLOCATED", "WRONG_SKU", "WRONG_LOT", "WRONG_WAREHOUSE", "WRONG_UNIT", "EXPIRED", "QUARANTINED", "NON_SELLABLE", "INSUFFICIENT_ALLOCATED_QUANTITY", "OVERRIDE_NOT_ALLOWED" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
+			HttpStatus status = exception.notFound() ? HttpStatus.NOT_FOUND : switch (exception.code()) { case "TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP", "CONCURRENCY_CONFLICT", "INVENTORY_SHORTAGE", "INSUFFICIENT_AVAILABLE_STOCK", "INSUFFICIENT_SELLABLE_AVAILABILITY", "INVENTORY_SAFETY_STOCK_PROTECTED", "INVENTORY_TRANSFER_SINGLE_LOT_REQUIRED", "IDEMPOTENCY_PAYLOAD_CONFLICT", "INVENTORY_RESERVATION_ALREADY_EXISTS", "STALE_ALLOCATION", "NOT_ALLOCATED", "WRONG_SKU", "WRONG_LOT", "WRONG_WAREHOUSE", "WRONG_UNIT", "EXPIRED", "QUARANTINED", "NON_SELLABLE", "INSUFFICIENT_ALLOCATED_QUANTITY", "OVERRIDE_NOT_ALLOWED" -> HttpStatus.CONFLICT; case "FORBIDDEN" -> HttpStatus.FORBIDDEN; case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED; default -> HttpStatus.BAD_REQUEST; };
 			return response(status, code, "Warehouse operation could not be completed", request);
 		}
 		@ExceptionHandler(LogisticsOperationException.class)
@@ -518,11 +527,20 @@ public final class GlobalExceptionHandler {
 			HttpStatus status = switch (exception.code()) {
 				case "PRECONDITION_REQUIRED" -> HttpStatus.PRECONDITION_REQUIRED;
 				case "FORBIDDEN" -> HttpStatus.FORBIDDEN;
-				case "IDEMPOTENCY_PAYLOAD_CONFLICT", "FULFILLMENT_ALREADY_EXISTS", "DELIVERY_TRANSITION_INVALID",
+				case "CUSTOMER_INSTRUCTION_EDIT_WINDOW_CLOSED", "DRIVER_WORKDAY_ALREADY_ACTIVE", "DRIVER_LOCATION_UNAVAILABLE",
+                        "IDEMPOTENCY_PAYLOAD_CONFLICT", "FULFILLMENT_ALREADY_EXISTS", "DELIVERY_TRANSITION_INVALID",
+						"OPERATIONAL_EXCEPTION_TRANSITION_INVALID", "EXCEPTION_ASSIGNEE_NOT_ELIGIBLE",
+						"EXCEPTION_OUTCOME_NOT_AUTHORIZED", "DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING",
+						"DELIVERY_CRITICAL_INSTRUCTION_ACK_REQUIRED",
+						"FULFILLMENT_DRIVER_ALREADY_ASSIGNED", "FULFILLMENT_DRIVER_ASSIGNMENT_STALE", "FULFILLMENT_DRIVER_ASSIGNMENT_REQUIRED",
+						"FULFILLMENT_NOT_READY_FOR_DISPATCH", "FULFILLMENT_DISPATCH_WINDOW_ALREADY_DEFINED", "PHYSICAL_ALLOCATION_CONCURRENCY_CONFLICT",
+						"FULFILLMENT_OUTGOING_CHECK_REQUIRED", "FULFILLMENT_OUTGOING_DISCREPANCY_OPEN",
 						"FULFILLMENT_TRANSITION_INVALID", "DELIVERY_NOT_ATTEMPTABLE", "POD_NOT_CAPTURED",
 						"FULFILLMENT_SHORTAGE_NOT_OPEN", "FULFILLMENT_PICKING_REQUIRED", "FULFILLMENT_NOT_STAGED",
 					"POD_REQUIRES_FINAL_DELIVERY", "DELIVERY_NOT_ACTIVE", "DELIVERY_HANDOFF_NOT_ACTIVE",
 					"DELIVERY_HANDOFF_EXPIRED", "DELIVERY_HANDOFF_TOKEN_INVALID", "BUYER_RECEIPT_ALREADY_RECORDED",
+					"TEMPERATURE_LOT_NOT_ALLOCATED", "TEMPERATURE_NOT_REQUIRED",
+					"TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP", "TEMPERATURE_POLICY_UNAVAILABLE",
 					"STALE_ALLOCATION", "NOT_ALLOCATED", "WRONG_SKU", "WRONG_LOT", "WRONG_WAREHOUSE", "WRONG_UNIT",
 					"EXPIRED", "QUARANTINED", "NON_SELLABLE", "INSUFFICIENT_ALLOCATED_QUANTITY", "OVERRIDE_NOT_ALLOWED" -> HttpStatus.CONFLICT;
 					case "BUYER_ONLY_OPERATION", "BUYER_RELATIONSHIP_NOT_FOUND", "DELIVERY_HANDOFF_DRIVER_NOT_ASSIGNED" -> HttpStatus.FORBIDDEN;

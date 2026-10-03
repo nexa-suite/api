@@ -10,6 +10,10 @@ public interface MobileDeliveryContractPort {
 
     HandoffValidation validate(ValidationRequest request);
 
+    DispatchHandoffIssue issueDispatchHandoff(DispatchHandoffIssueRequest request);
+
+    DispatchHandoffValidation validateDispatchHandoff(DispatchHandoffValidationRequest request);
+
     BuyerReceipt recordReceipt(ReceiptRequest request);
 
     record IssueRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId,
@@ -24,6 +28,19 @@ public interface MobileDeliveryContractPort {
 
     record HandoffValidation(UUID handoffId, UUID deliveryId, UUID attemptId,
                              Instant expiresAt, String deliveryStatus, BigDecimal deliveredQuantity) { }
+
+    record DispatchHandoffIssueRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID assignmentId,
+                                       UUID actorMembershipId, String idempotencyKey, String requestHash,
+                                       String tokenHash, Instant issuedAt, Instant expiresAt) { }
+
+    record DispatchHandoffIssue(UUID handoffId, UUID deliveryId, UUID assignmentId, long deliveryVersion,
+                                Instant expiresAt, String status, boolean replayed) { }
+
+    record DispatchHandoffValidationRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID assignmentId,
+                                            UUID driverMembershipId, UUID driverUserId, String tokenHash, Instant now) { }
+
+    record DispatchHandoffValidation(UUID handoffId, UUID deliveryId, UUID assignmentId, long deliveryVersion,
+                                     Instant expiresAt, String status) { }
 
     record ReceiptRequest(UUID tenantId, UUID workspaceId, UUID deliveryId,
                           UUID buyerMembershipId, UUID customerAccountId, String tokenHash,

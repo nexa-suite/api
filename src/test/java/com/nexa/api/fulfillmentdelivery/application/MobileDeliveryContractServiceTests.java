@@ -65,6 +65,75 @@ class MobileDeliveryContractServiceTests {
     }
 
     @Test
+    void issuesDispatchIdentityBoundToAssignmentAndReturnsNoTokenOnReplay() {
+        MobileDeliveryContractPort persistence = mock(MobileDeliveryContractPort.class);
+        CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+        BusinessTraceabilityCommands traceability = mock(BusinessTraceabilityCommands.class);
+        UUID deliveryId = UUID.randomUUID();
+        UUID assignmentId = UUID.randomUUID();
+        UUID handoffId = UUID.randomUUID();
+        when(persistence.issueDispatchHandoff(any())).thenAnswer(invocation -> {
+            MobileDeliveryContractPort.DispatchHandoffIssueRequest request = invocation.getArgument(0);
+            return new MobileDeliveryContractPort.DispatchHandoffIssue(handoffId, request.deliveryId(),
+                    request.assignmentId(), 7L, request.expiresAt(), "ACTIVE", false);
+        }).thenAnswer(invocation -> {
+            MobileDeliveryContractPort.DispatchHandoffIssueRequest request = invocation.getArgument(0);
+            return new MobileDeliveryContractPort.DispatchHandoffIssue(handoffId, request.deliveryId(),
+                    request.assignmentId(), 7L, request.expiresAt(), "ACTIVE", true);
+        });
+
+        MobileDeliveryContractService contract = service(persistence, accounts, traceability);
+        var issued = contract.issueDispatchHandoff(context(), deliveryId, assignmentId, "dispatch-handoff-1");
+        var replayed = contract.issueDispatchHandoff(context(), deliveryId, assignmentId, "dispatch-handoff-1");
+
+        assertThat(issued.purpose()).isEqualTo("DISPATCH_HANDOFF");
+        assertThat(issued.deliveryId()).isEqualTo(deliveryId);
+        assertThat(issued.assignmentId()).isEqualTo(assignmentId);
+        assertThat(issued.deliveryVersion()).isEqualTo(7L);
+        assertThat(issued.token()).isNotBlank();
+        assertThat(issued.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
+        assertThat(replayed.token()).isNull();
+        var request = org.mockito.ArgumentCaptor.forClass(MobileDeliveryContractPort.DispatchHandoffIssueRequest.class);
+        verify(persistence, org.mockito.Mockito.times(2)).issueDispatchHandoff(request.capture());
+        assertThat(request.getAllValues()).allSatisfy(value -> {
+            assertThat(value.requestHash()).isEqualTo(sha256("dispatch-handoff-v1|" + deliveryId + "|" + assignmentId));
+        });
+        assertThat(request.getAllValues().getFirst().tokenHash()).isEqualTo(sha256(issued.token()));
+        assertThat(request.getAllValues().getFirst().expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(10)));
+        verify(traceability).record(any(BusinessTraceabilityCommands.TraceRequest.class));
+    }
+
+    @Test
+    void dispatchValidationUsesCurrentLogisticsReadContextAndHashedToken() {
+        MobileDeliveryContractPort persistence = mock(MobileDeliveryContractPort.class);
+        CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+        BusinessTraceabilityCommands traceability = mock(BusinessTraceabilityCommands.class);
+        CurrentAccessContext context = context();
+        UUID deliveryId = UUID.randomUUID();
+        UUID assignmentId = UUID.randomUUID();
+        UUID handoffId = UUID.randomUUID();
+        when(persistence.validateDispatchHandoff(any())).thenAnswer(invocation -> {
+            MobileDeliveryContractPort.DispatchHandoffValidationRequest request = invocation.getArgument(0);
+            return new MobileDeliveryContractPort.DispatchHandoffValidation(handoffId, request.deliveryId(),
+                    request.assignmentId(), 3L, NOW.plusSeconds(30), "ACTIVE");
+        });
+
+        var result = service(persistence, accounts, traceability).validateDispatchHandoff(
+                context, deliveryId, assignmentId, "opaque-dispatch-token");
+
+        assertThat(result.handoffId()).isEqualTo(handoffId);
+        assertThat(result.deliveryId()).isEqualTo(deliveryId);
+        assertThat(result.assignmentId()).isEqualTo(assignmentId);
+        assertThat(result.deliveryVersion()).isEqualTo(3L);
+        var request = org.mockito.ArgumentCaptor.forClass(MobileDeliveryContractPort.DispatchHandoffValidationRequest.class);
+        verify(persistence).validateDispatchHandoff(request.capture());
+        assertThat(request.getValue().tokenHash()).isEqualTo(sha256("opaque-dispatch-token"));
+        verify(context).requirePermission(Permission.LOGISTICS_READ);
+        verify(persistence, never()).recordReceipt(any());
+        verify(traceability, never()).record(any(BusinessTraceabilityCommands.TraceRequest.class));
+    }
+
+    @Test
     void rejectsReceiptDecisionBeforeAnyPersistenceMutation() {
         MobileDeliveryContractPort persistence = mock(MobileDeliveryContractPort.class);
         CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);

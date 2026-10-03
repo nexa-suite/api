@@ -7,6 +7,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
 import com.nexa.api.inventoryavailability.application.port.WarehouseReservationPersistencePort;
@@ -46,8 +47,10 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
             SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             WarehouseOperationalSettingsPort operationalSettings,
-            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource, WorkspaceDirectory workspaces) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
+            WorkspaceDirectory workspaces, WarehouseObjectAccess warehouseAccess) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
+                warehouseAccess);
         this.workspaces = workspaces;
     }
 
@@ -120,7 +123,7 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
                 catch (IllegalStateException exception) { throw error("INVENTORY_SHORTAGE", false); }
                 checkUpdated(jdbc.update("insert into warehouse.inventory_reservation_allocation(id,reservation_line_id,lot_id,quantity,unit,expiration_date) values (?,?,?,?,?,?)",
                         UUID.randomUUID(), lineId, uuid(allocation.lotId()), allocation.quantity(), allocation.unit(), allocation.expirationDate()), "allocation insert");
-                checkUpdated(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity+?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and stock_quantity-reserved_quantity>=?",
+                checkUpdated(jdbc.update("update warehouse.inventory_lot set reserved_quantity=reserved_quantity+?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=? and stock_quantity-reserved_quantity-" + temperatureHeldQuantitySql("inventory_lot") + ">=?",
                         allocation.quantity(), tenant(context), workspace(context), uuid(allocation.lotId()), lot.version(), allocation.quantity()), "lot reservation update", "INVENTORY_SHORTAGE");
                 insertMovement(context, uuid(lot.warehouseId()), uuid(lot.zoneId()), uuid(allocation.lotId()), lot.catalogItemId(), uuidNullable(lot.skuId()),
                         "RESERVATION", allocation.quantity(), allocation.unit(), lot.onHand(), lot.onHand(), lot.reserved(), lot.reserved().add(allocation.quantity()),
@@ -177,15 +180,20 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
                                                                                                        String status, int page, int size) {
         requireRead(context);
         pageCheck(page, size);
-        String predicate = "where tenant_id=? and workspace_id=?";
+        String predicate = "where r.tenant_id=? and r.workspace_id=? and exists ("
+                + "select 1 from warehouse.inventory_reservation_allocation a "
+                + "join warehouse.inventory_reservation_line l on l.id=a.reservation_line_id "
+                + "join warehouse.inventory_lot lot on lot.tenant_id=r.tenant_id and lot.workspace_id=r.workspace_id and lot.id=a.lot_id "
+                + "where l.reservation_id=r.id";
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
-        if (status != null && !status.isBlank()) { predicate += " and status=?"; args.add(enumValue(status, "status", "PENDING", "RESERVED", "SHORTAGE", "RELEASED", "EXPIRED", "CANCELLED", "CONSUMED")); }
+        predicate += warehouseIdPredicate(context, "lot.warehouse_id", args) + ")";
+        if (status != null && !status.isBlank()) { predicate += " and r.status=?"; args.add(enumValue(status, "status", "PENDING", "RESERVED", "SHORTAGE", "RELEASED", "EXPIRED", "CANCELLED", "CONSUMED")); }
         List<Object> pageArgs = new ArrayList<>(args); pageArgs.add(size); pageArgs.add(page * size);
-        List<WarehouseOperationsService.ReservationSummary> items = jdbc.query("select id,sales_order_id,order_number,status,created_at,reserved_at,expires_at,version from warehouse.inventory_reservation "
-                        + predicate + " order by created_at desc,id desc limit ? offset ?", (rs, row) -> new WarehouseOperationsService.ReservationSummary(
+        List<WarehouseOperationsService.ReservationSummary> items = jdbc.query("select r.id,r.sales_order_id,r.order_number,r.status,r.created_at,r.reserved_at,r.expires_at,r.version from warehouse.inventory_reservation r "
+                        + predicate + " order by r.created_at desc,r.id desc limit ? offset ?", (rs, row) -> new WarehouseOperationsService.ReservationSummary(
                         rs.getObject("id").toString(), rs.getObject("sales_order_id").toString(), rs.getString("order_number"), rs.getString("status"),
                         instant(rs, "created_at"), instantNullable(rs, "reserved_at"), instant(rs, "expires_at"), rs.getLong("version")), pageArgs.toArray());
-        return new WarehouseOperationsService.Page<>(items, page, size, count("select count(*) from warehouse.inventory_reservation " + predicate, args.toArray()));
+        return new WarehouseOperationsService.Page<>(items, page, size, count("select count(*) from warehouse.inventory_reservation r " + predicate, args.toArray()));
     }
 
     @Transactional(readOnly = true)

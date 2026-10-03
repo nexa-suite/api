@@ -35,6 +35,7 @@ public final class PermissionPolicy {
 					Permission.CATALOG_READ, Permission.PROMOTION_READ,
 					Permission.WAREHOUSE_READ, Permission.LOGISTICS_READ, Permission.LOGISTICS_WRITE,
 					Permission.FULFILLMENT_READ),
+			MembershipRole.BUSINESS_OPERATIONS_MANAGER, Set.of(),
 			MembershipRole.BUYER, Set.of(
 					Permission.CATALOG_READ, Permission.SALES_BUYER_READ, Permission.SALES_BUYER_WRITE,
 					Permission.PROMOTION_READ, Permission.ORDERS_BUYER_READ, Permission.TRACKING_BUYER_READ));

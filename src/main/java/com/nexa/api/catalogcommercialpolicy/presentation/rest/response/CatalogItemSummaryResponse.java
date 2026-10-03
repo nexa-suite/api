@@ -1,15 +1,18 @@
 package com.nexa.api.catalogcommercialpolicy.presentation.rest.response;
 
-import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPricingView;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 import java.util.List;
 
 public record CatalogItemSummaryResponse(String catalogItemId, String productId, String itemName, String brandName,
-		String categoryName, String presentation, MoneyResponse unitPrice, String coldChainRequirement,
+		String categoryName, String presentation, @JsonInclude(JsonInclude.Include.NON_NULL) MoneyResponse unitPrice, String coldChainRequirement,
 		CatalogMediaResponse image, String status, String availabilityStatus, boolean nearExpiry,
-			String promotionLabel, MoneyResponse basePrice, MoneyResponse effectivePrice,
-			MoneyResponse discountAmount, String currency, List<CatalogAppliedPromotionResponse> appliedPromotions,
-			Instant pricingAsOf, String productFamilyId, String productFamilyCode, String productFamilyName,
+			String promotionLabel, MoneyResponse basePrice,
+			@JsonInclude(JsonInclude.Include.NON_NULL) MoneyResponse effectivePrice,
+			@JsonInclude(JsonInclude.Include.NON_NULL) MoneyResponse discountAmount,
+			@JsonInclude(JsonInclude.Include.NON_NULL) String currency,
+			@JsonInclude(JsonInclude.Include.NON_NULL) List<CatalogAppliedPromotionResponse> appliedPromotions,
+			@JsonInclude(JsonInclude.Include.NON_NULL) Instant pricingAsOf, String productFamilyId, String productFamilyCode, String productFamilyName,
 			String sellableSkuId, String skuCode, String unitOfMeasure, String packagingType,
 			java.math.BigDecimal netWeight, java.math.BigDecimal grossWeight, Instant availabilityAsOf,
 			String productVariantCode, String productVariantName, java.math.BigDecimal sellableAvailability,

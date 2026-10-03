@@ -1,9 +1,13 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.FulfillmentView;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.HandoffEvidence;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.LineView;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort.AssignDriverRequest;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort.DispatchPlanChangeRequest;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort.FulfillmentDriverAssignmentView;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.context.annotation.Profile;
@@ -22,6 +26,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -146,7 +151,8 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         }
         // Every fulfillment created since V91 has a physical allocation. Lock
         // it before the fulfillment row for one stable cross-context order.
-        physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        physicalAllocations.lockForFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
+                request.actorMembershipId());
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         if (!"PICKING".equals(current.status())) throw error("FULFILLMENT_PICKING_REQUIRED");
         List<FulfillmentLineRow> currentLines = lockLines(request.tenantId(), request.workspaceId(), request.fulfillmentId());
@@ -177,7 +183,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         Long allocationVersion = request.allocationVersion();
         if (!hasPhysicalPickingBinding(request) && current.physicalAllocationId() != null) {
             PhysicalAllocationCommands.AllocationResult allocation = physicalAllocations.getByFulfillment(
-                    request.tenantId(), request.workspaceId(), request.fulfillmentId());
+                    request.tenantId(), request.workspaceId(), request.fulfillmentId(), request.actorMembershipId());
             effectiveLines = bindLegacyPicking(effectiveLines, allocation);
             requested = groupPickedLines(effectiveLines);
             allocationVersion = allocation.version();
@@ -189,7 +195,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         // per-line validation loop. The request line order is a presentation
         // detail and cannot define the cross-fulfillment lock order.
         physicalAllocations.lockLotsForPicking(request.tenantId(), request.workspaceId(), request.fulfillmentId(),
-                pickingLotIds(effectiveLines));
+                request.actorMembershipId(), pickingLotIds(effectiveLines));
         Instant validationNow = clock.instant();
         boolean shortage = false;
         Set<UUID> physicalAllocationLineIds = new HashSet<>();
@@ -442,6 +448,45 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         }
         FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
         requireTransition(current.status(), "HANDED_OVER");
+        boolean groupedLoad = isGroupedLoad(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        if (groupedLoad && !hasTransferredGroupedLoad(request.tenantId(), request.workspaceId(), request.fulfillmentId())) {
+            throw error("FULFILLMENT_TRANSITION_INVALID");
+        }
+        if (current.version() != request.expectedVersion()
+                || !Objects.equals(current.physicalAllocationId(), request.physicalAllocationId())) {
+            throw error("DISPATCH_SNAPSHOT_CONCURRENCY_CONFLICT");
+        }
+        DriverAssignmentRow assignment = request.driverAssignmentId() == null ? null
+                : lockDriverAssignment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        if (request.driverAssignmentId() != null && (assignment == null
+                || !request.driverAssignmentId().equals(assignment.id())
+                || request.driverAssignmentVersion() != assignment.fulfillmentVersion() + 1
+                || assignment.fulfillmentVersion() + 1 != request.expectedVersion()
+                || !Objects.equals(assignment.physicalAllocationId(), request.physicalAllocationId())
+                || assignment.physicalAllocationVersion() != request.physicalAllocationVersion())) {
+            throw error("FULFILLMENT_DRIVER_ASSIGNMENT_STALE");
+        }
+        UUID currentCheckId = jdbc.query("select id from logistics.fulfillment_outgoing_goods_check "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_id=? and fulfillment_version=? "
+                        + "and physical_allocation_id=? and physical_allocation_version=? and matches=true "
+                        + "and not exists(select 1 from logistics.fulfillment_outgoing_goods_check c where "
+                        + "c.tenant_id=? and c.workspace_id=? and c.fulfillment_id=? and c.physical_allocation_id=? "
+                        + "and c.physical_allocation_version=? and c.matches=false and not exists ("
+                        + "select 1 from logistics.fulfillment_outgoing_discrepancy_resolution r "
+                        + "where r.tenant_id=c.tenant_id and r.workspace_id=c.workspace_id "
+                        + "and r.discrepancy_check_id=c.id)) order by checked_at desc,id desc limit 1",
+                (rs, row) -> rs.getObject("id", UUID.class), request.tenantId(), request.workspaceId(),
+                request.fulfillmentId(), request.expectedVersion(), request.physicalAllocationId(),
+                request.physicalAllocationVersion(), request.tenantId(), request.workspaceId(),
+                request.fulfillmentId(), request.physicalAllocationId(), request.physicalAllocationVersion())
+                .stream().findFirst().orElse(null);
+        if (!Objects.equals(currentCheckId, request.outgoingGoodsCheckId())) {
+            throw error("DISPATCH_SNAPSHOT_CONCURRENCY_CONFLICT");
+        }
+        if (request.outgoingGoodsCheckId() == null) throw error("FULFILLMENT_OUTGOING_CHECK_REQUIRED");
+        if (request.driverAssignmentId() == null && request.driverAssignmentVersion() >= 0) {
+            throw error("FULFILLMENT_DRIVER_ASSIGNMENT_STALE");
+        }
         Instant now = Objects.requireNonNull(request.now(), "now");
         if (jdbc.update("update logistics.fulfillment_line set dispatched_quantity=staged_quantity where tenant_id=? and workspace_id=? and fulfillment_id=? and staged_quantity>0",
                 request.tenantId(), request.workspaceId(), request.fulfillmentId()) == 0) throw error("FULFILLMENT_NOT_STAGED");
@@ -449,15 +494,346 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                 Timestamp.from(now), Timestamp.from(now), request.tenantId(), request.workspaceId(), request.fulfillmentId(), request.expectedVersion()) != 1) {
             throw error("CONCURRENCY_CONFLICT");
         }
-        UUID deliveryId = UUID.randomUUID();
-        jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,fulfillment_id,status,destination_snapshot,dispatched_at,created_at,updated_at,version) values (?,?,?,?, 'DISPATCHED',?,?,?, ?,0)",
-                deliveryId, request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.destinationSnapshot(),
-                Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        UUID deliveryId = materializeDispatchedDelivery(request.tenantId(), request.workspaceId(), current,
+                request.fulfillmentId(), now);
+        if (assignment != null) {
+            if (groupedLoad) {
+                requireExistingLoadDriverAssignment(request.tenantId(), request.workspaceId(), deliveryId, assignment);
+            } else {
+                jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,assigned_at,actor_membership_id,fulfillment_driver_assignment_id) values (?,?,?,?,?,?,?,?,?)",
+                        UUID.randomUUID(), request.tenantId(), request.workspaceId(), deliveryId,
+                        assignment.responsibleMembershipId(), assignment.responsibleUserId(),
+                        Timestamp.from(assignment.assignedAt()), assignment.actorMembershipId(), assignment.id());
+            }
+        } else if (groupedLoad) {
+            throw error("FULFILLMENT_DRIVER_ASSIGNMENT_REQUIRED");
+        }
+        jdbc.update("insert into logistics.fulfillment_handoff_evidence "
+                        + "(id,tenant_id,workspace_id,fulfillment_id,delivery_id,fulfillment_version,"
+                        + "warehouse_actor_membership_id,driver_assignment_id,driver_membership_id,"
+                        + "physical_allocation_id,physical_allocation_version,outgoing_goods_check_id,"
+                        + "idempotency_key,request_hash,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), request.tenantId(), request.workspaceId(), request.fulfillmentId(), deliveryId,
+                request.expectedVersion() + 1, request.actorMembershipId(),
+                assignment == null ? null : assignment.id(),
+                assignment == null ? null : assignment.responsibleMembershipId(),
+                request.physicalAllocationId(), request.physicalAllocationVersion(), request.outgoingGoodsCheckId(),
+                request.idempotencyKey(), request.requestHash(), Timestamp.from(now));
         insertEvent(request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.status(), "HANDED_OVER",
                 "HAND_OVER", request.actorMembershipId(), "Fulfillment handed over to delivery", now);
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "HAND_OVER",
                 request.idempotencyKey(), request.requestHash(), request.fulfillmentId(), now);
         return load(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+    }
+
+    private UUID materializeDispatchedDelivery(UUID tenantId, UUID workspaceId, FulfillmentRow fulfillment,
+                                               UUID fulfillmentId, Instant now) {
+        List<DeliveryMaterialization> existing = jdbc.query("select id,status from logistics.delivery "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_id=? for update",
+                (rs, row) -> new DeliveryMaterialization(rs.getObject("id", UUID.class), rs.getString("status")),
+                tenantId, workspaceId, fulfillmentId);
+        UUID deliveryId;
+        if (existing.isEmpty()) {
+            deliveryId = UUID.randomUUID();
+            jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,fulfillment_id,status,destination_snapshot,"
+                            + "dispatched_at,created_at,updated_at,version) values (?,?,?,?, 'DISPATCHED',?,?,?, ?,0)",
+                    deliveryId, tenantId, workspaceId, fulfillmentId, fulfillment.destinationSnapshot(),
+                    Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
+        } else {
+            if (existing.size() != 1 || !"PLANNED".equals(existing.getFirst().status())) {
+                throw error("DELIVERY_TRANSITION_INVALID");
+            }
+            deliveryId = existing.getFirst().id();
+            if (jdbc.update("update logistics.delivery set status='DISPATCHED',dispatched_at=?,updated_at=?,version=version+1 "
+                            + "where tenant_id=? and workspace_id=? and id=? and status='PLANNED'",
+                    Timestamp.from(now), Timestamp.from(now), tenantId, workspaceId, deliveryId) != 1) {
+                throw error("CONCURRENCY_CONFLICT");
+            }
+        }
+        CustomerInstructionDeliveryProjection.copy(jdbc, tenantId, workspaceId, fulfillment.salesOrderId(), deliveryId, now);
+        return deliveryId;
+    }
+
+    private boolean isGroupedLoad(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.delivery_load_stop "
+                        + "where tenant_id=? and workspace_id=? and fulfillment_id=?)", Boolean.class,
+                tenantId, workspaceId, fulfillmentId));
+    }
+
+    private boolean hasTransferredGroupedLoad(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from logistics.delivery_load_stop s "
+                        + "join logistics.delivery_load l on l.tenant_id=s.tenant_id and l.workspace_id=s.workspace_id "
+                        + "and l.id=s.load_id where s.tenant_id=? and s.workspace_id=? and s.fulfillment_id=? "
+                        + "and l.status='RESPONSIBILITY_TRANSFERRED')", Boolean.class,
+                tenantId, workspaceId, fulfillmentId));
+    }
+
+    private void requireExistingLoadDriverAssignment(UUID tenantId, UUID workspaceId, UUID deliveryId,
+                                                    DriverAssignmentRow assignment) {
+        Boolean matches = jdbc.queryForObject("select exists(select 1 from logistics.delivery_assignment "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and responsible_membership_id=? "
+                        + "and fulfillment_driver_assignment_id=? and actor_membership_id=?)", Boolean.class,
+                tenantId, workspaceId, deliveryId, assignment.responsibleMembershipId(), assignment.id(),
+                assignment.actorMembershipId());
+        if (!Boolean.TRUE.equals(matches)) throw error("FULFILLMENT_DRIVER_ASSIGNMENT_REQUIRED");
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<FulfillmentView> findHandOverReplay(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
+                                                        String idempotencyKey, String requestHash) {
+        IdempotencyRow prior = idempotency(tenantId, workspaceId, actorMembershipId, "HAND_OVER", idempotencyKey);
+        if (prior == null) return Optional.empty();
+        ensureHash(prior.requestHash(), requestHash);
+        return Optional.of(load(tenantId, workspaceId, prior.resourceId()));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<HandoffEvidence> findHandoffEvidence(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        HandoffEvidenceRow row = jdbc.query("select id,fulfillment_version,delivery_id,"
+                        + "warehouse_actor_membership_id,driver_assignment_id,driver_membership_id,"
+                        + "physical_allocation_id,physical_allocation_version,outgoing_goods_check_id,occurred_at "
+                        + "from logistics.fulfillment_handoff_evidence where tenant_id=? and workspace_id=? and fulfillment_id=?",
+                (rs, index) -> new HandoffEvidenceRow(rs.getObject("id", UUID.class),
+                        rs.getLong("fulfillment_version"), rs.getObject("delivery_id", UUID.class),
+                        rs.getObject("warehouse_actor_membership_id", UUID.class),
+                        rs.getObject("driver_assignment_id", UUID.class),
+                        rs.getObject("driver_membership_id", UUID.class),
+                        rs.getObject("physical_allocation_id", UUID.class), rs.getLong("physical_allocation_version"),
+                        rs.getObject("outgoing_goods_check_id", UUID.class), instant(rs, "occurred_at")),
+                tenantId, workspaceId, fulfillmentId).stream().findFirst().orElse(null);
+        if (row == null) return Optional.empty();
+        FulfillmentView current = load(tenantId, workspaceId, fulfillmentId);
+        boolean stillCurrent = current.version() == row.fulfillmentVersion()
+                && row.deliveryId().equals(current.deliveryId());
+        return Optional.of(new HandoffEvidence(row.id(), fulfillmentId, row.fulfillmentVersion(), row.deliveryId(),
+                row.warehouseActorMembershipId(), row.driverAssignmentId(), row.driverMembershipId(),
+                row.physicalAllocationId(), row.physicalAllocationVersion(), row.outgoingGoodsCheckId(),
+                row.occurredAt(), stillCurrent));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public FulfillmentDriverAssignmentView assignDriver(AssignDriverRequest request) {
+        validateScope(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey());
+        if (request.requestHash() == null || !request.requestHash().matches("[0-9a-f]{64}")
+                || request.responsibleMembershipId() == null || request.responsibleUserId() == null
+                || request.responsibleDisplayName() == null || request.responsibleDisplayName().isBlank()
+                || request.expectedFulfillmentVersion() < 0 || request.expectedPhysicalAllocationVersion() < 0
+                || request.currentFulfillmentVersion() < 0 || request.currentPhysicalAllocationVersion() < 0
+                || request.expectedPhysicalAllocationId() == null || request.currentPhysicalAllocationId() == null) {
+            throw error("INVALID_REQUEST");
+        }
+
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_ASSIGN", request.idempotencyKey());
+        IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_ASSIGN", request.idempotencyKey());
+        if (prior != null) {
+            ensureHash(prior.requestHash(), request.requestHash());
+            return findDriverAssignmentById(request.tenantId(), request.workspaceId(), prior.resourceId())
+                    .orElseThrow(() -> error("FULFILLMENT_DRIVER_ASSIGNMENT_NOT_FOUND"));
+        }
+
+        FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        DriverAssignmentRow existing = lockDriverAssignment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        if (existing != null) {
+            if (!existing.responsibleMembershipId().equals(request.responsibleMembershipId())
+                    || existing.fulfillmentVersion() != request.expectedFulfillmentVersion()) {
+                throw error("FULFILLMENT_DRIVER_ALREADY_ASSIGNED");
+            }
+            if (!existing.physicalAllocationId().equals(request.expectedPhysicalAllocationId())
+                    || existing.physicalAllocationVersion() != request.expectedPhysicalAllocationVersion()) {
+                throw error("PHYSICAL_ALLOCATION_CONCURRENCY_CONFLICT");
+            }
+            insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                    "DRIVER_ASSIGN", request.idempotencyKey(), request.requestHash(), existing.id(), request.now());
+            return findDriverAssignmentById(request.tenantId(), request.workspaceId(), existing.id())
+                    .orElseThrow(() -> error("FULFILLMENT_DRIVER_ASSIGNMENT_NOT_FOUND"));
+        }
+        if (!request.currentReadiness() || !"READY_FOR_DISPATCH".equals(request.currentFulfillmentStatus())) {
+            throw error("FULFILLMENT_NOT_READY_FOR_DISPATCH");
+        }
+        if (current.version() != request.expectedFulfillmentVersion()
+                || current.version() != request.currentFulfillmentVersion()) {
+            throw error("FULFILLMENT_CONCURRENCY_CONFLICT");
+        }
+        if (!"READY_FOR_DISPATCH".equals(current.status())) throw error("FULFILLMENT_NOT_READY_FOR_DISPATCH");
+        if (!current.physicalAllocationId().equals(request.expectedPhysicalAllocationId())
+                || !current.physicalAllocationId().equals(request.currentPhysicalAllocationId())
+                || request.expectedPhysicalAllocationVersion() != request.currentPhysicalAllocationVersion()) {
+            throw error("PHYSICAL_ALLOCATION_CONCURRENCY_CONFLICT");
+        }
+
+        Instant now = Objects.requireNonNull(request.now(), "now");
+        UUID assignmentId = UUID.randomUUID();
+        jdbc.update("insert into logistics.fulfillment_driver_assignment(id,tenant_id,workspace_id,fulfillment_id,physical_allocation_id,fulfillment_version,physical_allocation_version,responsible_membership_id,responsible_user_id,responsible_display_name_snapshot,actor_membership_id,assigned_at) values (?,?,?,?,?,?,?,?,?,?,?,?)",
+                assignmentId, request.tenantId(), request.workspaceId(), request.fulfillmentId(),
+                request.currentPhysicalAllocationId(), current.version(), request.currentPhysicalAllocationVersion(),
+                request.responsibleMembershipId(), request.responsibleUserId(), request.responsibleDisplayName().trim(),
+                request.actorMembershipId(), Timestamp.from(now));
+        if (jdbc.update("update logistics.fulfillment set updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and version=?",
+                Timestamp.from(now), request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.version()) != 1) {
+            throw error("FULFILLMENT_CONCURRENCY_CONFLICT");
+        }
+        insertEvent(request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.status(), current.status(),
+                "DRIVER_ASSIGNED", request.actorMembershipId(), "Driver assigned to prepared Fulfillment", now);
+        insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DRIVER_ASSIGN", request.idempotencyKey(), request.requestHash(), assignmentId, now);
+        return findDriverAssignmentById(request.tenantId(), request.workspaceId(), assignmentId)
+                .orElseThrow(() -> error("FULFILLMENT_DRIVER_ASSIGNMENT_NOT_FOUND"));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public FulfillmentDriverAssignmentView changeDispatchPlan(DispatchPlanChangeRequest request) {
+        validateScope(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey());
+        if (request.requestHash() == null || !request.requestHash().matches("[0-9a-f]{64}")
+                || request.expectedAssignmentId() == null || request.expectedPhysicalAllocationId() == null
+                || request.currentPhysicalAllocationId() == null || request.responsibleMembershipId() == null
+                || request.responsibleUserId() == null || request.responsibleDisplayName() == null
+                || request.responsibleDisplayName().isBlank() || request.expectedFulfillmentVersion() < 0
+                || request.expectedAssignmentVersion() < 0 || request.expectedPhysicalAllocationVersion() < 0
+                || request.currentFulfillmentVersion() < 0 || request.currentPhysicalAllocationVersion() < 0) {
+            throw error("INVALID_REQUEST");
+        }
+
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DISPATCH_PLAN_CHANGE", request.idempotencyKey());
+        IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DISPATCH_PLAN_CHANGE", request.idempotencyKey());
+        if (prior != null) {
+            ensureHash(prior.requestHash(), request.requestHash());
+            return findDriverAssignmentById(request.tenantId(), request.workspaceId(), prior.resourceId())
+                    .orElseThrow(() -> error("FULFILLMENT_DRIVER_ASSIGNMENT_NOT_FOUND"));
+        }
+
+        FulfillmentRow current = lockFulfillment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        DriverAssignmentRow existing = lockDriverAssignment(request.tenantId(), request.workspaceId(), request.fulfillmentId());
+        if (existing == null) throw error("FULFILLMENT_DRIVER_ASSIGNMENT_REQUIRED");
+        if (current.version() != request.expectedFulfillmentVersion()
+                || current.version() != request.currentFulfillmentVersion()
+                || existing.fulfillmentVersion() + 1 != request.expectedAssignmentVersion()
+                || !existing.id().equals(request.expectedAssignmentId())
+                || request.expectedAssignmentVersion() != request.expectedFulfillmentVersion()) {
+            throw error("FULFILLMENT_CONCURRENCY_CONFLICT");
+        }
+        if (!request.currentReadiness() || !"READY_FOR_DISPATCH".equals(request.currentFulfillmentStatus())
+                || !"READY_FOR_DISPATCH".equals(current.status())) {
+            throw error("FULFILLMENT_NOT_READY_FOR_DISPATCH");
+        }
+        if (!Objects.equals(current.physicalAllocationId(), request.expectedPhysicalAllocationId())
+                || !Objects.equals(current.physicalAllocationId(), request.currentPhysicalAllocationId())
+                || !Objects.equals(existing.physicalAllocationId(), request.expectedPhysicalAllocationId())
+                || existing.physicalAllocationVersion() != request.expectedPhysicalAllocationVersion()
+                || request.expectedPhysicalAllocationVersion() != request.currentPhysicalAllocationVersion()) {
+            throw error("PHYSICAL_ALLOCATION_CONCURRENCY_CONFLICT");
+        }
+        if (existing.responsibleMembershipId().equals(request.responsibleMembershipId())
+                && Objects.equals(existing.plannedDispatchAt(), request.plannedDispatchAt())) {
+            throw error("INVALID_REQUEST");
+        }
+
+        Instant now = Objects.requireNonNull(request.now(), "now");
+        UUID assignmentId = UUID.randomUUID();
+        jdbc.update("insert into logistics.fulfillment_driver_assignment"
+                        + "(id,tenant_id,workspace_id,fulfillment_id,physical_allocation_id,fulfillment_version,"
+                        + "physical_allocation_version,responsible_membership_id,responsible_user_id,"
+                        + "responsible_display_name_snapshot,actor_membership_id,assigned_at,planned_dispatch_at) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                assignmentId, request.tenantId(), request.workspaceId(), request.fulfillmentId(),
+                request.currentPhysicalAllocationId(), current.version(), request.currentPhysicalAllocationVersion(),
+                request.responsibleMembershipId(), request.responsibleUserId(), request.responsibleDisplayName().trim(),
+                request.actorMembershipId(), Timestamp.from(now),
+                request.plannedDispatchAt() == null ? null : Timestamp.from(request.plannedDispatchAt()));
+        if (jdbc.update("update logistics.fulfillment set updated_at=?,version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and id=? and version=?",
+                Timestamp.from(now), request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.version()) != 1) {
+            throw error("FULFILLMENT_CONCURRENCY_CONFLICT");
+        }
+        insertEvent(request.tenantId(), request.workspaceId(), request.fulfillmentId(), current.status(), current.status(),
+                "DISPATCH_PLAN_CHANGED", request.actorMembershipId(),
+                "Driver responsibility or planned dispatch time changed", now);
+        insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "DISPATCH_PLAN_CHANGE", request.idempotencyKey(), request.requestHash(), assignmentId, now);
+        return findDriverAssignmentById(request.tenantId(), request.workspaceId(), assignmentId)
+                .orElseThrow(() -> error("FULFILLMENT_DRIVER_ASSIGNMENT_NOT_FOUND"));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<FulfillmentDriverAssignmentView> findDriverAssignment(UUID tenantId, UUID workspaceId,
+                                                                           UUID fulfillmentId) {
+        return jdbc.query("select a.id,a.fulfillment_id,a.fulfillment_version+1 fulfillment_version,"
+                        + "a.physical_allocation_id,a.physical_allocation_version,a.responsible_membership_id,"
+                        + "a.responsible_display_name_snapshot,a.actor_membership_id,a.assigned_at,a.planned_dispatch_at,"
+                        + "d.id delivery_id,(f.version=a.fulfillment_version+1) is_current "
+                        + "from logistics.fulfillment_driver_assignment a join logistics.fulfillment f "
+                        + "on f.tenant_id=a.tenant_id and f.workspace_id=a.workspace_id and f.id=a.fulfillment_id "
+                        + "left join logistics.delivery_assignment da on da.tenant_id=a.tenant_id "
+                        + "and da.workspace_id=a.workspace_id and da.fulfillment_driver_assignment_id=a.id "
+                        + "left join logistics.delivery d on d.tenant_id=da.tenant_id and d.workspace_id=da.workspace_id "
+                        + "and d.id=da.delivery_id where a.tenant_id=? and a.workspace_id=? and a.fulfillment_id=? "
+                        + "order by a.fulfillment_version desc,a.assigned_at desc,a.id desc limit 1",
+                (rs, row) -> driverAssignmentView(rs), tenantId, workspaceId, fulfillmentId)
+                .stream().findFirst();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<FulfillmentDriverAssignmentView> findDriverAssignmentById(UUID tenantId, UUID workspaceId,
+                                                                               UUID assignmentId) {
+        return jdbc.query("select a.id,a.fulfillment_id,a.fulfillment_version+1 fulfillment_version,"
+                        + "a.physical_allocation_id,a.physical_allocation_version,a.responsible_membership_id,"
+                        + "a.responsible_display_name_snapshot,a.actor_membership_id,a.assigned_at,a.planned_dispatch_at,"
+                        + "d.id delivery_id,(f.version=a.fulfillment_version+1) is_current "
+                        + "from logistics.fulfillment_driver_assignment a join logistics.fulfillment f "
+                        + "on f.tenant_id=a.tenant_id and f.workspace_id=a.workspace_id and f.id=a.fulfillment_id "
+                        + "left join logistics.delivery_assignment da on da.tenant_id=a.tenant_id "
+                        + "and da.workspace_id=a.workspace_id and da.fulfillment_driver_assignment_id=a.id "
+                        + "left join logistics.delivery d on d.tenant_id=da.tenant_id and d.workspace_id=da.workspace_id "
+                        + "and d.id=da.delivery_id where a.tenant_id=? and a.workspace_id=? and a.id=?",
+                (rs, row) -> driverAssignmentView(rs), tenantId, workspaceId, assignmentId)
+                .stream().findFirst();
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<FulfillmentDriverAssignmentView> findDriverAssignmentHistory(UUID tenantId, UUID workspaceId,
+                                                                              UUID fulfillmentId) {
+        return jdbc.query("select a.id,a.fulfillment_id,a.fulfillment_version+1 fulfillment_version,"
+                        + "a.physical_allocation_id,a.physical_allocation_version,a.responsible_membership_id,"
+                        + "a.responsible_display_name_snapshot,a.actor_membership_id,a.assigned_at,a.planned_dispatch_at,"
+                        + "d.id delivery_id,(f.version=a.fulfillment_version+1) is_current "
+                        + "from logistics.fulfillment_driver_assignment a join logistics.fulfillment f "
+                        + "on f.tenant_id=a.tenant_id and f.workspace_id=a.workspace_id and f.id=a.fulfillment_id "
+                        + "left join logistics.delivery_assignment da on da.tenant_id=a.tenant_id "
+                        + "and da.workspace_id=a.workspace_id and da.fulfillment_driver_assignment_id=a.id "
+                        + "left join logistics.delivery d on d.tenant_id=da.tenant_id and d.workspace_id=da.workspace_id "
+                        + "and d.id=da.delivery_id where a.tenant_id=? and a.workspace_id=? and a.fulfillment_id=? "
+                        + "order by a.fulfillment_version,a.assigned_at,a.id",
+                (rs, row) -> driverAssignmentView(rs), tenantId, workspaceId, fulfillmentId);
+    }
+
+    private DriverAssignmentRow lockDriverAssignment(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
+        return jdbc.query("select id,fulfillment_version,physical_allocation_id,physical_allocation_version,responsible_membership_id,responsible_user_id,responsible_display_name_snapshot,actor_membership_id,assigned_at,planned_dispatch_at from logistics.fulfillment_driver_assignment where tenant_id=? and workspace_id=? and fulfillment_id=? order by fulfillment_version desc,id desc limit 1 for update",
+                (rs, row) -> new DriverAssignmentRow(rs.getObject("id", UUID.class), rs.getLong("fulfillment_version"),
+                        rs.getObject("physical_allocation_id", UUID.class), rs.getLong("physical_allocation_version"),
+                        rs.getObject("responsible_membership_id", UUID.class), rs.getObject("responsible_user_id", UUID.class),
+                        rs.getString("responsible_display_name_snapshot"), rs.getObject("actor_membership_id", UUID.class),
+                        instant(rs, "assigned_at"), instant(rs, "planned_dispatch_at")), tenantId, workspaceId, fulfillmentId)
+                .stream().findFirst().orElse(null);
+    }
+
+    private static FulfillmentDriverAssignmentView driverAssignmentView(java.sql.ResultSet rs)
+            throws java.sql.SQLException {
+        return new FulfillmentDriverAssignmentView(rs.getObject("id", UUID.class),
+                rs.getObject("fulfillment_id", UUID.class), rs.getLong("fulfillment_version"),
+                rs.getObject("physical_allocation_id", UUID.class), rs.getLong("physical_allocation_version"),
+                rs.getObject("responsible_membership_id", UUID.class), rs.getString("responsible_display_name_snapshot"),
+                rs.getObject("actor_membership_id", UUID.class), instant(rs, "assigned_at"),
+                instant(rs, "planned_dispatch_at"), rs.getObject("delivery_id", UUID.class), rs.getBoolean("is_current"));
     }
 
     private FulfillmentView load(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
@@ -573,6 +949,16 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
     private static final java.util.Set<String> SetOfTerminal = java.util.Set.of("COMPLETED", "CANCELLED");
 
     private record IdempotencyRow(String requestHash, UUID resourceId) { }
+    private record DriverAssignmentRow(UUID id, long fulfillmentVersion, UUID physicalAllocationId,
+                                       long physicalAllocationVersion, UUID responsibleMembershipId,
+                                       UUID responsibleUserId, String displayName, UUID actorMembershipId,
+                                       Instant assignedAt, Instant plannedDispatchAt) { }
+    private record HandoffEvidenceRow(UUID id, long fulfillmentVersion, UUID deliveryId,
+                                      UUID warehouseActorMembershipId, UUID driverAssignmentId,
+                                      UUID driverMembershipId, UUID physicalAllocationId,
+                                      long physicalAllocationVersion, UUID outgoingGoodsCheckId,
+                                      Instant occurredAt) { }
+    private record DeliveryMaterialization(UUID id, String status) { }
     private record FulfillmentLineRow(UUID id, UUID skuId, BigDecimal allocatedQuantity,
                                       BigDecimal pickedQuantity, BigDecimal unfulfilledQuantity, String unit) { }
     private record DiscrepancyRow(UUID id, BigDecimal quantity) { }

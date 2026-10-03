@@ -3,6 +3,7 @@ package com.nexa.api.support;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -11,12 +12,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Real HTTP workflow fixture shared by TASK-008 and TASK-010 integration gates. */
 public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegrationSupport {
     protected PurchaseRequestResource createApprovedPurchaseRequest() throws Exception {
-        ensureCommercialInventory();
+        return createApprovedPurchaseRequest("CAT-0002");
+    }
+
+    protected PurchaseRequestResource createApprovedPurchaseRequest(String catalogItemId) throws Exception {
+        if ("CAT-0002".equals(catalogItemId)) { ensureCommercialInventory(); }
+        else { ensureCommercialInventory(LocalDate.of(2099, 1, 1), catalogItemId); }
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
                         .header("Authorization", "Bearer " + buyer)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
+                        .content("{\"lines\":[{\"catalogItemId\":\"" + catalogItemId + "\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
                 .andExpect(status().isCreated()).andReturn();
         String requestId = json(created).get("id").asText();
         String etag = created.getResponse().getHeader("ETag");
@@ -38,6 +44,11 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
 
     /** Seeds real sellable inventory for v0.14 commercial backing scenarios. */
     protected void ensureCommercialInventory() throws Exception {
+        ensureCommercialInventory(LocalDate.of(2099, 1, 1), "CAT-0002");
+    }
+
+    /** Seeds sellable inventory with the requested expiry and catalog item for deterministic FEFO scenarios. */
+    protected void ensureCommercialInventory(LocalDate expirationDate, String catalogItemId) throws Exception {
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         MvcResult createdWarehouse = mockMvc.perform(post("/api/v1/warehouses")
@@ -46,6 +57,8 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .content("{\"code\":\"WH-COM-" + suffix + "\",\"name\":\"Commercial core warehouse\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
         String warehouseId = json(createdWarehouse).get("id").asText();
+        grantWarehouseAccess(warehouseId);
+        warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult createdZone = mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones")
                         .header("Authorization", "Bearer " + warehouse)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -57,8 +70,8 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .header("Idempotency-Key", "commercial-inbound-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId
-                                + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"B-COM-" + suffix
-                                + "\",\"expirationDate\":\"2099-01-01\",\"quantity\":100,\"unit\":\"UNIT\"}"))
+                                + "\",\"catalogItemId\":\"" + catalogItemId + "\",\"batchNumber\":\"B-COM-" + suffix
+                                + "\",\"expirationDate\":\"" + expirationDate + "\",\"quantity\":100,\"unit\":\"UNIT\"}"))
                 .andExpect(status().isCreated());
     }
 
@@ -85,7 +98,11 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
     }
 
     protected DispatchResource createReservedDispatch() throws Exception {
-        SalesOrderResource pending = createSalesOrder();
+        return createReservedDispatch("CAT-0002", LocalDate.of(2098, 1, 1));
+    }
+
+    protected DispatchResource createReservedDispatch(String catalogItemId, LocalDate expirationDate) throws Exception {
+        SalesOrderResource pending = convert(createApprovedPurchaseRequest(catalogItemId), "convert-" + UUID.randomUUID());
         MvcResult confirmed = mockMvc.perform(post("/api/v1/sales-orders/" + pending.id() + "/confirmations")
                         .header("Authorization", "Bearer " + pending.salesToken()).header("If-Match", pending.etag()))
                 .andExpect(status().isOk()).andReturn();
@@ -95,12 +112,14 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"WH-" + suffix + "\",\"name\":\"Dispatch test warehouse\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
         String warehouseId = json(createdWarehouse).get("id").asText();
+        grantWarehouseAccess(warehouseId);
+        warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult createdZone = mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones").header("Authorization", "Bearer " + warehouse)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"Z-" + suffix + "\",\"name\":\"Frozen dispatch zone\",\"type\":\"FROZEN\",\"temperatureMin\":-25,\"temperatureMax\":-15}"))
                 .andExpect(status().isCreated()).andReturn();
         String zoneId = json(createdZone).get("id").asText();
         mockMvc.perform(post("/api/v1/inventory/inbound-receipts").header("Authorization", "Bearer " + warehouse).header("Idempotency-Key", "inbound-" + suffix)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId + "\",\"catalogItemId\":\"CAT-0002\",\"batchNumber\":\"B-" + suffix + "\",\"expirationDate\":\"2098-01-01\",\"quantity\":20,\"unit\":\"UNIT\",\"temperatureReading\":-18}"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"warehouseId\":\"" + warehouseId + "\",\"zoneId\":\"" + zoneId + "\",\"catalogItemId\":\"" + catalogItemId + "\",\"batchNumber\":\"B-" + suffix + "\",\"expirationDate\":\"" + expirationDate + "\",\"quantity\":20,\"unit\":\"UNIT\",\"temperatureReading\":-18}"))
                 .andExpect(status().isCreated());
         MvcResult reservation = mockMvc.perform(post("/api/v1/fulfillment-candidates/" + pending.id() + "/inventory-reservations")
                         .header("Authorization", "Bearer " + warehouse).header("If-Match", confirmed.getResponse().getHeader("ETag"))
@@ -113,6 +132,15 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .header("Idempotency-Key", "dispatch-create-" + suffix))
                 .andExpect(status().isCreated()).andReturn();
         return new DispatchResource(json(dispatch).get("id").asText(), json(dispatch).get("dispatchNumber").asText(), dispatch.getResponse().getHeader("ETag"), logistics, reservationId, confirmed.getResponse().getHeader("ETag"), pending.id());
+    }
+
+    private void grantWarehouseAccess(String warehouseId) throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                .andExpect(status().isOk());
     }
 
     protected tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {

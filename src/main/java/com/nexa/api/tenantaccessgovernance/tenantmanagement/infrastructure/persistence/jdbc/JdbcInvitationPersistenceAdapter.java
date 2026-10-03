@@ -16,6 +16,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -151,12 +153,50 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 
 	@Override
 	public Optional<InvitationSnapshot> findForUpdateByTokenHash(String tokenHash) {
+		if (!TransactionSynchronizationManager.isSynchronizationActive()
+				|| !TransactionSynchronizationManager.isActualTransactionActive()) {
+			throw new IllegalStateException("Invitation acceptance requires an active transaction");
+		}
 		jdbc.queryForObject("select set_config('app.invitation_accept_token_hash', ?, true)", String.class, tokenHash);
-		Optional<InvitationSnapshot> snapshot = querySnapshot("select id,tenant_id,workspace_id,email,display_name,token_hash,status,expires_at,created_by_membership_id,version,created_at from tenant_management.organization_invitation where token_hash=? and status='PENDING' for update", tokenHash);
-		snapshot.ifPresent(value -> jdbc.queryForObject(
-				"select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true)",
-				String.class, value.invitation().tenantId().toString(), value.invitation().workspaceId().toString()));
-		return snapshot;
+		// The bearer-token SELECT policy cannot lock a row before its write scope is installed.
+		Optional<AcceptanceLookup> lookup = jdbc.query(
+				"select id,tenant_id,workspace_id from tenant_management.organization_invitation where token_hash=? and status='PENDING'",
+				(rs, row) -> new AcceptanceLookup(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
+						rs.getObject(3, UUID.class)), tokenHash).stream().findFirst();
+		if (lookup.isEmpty()) return Optional.empty();
+		AcceptanceLookup scope = lookup.get();
+		propagateAcceptanceScope(scope.tenantId(), scope.workspaceId());
+		jdbc.queryForObject(
+				"select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true) || set_config('app.cross_scope_workspace_scan', '', true)",
+				String.class, scope.tenantId().toString(), scope.workspaceId().toString());
+		// Revalidate token and state under the row lock; a concurrent revoke/rotation cannot be accepted.
+		return querySnapshot("select id,tenant_id,workspace_id,email,display_name,token_hash,status,expires_at,created_by_membership_id,version,created_at from tenant_management.organization_invitation where id=? and tenant_id=? and workspace_id=? and token_hash=? and status='PENDING' for update",
+				scope.invitationId(), scope.tenantId(), scope.workspaceId(), tokenHash);
+	}
+
+	private record AcceptanceLookup(UUID invitationId, UUID tenantId, UUID workspaceId) { }
+
+	private void propagateAcceptanceScope(UUID tenantId, UUID workspaceId) {
+		boolean cleanupRegistered = TransactionSynchronizationManager.getSynchronizations().stream()
+				.anyMatch(AcceptanceScopeSynchronization.class::isInstance);
+		if (!cleanupRegistered) {
+			TransactionSynchronizationManager.registerSynchronization(new AcceptanceScopeSynchronization(
+					RlsRequestScope.current(), RlsRequestScope.crossScopeWorkspaceScanEnabled()));
+		}
+		RlsRequestScope.clearCrossScopeWorkspaceScan();
+		RlsRequestScope.set(tenantId, workspaceId);
+	}
+
+	private record AcceptanceScopeSynchronization(RlsRequestScope.Scope previousScope,
+			boolean previousCrossScopeWorkspaceScan) implements TransactionSynchronization {
+		@Override
+		public void afterCompletion(int status) {
+			RlsRequestScope.clear();
+			if (previousScope != null) {
+				RlsRequestScope.set(previousScope.tenantId(), previousScope.workspaceId());
+			}
+			if (previousCrossScopeWorkspaceScan) RlsRequestScope.enableCrossScopeWorkspaceScan();
+		}
 	}
 
 	@Override

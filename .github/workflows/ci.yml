@@ -2,7 +2,7 @@ name: API CI
 
 on:
   push:
-    branches: [main, develop, "feature/**", "release/**", "integration/**"]
+    branches: [main, develop, "feature/**", "fix/**", "release/**", "integration/**"]
   pull_request:
     branches: [main, develop]
 
@@ -21,8 +21,10 @@ jobs:
           cache: maven
       - name: Fetch published v0.17.1 migration baseline
         run: git fetch --no-tags --depth=1 origin refs/tags/v0.17.1:refs/tags/v0.17.1
-      - name: Fetch latest published v0.18.0 consumer baseline
+      - name: Fetch published v0.18.0 consumer baseline
         run: git fetch --no-tags --depth=1 origin refs/tags/v0.18.0:refs/tags/v0.18.0
+      - name: Fetch latest published v0.19.0 consumer baseline
+        run: git fetch --no-tags --depth=1 origin refs/tags/v0.19.0:refs/tags/v0.19.0
       - name: Start external integration adapters
         run: |
           docker run -d --name nexa-ci-clamav -p 3310:3310 clamav/clamav-debian:1.4.3
@@ -65,6 +67,11 @@ jobs:
           python3 .github/scripts/test_check_openapi_compatibility.py
           python3 .github/scripts/check-openapi-compatibility.py
       - name: Verify OpenAPI compatibility against latest published release
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v0.19.0
+        run: python3 .github/scripts/check-openapi-compatibility.py
+      - name: Verify OpenAPI compatibility against previous consumer release
         if: ${{ github.event_name == 'pull_request' }}
         env:
           OPENAPI_BASE_REF: v0.18.0

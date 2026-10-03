@@ -20,7 +20,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Fresh-schema proof for the complete V107 direct-scope RLS inventory. */
+/** Fresh-schema proof for the complete current direct-scope RLS inventory. */
 @Testcontainers(disabledWithoutDocker = true)
 class ModernPostgresRlsClosureMigrationTests {
     @Container
@@ -30,7 +30,7 @@ class ModernPostgresRlsClosureMigrationTests {
             .withPassword("test-only-password");
 
     @Test
-    void freshSchemaMatchesEveryTableClassificationAndV107Policy() throws Exception {
+    void freshSchemaMatchesEveryTableClassificationAndV142Policy() throws Exception {
         try (Connection connection = POSTGRES.createConnection(""); var statement = connection.createStatement()) {
             statement.execute("create role nexa_runtime");
         }
@@ -38,9 +38,9 @@ class ModernPostgresRlsClosureMigrationTests {
                 .locations("classpath:db/migration").load().migrate();
 
         try (Connection connection = POSTGRES.createConnection("")) {
-            Map<String, InventoryEntry> inventory = readInventory("v107");
+            Map<String, InventoryEntry> inventory = readInventory("v142");
             assertHistoricalV102EvidenceRemainsConsistent();
-            assertScopeEvidenceCoversV107ClosureDelta(inventory);
+            assertScopeEvidenceCoversCurrentClosureDelta(inventory);
             Map<String, Long> categoryCounts = inventory.values().stream().collect(java.util.stream.Collectors.groupingBy(
                     InventoryEntry::category, java.util.stream.Collectors.counting()));
             assertThat(categoryCounts.getOrDefault("APPROVED_EXCEPTION", 0L)).isZero();
@@ -147,7 +147,7 @@ class ModernPostgresRlsClosureMigrationTests {
                 .isEqualTo(19L);
     }
 
-    private static void assertScopeEvidenceCoversV107ClosureDelta(Map<String, InventoryEntry> current) throws Exception {
+    private static void assertScopeEvidenceCoversCurrentClosureDelta(Map<String, InventoryEntry> current) throws Exception {
         Map<String, InventoryEntry> historicalV102 = readInventory("v102");
         Set<String> newlyForced = new LinkedHashSet<>();
         current.forEach((table, entry) -> {
@@ -155,14 +155,50 @@ class ModernPostgresRlsClosureMigrationTests {
                     && !historicalV102.containsKey(table)) newlyForced.add(table);
         });
         Set<String> expectedNewlyForced = Set.of(
+                "catalog_management.customer_terms",
+                "catalog_management.price_list",
+                "catalog_management.price_list_item",
+                "logistics.customer_instruction_revision",
+                "logistics.customer_instruction_set",
+                "logistics.delivery_active_attempt",
+                "logistics.delivery_execution_disposition",
+                "logistics.delivery_execution_hold",
+                "logistics.delivery_execution_temperature_evidence",
+                "logistics.delivery_instruction_acknowledgement",
+                "logistics.delivery_instruction_revision",
+                "logistics.delivery_load",
+                "logistics.delivery_load_command_idempotency",
+                "logistics.delivery_load_event",
+                "logistics.delivery_load_stop",
+                "logistics.dispatch_handoff_identity",
+                "logistics.driver_coordinate",
+                "logistics.driver_delivery_incident",
+                "logistics.driver_delivery_incident_evidence",
+                "logistics.driver_workday",
+                "logistics.driver_workday_event",
+                "logistics.fulfillment_dispatch_window_plan",
+                "logistics.fulfillment_driver_assignment",
+                "logistics.fulfillment_handoff_evidence",
+                "logistics.fulfillment_outgoing_discrepancy_resolution",
+                "logistics.fulfillment_outgoing_goods_check",
+                "logistics.fulfillment_outgoing_goods_check_line",
+                "logistics.operational_exception_case",
+                "logistics.operational_exception_coordination_transition",
+                "logistics.operational_exception_transition",
+                "logistics.stock_temperature_exception",
+                "sales.field_visit_evidence",
                 "sales.purchase_request_material_change",
+                "tenant_management.warehouse_access_grant",
+                "warehouse.inbound_receiving_discrepancy_case",
+                "warehouse.inventory_cycle_count",
+                "warehouse.inventory_cycle_count_correction",
                 "warehouse.inventory_transfer_history",
-                "catalog_management.price_list", "catalog_management.price_list_item",
-                "catalog_management.customer_terms");
-        assertThat(newlyForced).as("V103, V104, and V107 add the scoped tables in the official line")
+                "warehouse.inventory_transfer_receipt_observation",
+                "warehouse.physical_allocation_substitution_request");
+        assertThat(newlyForced).as("V103 through V142 add the explicitly classified scoped tables in the current line")
                 .containsExactlyInAnyOrderElementsOf(expectedNewlyForced);
 
-        List<String> evidenceLines = Files.readAllLines(Path.of("docs/security/rls-direct-scope-evidence-v107.tsv"));
+        List<String> evidenceLines = Files.readAllLines(Path.of("docs/security/rls-direct-scope-evidence-v142.tsv"));
         assertThat(evidenceLines.getFirst()).isEqualTo("table\tcategory\tscope_source\ttenant_id\tworkspace_id\tparent_derived\tread_write_paths\tworker_path\trls_required\tpolicy_shape\ttest\treason");
         Set<String> evidenced = new LinkedHashSet<>();
         for (String line : evidenceLines.subList(1, evidenceLines.size())) {
@@ -176,7 +212,7 @@ class ModernPostgresRlsClosureMigrationTests {
             assertThat(fields[8]).isEqualTo("yes");
             assertThat(fields[9]).contains("USING+WITH CHECK");
             assertThat(fields[10]).isNotBlank();
-            assertThat(evidenced.add(fields[0])).as("V107 scope evidence appears once: %s", fields[0]).isTrue();
+            assertThat(evidenced.add(fields[0])).as("current scope evidence appears once: %s", fields[0]).isTrue();
         }
         assertThat(evidenced).as("every post-V102 direct-scope table has current per-table evidence")
                 .containsExactlyInAnyOrderElementsOf(expectedNewlyForced);
@@ -249,7 +285,11 @@ class ModernPostgresRlsClosureMigrationTests {
                        has_table_privilege('nexa_runtime','catalog_management.customer_terms','SELECT'),
                        has_table_privilege('nexa_runtime','catalog_management.customer_terms','INSERT'),
                        has_table_privilege('nexa_runtime','catalog_management.customer_terms','UPDATE'),
-                       has_table_privilege('nexa_runtime','catalog_management.customer_terms','DELETE')
+                       has_table_privilege('nexa_runtime','catalog_management.customer_terms','DELETE'),
+                       has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','SELECT'),
+                       has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','INSERT'),
+                       has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','UPDATE'),
+                       has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','DELETE')
                 """)) {
             try (ResultSet rows = statement.executeQuery()) {
                 assertThat(rows.next()).isTrue();
@@ -268,6 +308,10 @@ class ModernPostgresRlsClosureMigrationTests {
                     assertThat(rows.getBoolean(column + 2)).as("V107 withholds scoped price updates").isFalse();
                     assertThat(rows.getBoolean(column + 3)).as("V107 withholds scoped price deletes").isFalse();
                 }
+                assertThat(rows.getBoolean(26)).as("V142 grants scoped stock-temperature exception reads").isTrue();
+                assertThat(rows.getBoolean(27)).as("V142 grants scoped stock-temperature exception creation").isTrue();
+                assertThat(rows.getBoolean(28)).as("V142 grants scoped stock-temperature exception resolution updates").isTrue();
+                assertThat(rows.getBoolean(29)).as("V142 withholds stock-temperature exception deletion").isFalse();
             }
         }
     }

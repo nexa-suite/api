@@ -32,6 +32,7 @@ class AccessPolicyTests {
 				MembershipRole.SALES,
 				MembershipRole.WAREHOUSE,
 				MembershipRole.LOGISTICS,
+				MembershipRole.BUSINESS_OPERATIONS_MANAGER,
 				MembershipRole.BUYER);
 		assertThat(MembershipRole.from("company owner")).isEqualTo(MembershipRole.COMPANY_OWNER);
 		assertThatThrownBy(() -> MembershipRole.from("admin"))

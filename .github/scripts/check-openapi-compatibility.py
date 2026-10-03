@@ -41,9 +41,60 @@ def _resolve(schema, components):
     return schema
 
 
+def _nullable_union_value_schema(schema):
+    """Return a sole non-null anyOf branch when the other branch is JSON null."""
+    if not isinstance(schema, dict):
+        return None
+    alternatives = schema.get("anyOf")
+    if not isinstance(alternatives, list) or len(alternatives) != 2:
+        return None
+    harmless_metadata = {
+        "anyOf", "description", "title", "example", "deprecated", "readOnly", "writeOnly"
+    }
+    if not set(schema).issubset(harmless_metadata):
+        return None
+
+    def is_unconstrained_null_branch(branch):
+        return (isinstance(branch, dict)
+                and branch.get("type") in ("null", ["null"])
+                and set(branch).issubset({"type", "description", "title", "example",
+                                          "deprecated", "readOnly", "writeOnly"}))
+
+    null_branches = [branch for branch in alternatives if is_unconstrained_null_branch(branch)]
+    value_branches = [branch for branch in alternatives if branch not in null_branches]
+    if len(null_branches) == 1 and len(value_branches) == 1:
+        return value_branches[0]
+    return None
+
+
 def schema_breaks(old, new, location, old_components, new_components, visited=None):
     if not isinstance(old, dict) or not isinstance(new, dict):
         return []
+    old_nullable_value_schema = _nullable_union_value_schema(old)
+    nullable_value_schema = _nullable_union_value_schema(new)
+    old_has_any_of = "anyOf" in old
+    new_has_any_of = "anyOf" in new
+
+    if old_has_any_of and old_nullable_value_schema is None:
+        return [] if old == new else [f"{location}: unsupported anyOf schema changed"]
+    if new_has_any_of and nullable_value_schema is None:
+        return [] if old == new else [f"{location}: unsupported anyOf schema introduced or changed"]
+
+    if old_nullable_value_schema is not None and nullable_value_schema is not None:
+        # Compare both value branches. This also keeps later nullable-to-nullable
+        # changes subject to the same field, type, enum, and required checks.
+        return schema_breaks(
+            old_nullable_value_schema, nullable_value_schema, location,
+            old_components, new_components, visited)
+    if nullable_value_schema is not None:
+        # A null alternative is compatible only when the prior non-null schema
+        # remains intact; compare that branch with the existing recursive gate.
+        return schema_breaks(
+            old, nullable_value_schema, location,
+            old_components, new_components, visited)
+    if old_nullable_value_schema is not None:
+        return [f"{location}: nullable alternative removed"]
+
     visited = set() if visited is None else visited
     old_resolved = _resolve(old, old_components)
     new_resolved = _resolve(new, new_components)

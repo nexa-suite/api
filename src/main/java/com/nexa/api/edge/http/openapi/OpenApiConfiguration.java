@@ -5,7 +5,9 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.media.BooleanSchema;
 import io.swagger.v3.oas.models.media.ArraySchema;
+import io.swagger.v3.oas.models.media.ComposedSchema;
 import io.swagger.v3.oas.models.media.IntegerSchema;
+import io.swagger.v3.oas.models.media.JsonSchema;
 import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.ObjectSchema;
 import io.swagger.v3.oas.models.media.Schema;
@@ -15,6 +17,10 @@ import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.core.converter.AnnotatedType;
+import io.swagger.v3.core.converter.ModelConverter;
+import io.swagger.v3.core.converter.ModelConverterContext;
+import io.swagger.v3.core.util.Json;
 import org.springdoc.core.customizers.GlobalOpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,10 +31,39 @@ import org.springframework.boot.info.BuildProperties;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Iterator;
 
 @Configuration(proxyBeanMethods = false)
 @Profile("local")
 public class OpenApiConfiguration {
+	@Bean
+	ModelConverter applicationResponseSchemaNames() {
+		return new ModelConverter() {
+			private final Map<String, String> schemaNames = Map.of(
+					"com.nexa.api.fulfillmentdelivery.application.model.OutgoingGoodsCheckModels$Line",
+					"OutgoingGoodsCheckLine",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Line",
+					"ExecutionTemperatureLine",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Snapshot",
+					"ExecutionTemperatureSnapshot",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Reading",
+					"ExecutionTemperatureReading",
+					"com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels$Hold",
+					"ExecutionTemperatureHold");
+
+			@Override
+			public Schema<?> resolve(AnnotatedType type, ModelConverterContext context,
+					Iterator<ModelConverter> chain) {
+				if (type != null && type.getType() != null) {
+					String typeName = Json.mapper().constructType(type.getType()).getRawClass().getName();
+					String schemaName = schemaNames.get(typeName);
+					if (schemaName != null) type.name(schemaName);
+				}
+				return chain.hasNext() ? chain.next().resolve(type, context, chain) : null;
+			}
+		};
+	}
+
 	@Bean
 	OpenAPI nexaOpenAPI(ObjectProvider<BuildProperties> buildProperties,
 			@Value("${spring.application.version:unknown}") String configuredVersion) {
@@ -80,6 +115,30 @@ public class OpenApiConfiguration {
 			openAPI.getPaths().values().stream()
 					.flatMap(path -> path.readOperations().stream())
 					.forEach(operation -> addTechnicalResponses(operation, statuses));
+		};
+	}
+
+	@Bean
+	GlobalOpenApiCustomizer nullableCatalogPriceProperties() {
+		return openAPI -> {
+			Map<String, Schema> schemas = openAPI.getComponents() == null ? null : openAPI.getComponents().getSchemas();
+			if (schemas == null) return;
+			for (String response : List.of("CatalogItemSummaryResponse", "CatalogItemDetailResponse")) {
+				Schema<?> schema = schemas.get(response);
+				if (schema == null) continue;
+				if (schema.getProperties() == null) throw new IllegalStateException("Catalog response has no properties: " + response);
+				for (String property : List.of("basePrice", "currentOfferPrice")) {
+					Object existing = schema.getProperties().get(property);
+					if (!(existing instanceof Schema<?> reference) || reference.get$ref() == null) {
+						throw new IllegalStateException("Catalog price schema reference is unavailable: "
+								+ response + "." + property);
+					}
+					List<Schema> alternatives = new java.util.ArrayList<>();
+					alternatives.add(new Schema<>().$ref(reference.get$ref()));
+					alternatives.add(new JsonSchema().types(java.util.Set.of("null")));
+					schema.addProperty(property, new ComposedSchema().anyOf(alternatives));
+				}
+			}
 		};
 	}
 

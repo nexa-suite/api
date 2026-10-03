@@ -19,7 +19,7 @@ public class AdjustInventory {
     public WarehouseOperationsService.LotSummary execute(CurrentAccessContext context, String lotId, BigDecimal quantity,
                                                           boolean inbound, String reason, long expectedVersion,
                                                           String idempotencyKey, String correlationId) {
-        WarehouseApplicationAuthorization.write(context);
+        WarehouseApplicationAuthorization.adjust(context);
         return persistence.adjust(context, lotId, quantity, inbound, reason, expectedVersion, idempotencyKey, correlationId);
     }
 }

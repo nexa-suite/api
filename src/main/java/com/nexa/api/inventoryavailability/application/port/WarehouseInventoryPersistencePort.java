@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.WarehouseOperationsService
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 public interface WarehouseInventoryPersistencePort {
     WarehouseOperationsService.Page<WarehouseOperationsService.LotSummary> lots(CurrentAccessContext context, String catalogItemId, String warehouseId, String zoneId, String status, int page, int size, String sort);
@@ -17,5 +18,13 @@ public interface WarehouseInventoryPersistencePort {
     WarehouseOperationsService.LotSummary quarantineLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation);
     WarehouseOperationsService.LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation);
     WarehouseOperationsService.LotSummary disposeLot(CurrentAccessContext context, String lotId, String disposition, long expected, String reason, String key, String correlation);
+    WarehouseOperationsService.LotSummary disposeTemperatureQuantity(CurrentAccessContext context, String lotId,
+            String disposition, BigDecimal affectedQuantity, UUID temperatureEvaluationId, long expected,
+            String reason, String key, String correlation);
+    WarehouseOperationsService.CycleCountRecord recordCycleCount(CurrentAccessContext context, String lotId,
+            WarehouseOperationsService.CycleCountCommand command, long expectedLotVersion, String key, String correlation);
+    WarehouseOperationsService.CycleCountCorrection applyCycleCountCorrection(CurrentAccessContext context,
+            String countId, long expectedLotVersion, String key, String correlation);
     List<WarehouseOperationsService.Availability> availability(CurrentAccessContext context, List<String> ids);
+    List<WarehouseOperationsService.Availability> warehouseAvailability(CurrentAccessContext context, String warehouseId, List<String> ids);
 }

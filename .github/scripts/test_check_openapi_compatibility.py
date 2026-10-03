@@ -97,6 +97,130 @@ class OpenApiCompatibilityFixtures(unittest.TestCase):
             "id": {"type": "integer"}})})
         self.assertFail(old, new)
 
+    def test_j_nullable_any_of_preserves_the_existing_reference(self):
+        money = {"type": "object", "properties": {
+            "amount": {"type": "string"}, "currency": {"type": "string"}}}
+        old = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"$ref": "#/components/schemas/MoneyResponse"}}),
+        })
+        new = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"anyOf": [
+                    {"$ref": "#/components/schemas/MoneyResponse"},
+                    {"type": "null"},
+                ]}}),
+        })
+        self.assertPass(old, new)
+
+    def test_k_nullable_any_of_still_fails_when_the_value_schema_breaks(self):
+        old = document(operation(), {
+            "MoneyResponse": {"type": "object", "properties": {
+                "amount": {"type": "string"}, "currency": {"type": "string"}}},
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"$ref": "#/components/schemas/MoneyResponse"}}),
+        })
+        new = document(operation(), {
+            "MoneyResponse": {"type": "object", "properties": {
+                "amount": {"type": "string"}}},
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"anyOf": [
+                    {"$ref": "#/components/schemas/MoneyResponse"},
+                    {"type": "null"},
+                ]}}),
+        })
+        self.assertFail(old, new)
+
+    def test_l_nullable_any_of_does_not_accept_an_unchecked_extra_value_branch(self):
+        money = {"type": "object", "properties": {
+            "amount": {"type": "string"}, "currency": {"type": "string"}}}
+        old = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"$ref": "#/components/schemas/MoneyResponse"}}),
+        })
+        new = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"anyOf": [
+                    {"$ref": "#/components/schemas/MoneyResponse"},
+                    {"type": "null"},
+                    {"type": "string"},
+                ]}}),
+        })
+        self.assertFail(old, new)
+
+    def test_m_nullable_to_nullable_change_still_checks_value_fields(self):
+        old = document(operation(), {
+            "MoneyResponse": {"type": "object", "properties": {
+                "amount": {"type": "string"}, "currency": {"type": "string"}}},
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"anyOf": [
+                    {"$ref": "#/components/schemas/MoneyResponse"},
+                    {"type": "null"},
+                ]}}),
+        })
+        new = document(operation(), {
+            "MoneyResponse": {"type": "object", "properties": {
+                "amount": {"type": "string"}}},
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"anyOf": [
+                    {"$ref": "#/components/schemas/MoneyResponse"},
+                    {"type": "null"},
+                ]}}),
+        })
+        self.assertFail(old, new)
+
+    def test_n_nullable_any_of_with_validation_sibling_is_rejected(self):
+        money = {"type": "object", "properties": {
+            "amount": {"type": "string"}, "currency": {"type": "string"}}}
+        old = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"$ref": "#/components/schemas/MoneyResponse"}}),
+        })
+        new = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"anyOf": [
+                    {"$ref": "#/components/schemas/MoneyResponse"},
+                    {"type": "null"},
+                ], "type": "string"}}),
+        })
+        self.assertFail(old, new)
+
+    def test_o_nullable_any_of_with_constrained_null_branch_is_rejected(self):
+        money = {"type": "object", "properties": {
+            "amount": {"type": "string"}, "currency": {"type": "string"}}}
+        old = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"$ref": "#/components/schemas/MoneyResponse"}}),
+        })
+        new = document(operation(), {
+            "MoneyResponse": money,
+            "Item": item_schema(properties={
+                "id": {"type": "string"},
+                "price": {"anyOf": [
+                    {"$ref": "#/components/schemas/MoneyResponse"},
+                    {"type": "null", "$ref": "#/components/schemas/MoneyResponse"},
+                ]}}),
+        })
+        self.assertFail(old, new)
+
 
 if __name__ == "__main__":
     unittest.main()

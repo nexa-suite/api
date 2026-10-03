@@ -2,17 +2,21 @@ package com.nexa.api.catalogcommercialpolicy.presentation.rest.response;
 
 import java.time.Instant;
 import java.util.List;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 public record CatalogItemDetailResponse(String catalogItemId, String productId, String itemName, String brandName,
-		String categoryName, String description, String presentation, MoneyResponse unitPrice,
+		String categoryName, String description, String presentation, @JsonInclude(JsonInclude.Include.NON_NULL) MoneyResponse unitPrice,
 		String coldChainRequirement, CatalogMediaResponse image, String status, String availabilityStatus,
-		boolean nearExpiry, String promotionLabel, MoneyResponse basePrice, MoneyResponse effectivePrice,
-		MoneyResponse discountAmount, String currency, List<CatalogAppliedPromotionResponse> appliedPromotions,
-		Instant pricingAsOf, String productFamilyId, String productFamilyCode, String productFamilyName,
+		boolean nearExpiry, String promotionLabel, MoneyResponse basePrice,
+		@JsonInclude(JsonInclude.Include.NON_NULL) MoneyResponse effectivePrice,
+		@JsonInclude(JsonInclude.Include.NON_NULL) MoneyResponse discountAmount,
+		@JsonInclude(JsonInclude.Include.NON_NULL) String currency,
+		@JsonInclude(JsonInclude.Include.NON_NULL) List<CatalogAppliedPromotionResponse> appliedPromotions,
+		@JsonInclude(JsonInclude.Include.NON_NULL) Instant pricingAsOf, String productFamilyId, String productFamilyCode, String productFamilyName,
 		String sellableSkuId, String skuCode, String unitOfMeasure, String packagingType,
 			java.math.BigDecimal netWeight, java.math.BigDecimal grossWeight, Instant availabilityAsOf,
 			String productVariantCode, String productVariantName, java.math.BigDecimal sellableAvailability,
-			MoneyResponse currentOfferPrice) {
+		MoneyResponse currentOfferPrice) {
 	public CatalogItemDetailResponse(String catalogItemId, String productId, String itemName, String brandName,
 			String categoryName, String description, String presentation, MoneyResponse unitPrice,
 			String coldChainRequirement, CatalogMediaResponse image, String status, String availabilityStatus,

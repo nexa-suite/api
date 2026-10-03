@@ -113,6 +113,9 @@ public final class PermissionCatalog {
 					PermissionKey.DISPATCH_COMPLETE, PermissionKey.LOGISTICS_ANALYTICS_READ,
 					PermissionKey.DOCUMENT_READ, PermissionKey.DOCUMENT_UPLOAD,
 					PermissionKey.NOTIFICATION_READ);
+			case BUSINESS_OPERATIONS_MANAGER -> Set.of(
+					PermissionKey.DELIVERY_EXCEPTION_READ, PermissionKey.DELIVERY_EXCEPTION_COORDINATE,
+					PermissionKey.NOTIFICATION_READ, PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
 			case BUYER -> Set.of(
 					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PROMOTION_READ,
 					PermissionKey.BUYER_SALES_READ, PermissionKey.BUYER_SALES_WRITE,

@@ -63,12 +63,14 @@ public final class DatabaseRuntimeConfigurationValidator {
                and n.nspname not in ('pg_catalog', 'information_schema')
                and has_function_privilege(current_user, p.oid, 'EXECUTE')
                and p.oid is distinct from to_regprocedure('integration.purge_expired_change_events(integer)')
+               and p.oid is distinct from to_regprocedure('logistics.purge_expired_driver_coordinates()')
              order by 1
             """;
     private static final String UNSAFE_ALLOWED_SECURITY_DEFINER_SQL = """
             select count(*)
               from pg_proc p
-             where p.oid = to_regprocedure('integration.purge_expired_change_events(integer)')
+             where p.oid in (to_regprocedure('integration.purge_expired_change_events(integer)'),
+                             to_regprocedure('logistics.purge_expired_driver_coordinates()'))
                and (p.proowner = current_user::regrole
                     or not exists (
                         select 1
@@ -93,7 +95,7 @@ public final class DatabaseRuntimeConfigurationValidator {
             Long unsafeAllowedSecurityDefiners = jdbc.queryForObject(UNSAFE_ALLOWED_SECURITY_DEFINER_SQL, Long.class);
             if (unsafeAllowedSecurityDefiners != null && unsafeAllowedSecurityDefiners > 0) {
                 unsafeSecurityDefiners = new java.util.ArrayList<>(unsafeSecurityDefiners);
-                unsafeSecurityDefiners.add("integration.purge_expired_change_events(integer)");
+                unsafeSecurityDefiners.add("approved retention function has unsafe ownership or search_path");
             }
             validate(configuredRuntimeUser, identity, ownedObjects == null ? 0L : ownedObjects,
                     unsafeRoles, creatableSchemas, unsafeSecurityDefiners);

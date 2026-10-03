@@ -2,10 +2,12 @@ package com.nexa.api.fulfillmentdelivery.application.port;
 
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.FulfillmentView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.LineView;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.HandoffEvidence;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** BC-06 write/read port; SQL remains in the logistics adapter. */
@@ -23,6 +25,24 @@ public interface FulfillmentPersistencePort {
     ShortageResolutionResult resolveShortage(ShortageResolutionRequest request);
 
     FulfillmentView handOver(HandOverRequest request);
+
+    Optional<FulfillmentView> findHandOverReplay(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
+                                                  String idempotencyKey, String requestHash);
+
+    Optional<HandoffEvidence> findHandoffEvidence(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
+
+    FulfillmentDriverAssignmentView assignDriver(AssignDriverRequest request);
+
+    FulfillmentDriverAssignmentView changeDispatchPlan(DispatchPlanChangeRequest request);
+
+    Optional<FulfillmentDriverAssignmentView> findDriverAssignment(UUID tenantId, UUID workspaceId,
+                                                                    UUID fulfillmentId);
+
+    Optional<FulfillmentDriverAssignmentView> findDriverAssignmentById(UUID tenantId, UUID workspaceId,
+                                                                        UUID assignmentId);
+
+    List<FulfillmentDriverAssignmentView> findDriverAssignmentHistory(UUID tenantId, UUID workspaceId,
+                                                                      UUID fulfillmentId);
 
     record CreateRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                          UUID salesOrderId, UUID physicalAllocationId, String destinationSnapshot,
@@ -69,5 +89,40 @@ public interface FulfillmentPersistencePort {
 
     record HandOverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
                            long expectedVersion, UUID actorMembershipId, String idempotencyKey,
-                           String requestHash, Instant now) { }
+                           String requestHash, Instant now, UUID driverAssignmentId,
+                           long driverAssignmentVersion, UUID physicalAllocationId,
+                           long physicalAllocationVersion, UUID outgoingGoodsCheckId) {
+        public HandOverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                               long expectedVersion, UUID actorMembershipId, String idempotencyKey,
+                               String requestHash, Instant now) {
+            this(tenantId, workspaceId, fulfillmentId, expectedVersion, actorMembershipId,
+                    idempotencyKey, requestHash, now, null, -1, null, -1, null);
+        }
+    }
+
+    record AssignDriverRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                               long expectedFulfillmentVersion, UUID expectedPhysicalAllocationId,
+                               long expectedPhysicalAllocationVersion, long currentFulfillmentVersion,
+                               String currentFulfillmentStatus, boolean currentReadiness,
+                               UUID currentPhysicalAllocationId, long currentPhysicalAllocationVersion,
+                               UUID responsibleMembershipId, UUID responsibleUserId,
+                               String responsibleDisplayName, UUID actorMembershipId,
+                               String idempotencyKey, String requestHash, Instant now) { }
+
+    record DispatchPlanChangeRequest(UUID tenantId, UUID workspaceId, UUID fulfillmentId,
+                                     long expectedFulfillmentVersion, UUID expectedAssignmentId,
+                                     long expectedAssignmentVersion, UUID expectedPhysicalAllocationId,
+                                     long expectedPhysicalAllocationVersion, long currentFulfillmentVersion,
+                                     String currentFulfillmentStatus, boolean currentReadiness,
+                                     UUID currentPhysicalAllocationId, long currentPhysicalAllocationVersion,
+                                     UUID responsibleMembershipId, UUID responsibleUserId,
+                                     String responsibleDisplayName, Instant plannedDispatchAt,
+                                     UUID actorMembershipId, String idempotencyKey,
+                                     String requestHash, Instant now) { }
+
+    record FulfillmentDriverAssignmentView(UUID id, UUID fulfillmentId, long fulfillmentVersion,
+                                           UUID physicalAllocationId, long physicalAllocationVersion,
+                                           UUID responsibleMembershipId, String responsibleDisplayName,
+                                           UUID actorMembershipId, Instant assignedAt, Instant plannedDispatchAt,
+                                           UUID deliveryId, boolean current) { }
 }

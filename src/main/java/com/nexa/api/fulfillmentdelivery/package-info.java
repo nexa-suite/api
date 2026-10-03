@@ -5,6 +5,7 @@
                 "BC-01-tenant-access-governance :: access-values",
                 "BC-01-tenant-access-governance :: governance-queries",
                 "BC-02-customer-buyer-relationships :: customer-relationships",
+                "BC-03-catalog-commercial-policy :: sales-catalog",
                 "BC-04-sales-commitment :: sales-public",
                 "BC-04-sales-commitment :: salescommitment-errors",
                 "BC-05-inventory-availability :: sales-availability",

@@ -2,6 +2,7 @@ package com.nexa.api.catalogcommercialpolicy.presentation.rest.mapper;
 
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPricingView;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -40,5 +41,31 @@ class CatalogResponseMapperTests {
 		assertThat(response.basePrice()).isNull();
 		assertThat(response.currentOfferPrice().amount()).isEqualTo("17");
 		assertThat(response.effectivePrice().amount()).isEqualTo("17");
+	}
+
+	@Test
+	void omitsOptionalPricingPropertiesWhenTheCatalogHasNoCurrentPrice() throws Exception {
+		var mapper = new CatalogResponseMapper();
+		var summary = new CatalogItemSummary("CAT-0002", "PROD-0002", "Sin precio", "Brand", "Dairy", "BOX 1",
+				null, null, "REFRIGERATED", null, null, "ACTIVE", "UNKNOWN", false, null, null);
+		var detail = new com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail("CAT-0002",
+				"PROD-0002", "Sin precio", "Brand", "Dairy", "Description", "BOX 1", null, null,
+				"REFRIGERATED", null, null, "ACTIVE", "UNKNOWN", false, null, null);
+
+		var summaryJson = JsonMapper.shared().readTree(JsonMapper.shared().writeValueAsString(mapper.toSummary(summary)));
+		var detailJson = JsonMapper.shared().readTree(JsonMapper.shared().writeValueAsString(mapper.toDetail(detail)));
+
+		for (var json : java.util.List.of(summaryJson, detailJson)) {
+			assertThat(json.has("unitPrice")).isFalse();
+			assertThat(json.has("basePrice")).isTrue();
+			assertThat(json.get("basePrice").isNull()).isTrue();
+			assertThat(json.has("effectivePrice")).isFalse();
+			assertThat(json.has("discountAmount")).isFalse();
+			assertThat(json.has("currency")).isFalse();
+			assertThat(json.has("appliedPromotions")).isFalse();
+			assertThat(json.has("pricingAsOf")).isFalse();
+			assertThat(json.has("currentOfferPrice")).isTrue();
+			assertThat(json.get("currentOfferPrice").isNull()).isTrue();
+		}
 	}
 }

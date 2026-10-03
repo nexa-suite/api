@@ -4,6 +4,7 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSearchCriteria;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSortField;
 import com.nexa.api.catalogcommercialpolicy.application.model.SortDirection;
+import com.nexa.api.catalogcommercialpolicy.domain.model.catalogitem.CatalogItemId;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcCatalogItemQueryAdapter;
 import com.nexa.api.support.PostgresIntegrationSupport;
 import com.nexa.api.inventoryavailability.infrastructure.persistence.CatalogProductAvailabilityAdapter;
@@ -34,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -160,6 +162,45 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         }
     }
 
+    @Test
+    void missingSkuPriceStaysAbsentForOperationsAndCustomerScopedQueriesRemainFailClosed() {
+        priceProduct = createPriceProduct();
+        String catalogItemId = jdbc.queryForObject(
+                "select legacy_catalog_item_id from catalog_management.sellable_sku where id=?", String.class, priceProduct);
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        CatalogScope operationsScope = new CatalogScope(tenant, workspace);
+        DataSource dataSource = jdbc.getDataSource();
+        assertThat(dataSource).isNotNull();
+        CountingJdbcTemplate countedJdbc = new CountingJdbcTemplate(dataSource);
+        var catalogAccounts = new com.nexa.api.bootstrap.runtime.boundaries.CatalogClientAccountCompositionAdapter(
+                new com.nexa.api.customerbuyerrelationships.infrastructure.persistence.ClientAccountPersistenceAdapter(countedJdbc));
+        var offers = new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcAuthoritativeOfferQuery(countedJdbc, catalogAccounts);
+        JdbcCatalogItemQueryAdapter adapter = new JdbcCatalogItemQueryAdapter(
+                countedJdbc, new CatalogProductAvailabilityAdapter(countedJdbc,
+                new com.nexa.api.catalogcommercialpolicy.infrastructure.query.JdbcSellableSkuQuery(countedJdbc, offers)), offers);
+
+        var page = adapter.search(operationsScope, new CatalogSearchCriteria(catalogItemId, null, null, null,
+                0, 10, CatalogSortField.ITEM_NAME, SortDirection.ASC));
+        var summary = page.items().stream().filter(item -> item.catalogItemId().equals(catalogItemId)).findFirst().orElseThrow();
+        var detail = adapter.findByCatalogItemId(operationsScope, new CatalogItemId(catalogItemId)).orElseThrow();
+
+        assertThat(jdbc.queryForObject("select count(*) from catalog_management.sku_price where sku_id=?", Integer.class,
+                priceProduct)).isZero();
+        assertThat(summary.unitPriceAmount()).isNull();
+        assertThat(summary.unitPriceCurrency()).isNull();
+        assertThat(summary.pricing()).isNull();
+        assertThat(detail.unitPriceAmount()).isNull();
+        assertThat(detail.unitPriceCurrency()).isNull();
+        assertThat(detail.pricing()).isNull();
+
+        CatalogScope customerScope = new CatalogScope(tenant, workspace, false,
+                UUID.fromString(buyerClientAccountId()));
+        assertThatThrownBy(() -> adapter.findByCatalogItemId(customerScope, new CatalogItemId(catalogItemId)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Authoritative offer is unavailable for the customer account");
+    }
+
     private UUID createPriceProduct() {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
@@ -172,8 +213,9 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         UUID product = UUID.randomUUID();
         Instant now = Instant.now();
         String suffix = product.toString();
+        String catalogItemId = "CAT-WAVE-D-" + suffix.toUpperCase(java.util.Locale.ROOT);
         jdbc.update("insert into catalog_management.product (id,tenant_id,workspace_id,catalog_item_id,product_code,slug,name,description,category_id,brand_id,storage_temperature,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
-                product, tenant, workspace, "WAVE-D-" + suffix, "WAVE-D-" + suffix, "wave-d-" + suffix,
+                product, tenant, workspace, catalogItemId, "WAVE-D-" + suffix, "wave-d-" + suffix,
                 "Wave D price product", "Concurrency test product", category, brand, "REFRIGERATED",
                 Timestamp.from(now), Timestamp.from(now));
         UUID family = UUID.randomUUID();
@@ -181,7 +223,7 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
                 family, tenant, workspace, "WAVE-D-FAM-" + suffix, "Wave D price family", "Concurrency test family", category, brand,
                 "REFRIGERATED", Timestamp.from(now), Timestamp.from(now));
         jdbc.update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,legacy_product_id,legacy_catalog_item_id,sku_code,presentation,packaging_type,unit_of_measure,pack_quantity,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',true,0,?,?)",
-                product, tenant, workspace, family, product, "WAVE-D-" + suffix, "WAVE-D-" + suffix, "UNIT", "UNSPECIFIED", "UNIT", BigDecimal.ONE,
+                product, tenant, workspace, family, product, catalogItemId, "WAVE-D-" + suffix, "UNIT", "UNSPECIFIED", "UNIT", BigDecimal.ONE,
                 Timestamp.from(now), Timestamp.from(now));
         return product;
     }

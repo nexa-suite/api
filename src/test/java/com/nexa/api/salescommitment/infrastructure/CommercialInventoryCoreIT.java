@@ -7,10 +7,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -126,10 +128,45 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         fulfillmentEtag = ready.getResponse().getHeader("ETag");
 
+        var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + fulfillmentId + "/physical-allocation")
+                        .header("Authorization", "Bearer " + warehouse))
+                .andExpect(status().isOk()).andReturn());
+        ensureWarehouseGrant(accessToken(OWNER_EMAIL, "PLATFORM"),
+                UUID.fromString(allocation.get("lines").get(0).get("warehouseId").asText()),
+                membershipId(LOGISTICS_EMAIL));
+        logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        MvcResult assignment = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/driver-assignments")
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-assignment-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"responsibleMembershipId\":\"" + membershipId(LOGISTICS_EMAIL)
+                                + "\",\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong() + "}"))
+                .andExpect(status().isOk()).andReturn();
+        fulfillmentEtag = assignment.getResponse().getHeader("ETag");
+        var allocationLine = allocation.get("lines").get(0);
+        MvcResult outgoing = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/outgoing-checks")
+                        .header("Authorization", "Bearer " + warehouse).header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "canonical-outgoing-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong()
+                                + ",\"observations\":[{\"physicalAllocationLineId\":\""
+                                + allocationLine.get("physicalAllocationLineId").asText() + "\",\"observedLotId\":\""
+                                + allocationLine.get("lotId").asText() + "\",\"observedQuantity\":"
+                                + allocationLine.get("remainingQuantity").asText() + "}]}"))
+                .andExpect(status().isCreated()).andReturn();
+        String dispatchBody = "{\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong()
+                + ",\"driverAssignmentId\":\"" + json(assignment).get("id").asText()
+                + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
+                + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
+
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/dispatches")
                         .header("Authorization", "Bearer " + warehouse)
                         .header("If-Match", fulfillmentEtag)
-                        .header("Idempotency-Key", "canonical-dispatch-" + uuid()))
+                        .header("Idempotency-Key", "canonical-dispatch-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("HANDED_OVER"))
                 .andReturn();
@@ -151,12 +188,62 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.status").value("IN_TRANSIT"))
                 .andReturn();
 
+        UUID deliveryUuid = UUID.fromString(deliveryId);
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        configureAllocatedLotTemperatureRange(UUID.fromString(fulfillmentId), lotId);
+        int temperatureEvidenceBefore = jdbc.queryForObject(
+                "select count(*) from logistics.temperature_evidence where tenant_id=? and workspace_id=? and delivery_id=?",
+                Integer.class, tenant, workspace, deliveryUuid);
+        int deliveryEventsBefore = jdbc.queryForObject(
+                "select count(*) from logistics.delivery_event where tenant_id=? and workspace_id=? and delivery_id=?",
+                Integer.class, tenant, workspace, deliveryUuid);
+        UUID logisticsMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        int temperatureCommandsBefore = jdbc.queryForObject(
+                "select count(*) from logistics.delivery_command_idempotency where tenant_id=? and workspace_id=? "
+                        + "and actor_membership_id=? and operation='TEMPERATURE'",
+                Integer.class, tenant, workspace, logisticsMembership);
+        long deliveryVersionBefore = jdbc.queryForObject(
+                "select version from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
+                Long.class, tenant, workspace, deliveryUuid);
+        String outOfRangeKey = "canonical-temperature-out-of-range-" + uuid();
+        mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/temperature-evidence")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", inTransit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", outOfRangeKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lotId\":\"" + lotId + "\",\"temperatureCelsius\":21,\"unit\":\"CELSIUS\",\"source\":\"MANUAL\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP"));
+        assertThat(jdbc.queryForObject(
+                "select count(*) from logistics.temperature_evidence where tenant_id=? and workspace_id=? and delivery_id=?",
+                Integer.class, tenant, workspace, deliveryUuid)).isEqualTo(temperatureEvidenceBefore);
+        assertThat(jdbc.queryForObject(
+                "select version from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
+                Long.class, tenant, workspace, deliveryUuid)).isEqualTo(deliveryVersionBefore);
+        assertThat(jdbc.queryForObject(
+                "select status from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
+                String.class, tenant, workspace, deliveryUuid)).isEqualTo("IN_TRANSIT");
+        assertThat(jdbc.queryForObject(
+                "select count(*) from logistics.delivery_event where tenant_id=? and workspace_id=? and delivery_id=?",
+                Integer.class, tenant, workspace, deliveryUuid)).isEqualTo(deliveryEventsBefore);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from logistics.delivery_command_idempotency where tenant_id=? and workspace_id=? "
+                        + "and actor_membership_id=? and operation='TEMPERATURE'",
+                Integer.class, tenant, workspace, logisticsMembership)).isEqualTo(temperatureCommandsBefore);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from logistics.delivery_command_idempotency where tenant_id=? and workspace_id=? "
+                        + "and actor_membership_id=? and operation='TEMPERATURE' and idempotency_key=?",
+                Integer.class, tenant, workspace, logisticsMembership, outOfRangeKey)).isZero();
+
         MvcResult evidence = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/temperature-evidence")
                         .header("Authorization", "Bearer " + logistics)
                         .header("If-Match", inTransit.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "canonical-temperature-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"lotId\":\"" + lotId + "\",\"temperatureCelsius\":21,\"unit\":\"CELSIUS\",\"source\":\"MANUAL\"}"))
+                        .content("{\"lotId\":\"" + lotId + "\",\"temperatureCelsius\":5,\"unit\":\"CELSIUS\","
+                                + "\"source\":\"MANUAL\",\"evidenceMetadata\":\"In-range transit reading\","
+                                + "\"recordedAt\":\"" + Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS) + "\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.lotId").value(lotId.toString()))
                 .andReturn();
@@ -170,10 +257,15 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                         + "and l.physical_allocation_id=f.physical_allocation_id and l.lot_id=? "
                         + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id "
                         + "and z.warehouse_id=l.warehouse_id and z.id=l.zone_id where f.id=?",
-                String.class, BigDecimal.valueOf(21), lotId, UUID.fromString(fulfillmentId));
+                String.class, BigDecimal.valueOf(5), lotId, UUID.fromString(fulfillmentId));
         assertThat(json(evidence).get("status").asText()).isEqualTo(expectedTemperatureStatus);
+        assertThat(json(evidence).get("status").asText()).isEqualTo("WITHIN_RANGE");
         assertThat(jdbc.queryForObject("select lot_id from logistics.temperature_evidence where id=?", UUID.class, evidenceId))
                 .isEqualTo(lotId);
+        assertThat(jdbc.queryForObject("select subject_type from logistics.temperature_evidence where id=?", String.class, evidenceId))
+                .isEqualTo("DELIVERY");
+        assertThat(jdbc.queryForObject("select subject_id from logistics.temperature_evidence where id=?", UUID.class, evidenceId))
+                .isEqualTo(deliveryUuid);
     }
 
     @Test
@@ -380,6 +472,59 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
+    }
+
+    private void ensureWarehouseGrant(String owner, UUID warehouseId, String memberId) throws Exception {
+        var grants = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn());
+        for (var grant : grants) {
+            if (!memberId.equals(grant.path("membershipId").asText())) continue;
+            if ("ACTIVE".equals(grant.path("status").asText())) return;
+            mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                            .header("Authorization", "Bearer " + owner)
+                            .header("If-Match", "\"" + grant.path("version").asLong() + "\"")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"membershipId\":\"" + memberId + "\"}"))
+                    .andExpect(status().isOk());
+            return;
+        }
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + memberId + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    private void configureAllocatedLotTemperatureRange(UUID fulfillmentId, UUID lotId) throws Exception {
+        UUID warehouseId = jdbc.queryForObject("select l.warehouse_id from warehouse.physical_allocation_line l "
+                        + "join logistics.fulfillment f on f.tenant_id=l.tenant_id and f.workspace_id=l.workspace_id "
+                        + "and f.physical_allocation_id=l.physical_allocation_id where f.id=? and l.lot_id=?",
+                UUID.class, fulfillmentId, lotId);
+        UUID zoneId = jdbc.queryForObject("select l.zone_id from warehouse.physical_allocation_line l "
+                        + "join logistics.fulfillment f on f.tenant_id=l.tenant_id and f.workspace_id=l.workspace_id "
+                        + "and f.physical_allocation_id=l.physical_allocation_id where f.id=? and l.lot_id=?",
+                UUID.class, fulfillmentId, lotId);
+        ensureWarehouseGrant(accessToken(OWNER_EMAIL, "PLATFORM"), warehouseId, membershipId(WAREHOUSE_EMAIL));
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        var zones = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/zones")
+                        .header("Authorization", "Bearer " + warehouse))
+                .andExpect(status().isOk()).andReturn()).path("items");
+        tools.jackson.databind.JsonNode allocatedZone = null;
+        for (var candidate : zones) {
+            if (zoneId.toString().equals(candidate.path("id").asText())) {
+                allocatedZone = candidate;
+                break;
+            }
+        }
+        assertThat(allocatedZone).as("allocated lot storage zone is visible to its granted warehouse operator").isNotNull();
+        mockMvc.perform(patch("/api/v1/warehouses/" + warehouseId + "/zones/" + zoneId)
+                        .header("Authorization", "Bearer " + warehouse)
+                        .header("If-Match", "\"" + allocatedZone.path("version").asLong() + "\"")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"temperatureMin\":2,\"temperatureMax\":8}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.temperatureMin").value(2))
+                .andExpect(jsonPath("$.temperatureMax").value(8));
     }
 
     private String directBody(String paymentOption, String quantity) {

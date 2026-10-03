@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommerc
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseTransferPersistencePort;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,8 +37,10 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             SellableSkuQuery catalog,
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort operationalSettings,
-            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource) {
-        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource);
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
+            WarehouseObjectAccess warehouseAccess) {
+        super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
+                warehouseAccess);
     }
 
     @Override
@@ -49,6 +52,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         pageCheck(page, size);
         StringBuilder predicate = new StringBuilder(" where tenant_id=? and workspace_id=?");
         List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        predicate.append(warehouseIdPredicate(context, "source_warehouse_id", args));
+        predicate.append(warehouseIdPredicate(context, "destination_warehouse_id", args));
         if (sourceWarehouseId != null && !sourceWarehouseId.isBlank()) {
             predicate.append(" and source_warehouse_id=?");
             args.add(uuid(sourceWarehouseId));
@@ -72,9 +77,12 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     @Transactional(readOnly = true)
     public WarehouseOperationsService.TransferSummary transfer(CurrentAccessContext context, String id) {
         requireRead(context);
-        return jdbc.query(transferSelect() + " where tenant_id=? and workspace_id=? and id=?",
+        WarehouseOperationsService.TransferSummary value = jdbc.query(transferSelect() + " where tenant_id=? and workspace_id=? and id=?",
                 (rs, row) -> transfer(rs), tenant(context), workspace(context), uuid(id))
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_TRANSFER_NOT_FOUND", true));
+        requireWarehouseAccess(context, UUID.fromString(value.sourceWarehouseId()));
+        requireWarehouseAccess(context, UUID.fromString(value.destinationWarehouseId()));
+        return value;
     }
 
     @Override
@@ -82,11 +90,18 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             CurrentAccessContext context, WarehouseOperationsService.TransferCommand command,
             long expectedSourceVersion, String idempotencyKey, String correlationId) {
         requireWrite(context);
-        requireIdempotency(idempotencyKey);
         if (command == null || expectedSourceVersion < 0) throw error("INVALID_REQUEST", false);
 
         UUID destinationWarehouseId = uuidRequired(command.destinationWarehouseId(), "destinationWarehouseId");
         UUID destinationZoneId = uuidRequired(command.destinationZoneId(), "destinationZoneId");
+        requireActiveWarehouse(context, destinationWarehouseId);
+        if (command.sourceLotId() != null && !command.sourceLotId().isBlank()) {
+            loadTransferLot(context, uuid(command.sourceLotId()), false);
+        } else {
+            UUID requestedSourceWarehouse = uuidRequired(command.sourceWarehouseId(), "sourceWarehouseId");
+            requireActiveWarehouse(context, requestedSourceWarehouse);
+        }
+        requireIdempotency(idempotencyKey);
         BigDecimal quantity = command.quantity();
         if (quantity == null || quantity.signum() <= 0) throw error("INVALID_REQUEST", false);
         String requestedUnit = command.unit() == null || command.unit().isBlank() ? null : normalizedUnit(command.unit());
@@ -102,7 +117,6 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             return transfer(context, prior.resourceId());
         }
 
-        requireActiveWarehouse(context, destinationWarehouseId);
         requireActiveZone(context, destinationWarehouseId, destinationZoneId);
 
         TransferLot sourceHint = command.sourceLotId() == null || command.sourceLotId().isBlank()
@@ -137,7 +151,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (source.warehouseId().equals(destinationWarehouseId.toString())
                 && source.zoneId().equals(destinationZoneId.toString())) throw error("INVALID_REQUEST", false);
 
-        BigDecimal sourceAvailable = source.onHand().subtract(source.reserved());
+        BigDecimal sourceAvailable = source.available();
         if (quantity.compareTo(sourceAvailable) > 0) throw error("INSUFFICIENT_AVAILABLE_STOCK", false);
         if (source.status().equals("AVAILABLE") && !source.warehouseId().equals(destinationWarehouseId.toString())) {
             SafetyStockRow safetyStock = safetyStock(context, UUID.fromString(source.warehouseId()), source.skuId());
@@ -155,7 +169,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (destination != null && !destination.status().equals(source.status())
                 && !destination.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         UUID transferId = UUID.randomUUID();
-        String mode = quantity.compareTo(source.onHand()) == 0 && source.reserved().signum() == 0 ? "FULL" : "PARTIAL";
+        String mode = quantity.compareTo(source.onHand()) == 0 && source.reserved().signum() == 0
+                && source.heldQuantity().signum() == 0 ? "FULL" : "PARTIAL";
         Timestamp requested = now();
         String correlation = correlationId == null ? "unknown" : correlationId;
         checkUpdated(jdbc.update("insert into warehouse.inventory_transfer"
@@ -206,7 +221,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                 || !source.expirationDate().isAfter(LocalDate.now())) {
             throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
         }
-        if (source.onHand().subtract(source.reserved()).compareTo(transfer.quantity()) < 0) {
+        if (source.available().compareTo(transfer.quantity()) < 0) {
             throw error("INSUFFICIENT_AVAILABLE_STOCK", false);
         }
         if (source.status().equals("AVAILABLE") && !source.warehouseUuid().equals(transfer.destinationWarehouseId())) {
@@ -217,7 +232,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
             BigDecimal warehouseAvailable = usableWarehouseQuantity(context, source.warehouseUuid(), source.skuId());
             BigDecimal protectedQuantity = safetyStock == null ? BigDecimal.ZERO : safetyStock.quantity();
             BigDecimal transferable = warehouseAvailable.subtract(protectedQuantity).max(BigDecimal.ZERO)
-                    .min(source.onHand().subtract(source.reserved()));
+                    .min(source.available());
             if (transfer.quantity().compareTo(transferable) > 0) {
                 throw error("INVENTORY_SAFETY_STOCK_PROTECTED", false);
             }
@@ -335,6 +350,106 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         return transfer(context, transfer.id().toString());
     }
 
+    @Override
+    @Transactional
+    public WarehouseOperationsService.TransferReceiptObservation observeReceiptDiscrepancy(
+            CurrentAccessContext context, String transferId,
+            WarehouseOperationsService.TransferReceiptObservationCommand command,
+            long expectedVersion, String idempotencyKey, String correlationId) {
+        requireWrite(context);
+        requireIdempotency(idempotencyKey);
+        if (command == null || expectedVersion < 0 || command.observedQuantity() == null
+                || !fitsTransferQuantity(command.observedQuantity()) || command.observedQuantity().signum() < 0) {
+            throw error("INVALID_REQUEST", false);
+        }
+        String observedBatch = bounded(command.observedBatchNumber(), "observedBatchNumber", 80);
+        String observedUnit = normalizedUnit(command.unit());
+        String operation = "inventory-transfer-receipt-observation";
+        String hashInput = lengthPrefixed(transferId)
+                + lengthPrefixed(Long.toString(expectedVersion))
+                + lengthPrefixed(observedBatch)
+                + lengthPrefixed(command.observedExpirationDate() == null
+                        ? null : command.observedExpirationDate().toString())
+                + lengthPrefixed(command.observedQuantity().toString())
+                + lengthPrefixed(observedUnit);
+        String hash = requestHash(operation, hashInput);
+        lockIdempotency(context, operation, idempotencyKey);
+
+        // This row lock serializes observations with dispatch/receipt while the active grants are rechecked.
+        TransferState transfer = transferState(context, transferId, true);
+        IdempotencyRecord prior = idempotent(context, operation, idempotencyKey);
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            return receiptObservation(context, prior.resourceId());
+        }
+        if (!"IN_TRANSIT".equals(transfer.status()) || transfer.version() != expectedVersion) {
+            throw error("CONCURRENCY_CONFLICT", false);
+        }
+        if (!transfer.unit().equalsIgnoreCase(observedUnit)) throw error("INVENTORY_UNIT_MISMATCH", false);
+        boolean differs = !transfer.batchNumber().equals(observedBatch)
+                || (command.observedExpirationDate() != null
+                    && !transfer.expirationDate().equals(command.observedExpirationDate()))
+                || transfer.quantity().compareTo(command.observedQuantity()) != 0;
+        if (!differs) throw error("INVALID_REQUEST", false);
+
+        UUID observationId = UUID.randomUUID();
+        Timestamp recordedAt = now();
+        String correlation = correlationId == null || correlationId.isBlank() ? "unknown" : correlationId;
+        checkUpdated(jdbc.update("insert into warehouse.inventory_transfer_receipt_observation"
+                        + "(id,tenant_id,workspace_id,transfer_id,transfer_version,source_warehouse_id,source_zone_id,source_lot_id,"
+                        + "destination_warehouse_id,destination_zone_id,expected_batch_number,expected_expiration_date,expected_quantity,"
+                        + "expected_unit,observed_batch_number,observed_expiration_date,observed_quantity,observed_unit,"
+                        + "actor_membership_id,correlation_id,recorded_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                observationId, tenant(context), workspace(context), transfer.id(), transfer.version(),
+                transfer.sourceWarehouseId(), transfer.sourceZoneId(), transfer.sourceLotId(),
+                transfer.destinationWarehouseId(), transfer.destinationZoneId(), transfer.batchNumber(),
+                transfer.expirationDate(), transfer.quantity(), transfer.unit(), observedBatch,
+                command.observedExpirationDate(), command.observedQuantity(), observedUnit,
+                context.membershipId().value(), correlation, recordedAt),
+                "transfer receipt observation insert");
+        checkUpdated(jdbc.update("insert into warehouse.inventory_event"
+                        + "(id,tenant_id,workspace_id,aggregate_id,event_type,occurred_at,actor_membership_id,correlation_id)"
+                        + " values (?,?,?,?,?,?,?,?)",
+                UUID.randomUUID(), tenant(context), workspace(context), observationId,
+                "warehouse.inventory.transfer.receipt-observation-recorded", recordedAt,
+                context.membershipId().value(), correlation), "transfer receipt observation event insert");
+        saveIdempotency(context, operation, idempotencyKey, hash, observationId.toString());
+        return receiptObservation(context, observationId.toString());
+    }
+
+    private WarehouseOperationsService.TransferReceiptObservation receiptObservation(
+            CurrentAccessContext context, String id) {
+        return jdbc.query("select id,transfer_id,transfer_version,source_warehouse_id,source_zone_id,source_lot_id,"
+                                + "destination_warehouse_id,destination_zone_id,expected_batch_number,expected_expiration_date,"
+                                + "expected_quantity,expected_unit,observed_batch_number,observed_expiration_date,observed_quantity,"
+                                + "observed_unit,actor_membership_id,recorded_at from warehouse.inventory_transfer_receipt_observation"
+                                + " where tenant_id=? and workspace_id=? and id=?",
+                        (rs, row) -> new WarehouseOperationsService.TransferReceiptObservation(
+                                rs.getObject("id", UUID.class).toString(), rs.getObject("transfer_id", UUID.class).toString(),
+                                rs.getLong("transfer_version"), rs.getObject("source_warehouse_id", UUID.class).toString(),
+                                rs.getObject("source_zone_id", UUID.class).toString(), rs.getObject("source_lot_id", UUID.class).toString(),
+                                rs.getObject("destination_warehouse_id", UUID.class).toString(),
+                                rs.getObject("destination_zone_id", UUID.class).toString(), rs.getString("expected_batch_number"),
+                                rs.getObject("expected_expiration_date", LocalDate.class), rs.getBigDecimal("expected_quantity"),
+                                rs.getString("expected_unit"), rs.getString("observed_batch_number"),
+                                rs.getObject("observed_expiration_date", LocalDate.class), rs.getBigDecimal("observed_quantity"),
+                                rs.getString("observed_unit"), rs.getObject("actor_membership_id", UUID.class).toString(),
+                                instant(rs, "recorded_at")),
+                        tenant(context), workspace(context), uuid(id))
+                .stream().findFirst().orElseThrow(() -> error("INVENTORY_TRANSFER_NOT_FOUND", true));
+    }
+
+    private static boolean fitsTransferQuantity(BigDecimal quantity) {
+        BigDecimal normalized = quantity.stripTrailingZeros();
+        int fractionalDigits = Math.max(0, normalized.scale());
+        int integerDigits = normalized.precision() - normalized.scale();
+        return fractionalDigits <= 4 && integerDigits <= 15;
+    }
+
+    private static String lengthPrefixed(String value) {
+        return value == null ? "-1:" : value.length() + ":" + value;
+    }
+
     private TransferLot selectFefoSource(CurrentAccessContext context, UUID sourceWarehouseId, UUID skuId,
                                          String catalogItemId, BigDecimal quantity, String unit) {
         String legacy = catalogItemId == null || catalogItemId.isBlank() ? skuId.toString() : bounded(catalogItemId, "catalogItemId", 64);
@@ -348,16 +463,19 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private TransferLot loadTransferLot(CurrentAccessContext context, UUID id, boolean lock) {
-        return jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
-                                + "stock_quantity,reserved_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
+        TransferLot lot = jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
+                                + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
+                                + " temperature_held_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?"
                                 + (lock ? " for update" : ""), (rs, row) -> transferLot(rs),
                         tenant(context), workspace(context), id)
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_LOT_NOT_FOUND", true));
+        requireWarehouseAccess(context, lot.warehouseUuid());
+        return lot;
     }
 
     private TransferState transferState(CurrentAccessContext context, String id, boolean lock) {
-        return jdbc.query("select id,status,version,source_warehouse_id,source_zone_id,source_lot_id,"
+        TransferState state = jdbc.query("select id,status,version,source_warehouse_id,source_zone_id,source_lot_id,"
                                 + "destination_warehouse_id,destination_zone_id,sku_id,catalog_item_id,batch_number,"
                                 + "expiration_date,requested_quantity,unit,reason,source_lot_status_at_dispatch "
                                 + "from warehouse.inventory_transfer where tenant_id=? and workspace_id=? and id=?"
@@ -372,12 +490,16 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                                 rs.getString("unit"), rs.getString("reason"), rs.getString("source_lot_status_at_dispatch")),
                         tenant(context), workspace(context), uuid(id))
                 .stream().findFirst().orElseThrow(() -> error("INVENTORY_TRANSFER_NOT_FOUND", true));
+        requireWarehouseAccess(context, state.sourceWarehouseId());
+        requireWarehouseAccess(context, state.destinationWarehouseId());
+        return state;
     }
 
     private TransferLot destinationLot(CurrentAccessContext context, UUID warehouseId, UUID skuId,
                                        String batchNumber, UUID sourceLotId, boolean lock) {
         return jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
-                                + "stock_quantity,reserved_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
+                                + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
+                                + " temperature_held_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=? and sku_id=?"
                                 + " and batch_number=? and id<>?" + (lock ? " for update" : ""),
                         (rs, row) -> transferLot(rs), tenant(context), workspace(context), warehouseId, skuId, batchNumber, sourceLotId)
@@ -410,12 +532,12 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private BigDecimal usableWarehouseQuantity(CurrentAccessContext context, UUID warehouseId, UUID skuId) {
-        BigDecimal value = jdbc.queryForObject("select coalesce(sum(l.stock_quantity-l.reserved_quantity),0)"
+        BigDecimal value = jdbc.queryForObject("select coalesce(sum(" + sellableQuantitySql("l") + "),0)"
                         + " from warehouse.inventory_lot l"
                         + " join warehouse.warehouse w on w.id=l.warehouse_id and w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id"
                         + " join warehouse.storage_zone z on z.id=l.zone_id and z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id"
                         + " where l.tenant_id=? and l.workspace_id=? and l.warehouse_id=? and l.sku_id=?"
-                        + " and l.status='AVAILABLE' and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity"
+                        + " and l.status='AVAILABLE' and l.expiration_date>current_date and " + sellableQuantitySql("l") + ">0"
                         + " and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE'",
                 BigDecimal.class, tenant(context), workspace(context), warehouseId, skuId);
         return value == null ? BigDecimal.ZERO : value;
@@ -459,7 +581,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                 rs.getObject("zone_id", UUID.class), rs.getString("catalog_item_id"),
                 rs.getObject("sku_id", UUID.class), rs.getString("batch_number"),
                 rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
-                rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"), rs.getString("unit"),
+                rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"),
+                rs.getBigDecimal("temperature_held_quantity"), rs.getString("unit"),
                 rs.getString("status"), rs.getLong("version"), rs.getString("temperature_range_snapshot"),
                 rs.getBigDecimal("temperature_value"));
     }
@@ -494,8 +617,10 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
 
     private record TransferLot(UUID id, UUID warehouseUuid, UUID zoneUuid, String catalogItemId, UUID skuId,
                                String batchNumber, LocalDate expirationDate, java.time.Instant receivedAt,
-                               BigDecimal onHand, BigDecimal reserved, String unit, String status, long version,
+                               BigDecimal onHand, BigDecimal reserved, BigDecimal heldQuantity,
+                               String unit, String status, long version,
                                String temperatureRangeSnapshot, BigDecimal temperatureValue) {
+        BigDecimal available() { return onHand.subtract(reserved).subtract(heldQuantity).max(BigDecimal.ZERO); }
         String warehouseId() { return warehouseUuid.toString(); }
         String zoneId() { return zoneUuid.toString(); }
     }

@@ -21,4 +21,9 @@ public interface WarehouseTransferPersistencePort {
     WarehouseOperationsService.TransferSummary receive(
             CurrentAccessContext context, String transferId, long expectedVersion,
             String idempotencyKey, String correlationId);
+
+    WarehouseOperationsService.TransferReceiptObservation observeReceiptDiscrepancy(
+            CurrentAccessContext context, String transferId,
+            WarehouseOperationsService.TransferReceiptObservationCommand command,
+            long expectedVersion, String idempotencyKey, String correlationId);
 }

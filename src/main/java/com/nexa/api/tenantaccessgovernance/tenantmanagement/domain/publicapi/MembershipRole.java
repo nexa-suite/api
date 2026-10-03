@@ -17,6 +17,7 @@ public enum MembershipRole {
 	SALES,
 	WAREHOUSE,
 	LOGISTICS,
+	BUSINESS_OPERATIONS_MANAGER,
 	BUYER;
 
 	public RoleDefinition definition() {

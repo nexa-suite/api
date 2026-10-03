@@ -16,6 +16,8 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static com.nexa.api.inventoryavailability.infrastructure.persistence.WarehousePersistenceSupport.sellableQuantitySql;
+
 @Repository
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPort {
@@ -52,12 +54,12 @@ public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPor
                         + "from catalog_sku_snapshot where tenant_id=? and workspace_id=? "
                         + "and status='ACTIVE' and legacy_catalog_item_id in (" + placeholders + ")), "
                         + "eligible_lot as ("
-                        + "select s.id sku_id,l.warehouse_id,l.expiration_date,l.stock_quantity-l.reserved_quantity quantity "
+                        + "select s.id sku_id,l.warehouse_id,l.expiration_date," + sellableQuantitySql("l") + " quantity "
                         + "from scoped_sku s join warehouse.inventory_lot l on l.tenant_id=? and l.workspace_id=? and l.sku_id=s.id "
                         + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
                         + "join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id "
                         + "left join warehouse.warehouse_service_configuration service on service.tenant_id=l.tenant_id and service.workspace_id=l.workspace_id and service.warehouse_id=l.warehouse_id "
-                        + "where l.status='AVAILABLE' and l.expiration_date>current_date and l.stock_quantity>l.reserved_quantity "
+                        + "where l.status='AVAILABLE' and l.expiration_date>current_date and " + sellableQuantitySql("l") + ">0 "
                         + "and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' "
                         + "and coalesce(service.service_status,'OPERATIONAL')='OPERATIONAL' "
                         + "and (s.temperature_min is null or (z.temperature_min is not null and z.temperature_min<=s.temperature_min)) "
@@ -65,11 +67,8 @@ public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPor
                         + "and ((s.temperature_min is null and s.temperature_max is null) or (l.temperature_value is not null "
                         + "and (s.temperature_min is null or l.temperature_value>=s.temperature_min) "
                         + "and (s.temperature_max is null or l.temperature_value<=s.temperature_max))) "
-                        + "and not exists (select 1 from warehouse.inventory_temperature_evaluation evaluation "
-                        + "where evaluation.tenant_id=l.tenant_id and evaluation.workspace_id=l.workspace_id and evaluation.lot_id=l.id "
-                        + "and evaluation.status='OPEN' and evaluation.disposition='HOLD') "
                         + "and coalesce((select disposition.disposition from warehouse.inventory_lot_disposition disposition "
-                        + "where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id "
+                        + "where disposition.tenant_id=l.tenant_id and disposition.workspace_id=l.workspace_id and disposition.lot_id=l.id and disposition.temperature_evaluation_id is null "
                         + "order by disposition.created_at desc,disposition.id desc limit 1),'RELEASE') not in ('HOLD','WASTE','RETURN_TO_SUPPLIER')), "
                         + "eligible_by_warehouse as (select sku_id,warehouse_id,sum(quantity) quantity,min(expiration_date) earliest_expiration "
                         + "from eligible_lot group by sku_id,warehouse_id), "

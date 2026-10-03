@@ -15,5 +15,18 @@ public interface WorkforceDirectory {
 
     Set<UUID> filterActiveBuyerMembershipIds(UUID tenantId, UUID workspaceId, List<UUID> membershipIds);
 
-    record LogisticsAssignee(UUID id, String email, String displayName) { }
+    /** Current effective exception capabilities, scoped to active internal workforce. */
+    default List<ExceptionAssignee> findExceptionAssignees(UUID tenantId, UUID workspaceId) { return List.of(); }
+
+    default Optional<ExceptionAssignee> findExceptionAssignee(UUID tenantId, UUID workspaceId, UUID membershipId) {
+        return findExceptionAssignees(tenantId,workspaceId).stream().filter(actor -> actor.membershipId().equals(membershipId)).findFirst();
+    }
+
+    record ExceptionAssignee(UUID membershipId, boolean coordinator, boolean driverReporter, String displayName) {
+        public ExceptionAssignee(UUID membershipId, boolean coordinator, boolean driverReporter) {
+            this(membershipId,coordinator,driverReporter,null);
+        }
+    }
+
+    record LogisticsAssignee(UUID id, UUID userId, String email, String displayName) { }
 }
