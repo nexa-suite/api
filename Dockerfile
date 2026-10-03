@@ -23,7 +23,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 nexa \
-    && useradd --system --uid 10001 --gid 10001 --no-create-home nexa
+    && useradd --system --uid 10001 --gid 10001 --no-create-home nexa \
+    && (getent group 1000 >/dev/null || groupadd --system --gid 1000 render-secrets) \
+    && usermod --append --groups 1000 nexa
 
 WORKDIR /app
 

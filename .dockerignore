@@ -6,6 +6,8 @@ target/
 .env
 .env.*
 !.env.example
+access-token-public.pem
+access-token-private.pem
 *.iml
 .idea/
 .vscode/

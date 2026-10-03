@@ -1,0 +1,82 @@
+services:
+  - type: web
+    name: nexa-api
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: off
+    healthCheckPath: /actuator/health/readiness
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: SERVER_PORT
+        value: "8080"
+      - key: NEXA_API_VERSION
+        value: "0.20.0"
+      - key: SPRING_PROFILES_ACTIVE
+        value: s3
+      - key: NEXA_FLYWAY_ENABLED
+        value: "true"
+      - key: NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME
+        value: "true"
+      - key: NEXA_DATABASE_POOL_MAX
+        value: "5"
+      - key: NEXA_DATABASE_URL
+        sync: false
+      - key: NEXA_DATABASE_MIGRATOR_USERNAME
+        sync: false
+      - key: NEXA_DATABASE_MIGRATOR_PASSWORD
+        sync: false
+      - key: NEXA_DATABASE_RUNTIME_USERNAME
+        sync: false
+      - key: NEXA_DATABASE_RUNTIME_PASSWORD
+        sync: false
+      - key: NEXA_SECURITY_ISSUER
+        sync: false
+      - key: NEXA_SECURITY_AUDIENCE
+        value: nexa-mobile
+      - key: NEXA_SECURITY_RSA_PUBLIC_KEY
+        value: /etc/secrets/access-token-public.pem
+      - key: NEXA_SECURITY_RSA_PRIVATE_KEY
+        value: /etc/secrets/access-token-private.pem
+      - key: NEXA_SECURITY_ALLOWED_ORIGINS
+        sync: false
+      - key: NEXA_REFRESH_COOKIE_SECURE
+        value: "true"
+      - key: NEXA_DEV_BOOTSTRAP_ENABLED
+        value: "false"
+      - key: NEXA_PASSWORD_RESET_THROTTLE_KEY
+        generateValue: true
+      - key: NEXA_NOTIFICATION_OUTBOX_KEY
+        generateValue: true
+      - key: NEXA_SYSTEM_OPERATOR_TOKEN
+        generateValue: true
+      - key: NEXA_CLAMAV_MODE
+        value: network
+      - key: NEXA_CLAMAV_HOST
+        sync: false
+      - key: NEXA_CLAMAV_PORT
+        value: "3310"
+      - key: NEXA_OBJECT_STORAGE_ENDPOINT
+        sync: false
+      - key: NEXA_OBJECT_STORAGE_BUCKET
+        sync: false
+      - key: NEXA_OBJECT_STORAGE_ACCESS_KEY
+        sync: false
+      - key: NEXA_OBJECT_STORAGE_SECRET_KEY
+        sync: false
+      - key: NEXA_OBJECT_STORAGE_REGION
+        value: us-east-1
+      - key: NEXA_OBJECT_STORAGE_TIMEOUT_MS
+        value: "5000"
+      - key: NEXA_PAYMENTS_PROVIDER
+        value: disabled
+      - key: NEXA_MAPS_PROVIDER
+        value: local
+      - key: NEXA_HEALTH_URL
+        value: http://127.0.0.1:8080/actuator/health/readiness
+      - key: MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE
+        value: readinessState,db,diskSpace
