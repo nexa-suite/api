@@ -40,6 +40,7 @@ contexts.
 - [Flyway migration history](../src/main/resources/db/migration/)
 - [Deterministic seed resources](../src/main/resources/seed/)
 - [Business XML and XSD schemas](../src/main/resources/schemas/)
+- [ICISA catalog reference handoff](./catalog-reference/README.md)
 
 Migration history, seed artifacts and schemas remain source evidence. No
 structural refactor should rewrite them.

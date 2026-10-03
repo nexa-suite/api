@@ -18,15 +18,24 @@ class CatalogVariantMappingTests {
     private CatalogVariantMappingLoader variantLoader;
 
     @Test
-    void mapsAllFiftySeedSkusToAnExplicitCuratedFamily() {
+    void mapsAllOneHundredTwoCatalogSkusToAnExplicitFamily() {
         Map<String, CatalogFamilySkuMappingLoader.MappingItem> mapping = loader.byLegacyCatalogItemId();
 
-        assertThat(mapping).hasSize(50);
+        assertThat(mapping).hasSize(102);
         assertThat(mapping.values().stream().map(CatalogFamilySkuMappingLoader.MappingItem::familyCode).distinct())
-                .hasSize(36);
+                .hasSize(88);
         assertThat(mapping.values().stream().map(CatalogFamilySkuMappingLoader.MappingItem::skuCode).distinct())
-                .hasSize(50);
+                .hasSize(102);
         assertThat(mapping.values()).allSatisfy(item -> assertThat(item.familyName()).isNotBlank());
+        assertThat(mapping.values().stream().filter(item -> Boolean.TRUE.equals(item.provisional())))
+                .hasSize(52)
+                .allSatisfy(item -> {
+                    assertThat(item.legacyCatalogItemId()).matches("CAT-00(?:5[1-9]|[6-9][0-9])|CAT-010[0-2]");
+                    assertThat(item.legacyProductCode()).isEqualTo(item.skuCode());
+                    assertThat(item.familyCode()).isEqualTo("FAM-" + item.legacyCatalogItemId());
+                    assertThat(item.presentation()).isEqualTo("UNSPECIFIED");
+                });
+        assertThat(mapping.values().stream().filter(item -> !Boolean.TRUE.equals(item.provisional()))).hasSize(50);
     }
 
     @Test

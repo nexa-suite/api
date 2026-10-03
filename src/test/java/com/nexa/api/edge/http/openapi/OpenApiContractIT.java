@@ -19,6 +19,10 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         var document = json(result);
         Path snapshotPath = Path.of("docs/openapi/openapi.json");
         assertThat(document.get("openapi").asText()).isEqualTo("3.1.0");
+        assertNullableMoneyProperty(document, "CatalogItemSummaryResponse", "basePrice");
+        assertNullableMoneyProperty(document, "CatalogItemSummaryResponse", "currentOfferPrice");
+        assertNullableMoneyProperty(document, "CatalogItemDetailResponse", "basePrice");
+        assertNullableMoneyProperty(document, "CatalogItemDetailResponse", "currentOfferPrice");
         assertThat(document.get("paths").has("/api/v1/authentication/identity-sign-in")).isTrue();
         assertThat(document.get("paths").has("/api/v1/me/access-contexts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/me/access-context-selections")).isTrue();
@@ -223,6 +227,23 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
             return value.decimalValue().stripTrailingZeros().toPlainString();
         }
         return value.toString();
+    }
+
+    private static void assertNullableMoneyProperty(tools.jackson.databind.JsonNode document, String schema,
+                                                     String property) {
+        var nullable = document.at("/components/schemas/" + schema + "/properties/" + property);
+        assertThat(nullable.has("$ref")).as("nullable property must use an explicit union").isFalse();
+        var alternatives = nullable.get("anyOf");
+        assertThat(alternatives).as("nullable property %s.%s", schema, property).isNotNull();
+        assertThat(alternatives).hasSize(2);
+        assertThat(alternatives.toString()).contains("#/components/schemas/MoneyResponse");
+        boolean includesNull = false;
+        for (var alternative : alternatives) {
+            var type = alternative.get("type");
+            includesNull |= type != null && (type.isTextual() && "null".equals(type.asText())
+                    || type.isArray() && type.toString().contains("\"null\""));
+        }
+        assertThat(includesNull).as("nullable property must include a JSON Schema null branch").isTrue();
     }
 
     private static void assertSchemaRef(tools.jackson.databind.JsonNode document, String path, String method,

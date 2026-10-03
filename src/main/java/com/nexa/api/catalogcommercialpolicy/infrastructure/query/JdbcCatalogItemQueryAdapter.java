@@ -67,10 +67,11 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
             case ITEM_NAME -> "f.name";
             case BRAND_NAME -> "b.name";
             case CATEGORY_NAME -> "c.name";
-            case UNIT_PRICE -> "coalesce(current_price.amount,0)";
+            case UNIT_PRICE -> "current_price.amount";
         };
         String direction = criteria.sortDirection() == SortDirection.DESC ? " desc" : " asc";
-        String sql = selectSql() + fromClause() + predicate + " order by " + order + direction
+        String nullOrdering = criteria.sortField() == CatalogSortField.UNIT_PRICE ? " nulls last" : "";
+        String sql = selectSql() + fromClause() + predicate + " order by " + order + direction + nullOrdering
                 + ",s.legacy_catalog_item_id asc nulls last,s.id asc limit ? offset ?";
         List<Object> pageArgs = new ArrayList<>(baseArgs);
         pageArgs.add(criteria.size());
@@ -126,25 +127,25 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
     }
 
     private CatalogItemSummary summary(Row row, Enrichment enrichment) {
-        CatalogPricingView value = enrichment.pricing().getOrDefault(row.catalogItemId(),
-                CatalogPricingView.base(row.amount(), row.currency(), clock.instant()));
+        CatalogPricingView value = pricing(row, enrichment);
         ProductAvailabilityPort.Snapshot available = enrichment.availability().getOrDefault(row.catalogItemId(), unknown(row.catalogItemId()));
         String label = promotionLabel(row.catalogItemId(), enrichment);
         return new CatalogItemSummary(row.catalogItemId(), row.productId().toString(), row.itemName(), row.brandName(),
-                row.categoryName(), row.presentation(), value.effectivePrice(), value.currency(), row.temperature(),
-                row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(), label, value,
+                row.categoryName(), row.presentation(), value == null ? null : value.effectivePrice(),
+                value == null ? null : value.currency(), row.temperature(), row.imagePath(), row.imageFileName(),
+                row.status(), available.status(), available.nearExpiry(), label, value,
                 string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
                 row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
                 row.variantCode(), row.variantName(), available.sellableAvailability());
     }
 
     private CatalogItemDetail detail(Row row, Enrichment enrichment) {
-        CatalogPricingView value = enrichment.pricing().getOrDefault(row.catalogItemId(),
-                CatalogPricingView.base(row.amount(), row.currency(), clock.instant()));
+        CatalogPricingView value = pricing(row, enrichment);
         ProductAvailabilityPort.Snapshot available = enrichment.availability().getOrDefault(row.catalogItemId(), unknown(row.catalogItemId()));
         String label = promotionLabel(row.catalogItemId(), enrichment);
         return new CatalogItemDetail(row.catalogItemId(), row.productId().toString(), row.itemName(), row.brandName(),
-                row.categoryName(), row.description(), row.presentation(), value.effectivePrice(), value.currency(),
+                row.categoryName(), row.description(), row.presentation(), value == null ? null : value.effectivePrice(),
+                value == null ? null : value.currency(),
                 row.temperature(), row.imagePath(), row.imageFileName(), row.status(), available.status(), available.nearExpiry(),
                 label, value, string(row.familyId()), row.familyCode(), row.familyName(), row.sellableSkuId().toString(), row.skuCode(),
                 row.unitOfMeasure(), row.packagingType(), row.netWeight(), row.grossWeight(), available.asOf(),
@@ -152,10 +153,17 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
     }
 
     private String promotionLabel(String catalogItemId, Enrichment enrichment) {
-        return enrichment.pricing().getOrDefault(catalogItemId,
-                        CatalogPricingView.base(BigDecimal.ZERO, "PEN", clock.instant()))
-                .appliedPromotions().stream().map(CatalogPricingView.AppliedPromotion::name)
+        CatalogPricingView pricing = enrichment.pricing().get(catalogItemId);
+        if (pricing == null) return null;
+        return pricing.appliedPromotions().stream().map(CatalogPricingView.AppliedPromotion::name)
                 .filter(name -> name != null && !name.isBlank()).collect(Collectors.joining(", "));
+    }
+
+    private CatalogPricingView pricing(Row row, Enrichment enrichment) {
+        CatalogPricingView resolved = enrichment.pricing().get(row.catalogItemId());
+        if (resolved != null) return resolved;
+        if (row.amount() == null || row.currency() == null) return null;
+        return CatalogPricingView.base(row.amount(), row.currency(), clock.instant());
     }
 
     private Enrichment enrich(CatalogScope scope, List<Row> rows) {
@@ -185,6 +193,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
                 if (scope.buyerView() || scope.clientAccountId() != null) {
                     throw new IllegalStateException("Authoritative offer is unavailable for the customer account");
                 }
+                if (row.amount() == null || row.currency() == null) continue;
                 prices.put(row.catalogItemId(), new CatalogPricingView(row.amount(), row.amount(), BigDecimal.ZERO,
                         row.currency(), List.of(), asOf, scope.buyerView()));
                 continue;
@@ -201,7 +210,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         return "select s.id sellable_sku_id,coalesce(s.legacy_product_id,s.id) product_id,s.legacy_catalog_item_id catalog_item_id,s.sku_code product_code," +
                 "coalesce(f.name,p.name) item_name,f.id family_id,f.family_code family_code,f.name family_name,v.variant_code variant_code,v.name variant_name,c.id category_id,c.name category_name," +
                 "b.name brand_name,s.presentation presentation,coalesce(p.description,f.description) description,f.storage_family temperature,s.status status," +
-                "coalesce(current_price.amount,0) amount,coalesce(current_price.currency,'PEN') currency,s.unit_of_measure unit_of_measure,s.packaging_type packaging_type," +
+                "current_price.amount amount,current_price.currency currency,s.unit_of_measure unit_of_measure,s.packaging_type packaging_type," +
                 "s.net_weight net_weight,s.gross_weight gross_weight,asset.asset_path image_path,asset.file_name image_file_name,s.temperature_min,s.temperature_max ";
     }
 
