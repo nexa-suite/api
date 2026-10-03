@@ -23,7 +23,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
 
     @Override
     protected void ensureCommercialInventory() throws Exception {
-        super.ensureCommercialInventory(LocalDate.now().plusDays(1), "CAT-0004");
+        super.ensureCommercialInventory(LocalDate.of(2099, 1, 1), "CAT-0004");
     }
 
     @Test
