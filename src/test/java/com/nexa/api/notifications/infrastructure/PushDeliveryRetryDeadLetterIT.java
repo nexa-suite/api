@@ -2,12 +2,14 @@ package com.nexa.api.notifications.infrastructure;
 
 import com.nexa.api.bootstrap.runtime.events.CanonicalOutboxEventProcessor;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -61,8 +63,9 @@ class PushDeliveryRetryDeadLetterIT extends NexaWorkflowIntegrationSupport {
 
         processor.processBatch();
 
-        assertThat(jdbc.queryForObject("select status from integration.outbox_event where event_id=?", String.class, outboxEventId))
-                .isEqualTo("DEAD_LETTER");
+        Awaitility.await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertThat(jdbc.queryForObject("select status from integration.outbox_event where event_id=?",
+                        String.class, outboxEventId)).isEqualTo("DEAD_LETTER"));
         assertThat(jdbc.queryForObject("select count(*) from notifications.push_delivery_attempt where subscription_id=? and event_id=?",
                 Integer.class, subscriptionId, sourceEventId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("select status from notifications.push_delivery_attempt where subscription_id=? and event_id=?",

@@ -3,6 +3,8 @@ package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchCommandPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffNotificationPort;
+import com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.TypedIncidentSourceRequest;
+import com.nexa.api.fulfillmentdelivery.application.port.OperationalExceptionPersistencePort;
 import com.nexa.api.fulfillmentdelivery.domain.delivery.DeliveryAttempt;
 import com.nexa.api.fulfillmentdelivery.domain.delivery.DeliveryAttemptLine;
 import com.nexa.api.fulfillmentdelivery.domain.delivery.DeliveryAttemptStatus;
@@ -46,6 +48,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     private final CanonicalOutboxPort canonicalOutbox;
     private final WarehouseEventContextQueryPort warehouseEvents;
     private final WorkforceDirectory workforce;
+    private final OperationalExceptionPersistencePort operationalExceptions;
 
     public DispatchCommandPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
                                              WarehouseLogisticsFulfillmentPort warehouseFulfillment,
@@ -54,11 +57,13 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
                                              SalesOrderFulfillmentQuery salesOrders,
                                              CustomerAccountQuery customerAccounts,
                                              WorkforceDirectory workforce,
-                                             CanonicalOutboxPort canonicalOutbox) {
+                                             CanonicalOutboxPort canonicalOutbox,
+                                             OperationalExceptionPersistencePort operationalExceptions) {
         super(jdbc, changeFeed, warehouseFulfillment, handoffNotifications, salesOrders, customerAccounts);
         this.warehouseEvents = warehouseEvents;
         this.workforce = workforce;
         this.canonicalOutbox = canonicalOutbox;
+        this.operationalExceptions = operationalExceptions;
     }
 
     @Override
@@ -114,6 +119,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,dispatch_order_id,status,destination_snapshot,created_at,updated_at,version) " +
                         "values (?,?,?,?,?,?,?,?,0)",
                 id, tenant, workspace, id, "PLANNED", source.destinationSnapshot(), timestamp(now), timestamp(now));
+        CustomerInstructionDeliveryProjection.copy(jdbc, tenant, workspace, source.salesOrderId(), id, Instant.ofEpochMilli(now));
         appendEvent(tenant, workspace, id, "logistics.dispatch.created", null, "READY_FOR_OPERATIONS", actor,
                 false, null, now, source.clientAccountId());
         saveIdempotency(tenant, workspace, "dispatch-create", key, requestHash, id, now);
@@ -214,10 +220,10 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
             if (jdbc.update("update logistics.dispatch_order set status='INCIDENT',temperature_status=?,updated_at=?,version=version+1 " +
                             "where tenant_id=? and workspace_id=? and id=? and version=?", readingStatus.name(), timestamp(now),
                     tenant, workspace, id, row.version()) != 1) throw error("CONCURRENCY_CONFLICT", false);
-            jdbc.update("insert into logistics.delivery_incident(id,tenant_id,workspace_id,dispatch_order_id," +
-                            "incident_type,severity,buyer_visible,description,occurred_at,created_at) values (?,?,?,?,?,?,?,?,?,?)",
-                    UUID.randomUUID(), tenant, workspace, id, "TEMPERATURE_EXCURSION", "HIGH", false,
-                    "Temperature reading is outside the configured dispatch range", timestamp(reading.recordedAt()), timestamp(now));
+            operationalExceptions.recordTypedIncident(new TypedIncidentSourceRequest(tenant, workspace, id,
+                    UUID.randomUUID(), "TEMPERATURE_EXCURSION", "HIGH", false,
+                    "Temperature reading is outside the configured dispatch range", reading.recordedAt(), null,
+                    actor, Instant.ofEpochMilli(now), key, requestHash));
             appendEvent(tenant, workspace, id, "logistics.dispatch.buyer-temperature-review", row.status(), "INCIDENT",
                     actor, true, "Delivery review required", now, row.clientAccountId());
         } else {
@@ -261,10 +267,10 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
             appendEvent(tenant, workspace, id, "logistics.dispatch.incident-recorded", row.status(), row.status(),
                     actor, buyerVisible, description, now, row.clientAccountId());
         }
-        jdbc.update("insert into logistics.delivery_incident(id,tenant_id,workspace_id,dispatch_order_id,incident_type," +
-                        "severity,buyer_visible,description,occurred_at,resolution,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
-                UUID.randomUUID(), tenant, workspace, id, incident.type().name(), incident.severity().name(),
-                incident.buyerVisible(), incident.description(), timestamp(incident.occurredAt()), incident.resolution(), timestamp(now));
+        operationalExceptions.recordTypedIncident(new TypedIncidentSourceRequest(tenant, workspace, id,
+                UUID.randomUUID(), incident.type().name(), incident.severity().name(), incident.buyerVisible(),
+                incident.description(), incident.occurredAt(), incident.resolution(), actor,
+                Instant.ofEpochMilli(now), key, requestHash));
         saveIdempotency(tenant, workspace, "dispatch-incident", key, requestHash, id, now);
         return detailView(tenantId, workspaceId, null, dispatchId);
     }
@@ -409,6 +415,13 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         if (replay != null) return replay;
         Instant effectiveCompletedAt = completedAt == null ? Instant.now() : completedAt;
         DispatchRow row = locked(tenant, workspace, id, null);
+        List<UUID> deliveryIds = jdbc.query("select id from logistics.delivery where tenant_id=? and workspace_id=? and dispatch_order_id=? order by id for update",
+                (rs,n)->rs.getObject(1,UUID.class),tenant,workspace,id);
+        for (UUID deliveryId : deliveryIds) {
+            if (DeliveryExecutionHoldGate.blocking(jdbc,tenant,workspace,deliveryId)) {
+                throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING",false);
+            }
+        }
         requireVersion(row, version);
         List<ObligationLine> obligations = obligations(tenant, workspace, row.salesOrderId());
         List<LogisticsOperationsService.DeliveryLineCommand> finalLines = remainingAfter(obligations,

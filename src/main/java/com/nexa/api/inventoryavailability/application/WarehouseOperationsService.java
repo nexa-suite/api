@@ -39,6 +39,7 @@ public class WarehouseOperationsService {
     private final QueryAvailability queryAvailability;
     private final ManageSafetyStock manageSafetyStock;
     private final TransferInventory transferInventory;
+    private final CycleCountInventory cycleCountInventory;
 
     public WarehouseOperationsService(WarehouseConfigurationPersistencePort configuration,
                                       WarehouseInventoryPersistencePort inventory,
@@ -59,7 +60,8 @@ public class WarehouseOperationsService {
                                       MarkFulfillmentReady markFulfillmentReady,
                                       QueryAvailability queryAvailability,
                                       ManageSafetyStock manageSafetyStock,
-                                      TransferInventory transferInventory) {
+                                      TransferInventory transferInventory,
+                                      CycleCountInventory cycleCountInventory) {
         this.configuration = configuration;
         this.inventory = inventory;
         this.reservations = reservations;
@@ -80,6 +82,7 @@ public class WarehouseOperationsService {
         this.queryAvailability = queryAvailability;
         this.manageSafetyStock = manageSafetyStock;
         this.transferInventory = transferInventory;
+        this.cycleCountInventory = cycleCountInventory;
     }
 
     public Page<WarehouseSummary> warehouses(CurrentAccessContext context, int page, int size, String sort) { return configuration.warehouses(context, page, size, sort); }
@@ -104,7 +107,22 @@ public class WarehouseOperationsService {
     public LotSummary quarantineLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) { return quarantineLot.execute(context, lotId, expected, reason, key, correlation); }
     public LotSummary restoreLot(CurrentAccessContext context, String lotId, long expected, String reason, String key, String correlation) { return restoreLot.execute(context, lotId, expected, reason, key, correlation); }
     public LotSummary disposeLot(CurrentAccessContext context, String lotId, String disposition, long expected, String reason, String key, String correlation) { return inventory.disposeLot(context, lotId, disposition, expected, reason, key, correlation); }
+    @Transactional public LotSummary disposeTemperatureQuantity(CurrentAccessContext context, String lotId,
+            String disposition, BigDecimal affectedQuantity, java.util.UUID temperatureEvaluationId,
+            long expected, String reason, String key, String correlation) {
+        return inventory.disposeTemperatureQuantity(context, lotId, disposition, affectedQuantity,
+                temperatureEvaluationId, expected, reason, key, correlation);
+    }
+    public CycleCountRecord recordCycleCount(CurrentAccessContext context, String lotId, CycleCountCommand command,
+                                             long expectedLotVersion, String key, String correlation) {
+        return cycleCountInventory.record(context, lotId, command, expectedLotVersion, key, correlation);
+    }
+    public CycleCountCorrection applyCycleCountCorrection(CurrentAccessContext context, String countId,
+                                                          long expectedLotVersion, String key, String correlation) {
+        return cycleCountInventory.applyCorrection(context, countId, expectedLotVersion, key, correlation);
+    }
     public List<Availability> availability(CurrentAccessContext context, List<String> ids) { return queryAvailability.execute(context, ids); }
+    public List<Availability> warehouseAvailability(CurrentAccessContext context, String warehouseId, List<String> ids) { return queryAvailability.executeWarehouse(context, warehouseId, ids); }
     public Page<SafetyStockSummary> safetyStocks(CurrentAccessContext context, String warehouseId, String skuId, int page, int size) {
         return manageSafetyStock.list(context, warehouseId, skuId, page, size);
     }
@@ -129,6 +147,11 @@ public class WarehouseOperationsService {
     public TransferSummary receiveTransfer(CurrentAccessContext context, String id, long expectedVersion,
                                            String key, String correlation) {
         return transferInventory.receive(context, id, expectedVersion, key, correlation);
+    }
+    @Transactional public TransferReceiptObservation observeTransferReceiptDiscrepancy(
+            CurrentAccessContext context, String id, TransferReceiptObservationCommand command,
+            long expectedVersion, String key, String correlation) {
+        return transferInventory.observeReceiptDiscrepancy(context, id, command, expectedVersion, key, correlation);
     }
     public ReservationPreview preview(CurrentAccessContext context, String orderId) { return prepareFulfillment.execute(context, orderId); }
     public ReservationDetail reserve(CurrentAccessContext context, String orderId, long expected, String key, String correlation) { return reserveInventory.execute(context, orderId, expected, key, correlation); }
@@ -183,14 +206,45 @@ public class WarehouseOperationsService {
                                   String mode, String status, String reason, Instant createdAt,
                                   long sourceVersionBefore, Long sourceVersionAfter, Long destinationVersionAfter,
                                   long version, Instant dispatchedAt, Instant receivedAt) { }
+    public record TransferReceiptObservationCommand(String observedBatchNumber,
+                                                    LocalDate observedExpirationDate,
+                                                    BigDecimal observedQuantity, String unit) { }
+    public record TransferReceiptObservation(String id, String transferId, long transferVersion,
+                                             String sourceWarehouseId, String sourceZoneId, String sourceLotId,
+                                             String destinationWarehouseId, String destinationZoneId,
+                                             String expectedBatchNumber, LocalDate expectedExpirationDate,
+                                             BigDecimal expectedQuantity, String expectedUnit,
+                                             String observedBatchNumber, LocalDate observedExpirationDate,
+                                             BigDecimal observedQuantity, String observedUnit,
+                                             String actorMembershipId, Instant recordedAt) {
+        public boolean hasDifference() {
+            return !expectedBatchNumber.equals(observedBatchNumber)
+                    || (observedExpirationDate != null && !expectedExpirationDate.equals(observedExpirationDate))
+                    || expectedQuantity.compareTo(observedQuantity) != 0;
+        }
+    }
+    public record CycleCountCommand(BigDecimal observedQuantity, String unit) { }
+    public record CycleCountRecord(String id, String lotId, String warehouseId, String zoneId,
+                                   long lotVersion, BigDecimal expectedQuantity, BigDecimal observedQuantity,
+                                   String unit, String status, String actorMembershipId, Instant recordedAt) { }
+    public record CycleCountCorrection(String id, String cycleCountId, String lotId, String warehouseId,
+                                       String zoneId, long lotVersionBefore, long lotVersionAfter,
+                                       BigDecimal quantityBefore, BigDecimal quantityAfter,
+                                       BigDecimal quantityDelta, String unit, String actorMembershipId,
+                                       Instant recordedAt) { }
     public record MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt, String skuId) {
         public MovementSummary(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt) {
             this(id, lotId, catalogItemId, type, quantity, unit, quantityBefore, quantityAfter, reservedBefore, reservedAfter, reason, occurredAt, null);
         }
     }
-    public record Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) {
+    public record Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId, String temperatureEvidenceObjectId) {
+        public Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) {
+            this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit,
+                    temperatureReading, notes, skuId, null);
+        }
         public Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes) {
-            this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit, temperatureReading, notes, null);
+            this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit,
+                    temperatureReading, notes, null, null);
         }
     }
     public record Availability(String catalogItemId, String status, Instant asOf,

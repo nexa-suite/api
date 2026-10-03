@@ -20,6 +20,7 @@ public final class RoleSurfacePolicy {
 			MembershipRole.SALES, Set.of(Surface.PLATFORM),
 			MembershipRole.WAREHOUSE, Set.of(Surface.PLATFORM),
 			MembershipRole.LOGISTICS, Set.of(Surface.PLATFORM),
+			MembershipRole.BUSINESS_OPERATIONS_MANAGER, Set.of(Surface.PLATFORM),
 			MembershipRole.BUYER, Set.of(Surface.PORTAL));
 
 	private RoleSurfacePolicy() {

@@ -16,7 +16,7 @@ public class QuarantineLot {
     @Transactional
     public WarehouseOperationsService.LotSummary execute(CurrentAccessContext context, String lotId, long expectedVersion,
                                                           String reason, String idempotencyKey, String correlationId) {
-        WarehouseApplicationAuthorization.write(context);
+        WarehouseApplicationAuthorization.waste(context);
         return persistence.quarantineLot(context, lotId, expectedVersion, reason, idempotencyKey, correlationId);
     }
 }

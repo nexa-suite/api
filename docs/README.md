@@ -18,6 +18,8 @@ contexts.
 
 ## HTTP and OpenAPI contracts
 
+- [Operations contract closure and implementation boundaries](./operations-contract-closure.md)
+
 - [OpenAPI instructions and compatibility checks](./openapi/README.md)
 - [Committed OpenAPI snapshot](./openapi/openapi.json)
 - [Cross-client API contract evidence — 2026-09-24](./verification/cross-client-contract-2026-09-24.md)
@@ -38,6 +40,7 @@ contexts.
 - [Flyway migration history](../src/main/resources/db/migration/)
 - [Deterministic seed resources](../src/main/resources/seed/)
 - [Business XML and XSD schemas](../src/main/resources/schemas/)
+- [ICISA catalog reference handoff](./catalog-reference/README.md)
 
 Migration history, seed artifacts and schemas remain source evidence. No
 structural refactor should rewrite them.

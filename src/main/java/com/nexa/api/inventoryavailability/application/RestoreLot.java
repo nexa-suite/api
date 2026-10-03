@@ -16,7 +16,7 @@ public class RestoreLot {
     @Transactional
     public WarehouseOperationsService.LotSummary execute(CurrentAccessContext context, String lotId, long expectedVersion,
                                                           String reason, String idempotencyKey, String correlationId) {
-        WarehouseApplicationAuthorization.write(context);
+        WarehouseApplicationAuthorization.release(context);
         return persistence.restoreLot(context, lotId, expectedVersion, reason, idempotencyKey, correlationId);
     }
 }

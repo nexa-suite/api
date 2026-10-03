@@ -10,6 +10,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,6 +32,7 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
     @Test
     void failureBeforeFinalFinancialAdjustmentRollsBackDeliveryResolutionAndOutbox() throws Exception {
         SalesOrderResource order = createConfirmedDirectOrder();
+        ensureBackingWarehouseGrants(order.id());
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
 
@@ -63,7 +65,30 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
         fulfillmentEtag = staged.getResponse().getHeader("ETag");
         MvcResult ready = transition(fulfillmentId, fulfillmentEtag, warehouse, "ready-for-dispatch", "rollback-financial-ready-");
         fulfillmentEtag = ready.getResponse().getHeader("ETag");
-        MvcResult handedOver = transition(fulfillmentId, fulfillmentEtag, warehouse, "dispatches", "rollback-financial-dispatch-");
+        var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + fulfillmentId + "/physical-allocation")
+                        .header("Authorization", "Bearer " + warehouse))
+                .andExpect(status().isOk()).andReturn());
+        MvcResult assignment = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/driver-assignments")
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "rollback-financial-assignment-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"responsibleMembershipId\":\"" + membershipId(LOGISTICS_EMAIL)
+                                + "\",\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong() + "}"))
+                .andExpect(status().isOk()).andReturn();
+        fulfillmentEtag = assignment.getResponse().getHeader("ETag");
+        MvcResult outgoing = recordMatchingOutgoingCheck(fulfillmentId, warehouse, fulfillmentEtag,
+                "rollback-financial-outgoing-" + UUID.randomUUID());
+        String dispatchBody = "{\"physicalAllocationId\":\"" + allocation.get("allocationId").asText()
+                + "\",\"physicalAllocationVersion\":" + allocation.get("version").asLong()
+                + ",\"driverAssignmentId\":\"" + json(assignment).get("id").asText()
+                + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
+                + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
+        MvcResult handedOver = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/dispatches")
+                        .header("Authorization", "Bearer " + warehouse).header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", "rollback-financial-dispatch-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
+                .andExpect(status().isOk()).andReturn();
         String deliveryId = json(handedOver).get("deliveryId").asText();
 
         MvcResult delivery = mockMvc.perform(get("/api/v1/deliveries/" + deliveryId)
@@ -116,6 +141,33 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
                 .andExpect(status().isOk()).andReturn();
     }
 
+    private MvcResult recordMatchingOutgoingCheck(String fulfillmentId, String token,
+                                                   String fulfillmentEtag, String idempotencyKey) throws Exception {
+        var allocation = json(mockMvc.perform(get("/api/v1/fulfillments/" + fulfillmentId + "/physical-allocation")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andReturn());
+        StringBuilder body = new StringBuilder("{\"physicalAllocationId\":\"")
+                .append(allocation.get("allocationId").asText())
+                .append("\",\"physicalAllocationVersion\":").append(allocation.get("version").asLong())
+                .append(",\"observations\":[");
+        for (int index = 0; index < allocation.get("lines").size(); index++) {
+            var line = allocation.get("lines").get(index);
+            if (index > 0) body.append(',');
+            BigDecimal quantity = line.get("remainingQuantity").decimalValue();
+            body.append("{\"physicalAllocationLineId\":\"").append(line.get("physicalAllocationLineId").asText())
+                    .append("\",\"observedLotId\":")
+                    .append(quantity.signum() == 0 ? "null" : "\"" + line.get("lotId").asText() + "\"")
+                    .append(",\"observedQuantity\":").append(quantity.toPlainString()).append('}');
+        }
+        body.append("]}");
+        return mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/outgoing-checks")
+                        .header("Authorization", "Bearer " + token)
+                        .header("If-Match", fulfillmentEtag)
+                        .header("Idempotency-Key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(body.toString()))
+                .andExpect(status().isCreated()).andReturn();
+    }
+
     private SalesOrderResource createConfirmedDirectOrder() throws Exception {
         ensureCommercialInventory();
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
@@ -129,5 +181,42 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
                                 + "\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":1,\"unit\":\"UNIT\"}]}"))
                 .andExpect(status().isCreated()).andReturn();
         return new SalesOrderResource(json(created).get("id").asText(), created.getResponse().getHeader("ETag"), sales);
+    }
+
+    private void ensureBackingWarehouseGrants(String salesOrderId) throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        var warehouseIds = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+                        + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
+                        + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
+                        + "join warehouse.inventory_backing_position p on p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.backing_line_id=l.id "
+                        + "where b.tenant_id=? and b.workspace_id=? and c.sales_order_id=? and b.status='BACKED'",
+                (rs, row) -> rs.getObject(1, UUID.class), tenant, workspace, UUID.fromString(salesOrderId));
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        for (UUID warehouseId : warehouseIds) {
+            for (String target : List.of(membershipId(WAREHOUSE_EMAIL), membershipId(LOGISTICS_EMAIL))) {
+                ensureWarehouseGrant(warehouseId, target, owner);
+            }
+        }
+    }
+
+    private void ensureWarehouseGrant(UUID warehouseId, String target, String owner) throws Exception {
+        var grants = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn());
+        for (var grant : grants) {
+            if (!target.equals(grant.path("membershipId").asText())) continue;
+            if ("ACTIVE".equals(grant.path("status").asText())) return;
+            mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                            .header("Authorization", "Bearer " + owner)
+                            .header("If-Match", "\"" + grant.path("version").asLong() + "\"")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"membershipId\":\"" + target + "\"}"))
+                    .andExpect(status().isOk());
+            return;
+        }
+        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                        .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + target + "\"}"))
+                .andExpect(status().isOk());
     }
 }

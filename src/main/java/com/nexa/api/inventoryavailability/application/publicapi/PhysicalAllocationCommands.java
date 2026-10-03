@@ -11,14 +11,14 @@ import java.util.UUID;
  * consumes the backing responsibility in the same transaction.
  */
 public interface PhysicalAllocationCommands {
-    AllocationResult getByFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
+    AllocationResult getByFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID actorMembershipId);
 
     /**
      * Acquires the allocation row lock for a fulfillment-scoped transaction.
      * Cross-context lifecycle commands use this before locking fulfillment so
      * physical allocation and fulfillment operations share one lock order.
      */
-    void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId);
+    void lockForFulfillment(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID actorMembershipId);
 
     /**
      * Acquires every fulfillment lot and any candidate lots for a picking
@@ -26,7 +26,8 @@ public interface PhysicalAllocationCommands {
      * This keeps multi-line and FEFO-override commands deadlock-free across
      * concurrent fulfillments.
      */
-    void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, List<UUID> candidateLotIds);
+    void lockLotsForPicking(UUID tenantId, UUID workspaceId, UUID fulfillmentId, UUID actorMembershipId,
+                            List<UUID> candidateLotIds);
 
     AllocationResult allocate(AllocationRequest request);
 

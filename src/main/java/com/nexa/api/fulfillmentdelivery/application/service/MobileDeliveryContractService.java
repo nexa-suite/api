@@ -74,6 +74,30 @@ public class MobileDeliveryContractService {
                 result.expiresAt(), result.status(), result.replayed() ? null : rawToken);
     }
 
+    @Transactional
+    public IssuedDispatchHandoff issueDispatchHandoff(CurrentAccessContext context, UUID deliveryId,
+                                                       UUID assignmentId, String idempotencyKey) {
+        context.requirePermission(Permission.LOGISTICS_WRITE);
+        requireKey(idempotencyKey);
+        if (deliveryId == null || assignmentId == null) throw invalid("DELIVERY_HANDOFF_REQUEST_INVALID");
+        Instant issuedAt = clock.instant();
+        String rawToken = token();
+        MobileDeliveryContractPort.DispatchHandoffIssue result = persistence.issueDispatchHandoff(
+                new MobileDeliveryContractPort.DispatchHandoffIssueRequest(
+                        context.tenantId().value(), context.workspaceId().value(), deliveryId, assignmentId,
+                        context.membershipId().value(), idempotencyKey.trim(),
+                        hash("dispatch-handoff-v1|" + deliveryId + "|" + assignmentId), hash(rawToken),
+                        issuedAt, issuedAt.plus(handoffTtl)));
+        if (!result.replayed()) {
+            trace(context, "DISPATCH_HANDOFF_IDENTITY_ISSUED", "DispatchHandoffIdentity", result.handoffId(),
+                    idempotencyKey, java.util.Map.of("deliveryId", deliveryId, "assignmentId", assignmentId,
+                            "deliveryVersion", result.deliveryVersion(), "expiresAt", result.expiresAt().toString()));
+        }
+        return new IssuedDispatchHandoff("DISPATCH_HANDOFF", result.handoffId(), result.deliveryId(),
+                result.assignmentId(), result.deliveryVersion(), result.expiresAt(), result.status(),
+                result.replayed() ? null : rawToken);
+    }
+
     @Transactional(readOnly = true)
     public MobileDeliveryContractPort.HandoffValidation validate(CurrentAccessContext context, String rawToken) {
         requireBuyer(context, PermissionKey.BUYER_TRACKING_READ);
@@ -82,6 +106,17 @@ public class MobileDeliveryContractService {
         return persistence.validate(new MobileDeliveryContractPort.ValidationRequest(
                 context.tenantId().value(), context.workspaceId().value(), context.membershipId().value(),
                 customerAccountId, hash(token), clock.instant()));
+    }
+
+    @Transactional(readOnly = true)
+    public MobileDeliveryContractPort.DispatchHandoffValidation validateDispatchHandoff(
+            CurrentAccessContext context, UUID deliveryId, UUID assignmentId, String rawToken) {
+        context.requirePermission(Permission.LOGISTICS_READ);
+        if (deliveryId == null || assignmentId == null) throw invalid("DELIVERY_HANDOFF_TOKEN_INVALID");
+        String token = requireToken(rawToken);
+        return persistence.validateDispatchHandoff(new MobileDeliveryContractPort.DispatchHandoffValidationRequest(
+                context.tenantId().value(), context.workspaceId().value(), deliveryId, assignmentId,
+                context.membershipId().value(), context.userId().value(), hash(token), clock.instant()));
     }
 
     @Transactional
@@ -179,4 +214,7 @@ public class MobileDeliveryContractService {
 
     public record IssuedHandoff(UUID handoffId, UUID deliveryId, UUID attemptId, Instant expiresAt,
                                 String status, String token) { }
+
+    public record IssuedDispatchHandoff(String purpose, UUID handoffId, UUID deliveryId, UUID assignmentId,
+                                        long deliveryVersion, Instant expiresAt, String status, String token) { }
 }

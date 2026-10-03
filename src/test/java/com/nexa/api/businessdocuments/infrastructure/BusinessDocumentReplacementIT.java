@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.io.ByteArrayInputStream;
@@ -17,7 +18,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
@@ -73,6 +76,47 @@ class BusinessDocumentReplacementIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "buyer-replace-document-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void evidenceIdempotencyBindsRequestMetadataAndActualUploadedBytes() throws Exception {
+        SalesOrderResource order = createConfirmedSalesOrder();
+        SalesOrderResource otherOrder = createConfirmedSalesOrder();
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String idempotencyKey = "driver-evidence-fingerprint-" + UUID.randomUUID();
+        byte[] original = new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 1, 2, 3, 4};
+        byte[] changed = original.clone();
+        changed[changed.length - 1] = 5;
+
+        MvcResult first = uploadEvidence(owner, idempotencyKey, order.id(), "proof.png", "image/png", original)
+                .andExpect(status().isCreated()).andReturn();
+        String evidenceId = json(first).get("id").asText();
+        MvcResult identicalReplay = uploadEvidence(owner, idempotencyKey, order.id(), "proof.png", "image/png", original)
+                .andExpect(status().isCreated()).andReturn();
+        assertThat(json(identicalReplay).get("id").asText()).isEqualTo(evidenceId);
+
+        uploadEvidence(owner, idempotencyKey, order.id(), "proof.png", "image/png", changed)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+        uploadEvidence(owner, idempotencyKey, order.id(), "other.png", "image/png", original)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+        uploadEvidence(owner, idempotencyKey, order.id(), "proof.png", "image/jpeg", original)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+        uploadEvidence(owner, idempotencyKey, otherOrder.id(), "proof.png", "image/png", original)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions uploadEvidence(String token, String key, String subjectId,
+            String filename, String contentType, byte[] bytes) throws Exception {
+        return mockMvc.perform(multipart("/api/v1/business-document-evidence")
+                .file(new MockMultipartFile("file", filename, contentType, bytes))
+                .param("subjectType", "SALES_ORDER")
+                .param("subjectId", subjectId)
+                .header("Authorization", "Bearer " + token)
+                .header("Idempotency-Key", key));
     }
 
     private UUID seedIssuedOrderSummary(String salesOrderId) {

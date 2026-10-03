@@ -4,6 +4,7 @@ import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -20,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Function;
 
 @RestController
@@ -220,13 +222,17 @@ public final class WarehouseController {
 
     @PostMapping("/inventory/inbound-receipts")
     public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId()), key, String.valueOf(correlation)));
+        var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId(), r.temperatureEvidenceObjectId()), key, String.valueOf(correlation)));
         return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
     }
 
     @PostMapping("/inventory/adjustments")
     public ResponseEntity<LotResponse> adjust(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = lot(service.adjust(c, r.lotId(), r.quantity(), r.direction() == null || r.direction().equalsIgnoreCase("IN"), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
+        String direction = r == null || r.direction() == null ? "" : r.direction().trim();
+        if (!direction.equalsIgnoreCase("IN") && !direction.equalsIgnoreCase("OUT")) {
+            throw new WarehouseOperationsService.WarehouseException("INVALID_REQUEST", false);
+        }
+        var result = lot(service.adjust(c, r.lotId(), r.quantity(), direction.equalsIgnoreCase("IN"), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
@@ -234,6 +240,34 @@ public final class WarehouseController {
     public ResponseEntity<LotResponse> waste(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var result = lot(service.waste(c, r.lotId(), r.quantity(), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
+    }
+
+    @PostMapping("/inventory/lots/{lotId}/cycle-counts")
+    @Operation(operationId = "recordInventoryCycleCount")
+    public ResponseEntity<CycleCountResponse> recordCycleCount(
+            @RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String lotId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody CycleCountRequest request,
+            @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        var command = new WarehouseOperationsService.CycleCountCommand(request.observedQuantity(), request.unit());
+        var value = cycleCount(service.recordCycleCount(c, lotId, command, version(ifMatch), key,
+                String.valueOf(correlation)));
+        return ResponseEntity.status(201).eTag(etag(value.lotVersion())).body(value);
+    }
+
+    @PostMapping("/inventory/cycle-counts/{countId}/corrections")
+    @Operation(operationId = "applyInventoryCycleCountCorrection")
+    public ResponseEntity<CycleCountCorrectionResponse> applyCycleCountCorrection(
+            @RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String countId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        var value = cycleCountCorrection(service.applyCycleCountCorrection(c, countId, version(ifMatch), key,
+                String.valueOf(correlation)));
+        return ResponseEntity.ok().eTag(etag(value.lotVersionAfter())).body(value);
     }
 
     @PostMapping("/inventory/lots/{lotId}/blocks")
@@ -258,12 +292,26 @@ public final class WarehouseController {
                                                    @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                    @RequestBody DispositionRequest r,
                                                    @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        if (r.affectedQuantity() != null || r.temperatureEvaluationId() != null) {
+            return mutation(service.disposeTemperatureQuantity(c, lotId, r.disposition(), r.affectedQuantity(),
+                    r.temperatureEvaluationId(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+        }
         return mutation(service.disposeLot(c, lotId, r.disposition(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
     }
 
     @GetMapping("/inventory-availability")
     public List<AvailabilityResponse> availability(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) List<String> catalogItemIds) {
         return service.availability(c, catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : List.of(catalogItemId)).stream().map(this::availability).toList();
+    }
+
+    @GetMapping("/warehouses/{warehouseId}/inventory-availability")
+    @Operation(operationId = "getWarehouseInventoryAvailability")
+    public List<AvailabilityResponse> warehouseAvailability(@RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String warehouseId, @RequestParam(required = false) String catalogItemId,
+            @RequestParam(required = false) List<String> catalogItemIds) {
+        return service.warehouseAvailability(c, warehouseId,
+                catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : java.util.Collections.singletonList(catalogItemId))
+                .stream().map(this::availability).toList();
     }
 
     @GetMapping("/inventory/safety-stocks")
@@ -352,6 +400,22 @@ public final class WarehouseController {
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
+    @PostMapping("/inventory/transfers/{id}/receipt-observations")
+    @Operation(operationId = "recordInventoryTransferReceiptObservation")
+    public ResponseEntity<TransferReceiptObservationResponse> observeTransferReceiptDiscrepancy(
+            @RequestAttribute(ACCESS) CurrentAccessContext c,
+            @PathVariable String id,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody TransferReceiptObservationRequest request,
+            @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        var command = new WarehouseOperationsService.TransferReceiptObservationCommand(
+                request.observedBatchNumber(), request.observedExpirationDate(), request.observedQuantity(), request.unit());
+        var value = transferReceiptObservation(service.observeTransferReceiptDiscrepancy(
+                c, id, command, version(ifMatch), key, String.valueOf(correlation)));
+        return ResponseEntity.status(201).eTag(etag(value.transferVersion())).body(value);
+    }
+
     @GetMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservation-preview")
     @Operation(operationId = "previewFulfillmentCandidateInventoryReservation")
     public ReservationPreviewResponse preview(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId) { return preview(service.preview(c, salesOrderId)); }
@@ -399,6 +463,15 @@ public final class WarehouseController {
     private MovementResponse movement(WarehouseOperationsService.MovementSummary x) { return new MovementResponse(x.id(), x.lotId(), x.catalogItemId(), x.type(), x.quantity(), x.unit(), x.quantityBefore(), x.quantityAfter(), x.reservedBefore(), x.reservedAfter(), x.reason(), x.occurredAt(), x.skuId()); }
     private SafetyStockResponse safetyStock(WarehouseOperationsService.SafetyStockSummary x) { return new SafetyStockResponse(x.id(), x.warehouseId(), x.skuId(), x.catalogItemId(), x.quantity(), x.unit(), x.version(), x.updatedAt()); }
     private TransferResponse transfer(WarehouseOperationsService.TransferSummary x) { return new TransferResponse(x.id(), x.sourceWarehouseId(), x.sourceZoneId(), x.sourceLotId(), x.destinationWarehouseId(), x.destinationZoneId(), x.destinationLotId(), x.skuId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.requestedQuantity(), x.transferredQuantity(), x.unit(), x.mode(), x.status(), x.reason(), x.createdAt(), x.sourceVersionBefore(), x.sourceVersionAfter(), x.destinationVersionAfter(), x.version(), x.dispatchedAt(), x.receivedAt()); }
+    private TransferReceiptObservationResponse transferReceiptObservation(
+            WarehouseOperationsService.TransferReceiptObservation x) {
+        return new TransferReceiptObservationResponse(x.id(), x.transferId(), x.transferVersion(),
+                x.sourceWarehouseId(), x.sourceZoneId(), x.sourceLotId(),
+                x.destinationWarehouseId(), x.destinationZoneId(),
+                x.expectedBatchNumber(), x.expectedExpirationDate(), x.expectedQuantity(), x.expectedUnit(),
+                x.observedBatchNumber(), x.observedExpirationDate(), x.observedQuantity(), x.observedUnit(),
+                x.hasDifference(), x.actorMembershipId(), x.recordedAt());
+    }
     private AvailabilityResponse availability(WarehouseOperationsService.Availability x) { return new AvailabilityResponse(x.catalogItemId(), x.status(), x.asOf(), x.physicalQuantity(), x.safetyStock(), x.sellableQuantity()); }
     private ReservationPreviewResponse preview(WarehouseOperationsService.ReservationPreview x) { return new ReservationPreviewResponse(x.salesOrderId(), x.orderNumber(), x.lines().stream().map(this::proposal).toList(), x.complete(), x.generatedAt(), x.notice()); }
     private ProposalLineResponse proposal(WarehouseOperationsService.ProposalLine x) { return new ProposalLineResponse(x.catalogItemId(), x.requested(), x.unit(), x.allocations().stream().map(this::allocation).toList(), x.shortage(), x.complete(), x.skuId()); }
@@ -436,6 +509,24 @@ public final class WarehouseController {
                                    String mode, String status, String reason, Instant createdAt,
                                    long sourceVersionBefore, Long sourceVersionAfter, Long destinationVersionAfter,
                                    long version, Instant dispatchedAt, Instant receivedAt) { }
+    public record TransferReceiptObservationResponse(
+            String observationId, String transferId, long transferVersion,
+            String sourceWarehouseId, String sourceZoneId, String sourceLotId,
+            String destinationWarehouseId, String destinationZoneId,
+            String expectedBatchNumber, LocalDate expectedExpirationDate,
+            BigDecimal expectedQuantity, String expectedUnit,
+            String observedBatchNumber, LocalDate observedExpirationDate,
+            BigDecimal observedQuantity, String observedUnit, boolean hasDifference,
+            String actorMembershipId, Instant recordedAt) { }
+    public record CycleCountResponse(String id, String lotId, String warehouseId, String zoneId,
+                                     long lotVersion, BigDecimal expectedQuantity, BigDecimal observedQuantity,
+                                     String unit, String status, String actorMembershipId, Instant recordedAt) { }
+    public record CycleCountCorrectionResponse(String id, String cycleCountId, String lotId,
+                                               String warehouseId, String zoneId,
+                                               long lotVersionBefore, long lotVersionAfter,
+                                               BigDecimal quantityBefore, BigDecimal quantityAfter,
+                                               BigDecimal quantityDelta, String unit,
+                                               String actorMembershipId, Instant recordedAt) { }
     public record ReservationPreviewResponse(String salesOrderId, String orderNumber, List<ProposalLineResponse> lines, boolean complete, Instant generatedAt, String notice) { }
     public record ProposalLineResponse(String catalogItemId, BigDecimal requested, String unit, List<AllocationResponse> allocations, BigDecimal shortage, boolean complete, String skuId) { }
     public record AllocationResponse(String lotId, BigDecimal quantity, String unit, LocalDate expirationDate) { }
@@ -464,10 +555,21 @@ public final class WarehouseController {
     public record SelectionPolicyPatchRequest(String selectionPolicy) { }
     public record ZoneRequest(String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax) { }
     public record ZonePatch(String name, BigDecimal temperatureMin, BigDecimal temperatureMax, String status) { }
-    public record ReceiptRequest(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) { }
+    public record ReceiptRequest(String warehouseId, String zoneId, String catalogItemId, String batchNumber,
+                                 LocalDate expirationDate, BigDecimal quantity, String unit,
+                                 @Schema(description = "Manual receiving temperature in Celsius; required for cold-chain SKUs.")
+                                 BigDecimal temperatureReading,
+                                 String notes, String skuId,
+                                 @Schema(description = "AVAILABLE image evidence bound to this WAREHOUSE; required for an out-of-range reading.")
+                                 String temperatureEvidenceObjectId) { }
     public record QuantityRequest(String lotId, BigDecimal quantity, String direction, String reason) { }
     public record ReasonRequest(String reason) { }
-    public record DispositionRequest(String disposition, String reason) { }
+    public record DispositionRequest(String disposition, String reason, BigDecimal affectedQuantity,
+                                     UUID temperatureEvaluationId) {
+        public DispositionRequest(String disposition, String reason) {
+            this(disposition, reason, null, null);
+        }
+    }
     public record SafetyStockRequest(@NotBlank @Size(max = 64) String warehouseId,
                                      @Size(max = 64) String skuId,
                                      @Size(max = 64) String catalogItemId,
@@ -483,4 +585,22 @@ public final class WarehouseController {
                                   @NotNull @DecimalMin("0.0001") BigDecimal quantity,
                                   @Size(max = 32) String unit,
                                   @NotBlank @Size(max = 2000) String reason) { }
+    public record TransferReceiptObservationRequest(
+            @NotBlank @Size(max = 80) String observedBatchNumber,
+            LocalDate observedExpirationDate,
+            @NotNull @DecimalMin("0.0") BigDecimal observedQuantity,
+            @NotBlank @Size(max = 32) String unit) { }
+    public record CycleCountRequest(@NotNull @DecimalMin("0.0") BigDecimal observedQuantity,
+                                    @NotBlank @Size(max = 32) String unit) { }
+
+    private CycleCountResponse cycleCount(WarehouseOperationsService.CycleCountRecord x) {
+        return new CycleCountResponse(x.id(), x.lotId(), x.warehouseId(), x.zoneId(), x.lotVersion(),
+                x.expectedQuantity(), x.observedQuantity(), x.unit(), x.status(), x.actorMembershipId(), x.recordedAt());
+    }
+
+    private CycleCountCorrectionResponse cycleCountCorrection(WarehouseOperationsService.CycleCountCorrection x) {
+        return new CycleCountCorrectionResponse(x.id(), x.cycleCountId(), x.lotId(), x.warehouseId(), x.zoneId(),
+                x.lotVersionBefore(), x.lotVersionAfter(), x.quantityBefore(), x.quantityAfter(),
+                x.quantityDelta(), x.unit(), x.actorMembershipId(), x.recordedAt());
+    }
 }

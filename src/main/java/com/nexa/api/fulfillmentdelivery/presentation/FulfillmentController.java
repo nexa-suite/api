@@ -2,7 +2,12 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentWorkListModels;
+import com.nexa.api.fulfillmentdelivery.application.model.OutgoingGoodsCheckModels;
+import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentLifecycleService;
+import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentWorkListService;
+import com.nexa.api.fulfillmentdelivery.application.service.OutgoingGoodsCheckService;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +20,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
@@ -45,9 +52,24 @@ public final class FulfillmentController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
 
     private final FulfillmentLifecycleService service;
+    private final FulfillmentWorkListService workList;
+    private final OutgoingGoodsCheckService outgoingGoodsChecks;
 
-    public FulfillmentController(FulfillmentLifecycleService service) {
+    public FulfillmentController(FulfillmentLifecycleService service, FulfillmentWorkListService workList,
+                                 OutgoingGoodsCheckService outgoingGoodsChecks) {
         this.service = service;
+        this.workList = workList;
+        this.outgoingGoodsChecks = outgoingGoodsChecks;
+    }
+
+    @GetMapping("/fulfillments")
+    @Operation(operationId = "listPickingFulfillmentWork")
+    public ResponseEntity<FulfillmentWorkListModels.Page> listPickingWork(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        FulfillmentWorkListModels.Page value = workList.list(context, page, size);
+        return ResponseEntity.ok(value);
     }
 
     @GetMapping("/fulfillments/{fulfillmentId}")
@@ -56,6 +78,15 @@ public final class FulfillmentController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
         FulfillmentModels.FulfillmentView value = service.get(context, fulfillmentId);
+        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @GetMapping("/fulfillments/{fulfillmentId}/physical-allocation")
+    @Operation(operationId = "getFulfillmentPhysicalAllocation")
+    public ResponseEntity<PhysicalAllocationModels.PhysicalAllocationView> getPhysicalAllocation(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        PhysicalAllocationModels.PhysicalAllocationView value = service.getPhysicalAllocation(context, fulfillmentId);
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -146,8 +177,19 @@ public final class FulfillmentController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
-        return fulfillmentMutation(service.dispatch(context, fulfillmentId, version(ifMatch), idempotencyKey));
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody(required = false) FulfillmentModels.DispatchRequest request) {
+        return fulfillmentMutation(service.dispatch(context, fulfillmentId, version(ifMatch), idempotencyKey, request));
+    }
+
+    @GetMapping("/fulfillments/{fulfillmentId}/handoff-evidence/current")
+    @Operation(operationId = "getCurrentFulfillmentHandoffEvidence")
+    public ResponseEntity<FulfillmentModels.HandoffEvidence> currentHandoffEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        FulfillmentModels.HandoffEvidence value = service.handoffEvidence(context, fulfillmentId);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .eTag(etag(value.fulfillmentVersion())).body(value);
     }
 
     @GetMapping("/deliveries/{deliveryId}")
@@ -157,6 +199,48 @@ public final class FulfillmentController {
             @PathVariable UUID deliveryId) {
         FulfillmentModels.DeliveryView value = service.getDelivery(context, deliveryId);
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+    }
+
+    @GetMapping("/fulfillments/{fulfillmentId}/outgoing-checks/current")
+    @Operation(operationId = "getCurrentOutgoingGoodsCheck")
+    public ResponseEntity<OutgoingGoodsCheckModels.Check> currentOutgoingGoodsCheck(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        OutgoingGoodsCheckModels.Check value = outgoingGoodsChecks.current(context, fulfillmentId);
+        if (value == null) return ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build();
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .eTag(etag(value.fulfillmentVersion())).body(value);
+    }
+
+    @PostMapping("/fulfillments/{fulfillmentId}/outgoing-checks")
+    @Operation(operationId = "recordOutgoingGoodsCheck")
+    public ResponseEntity<OutgoingGoodsCheckModels.Check> recordOutgoingGoodsCheck(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody OutgoingGoodsCheckModels.Request request) {
+        OutgoingGoodsCheckModels.Check value = outgoingGoodsChecks.record(context, fulfillmentId,
+                version(ifMatch), idempotencyKey, request);
+        return ResponseEntity.status(value.replayed() ? 200 : 201)
+                .cacheControl(CacheControl.noStore()).eTag(etag(value.fulfillmentVersion())).body(value);
+    }
+
+    @PostMapping("/fulfillments/{fulfillmentId}/outgoing-discrepancy-resolutions")
+    @Operation(operationId = "resolveOutgoingGoodsDiscrepancy")
+    public ResponseEntity<OutgoingGoodsCheckModels.DiscrepancyResolution> resolveOutgoingGoodsDiscrepancy(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody OutgoingDiscrepancyResolutionRequest request) {
+        OutgoingGoodsCheckModels.DiscrepancyResolution value = outgoingGoodsChecks.resolveDiscrepancy(
+                context, fulfillmentId, version(ifMatch), idempotencyKey,
+                new OutgoingGoodsCheckModels.ResolutionRequest(request.physicalAllocationId(),
+                        request.physicalAllocationVersion(), request.discrepancyCheckId(),
+                        request.matchingCheckId(), request.reason()));
+        return ResponseEntity.status(value.replayed() ? 200 : 201).cacheControl(CacheControl.noStore())
+                .eTag(etag(value.fulfillmentVersion())).body(value);
     }
 
     @PostMapping("/deliveries/{deliveryId}/transit-starts")
@@ -227,6 +311,54 @@ public final class FulfillmentController {
                 new FulfillmentLifecycleService.TemperatureCommand(request.lotId(), request.temperatureCelsius(),
                         request.unit(), request.source(), request.evidenceMetadata(), request.recordedAt()));
         return ResponseEntity.status(201).eTag(etag(value.deliveryVersion())).body(value);
+    }
+
+    @PostMapping("/temperature-evidence")
+    @Operation(operationId = "recordStockTemperatureEvidence")
+    public ResponseEntity<FulfillmentModels.TemperatureEvidenceView> recordStockTemperatureEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody TemperatureEvidenceRequest request) {
+        FulfillmentModels.TemperatureEvidenceView value = service.recordTemperatureEvidence(context, idempotencyKey,
+                new FulfillmentLifecycleService.TemperatureEvidenceCommand(request.subjectType(), request.subjectId(),
+                        request.value(), request.unit(), request.occurredAt(), request.evidenceObjectId(),
+                        request.expectedLotVersion(), request.affectedQuantity(), request.reason(),
+                        request.sourceEvidenceId()));
+        return ResponseEntity.status(201).body(value);
+    }
+
+    @GetMapping("/temperature-evidence/{evidenceId}")
+    @Operation(operationId = "getStockTemperatureEvidence")
+    public ResponseEntity<FulfillmentModels.TemperatureEvidenceView> getStockTemperatureEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID evidenceId) {
+        return ResponseEntity.ok(service.temperatureEvidence(context, evidenceId));
+    }
+
+    @GetMapping("/fulfillments/{fulfillmentId}/temperature-evidence/current")
+    @Operation(operationId = "getCurrentFulfillmentTemperatureReadiness")
+    public ResponseEntity<FulfillmentModels.FulfillmentTemperatureReadiness> currentFulfillmentTemperatureReadiness(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId) {
+        FulfillmentModels.FulfillmentTemperatureReadiness value =
+                service.fulfillmentTemperatureReadiness(context, fulfillmentId);
+        return ResponseEntity.ok().eTag(etag(value.fulfillmentVersion())).body(value);
+    }
+
+    @PostMapping("/fulfillments/{fulfillmentId}/temperature-evidence")
+    @Operation(operationId = "recordFulfillmentTemperatureEvidence")
+    public ResponseEntity<FulfillmentModels.TemperatureEvidenceView> recordFulfillmentTemperatureEvidence(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID fulfillmentId,
+            @RequestHeader(name = "If-Match", required = false) String ifMatch,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody FulfillmentTemperatureEvidenceRequest request) {
+        FulfillmentModels.TemperatureEvidenceView value = service.recordFulfillmentTemperatureEvidence(context,
+                fulfillmentId, version(ifMatch), idempotencyKey,
+                new FulfillmentLifecycleService.FulfillmentTemperatureEvidenceCommand(
+                        request.lotId(), request.value(), request.unit(), request.occurredAt(),
+                        request.expectedLotVersion(), request.evidenceObjectId()));
+        return ResponseEntity.status(201).eTag(etag(value.fulfillmentVersion())).body(value);
     }
 
     private static ResponseEntity<FulfillmentModels.FulfillmentView> fulfillmentMutation(FulfillmentModels.FulfillmentView value) {
@@ -301,4 +433,32 @@ public final class FulfillmentController {
     public record TemperatureRequest(UUID lotId, @NotNull BigDecimal temperatureCelsius,
                                      @Size(max = 16) String unit, @Size(max = 64) String source,
                                      @Size(max = 2000) String evidenceMetadata, Instant recordedAt) { }
+
+    public record TemperatureEvidenceRequest(@NotBlank @Size(max = 16) String subjectType,
+                                             @NotNull UUID subjectId,
+                                             @NotNull BigDecimal value,
+                                             @NotBlank @Size(max = 16) String unit,
+                                             @NotNull Instant occurredAt,
+                                             UUID evidenceObjectId,
+                                             @PositiveOrZero Long expectedLotVersion,
+                                             @Positive BigDecimal affectedQuantity,
+                                             @Size(max = 2000) String reason,
+                                             UUID sourceEvidenceId) { }
+
+    public record FulfillmentTemperatureEvidenceRequest(@NotNull UUID lotId,
+                                                        @NotNull BigDecimal value,
+                                                        @NotBlank @Size(max = 16) String unit,
+                                                        @NotNull Instant occurredAt,
+                                                        @jakarta.validation.constraints.PositiveOrZero Long expectedLotVersion,
+                                                        UUID evidenceObjectId) {
+        public FulfillmentTemperatureEvidenceRequest(UUID lotId, BigDecimal value, String unit, Instant occurredAt) {
+            this(lotId, value, unit, occurredAt, null, null);
+        }
+    }
+
+    public record OutgoingDiscrepancyResolutionRequest(@NotNull UUID physicalAllocationId,
+                                                         @PositiveOrZero long physicalAllocationVersion,
+                                                         @NotNull UUID discrepancyCheckId,
+                                                         @NotNull UUID matchingCheckId,
+                                                         @NotBlank @Size(max = 1000) String reason) { }
 }

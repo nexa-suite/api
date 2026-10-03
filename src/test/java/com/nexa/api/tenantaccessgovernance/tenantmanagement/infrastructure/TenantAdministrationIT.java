@@ -1,15 +1,25 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure;
 
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.notification.JdbcSecurityNotificationOutboxAdapter;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort;
 import com.nexa.api.support.PostgresIntegrationSupport;
+import com.nexa.api.shared.context.RlsRequestScope;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcInvitationPersistenceAdapter;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.InvitationExpirationJob;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.UUID;
@@ -18,6 +28,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,6 +44,18 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
 
     @Autowired
     private InvitationExpirationJob invitationExpirationJob;
+
+    @Autowired
+    private JdbcInvitationPersistenceAdapter invitationPersistence;
+
+    @Autowired
+    private TenantConfigurationPort tenantConfiguration;
+
+    @Autowired
+    private OpaqueSecurityTokenPort opaqueTokens;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void organizationSettingsAreTypedAuditedAndOptimisticallyConcurrent() throws Exception {
@@ -138,6 +161,126 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
                         .content("{\"email\":\"second-owner-" + uuid().substring(0, 8) + "@example.test\",\"displayName\":\"Second Owner\",\"roles\":[\"COMPANY_OWNER\"]}"))
                 .andExpect(status().isConflict());
         assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join tenant_management.membership_role_definition a on a.membership_id=m.id join tenant_management.role_definition r on r.id=a.role_id where w.tenant_id=? and m.status='ACTIVE' and r.code='company_owner'", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
+    }
+
+    @Test
+    void businessOperationsManagerInvitationCanBeAcceptedWithOnlyCoordinationPermissions() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "business-operations-manager-" + uuid().substring(0, 8) + "@example.test";
+        MvcResult created = mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
+                        .header("Idempotency-Key", "business-operations-manager-" + uuid()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + email + "\",\"displayName\":\"Business Operations Manager\",\"roles\":[\"BUSINESS_OPERATIONS_MANAGER\"]}"))
+                .andExpect(status().isCreated()).andReturn();
+        String invitationId = json(created).get("id").asText();
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.organization_invitation_role where invitation_id=? and role=?",
+                Integer.class, UUID.fromString(invitationId), "BUSINESS_OPERATIONS_MANAGER")).isEqualTo(1);
+
+        mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + invitationToken(email) + "\",\"password\":\"" + TEST_PASSWORD
+                                + "\",\"displayName\":\"Business Operations Manager\"}"))
+                .andExpect(status().isCreated());
+
+        String invited = accessToken(email, "PLATFORM");
+        MvcResult session = mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + invited))
+                .andExpect(status().isOk()).andReturn();
+        var membership = json(session).get("membership");
+        List<String> roles = new java.util.ArrayList<>();
+        membership.get("roles").forEach(role -> roles.add(role.asText()));
+        assertThat(roles).containsExactly("BUSINESS_OPERATIONS_MANAGER");
+
+        List<String> permissions = new java.util.ArrayList<>();
+        membership.get("permissions").forEach(permission -> permissions.add(permission.asText()));
+        assertThat(permissions).contains("delivery.exception.read", "delivery.exception.coordinate")
+                .doesNotContain("inventory.release", "dispatch.assign", "dispatch.temperature");
+        assertThat(RlsRequestScope.current()).as("acceptance scope is restored after success").isNull();
+
+        String rollbackEmail = "business-operations-manager-rollback-" + uuid().substring(0, 8) + "@example.test";
+        mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
+                        .header("Idempotency-Key", "business-operations-manager-rollback-" + uuid()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + rollbackEmail + "\",\"displayName\":\"Business Operations Manager Rollback\",\"roles\":[\"BUSINESS_OPERATIONS_MANAGER\"]}"))
+                .andExpect(status().isCreated());
+        String rollbackToken = invitationToken(rollbackEmail);
+        RlsRequestScope.Scope originalScope = new RlsRequestScope.Scope(UUID.randomUUID(), UUID.randomUUID());
+        RlsRequestScope.set(originalScope.tenantId(), originalScope.workspaceId());
+        try {
+            assertThatThrownBy(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                var snapshot = invitationPersistence.findForUpdateByTokenHash(opaqueTokens.sha256(rollbackToken));
+                assertThat(snapshot).isPresent();
+                assertThat(RlsRequestScope.current()).isNotNull();
+                assertThat(RlsRequestScope.current().tenantId().toString()).isEqualTo(tenantId());
+                assertThat(RlsRequestScope.current().workspaceId().toString()).isEqualTo(workspaceId());
+                assertThat(invitationPersistence.findForUpdateByTokenHash(opaqueTokens.sha256(rollbackToken))).isPresent();
+                TransactionTemplate newTransaction = new TransactionTemplate(transactionManager);
+                newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                String tenantScope = newTransaction.execute(inner -> jdbc.queryForObject(
+                        "select current_setting('app.current_tenant_id', true)", String.class));
+                String workspaceScope = newTransaction.execute(inner -> jdbc.queryForObject(
+                        "select current_setting('app.current_workspace_id', true)", String.class));
+                assertThat(tenantScope).isEqualTo(tenantId());
+                assertThat(workspaceScope).isEqualTo(workspaceId());
+                assertThat(tenantConfiguration.findTenantSecuritySettings(tenantId())).isPresent();
+                throw new IllegalStateException("rollback scoped acceptance lookup");
+            })).isInstanceOf(IllegalStateException.class).hasMessage("rollback scoped acceptance lookup");
+            assertThat(RlsRequestScope.current()).as("original scope is restored after rollback").isEqualTo(originalScope);
+        } finally {
+            RlsRequestScope.clear();
+        }
+    }
+
+    @Test
+    void invitationAcceptanceLookupInstallsScopeBeforeLockingUnderRuntimeRls() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "runtime-rls-invitation-" + uuid().substring(0, 8) + "@example.test";
+        createInvitation(owner, email, "Runtime RLS invitee", "runtime-rls-invitation-" + uuid());
+        String tokenHash = opaqueTokens.sha256(invitationToken(email));
+
+        var runtimeDataSource = new DriverManagerDataSource(runtimeJdbcUrl(), RUNTIME_USERNAME, RUNTIME_PASSWORD);
+        var runtimeJdbc = new JdbcTemplate(runtimeDataSource);
+        var runtimeTransactionManager = new DataSourceTransactionManager(runtimeDataSource);
+        var runtimeInvitationPersistence = new JdbcInvitationPersistenceAdapter(runtimeJdbc, runtimeTransactionManager);
+
+        RlsRequestScope.clear();
+        RlsRequestScope.enableCrossScopeWorkspaceScan();
+        try {
+            assertThatThrownBy(() -> new TransactionTemplate(runtimeTransactionManager).execute(status -> {
+                assertThat(runtimeJdbc.queryForObject("select current_user", String.class)).isEqualTo(RUNTIME_USERNAME);
+                assertThat(runtimeJdbc.queryForObject(
+                        "select rolbypassrls from pg_roles where rolname=current_user", Boolean.class)).isFalse();
+
+                runtimeJdbc.queryForObject("select set_config('app.invitation_accept_token_hash', ?, true)",
+                        String.class, tokenHash);
+                assertThat(runtimeJdbc.queryForObject(
+                        "select count(*) from tenant_management.organization_invitation where token_hash=? and status='PENDING'",
+                        Integer.class, tokenHash)).isEqualTo(1);
+                assertThat(runtimeJdbc.queryForObject(
+                        "select count(*) from (select id from tenant_management.organization_invitation where token_hash=? and status='PENDING' for update) locked",
+                        Integer.class, tokenHash)).isZero();
+
+                var snapshot = runtimeInvitationPersistence.findForUpdateByTokenHash(tokenHash);
+                assertThat(snapshot).isPresent();
+                assertThat(snapshot.orElseThrow().invitation().tenantId().value().toString()).isEqualTo(tenantId());
+                assertThat(snapshot.orElseThrow().invitation().workspaceId().value().toString()).isEqualTo(workspaceId());
+                assertThat(runtimeJdbc.queryForObject(
+                        "select current_setting('app.current_tenant_id', true)", String.class)).isEqualTo(tenantId());
+                assertThat(runtimeJdbc.queryForObject(
+                        "select current_setting('app.current_workspace_id', true)", String.class)).isEqualTo(workspaceId());
+                assertThat(runtimeJdbc.queryForObject(
+                        "select current_setting('app.cross_scope_workspace_scan', true)", String.class)).isEmpty();
+                assertThat(RlsRequestScope.current()).isEqualTo(
+                        new RlsRequestScope.Scope(UUID.fromString(tenantId()), UUID.fromString(workspaceId())));
+                assertThat(RlsRequestScope.crossScopeWorkspaceScanEnabled()).isFalse();
+
+                throw new IllegalStateException("rollback runtime RLS invitation scope test");
+            })).isInstanceOf(IllegalStateException.class).hasMessage("rollback runtime RLS invitation scope test");
+
+            assertThat(RlsRequestScope.current()).as("null request scope is restored after rollback").isNull();
+            assertThat(RlsRequestScope.crossScopeWorkspaceScanEnabled())
+                    .as("pre-existing cross-scope flag is restored after rollback").isTrue();
+        } finally {
+            RlsRequestScope.clear();
+        }
+        assertThat(RlsRequestScope.current()).isNull();
+        assertThat(RlsRequestScope.crossScopeWorkspaceScanEnabled()).isFalse();
     }
 
     @Test

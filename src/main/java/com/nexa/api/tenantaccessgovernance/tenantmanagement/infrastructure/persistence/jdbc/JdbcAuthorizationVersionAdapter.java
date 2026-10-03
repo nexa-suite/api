@@ -3,6 +3,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.pers
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.AuthorizationVersionPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,5 +27,14 @@ public class JdbcAuthorizationVersionAdapter implements AuthorizationVersionPort
 				+ "join tenant_management.workspace w on w.id=m.workspace_id where w.tenant_id=? and w.id=? "
 				+ "on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=current_timestamp",
 				tenantId.value(), workspaceId.value());
+	}
+
+	@Override
+	@Transactional
+	public void bump(TenantId tenantId, WorkspaceId workspaceId, MembershipId membershipId) {
+		jdbc.query("select tenant_management.bump_authorization_membership(?) from tenant_management.workspace_membership m "
+				+ "join tenant_management.workspace w on w.id=m.workspace_id "
+				+ "where m.id=? and m.workspace_id=? and w.tenant_id=?",
+				(rs, row) -> rs.getObject(1), membershipId.value(), membershipId.value(), workspaceId.value(), tenantId.value());
 	}
 }

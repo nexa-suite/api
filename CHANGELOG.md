@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.20.0] - 2026-10-02
+
+Consolidated Operations Wave 4 server support and remediation.
+See [release notes](docs/releases/v0.20.0.md). Supersedes the prerelease checkpoint;
+technical verification does not imply production or Product/System acceptance.
+
+## [0.20.0-alpha.1] - 2026-10-01
+
+Wave 4 source checkpoint, published as prerelease with known validation failures.
+See [release notes](docs/releases/v0.20.0-alpha.1.md). No stable readiness claim.
+
 All notable changes to this project are documented in this file.
 The project uses Semantic Versioning.
 

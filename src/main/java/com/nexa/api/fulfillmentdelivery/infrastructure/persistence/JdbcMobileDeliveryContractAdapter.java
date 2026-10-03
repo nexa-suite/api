@@ -71,6 +71,54 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
+    public DispatchHandoffIssue issueDispatchHandoff(DispatchHandoffIssueRequest request) {
+        requireScope(request.tenantId(), request.workspaceId(), request.deliveryId(), request.assignmentId(),
+                request.actorMembershipId(), request.idempotencyKey(), request.requestHash(), request.tokenHash(),
+                request.issuedAt(), request.expiresAt());
+        lockCommand(request.tenantId(), request.workspaceId(), request.actorMembershipId(),
+                "HANDOFF_ISSUE", request.idempotencyKey());
+
+        DispatchBinding binding = lockCurrentDispatchBinding(request.tenantId(), request.workspaceId(),
+                request.deliveryId(), request.assignmentId());
+        if (binding == null) throw error("DELIVERY_HANDOFF_TOKEN_INVALID", false);
+
+        DispatchHandoffRow prior = jdbc.query("select id,delivery_id,assignment_id,delivery_version,expires_at,status,request_hash "
+                        + "from logistics.dispatch_handoff_identity where tenant_id=? and workspace_id=? "
+                        + "and issuer_membership_id=? and idempotency_key=? for update",
+                (rs, row) -> new DispatchHandoffRow(rs.getObject("id", UUID.class),
+                        rs.getObject("delivery_id", UUID.class), rs.getObject("assignment_id", UUID.class),
+                        rs.getLong("delivery_version"), rs.getTimestamp("expires_at").toInstant(),
+                        rs.getString("status"), rs.getString("request_hash")),
+                request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.idempotencyKey())
+                .stream().findFirst().orElse(null);
+        if (prior != null) {
+            if (!Objects.equals(prior.requestHash(), request.requestHash())) {
+                throw error("IDEMPOTENCY_PAYLOAD_CONFLICT", false);
+            }
+            String status = prior.status();
+            if ("ACTIVE".equals(status) && prior.deliveryVersion() != binding.deliveryVersion()) status = "REPLACED";
+            else if ("ACTIVE".equals(status) && !prior.expiresAt().isAfter(request.issuedAt())) status = "EXPIRED";
+            return new DispatchHandoffIssue(prior.id(), prior.deliveryId(), prior.assignmentId(),
+                    prior.deliveryVersion(), prior.expiresAt(), status, true);
+        }
+
+        UUID handoffId = UUID.randomUUID();
+        jdbc.update("update logistics.dispatch_handoff_identity set status='REPLACED' "
+                        + "where tenant_id=? and workspace_id=? and assignment_id=? and status='ACTIVE'",
+                request.tenantId(), request.workspaceId(), request.assignmentId());
+        jdbc.update("insert into logistics.dispatch_handoff_identity(id,tenant_id,workspace_id,delivery_id,assignment_id,"
+                        + "delivery_version,token_hash,issued_at,expires_at,issuer_membership_id,idempotency_key,"
+                        + "request_hash,status,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                handoffId, request.tenantId(), request.workspaceId(), request.deliveryId(), request.assignmentId(),
+                binding.deliveryVersion(), request.tokenHash(), Timestamp.from(request.issuedAt()),
+                Timestamp.from(request.expiresAt()), request.actorMembershipId(), request.idempotencyKey(),
+                request.requestHash(), "ACTIVE", Timestamp.from(request.issuedAt()));
+        return new DispatchHandoffIssue(handoffId, request.deliveryId(), request.assignmentId(),
+                binding.deliveryVersion(), request.expiresAt(), "ACTIVE", false);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
     public HandoffValidation validate(ValidationRequest request) {
         requireScope(request.tenantId(), request.workspaceId(), request.buyerMembershipId(), request.customerAccountId(), request.tokenHash(), request.now());
         return jdbc.query("select h.id,h.delivery_id,h.delivery_attempt_id,h.expires_at,h.status handoff_status,d.status delivery_status,a.status attempt_status,coalesce(sum(coalesce(l.received_quantity, case when l.attempted_quantity is null then l.quantity else 0 end)),0) delivered_quantity "
@@ -95,6 +143,35 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
+    public DispatchHandoffValidation validateDispatchHandoff(DispatchHandoffValidationRequest request) {
+        requireScope(request.tenantId(), request.workspaceId(), request.deliveryId(), request.assignmentId(),
+                request.driverMembershipId(), request.driverUserId(), request.tokenHash(), request.now());
+        return jdbc.query("select h.id,h.delivery_id,h.assignment_id,h.delivery_version,h.expires_at,h.status "
+                        + "from logistics.dispatch_handoff_identity h "
+                        + "join logistics.delivery_assignment da on da.tenant_id=h.tenant_id "
+                        + "and da.workspace_id=h.workspace_id and da.delivery_id=h.delivery_id "
+                        + "and da.fulfillment_driver_assignment_id=h.assignment_id "
+                        + "join logistics.fulfillment_driver_assignment a on a.tenant_id=da.tenant_id "
+                        + "and a.workspace_id=da.workspace_id and a.id=da.fulfillment_driver_assignment_id "
+                        + "join logistics.fulfillment f on f.tenant_id=a.tenant_id and f.workspace_id=a.workspace_id "
+                        + "and f.id=a.fulfillment_id "
+                        + "join logistics.delivery d on d.tenant_id=h.tenant_id and d.workspace_id=h.workspace_id "
+                        + "and d.id=h.delivery_id "
+                        + "where h.tenant_id=? and h.workspace_id=? and h.delivery_id=? and h.assignment_id=? "
+                        + "and h.token_hash=? and h.status='ACTIVE' and h.expires_at>? "
+                        + "and h.delivery_version=d.version and f.version=a.fulfillment_version+1 "
+                        + "and a.responsible_membership_id=? and a.responsible_user_id=?",
+                (rs, row) -> new DispatchHandoffValidation(rs.getObject("id", UUID.class),
+                        rs.getObject("delivery_id", UUID.class), rs.getObject("assignment_id", UUID.class),
+                        rs.getLong("delivery_version"), rs.getTimestamp("expires_at").toInstant(),
+                        rs.getString("status")),
+                request.tenantId(), request.workspaceId(), request.deliveryId(), request.assignmentId(),
+                request.tokenHash(), Timestamp.from(request.now()), request.driverMembershipId(), request.driverUserId())
+                .stream().findFirst().orElseThrow(() -> error("DELIVERY_HANDOFF_TOKEN_INVALID", false));
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public BuyerReceipt recordReceipt(ReceiptRequest request) {
         requireScope(request.tenantId(), request.workspaceId(), request.deliveryId(), request.buyerMembershipId(),
@@ -114,6 +191,8 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
         }
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
         if (delivery == null) throw error("DELIVERY_NOT_FOUND", true);
+        if (DeliveryExecutionHoldGate.blocking(jdbc, request.tenantId(), request.workspaceId(), request.deliveryId()))
+            throw error("DELIVERY_OPERATIONAL_EXCEPTION_BLOCKING", false);
         HandoffRow handoff = jdbc.query("select id,delivery_attempt_id,customer_account_id,expires_at,status from logistics.delivery_handoff_token where tenant_id=? and workspace_id=? and delivery_id=? and token_hash=? for update",
                 (rs, row) -> new HandoffRow(rs.getObject("id", UUID.class), request.deliveryId(), rs.getObject("delivery_attempt_id", UUID.class),
                         rs.getTimestamp("expires_at").toInstant(), rs.getString("status")), request.tenantId(), request.workspaceId(), request.deliveryId(), request.tokenHash())
@@ -163,6 +242,21 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
                 (rs, row) -> new DeliveryRow(rs.getObject("id", UUID.class), rs.getObject("fulfillment_id", UUID.class),
                         rs.getObject("dispatch_order_id", UUID.class), rs.getString("status")),
                 tenant, workspace, id).stream().findFirst().orElse(null);
+    }
+
+    private DispatchBinding lockCurrentDispatchBinding(UUID tenant, UUID workspace, UUID deliveryId,
+                                                        UUID assignmentId) {
+        return jdbc.query("select d.version delivery_version from logistics.fulfillment_driver_assignment a "
+                        + "join logistics.fulfillment f on f.tenant_id=a.tenant_id and f.workspace_id=a.workspace_id "
+                        + "and f.id=a.fulfillment_id and f.version=a.fulfillment_version+1 "
+                        + "join logistics.delivery_assignment da on da.tenant_id=a.tenant_id "
+                        + "and da.workspace_id=a.workspace_id and da.fulfillment_driver_assignment_id=a.id "
+                        + "and da.delivery_id=? "
+                        + "join logistics.delivery d on d.tenant_id=da.tenant_id and d.workspace_id=da.workspace_id "
+                        + "and d.id=da.delivery_id where a.tenant_id=? and a.workspace_id=? and a.id=? "
+                        + "for update of f,d",
+                (rs, row) -> new DispatchBinding(rs.getLong("delivery_version")),
+                deliveryId, tenant, workspace, assignmentId).stream().findFirst().orElse(null);
     }
 
     private UUID customerAccount(UUID tenant, UUID workspace, DeliveryRow delivery) {
@@ -218,6 +312,9 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
     private record DeliveryRow(UUID id, UUID fulfillmentId, UUID dispatchOrderId, String status) { }
     private record AttemptRow(UUID id, String status) { }
     private record HandoffRow(UUID id, UUID deliveryId, UUID attemptId, Instant expiresAt, String status) { }
+    private record DispatchBinding(long deliveryVersion) { }
+    private record DispatchHandoffRow(UUID id, UUID deliveryId, UUID assignmentId, long deliveryVersion,
+                                      Instant expiresAt, String status, String requestHash) { }
     private record ValidationRow(UUID handoffId, UUID deliveryId, UUID attemptId, Instant expiresAt,
                                  String handoffStatus, String deliveryStatus, String attemptStatus,
                                  BigDecimal deliveredQuantity) { }

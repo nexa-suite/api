@@ -45,4 +45,26 @@ public class JdbcBusinessEvidenceQuery implements BusinessEvidenceQuery {
                 subjectId, subjectType, subjectId).stream().findFirst().orElse(false);
         return Boolean.TRUE.equals(available);
     }
+
+    @Override
+    public boolean isAvailableForSubject(UUID tenantId, UUID workspaceId, UUID evidenceObjectId,
+                                         String subjectType, UUID subjectId) {
+        Boolean available = jdbc.query("select exists(select 1 from business_documents.evidence_object "
+                        + "where tenant_id=? and workspace_id=? and id=? and lifecycle_status='AVAILABLE' "
+                        + "and subject_type=? and subject_id=?)",
+                (rs, row) -> rs.getBoolean(1), tenantId, workspaceId, evidenceObjectId,
+                subjectType, subjectId).stream().findFirst().orElse(false);
+        return Boolean.TRUE.equals(available);
+    }
+
+    @Override
+    public boolean isAvailablePhotoForSubject(UUID tenantId, UUID workspaceId, UUID evidenceObjectId,
+                                               String subjectType, UUID subjectId) {
+        Boolean available = jdbc.query("select exists(select 1 from business_documents.evidence_object "
+                        + "where tenant_id=? and workspace_id=? and id=? and lifecycle_status='AVAILABLE' "
+                        + "and lower(detected_content_type) like 'image/%' and subject_type=? and subject_id=?)",
+                (rs, row) -> rs.getBoolean(1), tenantId, workspaceId, evidenceObjectId,
+                subjectType, subjectId).stream().findFirst().orElse(false);
+        return Boolean.TRUE.equals(available);
+    }
 }
