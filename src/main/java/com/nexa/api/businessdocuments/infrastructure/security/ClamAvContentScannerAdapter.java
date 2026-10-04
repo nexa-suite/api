@@ -29,7 +29,7 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
     private final int readTimeoutMs;
     private final TechnicalMetricsPort metrics;
 
-    private enum Mode { NETWORK, DETERMINISTIC_LOCAL }
+    private enum Mode { NETWORK, DETERMINISTIC_LOCAL, DISABLED }
 
     @Autowired
     public ClamAvContentScannerAdapter(org.springframework.core.env.Environment environment,
@@ -63,6 +63,9 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
     }
 
     private ScanResult scanBytes(byte[] content) {
+        if (mode == Mode.DISABLED) {
+            return new ScanResult(false, null, "MALWARE_SCANNER_DISABLED");
+        }
         if (content == null || content.length == 0) return new ScanResult(false, null, "EMPTY_FILE");
         if (mode == Mode.NETWORK) {
             if (host.isBlank()) return new ScanResult(false, null, "MALWARE_SCANNER_UNAVAILABLE");
@@ -130,7 +133,8 @@ public final class ClamAvContentScannerAdapter implements ContentScannerPort {
             return Mode.DETERMINISTIC_LOCAL;
         }
         if (normalized.equals("network")) return Mode.NETWORK;
-        throw new IllegalStateException("Unsupported ClamAV mode '" + value + "'; use network or deterministic-local");
+        if (normalized.equals("disabled")) return Mode.DISABLED;
+        throw new IllegalStateException("Unsupported ClamAV mode '" + value + "'; use network, deterministic-local or disabled");
     }
 
     private static int positive(String value, String label) {
