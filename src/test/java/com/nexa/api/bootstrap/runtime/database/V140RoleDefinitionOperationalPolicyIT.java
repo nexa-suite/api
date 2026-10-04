@@ -87,7 +87,7 @@ class V140RoleDefinitionOperationalPolicyIT {
             prepared = true;
 
             migrateAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, null);
-            assertThat(schemaHistoryVersion()).isEqualTo("144");
+            assertThat(schemaHistoryVersion()).isEqualTo("145");
             assertThat(canonicalRoleExists()).isTrue();
 
             assertRuntimeCannotInsertWithMatchedContext();
@@ -130,6 +130,7 @@ class V140RoleDefinitionOperationalPolicyIT {
             statement.execute("alter table warehouse.inventory_temperature_evaluation owner to " + MIGRATOR_USERNAME);
             statement.execute("alter table warehouse.inventory_lot_disposition owner to " + MIGRATOR_USERNAME);
             statement.execute("alter table tenant_management.organization_invitation_role owner to " + MIGRATOR_USERNAME);
+            statement.execute("alter table tenant_management.organization_registration_draft_idempotency owner to " + MIGRATOR_USERNAME);
             statement.execute("""
                     grant references on logistics.operational_exception_case, tenant_management.workspace_membership,
                         logistics.temperature_evidence, warehouse.inventory_temperature_evaluation to %s
