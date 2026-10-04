@@ -76,6 +76,18 @@ class CatalogVariantMappingTests {
         });
     }
 
+    @Test
+    void variantOverridesReplaceTheDirectFamilyForEveryReviewedGoudaItem() {
+        Map<String, CatalogFamilySkuMappingLoader.MappingItem> direct = loader.byLegacyCatalogItemId();
+        Map<String, CatalogVariantMappingLoader.MappingItem> overrides = variantLoader.byLegacyCatalogItemId();
+
+        overrides.values().forEach(override -> {
+            CatalogFamilySkuMappingLoader.MappingItem directMapping = direct.get(override.legacyCatalogItemId());
+            assertThat(directMapping.familyCode()).isNotEqualTo(override.familyCode());
+            assertThat(directMapping.familyName()).isNotEqualTo(override.familyName());
+        });
+    }
+
     private static void assertSameFamily(Map<String, CatalogFamilySkuMappingLoader.MappingItem> mapping,
             String first, String second) {
         assertThat(mapping.get(first).familyCode()).isEqualTo(mapping.get(second).familyCode());
