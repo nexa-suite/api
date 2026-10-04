@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.21.0] - Unreleased candidate
+
+Prepared the next compatible API release boundary after v0.20.0.
+See [release notes](docs/releases/v0.21.0.md). This candidate is not published
+support until its required verification, signed tag and GitHub Release exist.
+
+### Changed
+
+- Align the Maven, Render declarative configuration and committed OpenAPI
+  contract version with `0.21.0`.
+- Extend the pull-request OpenAPI compatibility matrix to the published
+  `v0.20.0` consumer baseline while retaining the earlier baselines.
+- Revalidate the native identity sign-in, access-context ticket and JWT
+  session boundaries without widening browser transport or server authority.
+
+### Preserved
+
+- No database migration, RLS policy, bounded-context ownership or SMTP behavior
+  changes are included in this candidate.
+- Production provider readiness, physical-device evidence and Product/System
+  acceptance remain separate gates.
+
 ## [0.20.0] - 2026-10-02
 
 Consolidated Operations Wave 4 server support and remediation.
