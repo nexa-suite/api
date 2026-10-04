@@ -28,3 +28,26 @@ Generated business documents that do not require malware scanning continue to
 use their existing flow. Network scanning remains the default outside this
 explicit deployment configuration, and deterministic local scanning remains
 restricted to local or test profiles.
+
+### Neon V140 migration gate
+
+Neon runs the API with separate `nexa_migrator` and `nexa_runtime` roles. Because
+`tenant_management.role_definition` uses `FORCE ROW LEVEL SECURITY`, V140's
+canonical global `business_operations_manager` row needs a temporary, exact
+insert policy while Flyway runs. The policy does not grant a privilege to the
+runtime role and does not permit any other row.
+
+Run the following sequence with direct connections authenticated as the named
+role. Keep the password values outside the repository:
+
+1. As `nexa_migrator`, execute [`database/prepare-v140-role-definition.sql`](./database/prepare-v140-role-definition.sql).
+2. As `nexa_migrator`, run Flyway through the pending migrations.
+3. In a `finally` or equivalent cleanup step, as `nexa_migrator`, execute [`database/cleanup-v140-role-definition.sql`](./database/cleanup-v140-role-definition.sql), whether Flyway succeeds or fails.
+4. Verify that the temporary policy is absent and `FORCE ROW LEVEL SECURITY` is still enabled before deployment.
+
+The preparation script stops if the table owner, enabled/forced RLS mode, or
+migrator role flags are unsafe. It also stops when an earlier temporary policy
+remains. The cleanup script is idempotent and removes only the expected
+`nexa_v140_migrator_insert` policy.
+Neither script changes ownership, grants `BYPASSRLS`, grants runtime write
+access, or stores credentials. Do not deploy while the temporary policy remains.
