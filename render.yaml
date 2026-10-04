@@ -3,7 +3,7 @@ services:
     name: nexa-api
     runtime: docker
     plan: free
-    region: oregon
+    region: ohio
     branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
@@ -25,17 +25,17 @@ services:
       - key: NEXA_DATABASE_POOL_MAX
         value: "5"
       - key: NEXA_DATABASE_URL
-        sync: false
+        value: jdbc:postgresql://ep-misty-pine-b5ilqw59.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require
       - key: NEXA_DATABASE_MIGRATOR_USERNAME
-        sync: false
+        value: nexa_migrator
       - key: NEXA_DATABASE_MIGRATOR_PASSWORD
         sync: false
       - key: NEXA_DATABASE_RUNTIME_USERNAME
-        sync: false
+        value: nexa_runtime
       - key: NEXA_DATABASE_RUNTIME_PASSWORD
         sync: false
       - key: NEXA_SECURITY_ISSUER
-        sync: false
+        value: https://nexa-api-69bj.onrender.com
       - key: NEXA_SECURITY_AUDIENCE
         value: nexa-mobile
       - key: NEXA_SECURITY_RSA_PUBLIC_KEY
@@ -43,7 +43,7 @@ services:
       - key: NEXA_SECURITY_RSA_PRIVATE_KEY
         value: /etc/secrets/access-token-private.pem
       - key: NEXA_SECURITY_ALLOWED_ORIGINS
-        sync: false
+        value: ""
       - key: NEXA_REFRESH_COOKIE_SECURE
         value: "true"
       - key: NEXA_DEV_BOOTSTRAP_ENABLED
@@ -55,21 +55,19 @@ services:
       - key: NEXA_SYSTEM_OPERATOR_TOKEN
         generateValue: true
       - key: NEXA_CLAMAV_MODE
-        value: network
-      - key: NEXA_CLAMAV_HOST
-        sync: false
+        value: disabled
       - key: NEXA_CLAMAV_PORT
         value: "3310"
       - key: NEXA_OBJECT_STORAGE_ENDPOINT
-        sync: false
+        value: https://br-bitter-brook-b5h33nda.storage.c-7.us-east-2.aws.neon.tech
       - key: NEXA_OBJECT_STORAGE_BUCKET
-        sync: false
+        value: nexa-business-documents
       - key: NEXA_OBJECT_STORAGE_ACCESS_KEY
         sync: false
       - key: NEXA_OBJECT_STORAGE_SECRET_KEY
         sync: false
       - key: NEXA_OBJECT_STORAGE_REGION
-        value: us-east-1
+        value: us-east-2
       - key: NEXA_OBJECT_STORAGE_TIMEOUT_MS
         value: "5000"
       - key: NEXA_PAYMENTS_PROVIDER

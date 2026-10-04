@@ -78,11 +78,36 @@ class BusinessDocumentStorageSecurityTests {
     }
 
     @Test
+    void disabledModeNeverReportsCleanContent() {
+        var scanner = new ClamAvContentScannerAdapter(new MockEnvironment()
+                .withProperty("nexa.clamav.mode", "disabled"));
+
+        var result = scanner.scan(new ByteArrayInputStream("%PDF-1.7\ncontent".getBytes(StandardCharsets.US_ASCII)));
+
+        assertThat(result.clean()).isFalse();
+        assertThat(result.detectedContentType()).isNull();
+        assertThat(result.reason()).isEqualTo("MALWARE_SCANNER_DISABLED");
+        assertThat(scanner.scan(new byte[0]).reason()).isEqualTo("MALWARE_SCANNER_DISABLED");
+    }
+
+    @Test
     void scannerStartupRequiresAnExplicitBoundaryOutsideLocalMode() {
         assertThatThrownBy(() -> new ClamAvRuntimeConfigurationValidator(new MockEnvironment()
                 .withProperty("nexa.clamav.mode", "network")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("NEXA_CLAMAV_HOST is required when malware scanning uses network mode");
+
+        new ClamAvRuntimeConfigurationValidator(new MockEnvironment()
+                .withProperty("nexa.clamav.mode", "network")
+                .withProperty("nexa.clamav.host", "clamav.internal"));
+
+        new ClamAvRuntimeConfigurationValidator(new MockEnvironment()
+                .withProperty("nexa.clamav.mode", "disabled"));
+
+        assertThatThrownBy(() -> new ClamAvRuntimeConfigurationValidator(new MockEnvironment()
+                .withProperty("nexa.clamav.mode", "deterministic-local")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Deterministic malware scanning requires the local profile");
 
         MockEnvironment local = new MockEnvironment();
         local.setActiveProfiles("local");
