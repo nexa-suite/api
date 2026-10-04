@@ -14,6 +14,10 @@ support until its required verification, signed tag and GitHub Release exist.
   `v0.20.0` consumer baseline while retaining the earlier baselines.
 - Revalidate the native identity sign-in, access-context ticket and JWT
   session boundaries without widening browser transport or server authority.
+- Persist the reviewed 102-item catalog reference as a separate v2 seed while
+  preserving the immutable v1 seed and its checksum records.
+- Bind organization-onboarding resume tokens from the `X-Resume-Token` HTTP
+  header and extend the HTTP/RLS regression coverage.
 
 ### Preserved
 
