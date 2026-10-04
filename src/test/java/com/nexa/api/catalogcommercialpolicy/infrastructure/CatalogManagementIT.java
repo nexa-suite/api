@@ -222,8 +222,33 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 		seed.importDeterministicSeed();
 		assertThat(jdbc.queryForObject("select name from catalog_management.product where id=?", String.class, productId))
 				.isEqualTo("Managed edit survives restart");
-		assertThat(jdbc.queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v1'",
+		assertThat(jdbc.queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v2'",
 					Integer.class, tenant, workspace)).isEqualTo(1);
+	}
+
+	@Test
+	void persistenceSeedContainsCanonicalItemsAndKeepsProvisionalReferencesOutOfBuyerVisibility() {
+		UUID tenant = UUID.fromString(tenantId());
+		UUID workspace = UUID.fromString(workspaceId());
+
+		assertThat(jdbc.queryForObject("select count(*) from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id like 'CAT-%'",
+				Integer.class, tenant, workspace)).isEqualTo(102);
+		assertThat(jdbc.queryForObject("select count(*) from catalog_management.product_visibility pv "
+				+ "join catalog_management.product p on p.id=pv.product_id and p.tenant_id=pv.tenant_id and p.workspace_id=pv.workspace_id "
+				+ "where pv.tenant_id=? and pv.workspace_id=? and p.catalog_item_id like 'CAT-%' and pv.buyer_visible=false",
+				Integer.class, tenant, workspace)).isEqualTo(52);
+		assertThat(jdbc.queryForObject("select count(*) from catalog_management.product_price pp "
+				+ "join catalog_management.product p on p.id=pp.product_id and p.tenant_id=pp.tenant_id and p.workspace_id=pp.workspace_id "
+				+ "where pp.tenant_id=? and pp.workspace_id=? and p.catalog_item_id like 'CAT-%' and pp.source_code='PROVISIONAL_REFERENCE'",
+				Integer.class, tenant, workspace)).isEqualTo(52);
+		assertThat(jdbc.queryForObject("select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id like 'CAT-%'",
+				Integer.class, tenant, workspace)).isEqualTo(102);
+		assertThat(jdbc.queryForObject("select pf.family_code from catalog_management.sellable_sku sku "
+				+ "join catalog_management.product_family pf on pf.id=sku.family_id and pf.tenant_id=sku.tenant_id and pf.workspace_id=sku.workspace_id "
+				+ "where sku.tenant_id=? and sku.workspace_id=? and sku.legacy_catalog_item_id='CAT-0014'",
+				String.class, tenant, workspace)).isEqualTo("FAM-GOUDA");
+		assertThat(jdbc.queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v2'",
+				Integer.class, tenant, workspace)).isEqualTo(1);
 	}
 
 	@Test
