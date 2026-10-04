@@ -11,7 +11,7 @@ import java.util.Set;
 @Component
 @Profile("!test")
 public final class ClamAvRuntimeConfigurationValidator {
-    private static final Set<String> SUPPORTED = Set.of("network", "deterministic-local");
+    private static final Set<String> SUPPORTED = Set.of("network", "deterministic-local", "disabled");
 
     public ClamAvRuntimeConfigurationValidator(Environment environment) {
         String mode = environment.getProperty("nexa.clamav.mode", "network").trim().toLowerCase(Locale.ROOT).replace('_', '-');
@@ -19,7 +19,7 @@ public final class ClamAvRuntimeConfigurationValidator {
             throw new IllegalStateException("NEXA_CLAMAV_HOST is required when malware scanning uses network mode");
         }
         if (!SUPPORTED.contains(mode)) {
-            throw new IllegalStateException("Unsupported ClamAV mode '" + mode + "'; use network or deterministic-local");
+            throw new IllegalStateException("Unsupported ClamAV mode '" + mode + "'; use network, deterministic-local or disabled");
         }
         if ("deterministic-local".equals(mode) && !environment.acceptsProfiles("local")) {
             throw new IllegalStateException("Deterministic malware scanning requires the local profile");
