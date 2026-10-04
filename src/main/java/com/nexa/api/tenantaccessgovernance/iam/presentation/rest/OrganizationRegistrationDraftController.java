@@ -37,35 +37,40 @@ public final class OrganizationRegistrationDraftController {
 
     @GetMapping("/{registrationId}")
     @Operation(operationId = "getOrganizationRegistrationDraft")
-    public ResponseEntity<DraftResponse> get(@PathVariable UUID registrationId, HttpHeaders headers) {
-        var value = drafts.get(registrationId, token(headers));
+    @SuppressWarnings("unused")
+    public ResponseEntity<DraftResponse> get(@PathVariable UUID registrationId,
+            HttpServletRequest request, HttpHeaders headers) {
+        var value = drafts.get(registrationId, token(request));
         return ResponseEntity.ok().eTag(etag(value.version())).body(response(value, null));
     }
 
     @PutMapping("/{registrationId}/steps/{step}")
     @Operation(operationId = "updateOrganizationRegistrationDraftStep")
+    @SuppressWarnings("unused")
     public ResponseEntity<DraftResponse> updateStep(@PathVariable UUID registrationId, @PathVariable int step,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            HttpHeaders headers, @RequestBody(required = false) Map<String, Object> values) {
-        var value = drafts.updateStep(registrationId, token(headers), version(ifMatch), step,
+            HttpServletRequest request, HttpHeaders headers,
+            @RequestBody(required = false) Map<String, Object> values) {
+        var value = drafts.updateStep(registrationId, token(request), version(ifMatch), step,
                 values == null ? Map.of() : values, idempotencyKey);
         return ResponseEntity.ok().eTag(etag(value.version())).body(response(value, null));
     }
 
     @PostMapping("/{registrationId}/submit")
     @Operation(operationId = "submitOrganizationRegistrationDraft")
+    @SuppressWarnings("unused")
     public ResponseEntity<DraftResponse> submit(@PathVariable UUID registrationId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            HttpHeaders headers) {
-        var value = drafts.submit(registrationId, token(headers), version(ifMatch), idempotencyKey);
+            HttpServletRequest request, HttpHeaders headers) {
+        var value = drafts.submit(registrationId, token(request), version(ifMatch), idempotencyKey);
         return ResponseEntity.ok().eTag(etag(value.version())).body(response(value, null));
     }
 
-    private static String token(HttpHeaders headers) {
-        String value = headers.getFirst("X-Resume-Token");
-        if (value == null || value.isBlank()) value = headers.getFirst("X-Organization-Registration-Token");
+    private static String token(HttpServletRequest request) {
+        String value = request.getHeader("X-Resume-Token");
+        if (value == null || value.isBlank()) value = request.getHeader("X-Organization-Registration-Token");
         return value;
     }
 
