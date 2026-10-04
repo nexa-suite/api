@@ -17,7 +17,6 @@ import java.security.MessageDigest;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -50,9 +49,11 @@ public class JdbcOrganizationRegistrationDraftAdapter implements OrganizationReg
     public OrganizationRegistrationDraftModels.Created create() {
         UUID id = UUID.randomUUID();
         String rawToken = tokens.generate();
+        String tokenHash = tokens.sha256(rawToken);
         Instant now = clock.instant();
+        JdbcOrganizationRegistrationRlsContext.bindDraftCreate(jdbc, id, tokenHash);
         jdbc.update("insert into tenant_management.organization_registration (id,status,status_token_hash,onboarding_data,last_completed_step,created_at,updated_at,version) values (?,'DRAFT',?,'{}'::jsonb,0,?,?,0)",
-                id, tokens.sha256(rawToken), timestamp(now), timestamp(now));
+                id, tokenHash, timestamp(now), timestamp(now));
         return new OrganizationRegistrationDraftModels.Created(read(id, rawToken), rawToken);
     }
 
@@ -123,6 +124,7 @@ public class JdbcOrganizationRegistrationDraftAdapter implements OrganizationReg
     private RegistrationRow lock(UUID id, String rawToken) {
         if (id == null || rawToken == null || rawToken.isBlank()) throw error("DRAFT_NOT_FOUND");
         String hash = tokens.sha256(rawToken);
+        JdbcOrganizationRegistrationRlsContext.bindDraftUpdate(jdbc, id, hash);
         return jdbc.query("select id,status,status_token_hash,onboarding_data::text,last_completed_step,version,created_at,updated_at from tenant_management.organization_registration where id=? and status_token_hash=? for update",
                 (rs, n) -> new RegistrationRow(rs.getObject("id", UUID.class), rs.getString("status"), rs.getString("status_token_hash"), parse(rs.getString("onboarding_data")),
                         rs.getInt("last_completed_step"), rs.getLong("version"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), id, hash)
@@ -135,6 +137,7 @@ public class JdbcOrganizationRegistrationDraftAdapter implements OrganizationReg
     }
 
     private OrganizationRegistrationDraftModels.Draft readByHash(UUID id, String hash) {
+        JdbcOrganizationRegistrationRlsContext.bindDraftRead(jdbc, id, hash);
         return jdbc.query("select id,status,status_token_hash,onboarding_data::text,last_completed_step,version,created_at,updated_at from tenant_management.organization_registration where id=? and status_token_hash=?",
                 (rs, n) -> view(new RegistrationRow(rs.getObject("id", UUID.class), rs.getString("status"), rs.getString("status_token_hash"), parse(rs.getString("onboarding_data")),
                         rs.getInt("last_completed_step"), rs.getLong("version"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant())), id, hash)

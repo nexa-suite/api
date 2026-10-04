@@ -10,10 +10,24 @@ import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.AccessPolicy;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
+import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.IamSecurityModels.RegistrationRequest;
+import com.nexa.api.tenantaccessgovernance.iam.application.onboarding.OrganizationRegistrationDraftModels;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.JdbcOrganizationActivationAdapter;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.JdbcOrganizationRegistrationDraftAdapter;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.JdbcOrganizationRegistrationPersistenceAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcAccessPolicyAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcWorkspacePreviewQueryAdapter;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.SecureOpaqueSecurityTokenAdapter;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.EffectiveAuthorization;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.FounderIdentity;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.OrganizationRegistration;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.OrganizationRegistrationId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.ReferencePlan;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.RegistrationStatusTokenHash;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.TermsAcceptance;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.WorkspaceSlug;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.WorkspacePreviewQueryPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcInvitationPersistenceAdapter;
 import com.zaxxer.hikari.HikariConfig;
@@ -21,6 +35,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -32,12 +47,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static com.nexa.api.support.PostgresIntegrationSupport.migratorDatabasePassword;
 import static com.nexa.api.support.PostgresIntegrationSupport.migratorDatabaseUsername;
 import static com.nexa.api.support.PostgresIntegrationSupport.openMigratorConnection;
@@ -761,6 +778,123 @@ class RlsRuntimeDatabaseIsolationIT {
         } finally {
             deleteRuntimeSecurityFixture(fixture);
             RlsRequestScope.clear();
+        }
+    }
+
+    @Test
+    void registrationDraftUsesTokenBoundTransactionLocalContextAndRejectsWrongTokenAndStaleCas() throws Exception {
+        DriverManagerDataSource runtimeDataSource = new DriverManagerDataSource(runtimeJdbcUrl(), runtimeDatabaseUsername(), runtimeDatabasePassword());
+        JdbcTemplate runtimeJdbc = new JdbcTemplate(runtimeDataSource);
+        DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(runtimeDataSource);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        JdbcOrganizationRegistrationDraftAdapter drafts = new JdbcOrganizationRegistrationDraftAdapter(
+                runtimeJdbc, JsonMapper.builder().build(), new SecureOpaqueSecurityTokenAdapter(), Clock.systemUTC());
+        List<UUID> registrationIds = new ArrayList<>();
+        try {
+            try (Connection connection = openRuntimeConnection()) {
+                assertThat(scalar(connection, "select current_user")).isEqualTo(runtimeDatabaseUsername());
+                assertThat(scalar(connection, "select rolbypassrls::text from pg_roles where rolname=current_user")).isEqualTo("false");
+                assertThat(count(connection, "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='tenant_management' and c.relname='organization_registration' and c.relforcerowsecurity")).isEqualTo(1);
+                assertThat(sqlState(connection, "insert into tenant_management.organization_registration (id,status,status_token_hash,onboarding_data,last_completed_step,created_at,updated_at,version) values (?,'DRAFT',?,'{}'::jsonb,0,current_timestamp,current_timestamp,0)",
+                        UUID.randomUUID(), "a".repeat(64))).isEqualTo("42501");
+            }
+
+            OrganizationRegistrationDraftModels.Created created = transaction.execute(status -> drafts.create());
+            assertThat(created).isNotNull();
+            registrationIds.add(created.draft().registrationId());
+            assertThat(created.draft().status()).isEqualTo("DRAFT");
+            assertThat(created.draft().version()).isZero();
+            try (Connection connection = openRuntimeConnection()) {
+                assertThat(currentSetting(connection, "app.organization_registration_id")).as("registration context is transaction-local").isIn(null, "");
+                assertThat(currentSetting(connection, "app.organization_registration_token_hash")).as("token hash context is transaction-local").isIn(null, "");
+                assertThat(currentSetting(connection, "app.organization_registration_write_mode")).as("write mode context is transaction-local").isIn(null, "");
+            }
+
+            assertThatThrownBy(() -> transaction.execute(status -> drafts.get(created.draft().registrationId(), "wrong-token")))
+                    .isInstanceOf(OrganizationRegistrationDraftException.class)
+                    .extracting("code").isEqualTo("DRAFT_NOT_FOUND");
+            String tokenHash = new SecureOpaqueSecurityTokenAdapter().sha256(created.resumeToken());
+            int changed = transaction.execute(status -> {
+                runtimeJdbc.queryForObject("select set_config('app.organization_registration_id', ?, true) || "
+                                + "set_config('app.organization_registration_token_hash', ?, true) || "
+                                + "set_config('app.organization_registration_write_mode', 'DRAFT_UPDATE', true)",
+                        String.class, created.draft().registrationId().toString(), tokenHash);
+                return runtimeJdbc.update("update tenant_management.organization_registration set onboarding_data=?::jsonb,last_completed_step=1,legal_name=?,display_name=?,normalized_legal_name=?,updated_at=current_timestamp,version=version+1 where id=? and status='DRAFT' and status_token_hash=? and version=?",
+                        "{\"step1\":{\"legalName\":\"Runtime RLS Test\",\"displayName\":\"Runtime RLS Test\"}}",
+                        "Runtime RLS Test", "Runtime RLS Test", "runtime rls test", created.draft().registrationId(), tokenHash, 0);
+            });
+            assertThat(changed).as("token-scoped step update passes forced RLS").isEqualTo(1);
+            int staleCas = transaction.execute(status -> {
+                runtimeJdbc.queryForObject("select set_config('app.organization_registration_id', ?, true) || "
+                                + "set_config('app.organization_registration_token_hash', ?, true) || "
+                                + "set_config('app.organization_registration_write_mode', 'DRAFT_UPDATE', true)",
+                        String.class, created.draft().registrationId().toString(), tokenHash);
+                return runtimeJdbc.update("update tenant_management.organization_registration set version=version+1 where id=? and status='DRAFT' and status_token_hash=? and version=?",
+                        created.draft().registrationId(), tokenHash, 0);
+            });
+            assertThat(staleCas).as("stale CAS must update no row").isZero();
+            int wrongTokenUpdate = transaction.execute(status -> {
+                runtimeJdbc.queryForObject("select set_config('app.organization_registration_id', ?, true) || "
+                                + "set_config('app.organization_registration_token_hash', ?, true) || "
+                                + "set_config('app.organization_registration_write_mode', 'DRAFT_UPDATE', true)",
+                        String.class, created.draft().registrationId().toString(), "b".repeat(64));
+                return runtimeJdbc.update("update tenant_management.organization_registration set version=version+1 where id=? and status='DRAFT' and status_token_hash=? and version=?",
+                        created.draft().registrationId(), "b".repeat(64), 1);
+            });
+            assertThat(wrongTokenUpdate).as("wrong token must update no row").isZero();
+
+            OrganizationRegistrationDraftModels.Created second = transaction.execute(status -> drafts.create());
+            assertThat(second).isNotNull();
+            registrationIds.add(second.draft().registrationId());
+            assertThatThrownBy(() -> transaction.execute(status -> drafts.get(second.draft().registrationId(), created.resumeToken())))
+                    .isInstanceOf(OrganizationRegistrationDraftException.class)
+                    .extracting("code").isEqualTo("DRAFT_NOT_FOUND");
+        } finally {
+            try (Connection connection = openMigratorConnection()) {
+                for (UUID registrationId : registrationIds) {
+                    execute(connection, "delete from tenant_management.organization_registration_draft_idempotency where registration_id=?", registrationId);
+                    execute(connection, "delete from tenant_management.organization_registration where id=?", registrationId);
+                }
+            }
+        }
+    }
+
+    @Test
+    void operatorRegistrationLookupUsesOneAuthorizedRegistrationIdAndLocalContext() throws Exception {
+        DriverManagerDataSource runtimeDataSource = new DriverManagerDataSource(runtimeJdbcUrl(), runtimeDatabaseUsername(), runtimeDatabasePassword());
+        JdbcTemplate runtimeJdbc = new JdbcTemplate(runtimeDataSource);
+        DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(runtimeDataSource);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        JdbcOrganizationActivationAdapter activation = new JdbcOrganizationActivationAdapter(runtimeJdbc);
+        JdbcOrganizationRegistrationPersistenceAdapter registrations = new JdbcOrganizationRegistrationPersistenceAdapter(runtimeJdbc);
+        UUID registrationId = UUID.randomUUID();
+        String tokenHash = "c".repeat(64);
+        String workspaceSlug = "op-" + registrationId.toString().substring(0, 8);
+        String founderEmail = "op-" + registrationId.toString().substring(0, 8) + "@e.test";
+        OrganizationRegistration registration = OrganizationRegistration.submit(new OrganizationRegistrationId(registrationId),
+                new FounderIdentity(founderEmail, "Operator"), new WorkspaceSlug(workspaceSlug),
+                new TermsAcceptance("terms", true), ReferencePlan.Starter, new RegistrationStatusTokenHash(tokenHash));
+        RegistrationRequest request = new RegistrationRequest("Operator Test", "Operator Test", null, "b2bColdChainDistributor",
+                "Store", "Lima", founderEmail, "Operator", "Workspace", workspaceSlug, "Starter", "terms", true);
+        try {
+            int inserted = transaction.execute(status -> {
+                registrations.save(registration, request, Instant.now());
+                return 1;
+            });
+            assertThat(inserted).isEqualTo(1);
+
+            var snapshot = transaction.execute(status -> activation.findForUpdate(registrationId));
+            assertThat(snapshot).isPresent();
+            assertThat(snapshot.orElseThrow().status()).isEqualTo("PENDING_ACTIVATION");
+            assertThat(snapshot.orElseThrow().id()).isEqualTo(registrationId);
+            try (Connection connection = openRuntimeConnection()) {
+                assertThat(currentSetting(connection, "app.organization_registration_operator_id"))
+                        .as("operator registration context is transaction-local").isIn(null, "");
+            }
+        } finally {
+            try (Connection connection = openMigratorConnection()) {
+                execute(connection, "delete from tenant_management.organization_registration where id=?", registrationId);
+            }
         }
     }
 
