@@ -13,9 +13,12 @@ import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.IamSecurityModels.RegistrationRequest;
 import com.nexa.api.tenantaccessgovernance.iam.application.onboarding.OrganizationRegistrationDraftModels;
+import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OrganizationActivationPersistencePort;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.JdbcOrganizationActivationAdapter;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.JdbcMembershipRolePersistenceAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.JdbcOrganizationRegistrationDraftAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.JdbcOrganizationRegistrationPersistenceAdapter;
+import com.nexa.api.tenantaccessgovernance.iam.infrastructure.password.BCryptPasswordVerifier;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcAccessPolicyAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcWorkspacePreviewQueryAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.SecureOpaqueSecurityTokenAdapter;
@@ -39,6 +42,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.Connection;
@@ -51,6 +55,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -855,6 +861,155 @@ class RlsRuntimeDatabaseIsolationIT {
                     execute(connection, "delete from tenant_management.organization_registration_draft_idempotency where registration_id=?", registrationId);
                     execute(connection, "delete from tenant_management.organization_registration where id=?", registrationId);
                 }
+            }
+        }
+    }
+
+    @Test
+    void runtimeRegistrationAdaptersCompleteDraftIdempotencyAndActivationWithForcedRls() throws Exception {
+        RlsRequestScope.clear();
+        List<UUID> registrationIds = new ArrayList<>();
+        OrganizationActivationPersistencePort.ActivatedOrganization activated = null;
+        UUID founderUserId = null;
+        UUID activatedTenantId = null;
+        UUID activatedWorkspaceId = null;
+        try (HikariDataSource pool = runtimePool()) {
+            RlsScopedDataSource scopedDataSource = new RlsScopedDataSource(pool);
+            JdbcTemplate runtimeJdbc = new JdbcTemplate(scopedDataSource);
+            TransactionTemplate transaction = new TransactionTemplate(new DataSourceTransactionManager(scopedDataSource));
+            SecureOpaqueSecurityTokenAdapter tokens = new SecureOpaqueSecurityTokenAdapter();
+            JdbcOrganizationRegistrationDraftAdapter drafts = new JdbcOrganizationRegistrationDraftAdapter(
+                    runtimeJdbc, JsonMapper.builder().build(), tokens, Clock.systemUTC());
+            JdbcOrganizationActivationAdapter activation = new JdbcOrganizationActivationAdapter(runtimeJdbc);
+            JdbcMembershipRolePersistenceAdapter roles = new JdbcMembershipRolePersistenceAdapter(runtimeJdbc);
+
+            int firstBackendPid = transaction.execute(status -> runtimeJdbc.queryForObject("select pg_backend_pid()", Integer.class));
+            assertThat(runtimeJdbc.queryForObject("select current_setting('app.organization_registration_id', true)", String.class))
+                    .as("transaction-local registration context must be cleared on pooled connection reuse")
+                    .isIn(null, "");
+
+            OrganizationRegistrationDraftModels.Created created = transaction.execute(status -> drafts.create());
+            assertThat(created).isNotNull();
+            UUID registrationId = created.draft().registrationId();
+            registrationIds.add(registrationId);
+            String resumeToken = created.resumeToken();
+            assertThat(runtimeJdbc.queryForObject("select current_user", String.class)).isEqualTo(runtimeDatabaseUsername());
+            for (String privilege : List.of("SELECT", "INSERT")) {
+                assertThat(runtimeJdbc.queryForObject(
+                        "select has_table_privilege(current_user, 'tenant_management.organization_registration_draft_idempotency', ?)",
+                        Boolean.class, privilege)).as("nexa_runtime must have the table DML required by draft idempotency: " + privilege).isTrue();
+            }
+            for (String privilege : List.of("UPDATE", "DELETE")) {
+                assertThat(runtimeJdbc.queryForObject(
+                        "select has_table_privilege(current_user, 'tenant_management.organization_registration_draft_idempotency', ?)",
+                        Boolean.class, privilege)).as("nexa_runtime must not receive unused draft idempotency authority: " + privilege).isFalse();
+            }
+
+            Map<String, Object> step1 = Map.of("legalName", "Runtime RLS Registration", "displayName", "Runtime RLS Registration");
+            OrganizationRegistrationDraftModels.Draft afterStep1 = transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 0, 1, step1, "runtime-step-1"));
+            assertThat(afterStep1.version()).isEqualTo(1);
+
+            OrganizationRegistrationDraftModels.Draft replayedStep1 = transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 0, 1, step1, "runtime-step-1"));
+            assertThat(replayedStep1.version()).as("replaying the same idempotency key must not advance the draft").isEqualTo(1);
+            assertThat(replayedStep1.data()).isEqualTo(afterStep1.data());
+
+            assertThatThrownBy(() -> transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 0, 1, step1, "runtime-step-1-stale")))
+                    .isInstanceOf(OrganizationRegistrationDraftException.class)
+                    .extracting("code").isEqualTo("DRAFT_VERSION_CONFLICT");
+
+            OrganizationRegistrationDraftModels.Draft afterStep2 = transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 1, 2,
+                    Map.of("workspaceName", "Runtime RLS Workspace", "workspaceSlug", "runtime-" + registrationId.toString().substring(0, 8),
+                            "storageSiteName", "Runtime Storage", "storageSiteAddress", "Av. Runtime 1"), "runtime-step-2"));
+            OrganizationRegistrationDraftModels.Draft afterStep3 = transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 2, 3,
+                    Map.of("operationCategory", "b2bColdChainDistributor"), "runtime-step-3"));
+            OrganizationRegistrationDraftModels.Draft afterStep4 = transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 3, 4,
+                    Map.of("founderEmail", "runtime-" + registrationId.toString().substring(0, 8) + "@example.test",
+                            "founderDisplayName", "Runtime Founder"), "runtime-step-4"));
+            OrganizationRegistrationDraftModels.Draft afterStep5 = transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 4, 5,
+                    Map.of("referencePlan", "Starter"), "runtime-step-5"));
+            OrganizationRegistrationDraftModels.Draft afterStep6 = transaction.execute(status -> drafts.updateStep(
+                    registrationId, resumeToken, 5, 6,
+                    Map.of("termsVersion", "academic-2026-10-03", "termsAccepted", true), "runtime-step-6"));
+            assertThat(List.of(afterStep2.version(), afterStep3.version(), afterStep4.version(), afterStep5.version(), afterStep6.version()))
+                    .containsExactly(2L, 3L, 4L, 5L, 6L);
+
+            OrganizationRegistrationDraftModels.Draft submitted = transaction.execute(status -> drafts.submit(
+                    registrationId, resumeToken, 6, "runtime-submit"));
+            assertThat(submitted.status()).isEqualTo("PENDING_ACTIVATION");
+            assertThat(submitted.version()).isEqualTo(7);
+            OrganizationRegistrationDraftModels.Draft replayedSubmit = transaction.execute(status -> drafts.submit(
+                    registrationId, resumeToken, 6, "runtime-submit"));
+            assertThat(replayedSubmit.status()).isEqualTo("PENDING_ACTIVATION");
+            assertThat(replayedSubmit.version()).as("replaying submit must not advance the draft").isEqualTo(7);
+
+            String founderEmail = "runtime-" + registrationId.toString().substring(0, 8) + "@example.test";
+            String workspaceSlug = "runtime-" + registrationId.toString().substring(0, 8);
+            OrganizationRegistration registration = OrganizationRegistration.submit(
+                    new OrganizationRegistrationId(registrationId), new FounderIdentity(founderEmail, "Runtime Founder"),
+                    new WorkspaceSlug(workspaceSlug), new TermsAcceptance("academic-2026-10-03", true), ReferencePlan.Starter,
+                    new RegistrationStatusTokenHash(tokens.sha256(resumeToken)));
+            activated = transaction.execute(status -> {
+                OrganizationActivationPersistencePort.ActivatedOrganization result = activation.createActivatedOrganization(
+                        registration,
+                        new OrganizationActivationPersistencePort.OrganizationSeed("Runtime RLS Registration", "Runtime RLS Registration", null,
+                                "b2bColdChainDistributor"),
+                        "Runtime RLS Workspace", new BCryptPasswordVerifier(new BCryptPasswordEncoder(4)).encode("test-only-runtime-password"),
+                        Instant.now());
+                roles.assignFounderRoles(result.membershipId(), result.tenantId(), result.workspaceId(), Set.of("TENANT_ADMIN", "COMPANY_OWNER"));
+                activation.markActivated(registrationId, result.tenantId(), result.workspaceId(), result.founderUserId(), Instant.now());
+                return result;
+            });
+            founderUserId = activated.founderUserId();
+            activatedTenantId = activated.tenantId();
+            activatedWorkspaceId = activated.workspaceId();
+            assertThat(activated.founderEmail()).isEqualTo(founderEmail);
+            var snapshot = transaction.execute(status -> activation.findForUpdate(registrationId));
+            assertThat(snapshot).isPresent();
+            assertThat(snapshot.orElseThrow().status()).isEqualTo("ACTIVE");
+            assertThat(snapshot.orElseThrow().tenantId()).isEqualTo(activatedTenantId);
+            assertThat(snapshot.orElseThrow().workspaceId()).isEqualTo(activatedWorkspaceId);
+            assertThat(snapshot.orElseThrow().founderUserId()).isEqualTo(founderUserId);
+
+            int reusedBackendPid = transaction.execute(status -> runtimeJdbc.queryForObject("select pg_backend_pid()", Integer.class));
+            assertThat(reusedBackendPid).as("the runtime adapter workflow must reuse the bounded pool connection").isEqualTo(firstBackendPid);
+            assertThat(runtimeJdbc.queryForObject("select current_setting('app.organization_registration_id', true)", String.class))
+                    .as("registration scope must be cleared after the activation transaction").isIn(null, "");
+        } finally {
+            try (Connection connection = openMigratorConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    for (UUID registrationId : registrationIds) {
+                        execute(connection, "delete from tenant_management.organization_registration_draft_idempotency where registration_id=?", registrationId);
+                        execute(connection, "delete from tenant_management.organization_registration where id=?", registrationId);
+                    }
+                    if (activatedWorkspaceId != null) {
+                        execute(connection, "delete from tenant_management.membership_role_definition where workspace_id=?", activatedWorkspaceId);
+                        execute(connection, "delete from tenant_management.membership_authorization_state where workspace_id=?", activatedWorkspaceId);
+                        execute(connection, "delete from tenant_management.workspace_membership where workspace_id=?", activatedWorkspaceId);
+                    }
+                    if (activatedTenantId != null) {
+                        execute(connection, "delete from tenant_management.organization_settings where tenant_id=?", activatedTenantId);
+                    }
+                    if (founderUserId != null) {
+                        execute(connection, "delete from iam.password_credential where user_id=?", founderUserId);
+                        execute(connection, "delete from iam.user_account where id=?", founderUserId);
+                    }
+                    if (activatedWorkspaceId != null) execute(connection, "delete from tenant_management.workspace where id=?", activatedWorkspaceId);
+                    if (activatedTenantId != null) execute(connection, "delete from tenant_management.tenant where id=?", activatedTenantId);
+                    connection.commit();
+                } catch (SQLException exception) {
+                    connection.rollback();
+                    throw exception;
+                }
+            } finally {
+                RlsRequestScope.clear();
             }
         }
     }

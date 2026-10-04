@@ -86,9 +86,9 @@ public class JdbcOrganizationRegistrationDraftAdapter implements OrganizationReg
         long nextVersion = row.version() + 1;
         int completed = Math.max(row.lastCompletedStep(), step);
         jdbc.update("update tenant_management.organization_registration set onboarding_data=?::jsonb,last_completed_step=?,legal_name=?,display_name=?,normalized_legal_name=?,business_identifier=?,operation_category=?,storage_site_name=?,storage_site_address=?,founder_email=?,founder_display_name=?,workspace_name=?,workspace_slug=?,reference_plan=?,terms_version=?,terms_accepted_at=?,updated_at=?,version=? where id=? and status='DRAFT' and version=?",
-                json(data), completed, text(all, "legalName"), text(all, "displayName"), normalized(text(all, "legalName")), nullable(text(all, "businessIdentifier")),
-                text(all, "operationCategory"), text(all, "storageSiteName"), text(all, "storageSiteAddress"), text(all, "founderEmail"), text(all, "founderDisplayName"),
-                text(all, "workspaceName"), text(all, "workspaceSlug"), text(all, "referencePlan"), text(all, "termsVersion"), acceptedAt(all) ? Timestamp.from(now) : null,
+                json(data), completed, nullable(text(all, "legalName")), nullable(text(all, "displayName")), normalized(text(all, "legalName")), nullable(text(all, "businessIdentifier")),
+                nullable(text(all, "operationCategory")), nullable(text(all, "storageSiteName")), nullable(text(all, "storageSiteAddress")), nullable(text(all, "founderEmail")), nullable(text(all, "founderDisplayName")),
+                nullable(text(all, "workspaceName")), nullable(text(all, "workspaceSlug")), nullable(text(all, "referencePlan")), nullable(text(all, "termsVersion")), acceptedAt(all) ? Timestamp.from(now) : null,
                 Timestamp.from(now), nextVersion, registrationId, expectedVersion);
         remember(registrationId, idempotencyKey, "STEP", requestHash, nextVersion, now);
         return readByHash(registrationId, row.tokenHash());
