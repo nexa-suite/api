@@ -147,6 +147,29 @@ class OrganizationRegistrationDraftHttpRlsIT {
                 .andExpect(jsonPath("$.data.step1.legalName").value("HTTP RLS Registration"));
     }
 
+    @Test
+    void rejectsMissingOrAlteredTokenAndAcceptsLegacyHeaderAlias() throws Exception {
+        var created = mockMvc.perform(post("/api/v1/tenant-management/organization-registration-drafts")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isCreated())
+                .andReturn();
+        var body = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(created.getResponse().getContentAsString());
+        createdRegistration = UUID.fromString(body.get("registrationId").asText());
+        String resumeToken = body.get("resumeToken").asText();
+        String path = "/api/v1/tenant-management/organization-registration-drafts/" + createdRegistration;
+
+        mockMvc.perform(get(path))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("DRAFT_NOT_FOUND"));
+        mockMvc.perform(get(path).header("X-Resume-Token", resumeToken + "-altered"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("DRAFT_NOT_FOUND"));
+        mockMvc.perform(get(path).header("X-Organization-Registration-Token", resumeToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.registrationId").value(createdRegistration.toString()));
+    }
+
     private static void createRuntimeRole() {
         try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), MIGRATOR_USERNAME, MIGRATOR_PASSWORD);
              Statement statement = connection.createStatement()) {
