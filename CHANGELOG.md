@@ -14,11 +14,17 @@ support until its required verification, signed tag and GitHub Release exist.
   `v0.20.0` consumer baseline while retaining the earlier baselines.
 - Revalidate the native identity sign-in, access-context ticket and JWT
   session boundaries without widening browser transport or server authority.
+- Persist the reviewed 102-item catalog reference as a separate v2 seed while
+  preserving the immutable v1 seed and its checksum records.
+- Bind organization-onboarding resume tokens from the `X-Resume-Token` HTTP
+  header and extend the HTTP/RLS regression coverage.
 
 ### Preserved
 
-- No database migration, RLS policy, bounded-context ownership or SMTP behavior
-  changes are included in this candidate.
+- Historical migration files remain immutable. Additive V145 grants the
+  restricted runtime identity only SELECT and INSERT on the existing
+  registration-draft idempotency table; RLS, bounded-context ownership and
+  SMTP behavior remain unchanged.
 - Production provider readiness, physical-device evidence and Product/System
   acceptance remain separate gates.
 
