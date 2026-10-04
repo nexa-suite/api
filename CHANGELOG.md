@@ -1,8 +1,10 @@
 # Changelog
 
-## [0.21.0] - Unreleased candidate
+## [0.21.0] - 2026-10-04 (planned academic checkpoint)
 
-Prepared the next compatible API release boundary after v0.20.0.
+Planned academic checkpoint for the next compatible API release boundary after
+v0.20.0. The candidate remains unreleased until its signed tag and GitHub
+Release exist.
 See [release notes](docs/releases/v0.21.0.md). This candidate is not published
 support until its required verification, signed tag and GitHub Release exist.
 
