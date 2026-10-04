@@ -21,8 +21,10 @@ support until its required verification, signed tag and GitHub Release exist.
 
 ### Preserved
 
-- No database migration, RLS policy, bounded-context ownership or SMTP behavior
-  changes are included in this candidate.
+- Historical migration files remain immutable. Additive V145 grants the
+  restricted runtime identity only SELECT and INSERT on the existing
+  registration-draft idempotency table; RLS, bounded-context ownership and
+  SMTP behavior remain unchanged.
 - Production provider readiness, physical-device evidence and Product/System
   acceptance remain separate gates.
 
