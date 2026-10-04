@@ -15,7 +15,7 @@ services:
       - key: SERVER_PORT
         value: "8080"
       - key: NEXA_API_VERSION
-        value: "0.20.0"
+        value: "0.21.0"
       - key: SPRING_PROFILES_ACTIVE
         value: s3
       - key: NEXA_FLYWAY_ENABLED
