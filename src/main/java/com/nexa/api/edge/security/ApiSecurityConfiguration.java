@@ -52,10 +52,17 @@ public class ApiSecurityConfiguration {
 			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter) throws Exception {
 				boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
 				boolean observabilityProfile = environment.acceptsProfiles(Profiles.of("observability"));
+				boolean swaggerEnabled = localProfile
+						|| Boolean.parseBoolean(environment.getProperty("nexa.swagger.enabled", "false"))
+						|| Boolean.parseBoolean(environment.getProperty("springdoc.swagger-ui.enabled", "false"))
+						|| Boolean.parseBoolean(environment.getProperty("springdoc.api-docs.enabled", "false"));
 		Set<String> allowedOrigins = allowedOrigins(environment);
+		String contentSecurityPolicyDirectives = swaggerEnabled
+				? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+				: "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
 			http.csrf(AbstractHttpConfigurer::disable)
 				.headers(headers -> {
-					headers.contentSecurityPolicy(policy -> policy.policyDirectives("default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"));
+					headers.contentSecurityPolicy(policy -> policy.policyDirectives(contentSecurityPolicyDirectives));
 					headers.contentTypeOptions(content -> { });
 					headers.referrerPolicy(referrer -> referrer.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER));
 					headers.permissionsPolicy(permissions -> permissions.policy("camera=(), microphone=(), geolocation=()"));
@@ -77,7 +84,7 @@ public class ApiSecurityConfiguration {
 						if (localProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
 						else authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").authenticated();
 					}
-					if (localProfile) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
+					if (swaggerEnabled) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
 						authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/identity-sign-in",
 						"/api/v1/authentication/refresh", "/api/v1/me/access-contexts", "/api/v1/me/access-context-selections",
 						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",

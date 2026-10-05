@@ -40,4 +40,12 @@ class ApiSecurityBoundaryTests {
 				.andExpect(content().contentTypeCompatibleWith("application/problem+json"))
 				.andExpect(jsonPath("$.code").value("FORBIDDEN"));
 	}
+
+	@Test
+	void swaggerIsUnauthorizedByDefaultInNonLocalProfile() throws Exception {
+		mockMvc.perform(get("/swagger-ui/index.html"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+	}
 }
