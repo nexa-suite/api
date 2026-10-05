@@ -23,8 +23,13 @@ import io.swagger.v3.core.converter.ModelConverterContext;
 import io.swagger.v3.core.util.Json;
 import org.springdoc.core.customizers.GlobalOpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Condition;
+import org.springframework.context.annotation.ConditionContext;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
+import org.springframework.core.type.AnnotatedTypeMetadata;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.info.BuildProperties;
@@ -34,8 +39,19 @@ import java.util.Map;
 import java.util.Iterator;
 
 @Configuration(proxyBeanMethods = false)
-@Profile("local")
+@Conditional(OpenApiConfiguration.OpenApiEnabledCondition.class)
 public class OpenApiConfiguration {
+
+	static class OpenApiEnabledCondition implements Condition {
+		@Override
+		public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+			Environment env = context.getEnvironment();
+			return env.acceptsProfiles(Profiles.of("local"))
+					|| Boolean.parseBoolean(env.getProperty("nexa.swagger.enabled", "false"))
+					|| Boolean.parseBoolean(env.getProperty("springdoc.swagger-ui.enabled", "false"))
+					|| Boolean.parseBoolean(env.getProperty("springdoc.api-docs.enabled", "false"));
+		}
+	}
 	@Bean
 	ModelConverter applicationResponseSchemaNames() {
 		return new ModelConverter() {

@@ -64,6 +64,8 @@ nexa:
       api-key: ${NEXA_MAPS_GOOGLE_API_KEY:}
       routes-base-url: ${NEXA_MAPS_GOOGLE_ROUTES_BASE_URL:https://routes.googleapis.com}
       timeout-ms: ${NEXA_MAPS_GOOGLE_TIMEOUT_MS:10000}
+  swagger:
+    enabled: true
   security:
     issuer: ${NEXA_SECURITY_ISSUER:http://localhost:8080}
     audience: ${NEXA_SECURITY_AUDIENCE:nexa-local}
