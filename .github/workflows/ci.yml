@@ -25,7 +25,9 @@ jobs:
         run: git fetch --no-tags --depth=1 origin refs/tags/v0.18.0:refs/tags/v0.18.0
       - name: Fetch latest published v0.19.0 consumer baseline
         run: git fetch --no-tags --depth=1 origin refs/tags/v0.19.0:refs/tags/v0.19.0
-      - name: Fetch latest published v0.20.0 consumer baseline
+      - name: Fetch latest published v0.21.0 consumer baseline
+        run: git fetch --no-tags --depth=1 origin refs/tags/v0.21.0:refs/tags/v0.21.0
+      - name: Fetch previous published v0.20.0 consumer baseline
         run: git fetch --no-tags --depth=1 origin refs/tags/v0.20.0:refs/tags/v0.20.0
       - name: Start external integration adapters
         run: |
@@ -69,6 +71,11 @@ jobs:
           python3 .github/scripts/test_check_openapi_compatibility.py
           python3 .github/scripts/check-openapi-compatibility.py
       - name: Verify OpenAPI compatibility against latest published release
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v0.21.0
+        run: python3 .github/scripts/check-openapi-compatibility.py
+      - name: Verify OpenAPI compatibility against previous published release
         if: ${{ github.event_name == 'pull_request' }}
         env:
           OPENAPI_BASE_REF: v0.20.0

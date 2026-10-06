@@ -25,18 +25,21 @@ established by a verified signed Git tag and its corresponding GitHub Release.
 An API release does not claim complete Nexa System Acceptance or full-system
 Production Readiness.
 
-The [v0.20.0 release boundary](./docs/releases/v0.20.0.md) consolidates the
-Operations Mobile server contracts and deployment boundary. Its publication
-record is the verified `v0.20.0` tag and
-[GitHub Release](https://github.com/nexa-suite/api/releases/tag/v0.20.0).
-Existing v0.19.0, v0.18.0 and v0.17.1 consumer baselines remain covered by the
-compatibility checks.
+The OpenAPI compatibility workflow checks the published [v0.21.0](
+./docs/releases/v0.21.0.md), v0.20.0, v0.19.0, v0.18.0 and v0.17.1 consumer
+baselines.
 
-The repository currently contains an unreleased v0.21.0 candidate. It updates
-the compatibility gate to include the published v0.20.0 contract while
-preserving the server authorization, tenant isolation, database and native
-session boundaries. Consumer support for v0.21.0 requires the signed tag and
-GitHub Release described in the [release policy](./.github/RELEASE_POLICY.md).
+The v1.0.0 API boundary aligns the Maven, Render and OpenAPI version metadata
+and carries the compatible Swagger/OpenAPI runtime configuration work recorded
+in the historical v0.21.1 candidate. It also gives the seeded warehouse to the
+seeded warehouse membership through an explicit grant when the opt-in local
+development bootstrap runs. This fixture-only change does not alter normal
+warehouse creation, non-local authorization or Render bootstrap behavior.
+Technical state gauges retain their suppliers for the registered meter's
+lifetime; this observability correction does not change API contracts or
+business behavior.
+Consumer support for v1.0.0 follows the annotated signed-tag and GitHub Release
+requirements in the [release policy](./.github/RELEASE_POLICY.md).
 
 The v0.17.1 release remains the verified upgrade baseline. This repository
 retains the v0.17.0 release notes and has no historical v0.17.1 release-note
