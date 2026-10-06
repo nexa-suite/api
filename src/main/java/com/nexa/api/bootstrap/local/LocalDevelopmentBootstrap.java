@@ -2,6 +2,16 @@ package com.nexa.api.bootstrap.local;
 
 import com.nexa.api.bootstrap.local.seed.ClientAccountSeedLoader;
 import com.nexa.api.bootstrap.local.seed.ClientAccountSeedRecord;
+import com.nexa.api.shared.context.RlsRequestScope;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
@@ -13,11 +23,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import com.nexa.api.shared.context.RlsRequestScope;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -33,15 +42,20 @@ public class LocalDevelopmentBootstrap {
 	private final Clock clock;
 	private final ClientAccountSeedLoader clientAccountSeedLoader;
 	private final TransactionTemplate transactionTemplate;
+	private final ResolveCurrentAccessContextUseCase accessContexts;
+	private final WarehouseObjectAccess warehouseObjectAccess;
 
 	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock, ClientAccountSeedLoader clientAccountSeedLoader,
-			PlatformTransactionManager transactionManager) {
+			PlatformTransactionManager transactionManager, ResolveCurrentAccessContextUseCase accessContexts,
+			WarehouseObjectAccess warehouseObjectAccess) {
 		this.jdbc = jdbc;
 		this.environment = environment;
 		this.encoder = new BCryptPasswordEncoder(environment.getProperty("nexa.security.bcrypt-strength", Integer.class, 12));
 		this.clock = clock;
 		this.clientAccountSeedLoader = clientAccountSeedLoader;
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
+		this.accessContexts = accessContexts;
+		this.warehouseObjectAccess = warehouseObjectAccess;
 	}
 
 	@EventListener(ApplicationReadyEvent.class)
@@ -118,6 +132,42 @@ public class LocalDevelopmentBootstrap {
 		UUID persistedZoneId = jdbc.queryForObject("select id from warehouse.storage_zone where tenant_id=? and workspace_id=? and warehouse_id=? and code=?",
 				UUID.class, tenantId, workspaceId, persistedWarehouseId, "CHILLED-A");
 		seedInventory(tenantId, workspaceId, persistedWarehouseId, persistedZoneId, now);
+		grantLocalWarehouseAccess(tenantId, workspaceId, persistedWarehouseId);
+	}
+
+	private void grantLocalWarehouseAccess(UUID tenantId, UUID workspaceId, UUID warehouseId) {
+		LocalMembership owner = localMembership("NEXA_DEV_OWNER_EMAIL", tenantId, workspaceId);
+		LocalMembership warehouseOperator = localMembership("NEXA_DEV_WAREHOUSE_EMAIL", tenantId, workspaceId);
+		CurrentAccessContext administrator = currentContext(owner, tenantId, workspaceId);
+		CurrentAccessContext operator = currentContext(warehouseOperator, tenantId, workspaceId);
+		if (!operator.hasRole(MembershipRole.WAREHOUSE)) {
+			throw new IllegalStateException("The local Warehouse fixture account must retain its Warehouse role");
+		}
+
+		Long expectedVersion = warehouseObjectAccess.grants(administrator, warehouseId).stream()
+				.filter(grant -> grant.membershipId().equals(warehouseOperator.membershipId()))
+				.map(grant -> grant.version()).findFirst().orElse(null);
+		warehouseObjectAccess.grant(administrator, warehouseId, warehouseOperator.membershipId(), expectedVersion,
+				"local-development-bootstrap");
+	}
+
+	private CurrentAccessContext currentContext(LocalMembership membership, UUID tenantId, UUID workspaceId) {
+		return accessContexts.resolve(new CurrentAccessRequest(new UserId(membership.userId()), new TenantId(tenantId),
+				new WorkspaceId(workspaceId), Surface.PLATFORM));
+	}
+
+	private LocalMembership localMembership(String emailKey, UUID tenantId, UUID workspaceId) {
+		String email = defaulted(emailKey, defaultEmail(emailKey)).toLowerCase(java.util.Locale.ROOT);
+		UUID userId = jdbc.queryForObject("select id from iam.user_account where normalized_email=?", UUID.class, email);
+		List<LocalMembership> memberships = jdbc.query("select m.id,m.user_id from tenant_management.workspace_membership m "
+				+ "join tenant_management.workspace w on w.id=m.workspace_id and w.tenant_id=? "
+				+ "where m.workspace_id=? and m.user_id=? and m.membership_type='INTERNAL' and m.status='ACTIVE'",
+				(rs, row) -> new LocalMembership(rs.getObject("id", UUID.class), rs.getObject("user_id", UUID.class)),
+				tenantId, workspaceId, userId);
+		if (memberships.size() != 1) {
+			throw new IllegalStateException("The local bootstrap account must have one active internal membership in the current tenant workspace");
+		}
+		return memberships.get(0);
 	}
 
 	private void seedInventory(UUID tenantId, UUID workspaceId, UUID warehouseId, UUID zoneId, Instant now) {
@@ -273,4 +323,5 @@ public class LocalDevelopmentBootstrap {
 
 	private record UserSeed(String emailKey, String passwordKey, Set<String> roles) {}
 	private record SkuSeed(UUID id, String legacyCatalogItemId, String unitOfMeasure) {}
+	private record LocalMembership(UUID membershipId, UUID userId) {}
 }
