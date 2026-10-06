@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.21.1] - 2026-10-05
+
+Patch release providing runtime configurable Swagger UI and OpenAPI documentation support for cloud deployments (Render).
+See [release notes](docs/releases/v0.21.1.md).
+
+### Fixed
+
+- Enable Swagger UI and OpenAPI documentation (`/swagger-ui/**`, `/v3/api-docs/**`) via configurable runtime property `nexa.swagger.enabled` / `NEXA_SWAGGER_ENABLED=true` in non-local environments while preserving local profile defaults.
+- Adapt Content Security Policy (CSP) headers when Swagger UI is enabled to permit Swagger UI inline script and style bundles.
+- Align Maven, Render declarative configuration and committed OpenAPI version metadata with `0.21.1`.
+
 ## [0.21.0] - 2026-10-04
 
 Published academic technical checkpoint for the next compatible API release
