@@ -9,8 +9,8 @@ GitHub Release; a preparation branch alone is not released support.
 
 | Release | Summary |
 |---|---|
-| [v0.21.1](./v0.21.1.md) | Runtime configurable Swagger UI and OpenAPI contract patch |
-| [v0.21.0](./v0.21.0.md) | Academic technical checkpoint after v0.20.0 |
+| [v1.0.0](./v1.0.0.md) | First stable-version API boundary with scoped local-fixture and technical-gauge fixes |
+| [v0.21.0](./v0.21.0.md) | Published academic technical checkpoint after v0.20.0; verify [publication](https://github.com/nexa-suite/api/releases/tag/v0.21.0) before consumption |
 | [v0.20.0](./v0.20.0.md) | Operations Mobile server contracts and deployment boundary; verify [publication](https://github.com/nexa-suite/api/releases/tag/v0.20.0) before consumption |
 | [v0.19.0](./v0.19.0.md) | Module/persistence boundary closure and transport/dependency hardening; verify [publication](https://github.com/nexa-suite/api/releases/tag/v0.19.0) before consumption |
 | [v0.18.0](./v0.18.0.md) | Consumer-stable API closure and cross-client contracts |
@@ -46,6 +46,7 @@ reachable in Git history.
 
 | Draft | Status |
 |---|---|
+| [HISTORICAL CANDIDATE: v0.21.1](./v0.21.1.md) | Swagger/OpenAPI runtime patch scope carried into the v1.0.0 boundary |
 | [UNRELEASED HISTORICAL CANDIDATE: v0.7.0](./v0.7.0.md) | Consolidated into later published work; no tag or GitHub Release |
 | [UNRELEASED DRAFT: v0.8.1 candidate](./v0.8.1.md) | Development material retained for historical context; no published tag or GitHub Release |
 

@@ -28,6 +28,7 @@ public final class TechnicalMetrics implements TechnicalMetricsPort {
 
     public void gauge(String component, String signal, DoubleSupplier value) {
         Gauge.builder("nexa.technical.state", value, supplier -> supplier.getAsDouble())
+                .strongReference(true)
                 .tag("component", component)
                 .tag("signal", signal)
                 .register(registry);

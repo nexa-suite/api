@@ -15,7 +15,7 @@ services:
       - key: SERVER_PORT
         value: "8080"
       - key: NEXA_API_VERSION
-        value: "0.21.1"
+        value: "1.0.0"
       - key: NEXA_SWAGGER_ENABLED
         value: "true"
       - key: SPRING_PROFILES_ACTIVE
