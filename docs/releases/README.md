@@ -9,7 +9,8 @@ GitHub Release; a preparation branch alone is not released support.
 
 | Release | Summary |
 |---|---|
-| [v0.21.0 candidate](./v0.21.0.md) | Unreleased compatible release candidate; publication requires the signed tag and GitHub Release |
+| [v0.21.1](./v0.21.1.md) | Runtime configurable Swagger UI and OpenAPI contract patch |
+| [v0.21.0](./v0.21.0.md) | Academic technical checkpoint after v0.20.0 |
 | [v0.20.0](./v0.20.0.md) | Operations Mobile server contracts and deployment boundary; verify [publication](https://github.com/nexa-suite/api/releases/tag/v0.20.0) before consumption |
 | [v0.19.0](./v0.19.0.md) | Module/persistence boundary closure and transport/dependency hardening; verify [publication](https://github.com/nexa-suite/api/releases/tag/v0.19.0) before consumption |
 | [v0.18.0](./v0.18.0.md) | Consumer-stable API closure and cross-client contracts |
