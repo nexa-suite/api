@@ -1,8 +1,10 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure;
 
 import com.nexa.api.support.PostgresIntegrationSupport;
+import com.nexa.api.bootstrap.local.LocalDevelopmentBootstrap;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -22,6 +24,72 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
+    @Autowired
+    private LocalDevelopmentBootstrap localDevelopmentBootstrap;
+
+    @Test
+    void localBootstrapGrantsOnlyItsWarehouseOperatorAndRerunsThroughGovernanceIdempotently() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID warehouse = jdbc.queryForObject("select id from warehouse.warehouse where tenant_id=? and workspace_id=? and code=?",
+                UUID.class, tenant, workspace, "ICISA-COLD-01");
+        UUID operatorMembership = UUID.fromString(membershipId(WAREHOUSE_EMAIL));
+        UUID ownerMembership = UUID.fromString(membershipId(OWNER_EMAIL));
+
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=? and status='ACTIVE'",
+                Integer.class, tenant, workspace, warehouse, operatorMembership)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select changed_by_membership_id from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=?",
+                UUID.class, tenant, workspace, warehouse, operatorMembership)).isEqualTo(ownerMembership);
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id<>?",
+                Integer.class, tenant, workspace, warehouse, operatorMembership)).isZero();
+
+        String warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        MvcResult listed = mockMvc.perform(get("/api/v1/warehouses").param("page", "0").param("size", "100")
+                        .header("Authorization", "Bearer " + warehouseToken))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(java.util.stream.StreamSupport.stream(json(listed).get("items").spliterator(), false)
+                .anyMatch(item -> "ICISA-COLD-01".equals(item.get("code").asText()))).isTrue();
+
+        MvcResult lots = mockMvc.perform(get("/api/v1/inventory/lots").param("warehouseId", warehouse.toString())
+                        .param("catalogItemId", "CAT-0002").param("page", "0").param("size", "100")
+                        .header("Authorization", "Bearer " + warehouseToken))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(lots).get("items").size()).isGreaterThan(0);
+        assertThat(json(lots).get("items").get(0).get("warehouseId").asText()).isEqualTo(warehouse.toString());
+
+        String createdWarehouse = createWarehouse(warehouseToken, "WH-LOCAL-" + suffix());
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=?",
+                Integer.class, tenant, workspace, UUID.fromString(createdWarehouse))).isZero();
+        mockMvc.perform(get("/api/v1/warehouses/" + createdWarehouse)
+                        .header("Authorization", "Bearer " + warehouseToken))
+                .andExpect(status().isNotFound());
+
+        long operatorAuthorizationVersion = authorizationVersion(operatorMembership.toString());
+        String grantChangedAt = jdbc.queryForObject("select changed_at::text from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=?",
+                String.class, tenant, workspace, warehouse, operatorMembership);
+        localDevelopmentBootstrap.seedWarehouseAfterCatalogReconciliation();
+
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=? and status='ACTIVE'",
+                Integer.class, tenant, workspace, warehouse, operatorMembership)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select version from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=?",
+                Long.class, tenant, workspace, warehouse, operatorMembership)).isZero();
+        assertThat(jdbc.queryForObject("select changed_at::text from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=?",
+                String.class, tenant, workspace, warehouse, operatorMembership)).isEqualTo(grantChangedAt);
+        assertThat(authorizationVersion(operatorMembership.toString())).isEqualTo(operatorAuthorizationVersion);
+        assertThat(jdbc.queryForObject("select count(*) from integration.change_event where tenant_id=? and workspace_id=? "
+                        + "and aggregate_type='warehouse-access-grants' and aggregate_id=? "
+                        + "and event_type='tenant.warehouse-access-grant.created'",
+                Integer.class, tenant, workspace, warehouse)).isEqualTo(1);
+    }
+
     @Test
     void buyerMembershipCannotReceiveAWorkforceWarehouseGrant() throws Exception {
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
