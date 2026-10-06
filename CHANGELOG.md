@@ -1,15 +1,42 @@
 # Changelog
 
-## [0.21.1] - 2026-10-05
+## [1.0.0] - 2026-10-05
 
-Patch release providing runtime configurable Swagger UI and OpenAPI documentation support for cloud deployments (Render).
-See [release notes](docs/releases/v0.21.1.md).
+First stable-version API repository boundary, based on the v0.21.0 contract.
+No endpoint, operation, request, response or schema removals are included.
+Consumer support follows the verified signed-tag and GitHub Release policy.
+Technical verification does not imply Product Acceptance, System Acceptance
+or Production Readiness.
+See [release notes](docs/releases/v1.0.0.md).
 
-### Fixed
+### Changed
 
-- Enable Swagger UI and OpenAPI documentation (`/swagger-ui/**`, `/v3/api-docs/**`) via configurable runtime property `nexa.swagger.enabled` / `NEXA_SWAGGER_ENABLED=true` in non-local environments while preserving local profile defaults.
-- Adapt Content Security Policy (CSP) headers when Swagger UI is enabled to permit Swagger UI inline script and style bundles.
-- Align Maven, Render declarative configuration and committed OpenAPI version metadata with `0.21.1`.
+- Align Maven, Render declarative configuration and committed OpenAPI metadata
+  with `1.0.0`.
+- Enable runtime-configurable Swagger UI and OpenAPI documentation in
+  non-local environments when explicitly enabled, retaining local defaults
+  and the related Content Security Policy handling.
+- Give the seeded warehouse to the seeded warehouse membership through the
+  existing explicit-grant path when the opt-in local development bootstrap
+  runs; ordinary warehouse creation and non-local grants are unchanged.
+- Retain technical state gauge suppliers for each registered meter's lifetime
+  so Micrometer can continue observing their values.
+
+## [0.21.1] - 2026-10-05 (superseded)
+
+Historical compatible patch candidate for runtime-configurable Swagger UI and
+OpenAPI documentation support in cloud deployments; its scope is carried by
+the v1.0.0 boundary.
+See [historical notes](docs/releases/v0.21.1.md).
+
+### Changed
+
+- Enable Swagger UI and OpenAPI documentation (`/swagger-ui/**`, `/v3/api-docs/**`)
+  through runtime property `nexa.swagger.enabled` / `NEXA_SWAGGER_ENABLED=true`
+  in non-local environments while preserving local profile defaults.
+- Adapt Content Security Policy headers when Swagger UI is enabled.
+- Align Maven, Render declarative configuration and OpenAPI version metadata
+  with `0.21.1` for that unpublished candidate.
 
 ## [0.21.0] - 2026-10-04
 
