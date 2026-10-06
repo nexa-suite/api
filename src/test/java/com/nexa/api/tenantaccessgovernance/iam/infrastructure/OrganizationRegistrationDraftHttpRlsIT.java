@@ -22,6 +22,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -88,6 +90,16 @@ class OrganizationRegistrationDraftHttpRlsIT {
         registry.add("nexa.security.notification-outbox-key",
                 () -> "integration-notification-outbox-key-012345678901234567890123456789");
         registry.add("NEXA_DEV_BOOTSTRAP_ENABLED", () -> "false");
+    }
+
+    @Test
+    void disabledLocalBootstrapDoesNotCreateWarehouseAccessGrants() throws Exception {
+        try (Connection connection = openMigratorConnection();
+             Statement statement = connection.createStatement();
+             java.sql.ResultSet rows = statement.executeQuery("select count(*) from tenant_management.warehouse_access_grant")) {
+            assertThat(rows.next()).isTrue();
+            assertThat(rows.getLong(1)).isZero();
+        }
     }
 
     @AfterEach
