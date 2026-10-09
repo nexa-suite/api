@@ -18,3 +18,13 @@ Authenticated requests with missing or invalid credentials return `401`. Authent
 | `BUYER` | Portal | own client-account, catalog, request, order and tracking capabilities | no Platform routes or internal membership data |
 
 The system-operator boundary is an internal activation capability and is not a Workspace Membership role.
+
+## Business-document permission checks (current API runtime)
+
+Document metadata reads call `get` and require `DOCUMENT_READ`. Issued-document
+byte downloads require `DOCUMENT_DOWNLOAD` and then call the same metadata
+lookup, so the current implementation requires both permissions for those
+bytes. Evidence-byte downloads use a separate evidence lookup and require
+`DOCUMENT_DOWNLOAD`; that path does not call the metadata `get` method. These
+are separate permission keys, and this describes the current method paths, not
+an implication between the permissions.

@@ -20,10 +20,12 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -68,6 +70,70 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
                 .andExpect(status().isForbidden());
 
         assertThat(counts(order.id())).isEqualTo(before);
+    }
+
+    @Test
+    void readPermissionAllowsDocumentMetadataButNotBytesWithoutDownloadPermission() throws Exception {
+        SalesOrderResource order = createConfirmedSalesOrder();
+        UUID documentId = seedIssuedOrderSummary(order.id());
+
+        mockMvc.perform(get("/api/v1/business-documents/" + documentId)
+                        .header("Authorization", "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/business-documents/" + documentId + "/downloads")
+                        .header("Authorization", "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM")))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/business-documents/" + documentId)
+                        .header("Authorization", "Bearer " + accessToken(SALES_EMAIL, "PLATFORM")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/business-documents/" + documentId + "/downloads")
+                        .header("Authorization", "Bearer " + accessToken(SALES_EMAIL, "PLATFORM")))
+                .andExpect(status().isOk());
+
+        UUID logisticsMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        List<RoleAssignment> existingRoles = jdbc.query(
+                "select role_id,assigned_by_membership_id,assigned_at from tenant_management.membership_role_definition where membership_id=?",
+                (rs, row) -> new RoleAssignment(rs.getObject("role_id", UUID.class),
+                        rs.getObject("assigned_by_membership_id", UUID.class), rs.getTimestamp("assigned_at")),
+                logisticsMembership);
+        UUID downloadOnlyRole = UUID.randomUUID();
+        try {
+            jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", logisticsMembership);
+            Timestamp now = Timestamp.from(Instant.now());
+            jdbc.update("insert into tenant_management.role_definition "
+                            + "(id,tenant_id,workspace_id,code,name,description,role_type,status,created_by_membership_id,created_at,updated_at,version) "
+                            + "values (?,?,?,?,?,?,'CUSTOM','ACTIVE',?,?,?,0)",
+                    downloadOnlyRole, tenant, workspace, "download_only_" + downloadOnlyRole.toString().replace("-", ""),
+                    "Document download only", "Test-only custom role with no metadata permission",
+                    logisticsMembership, now, now);
+            jdbc.update("insert into tenant_management.role_permission(role_id,permission_key) values (?,?)",
+                    downloadOnlyRole, PermissionKey.DOCUMENT_DOWNLOAD.code());
+            jdbc.update("insert into tenant_management.membership_role_definition "
+                            + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
+                            + "values (?,?,?,?,?,?)",
+                    logisticsMembership, tenant, workspace, downloadOnlyRole, logisticsMembership, now);
+
+            String downloadOnly = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+            mockMvc.perform(get("/api/v1/business-documents/" + documentId)
+                            .header("Authorization", "Bearer " + downloadOnly))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(get("/api/v1/business-documents/" + documentId + "/downloads")
+                            .header("Authorization", "Bearer " + downloadOnly))
+                    .andExpect(status().isForbidden());
+        } finally {
+            jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", logisticsMembership);
+            jdbc.update("delete from tenant_management.role_definition where id=?", downloadOnlyRole);
+            for (RoleAssignment assignment : existingRoles) {
+                jdbc.update("insert into tenant_management.membership_role_definition "
+                                + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
+                                + "values (?,?,?,?,?,?)",
+                        logisticsMembership, tenant, workspace, assignment.roleId(),
+                        assignment.assignedByMembershipId(), assignment.assignedAt());
+            }
+        }
     }
 
     @Test
@@ -164,4 +230,6 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
     }
 
     private record DocumentCounts(int documents, int requests, int outboxEvents) { }
+
+    private record RoleAssignment(UUID roleId, UUID assignedByMembershipId, Timestamp assignedAt) { }
 }

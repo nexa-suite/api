@@ -207,6 +207,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
 
     @Transactional(readOnly = true)
     public BusinessDocumentModels.Download download(CurrentAccessContext context, UUID documentId) {
+        context.requirePermission(PermissionKey.DOCUMENT_DOWNLOAD);
         BusinessDocumentModels.DocumentView document = get(context, documentId);
         if (!(BusinessDocumentStatus.GENERATED.name().equals(document.status())
                 || BusinessDocumentStatus.SUPERSEDED.name().equals(document.status()))
