@@ -23,6 +23,32 @@ credentials own those writes. The anchor only confirms that a centrally
 validated Tenant/Workspace pair belongs in this physical database; it does not
 grant access or replace central membership and authorization checks.
 
+V3 is an additive Tenant business schema baseline generated from a fresh
+central database at published Flyway V146. Its checked selector contains the
+canonical BC02–BC11 tables, the 16 approved Tenant-local shared technical
+tables, and four immutable `GLOBAL_REFERENCE` projections. It excludes BC01
+IAM, Tenant, membership, role and credential tables. Tenant FKs target the V1
+local identity; composite Tenant/Workspace FKs target the V2 anchor. The BC10
+notification-preference table stores only a Workspace UUID, so its existing
+unary FK targets the anchor's unique `workspace_id`. FKs to central membership
+and user identity are removed while their business UUID columns and indexes
+remain. Business-to-business FKs, checks, indexes, triggers, functions, RLS
+policies and source `nexa_runtime` table grants are carried into the baseline.
+Generation fails on an external FK outside these explicit mappings. The four
+reference tables are loaded as read-only local projections; their logical
+values and counts are checked against the published central migration state.
+V3 creates schema only and contains no normal-Tenant business seed.
+
+One copied V146 trigger remains an explicit cutover dependency. V83's
+`sales.assign_purchase_request_expiry()` reads
+`tenant_management.operational_settings.purchase_request_expiry_days` when a
+non-DRAFT purchase request has no `expires_at`. That BC01 table is
+intentionally excluded from V3. The V3 rehearsal verifies that the function
+definition is preserved but does not execute this transition. Purchase-request
+write routing must remain out of scope until an accepted source for this
+setting is available to the Tenant database; V3 alone does not make this
+trigger executable there.
+
 The central row has the determinant `tenant_id -> database_identity,
 credential_secret_reference, lifecycle_state, created_at, updated_at, version`;
 `tenant_id` is its primary key and the database identity and secret reference
@@ -81,21 +107,27 @@ and checks central authority revalidation, routing and pool reuse,
 wrong-physical-database rejection, missing or mismatched Workspace-anchor
 denial, runtime read-only access to the anchor, RLS scope application and
 cleanup, pool capacity failure, idle eviction, safe rebinding with an active
-transaction, and same-thread transaction fences. An explicitly named
-test-only fixture rehearsal loads the reviewed catalog JSON and family/SKU
-mapping into temporary probe tables in both Tenant databases and checks the
-existing deterministic reference IDs and curated/provisional counts. The
-probe tables are dropped after the assertion. This verifies fixture mapping
-and physical separation only; it is not extraction/reconciliation of business
-data, a full Catalog schema migration, or an automatic seed for a normal Tenant.
-These tests do not prove deployed secret-provider behavior, production
-provisioning, operational recovery or production readiness.
+transaction, and same-thread transaction fences.
 
-Remaining integration work includes an operational provisioning and
-reconciliation process using an authorized source snapshot, production
-singleton and capacity configuration, explicit Tenant routing for background
-jobs, and additive treatment of the existing business-to-central foreign keys
-before any data extraction. The test fixture is not an authorized source
-snapshot. The current global Spring DataSource, existing adapters, and
-published central Flyway history through V146 remain unchanged. No existing
-API business command uses this router yet; no HTTP cutover is implemented.
+The separate V3 integration test applies V1–V3 to two fresh Tenant databases.
+It compares table, constraint, index, trigger, function, RLS policy and runtime
+grant evidence against the central V146 schema while checking that central
+identity and membership tables are absent. It then uses the reviewed 102-item
+catalog seed and explicit family/SKU mapping as a disposable central fixture,
+copies the scoped Catalog rows into one Tenant database, and verifies ordered
+table counts and row checksums, preserved Product/SellableSku UUIDs, and the
+50 curated plus 52 provisional visibility counts. The other Tenant remains
+unseeded. This is a fixture extraction/reconciliation rehearsal only; it is
+not an authorized production snapshot, an automatic seed for a normal Tenant,
+or a production data migration. Neither test proves deployed secret-provider
+behavior, production provisioning, operational recovery or production
+readiness.
+
+Remaining integration work includes operational provisioning and
+reconciliation from an authorized source snapshot, production singleton and
+capacity configuration, Tenant-aware routing for background jobs, and
+adapter-level routing before any production cutover. The test fixture is not an
+authorized source snapshot. The current global Spring DataSource, existing
+adapters, and published central Flyway history through V146 remain unchanged.
+No existing API business command uses this router yet; no HTTP cutover is
+implemented.
