@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.database.tenant;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 
 import javax.sql.DataSource;
 import java.util.ArrayList;
@@ -51,7 +52,8 @@ final class TenantBusinessDatabasePoolRegistry implements AutoCloseable {
 		if (!(delegate instanceof AutoCloseable)) {
 			throw new IllegalStateException("Tenant database pools must be closeable for safe eviction");
 		}
-		DataSource identityChecked = new TenantBusinessDatabaseIdentityCheckingDataSource(delegate, binding);
+		TenantBusinessDatabaseIdentityCheckingDataSource identityChecked =
+				new TenantBusinessDatabaseIdentityCheckingDataSource(delegate, binding);
 		entry = new PoolEntry(key, identityChecked);
 		entry.activeLeases = 1;
 		available.put(key, entry);
@@ -132,11 +134,11 @@ final class TenantBusinessDatabasePoolRegistry implements AutoCloseable {
 
 	private static final class PoolEntry {
 		private final PoolKey key;
-		private final DataSource dataSource;
+		private final TenantBusinessDatabaseIdentityCheckingDataSource dataSource;
 		private int activeLeases;
 		private boolean retired;
 
-		private PoolEntry(PoolKey key, DataSource dataSource) {
+		private PoolEntry(PoolKey key, TenantBusinessDatabaseIdentityCheckingDataSource dataSource) {
 			this.key = key;
 			this.dataSource = dataSource;
 		}
@@ -152,9 +154,9 @@ final class TenantBusinessDatabasePoolRegistry implements AutoCloseable {
 			this.entry = entry;
 		}
 
-		DataSource dataSource() {
+		DataSource dataSource(WorkspaceId workspaceId) {
 			if (released.get()) throw new IllegalStateException("Tenant database pool lease is closed");
-			return entry.dataSource;
+			return entry.dataSource.forVerifiedWorkspace(workspaceId);
 		}
 
 		@Override
