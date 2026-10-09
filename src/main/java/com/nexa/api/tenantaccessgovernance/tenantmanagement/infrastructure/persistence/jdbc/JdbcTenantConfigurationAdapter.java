@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.pers
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.TenantConfigurationModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantExternalConfigurationSource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
@@ -10,6 +11,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configu
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.RegionalSettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.TenantSecuritySettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.UnitPreferences;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -87,6 +90,28 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 		ensureWorkspaceDefaults(workspaceId);
 		return jdbc.query("select warehouse_preference_strategy,order_cutoff_policy,fulfillment_defaults,inventory_visibility_policy,buyer_availability_policy,operating_hours_start,operating_hours_end,order_cutoff_minutes,thermal_log_required,version from tenant_management.operational_settings where workspace_id=?",
 				(rs, row) -> new OperationalSettings(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getTime(6).toLocalTime(), rs.getTime(7).toLocalTime(), rs.getInt(8), rs.getBoolean(9), rs.getLong(10)), uuid(workspaceId)).stream().findFirst();
+	}
+
+	@Override
+	@Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+	public Optional<OperationalSettingsAccess.PurchaseRequestExpiryPolicySource> findPurchaseRequestExpiryPolicy(
+			String tenantId, String workspaceId) {
+		return jdbc.query("select settings.workspace_id as settings_workspace_id, "
+				+ "settings.purchase_request_expiry_days as expiry_days, settings.version as source_version "
+				+ "from tenant_management.workspace ws "
+				+ "left join tenant_management.operational_settings settings on settings.workspace_id=ws.id "
+				+ "where ws.tenant_id=? and ws.id=?",
+				(rs, row) -> {
+					boolean present = rs.getObject("settings_workspace_id") != null;
+					var state = present ? OperationalSettingsAccess.SourceState.PRESENT
+							: OperationalSettingsAccess.SourceState.CONFIRMED_ABSENT;
+					Long sourceVersion = present ? rs.getLong("source_version") : null;
+					int expiryDays = present ? rs.getInt("expiry_days") : 3;
+					return new OperationalSettingsAccess.PurchaseRequestExpiryPolicySource(
+							new TenantId(java.util.UUID.fromString(tenantId)),
+							new WorkspaceId(java.util.UUID.fromString(workspaceId)),
+							state, sourceVersion, expiryDays);
+				}, uuid(tenantId), uuid(workspaceId)).stream().findFirst();
 	}
 
 	@Override

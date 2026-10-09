@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 
 /** Builds the additive V3 baseline from a fresh database at the published central V146 state. */
 final class TenantBusinessDatabaseBaselineGenerator {
+    static final int CENTRAL_BASELINE_VERSION = 146;
     static final String MANIFEST_PATH = "src/main/resources/db/tenant-migration/tenant-business-baseline-v3.tsv";
     static final String CANONICAL_OWNERSHIP_PATH = "docs/architecture/canonical-sql-ownership.tsv";
     static final String SOURCE_MIGRATIONS_PATH = "src/main/resources/db/migration";
@@ -40,6 +41,7 @@ final class TenantBusinessDatabaseBaselineGenerator {
             "(?m)^(?:CREATE SEQUENCE|ALTER SEQUENCE)\\s+[^;]*;\\s*");
     private static final Pattern FORCE_RLS_DUMP_STATEMENT = Pattern.compile(
             "(?m)^ALTER TABLE(?: ONLY)?\\s+[^;]+? FORCE ROW LEVEL SECURITY;\\s*");
+    private static final Pattern VERSIONED_MIGRATION_FILENAME = Pattern.compile("V(\\d+)__.*\\.sql");
     private static final Set<String> ACTOR_REFERENCE_TARGETS = Set.of(
             "iam.user_account", "tenant_management.workspace_membership");
     private static final List<String> TABLE_PRIVILEGES = List.of(
@@ -91,7 +93,7 @@ final class TenantBusinessDatabaseBaselineGenerator {
         try (Connection connection = DriverManager.getConnection(
                 central.getJdbcUrl(), central.getUsername(), central.getPassword())) {
             int centralVersion = successfulCentralVersion(connection);
-            if (centralVersion != 146) {
+            if (centralVersion != CENTRAL_BASELINE_VERSION) {
                 throw new IllegalStateException("V3 baseline requires published central Flyway V146; found V" + centralVersion);
             }
             String ownershipDigest = sha256(Files.readAllBytes(repositoryRoot.resolve(CANONICAL_OWNERSHIP_PATH)));
@@ -643,7 +645,13 @@ final class TenantBusinessDatabaseBaselineGenerator {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (var paths = Files.walk(migrationDirectory)) {
-                for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
+                for (Path path : paths.filter(Files::isRegularFile)
+                        .filter(path -> {
+                            Matcher matcher = VERSIONED_MIGRATION_FILENAME.matcher(path.getFileName().toString());
+                            return matcher.matches()
+                                    && Integer.parseInt(matcher.group(1)) <= CENTRAL_BASELINE_VERSION;
+                        })
+                        .sorted().toList()) {
                     digest.update(migrationDirectory.relativize(path).toString().replace('\\', '/').getBytes(StandardCharsets.UTF_8));
                     digest.update((byte) 0);
                     digest.update(Files.readAllBytes(path));

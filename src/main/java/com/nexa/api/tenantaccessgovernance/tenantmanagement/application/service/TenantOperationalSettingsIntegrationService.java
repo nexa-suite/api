@@ -2,6 +2,8 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 
 import java.time.LocalTime;
 import java.util.Optional;
@@ -31,6 +33,12 @@ public final class TenantOperationalSettingsIntegrationService implements com.ne
                 current.fulfillmentDefaults(), current.inventoryVisibilityPolicy(), current.buyerAvailabilityPolicy(),
                 startsAt, endsAt, current.orderCutoffMinutes(), current.thermalLogRequired(), expectedVersion);
         return configuration.updateOperationalSettings(workspaceId, updated);
+    }
+
+    @Override
+    public Optional<PurchaseRequestExpiryPolicySource> findPurchaseRequestExpiryPolicy(
+            TenantId tenantId, WorkspaceId workspaceId) {
+        return configuration.findPurchaseRequestExpiryPolicy(tenantId.toString(), workspaceId.toString());
     }
 
     private static Snapshot snapshot(OperationalSettings value) {

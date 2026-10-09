@@ -69,6 +69,7 @@ class TenantBusinessDatabaseRouterIT {
 	private static final String CENTRAL_RUNTIME_PASSWORD = "central-runtime-only-test-password";
 	private static final String TENANT_A_RUNTIME_PASSWORD = "tenant-a-runtime-only-test-password";
 	private static final String TENANT_B_RUNTIME_PASSWORD = "tenant-b-runtime-only-test-password";
+	private static final String TENANT_POLICY_SNAPSHOT_WRITER_PASSWORD = "tenant-policy-snapshot-writer-test-password";
 	private static final String RUNTIME_USERNAME = "nexa_runtime";
 
 	@Container
@@ -89,6 +90,8 @@ class TenantBusinessDatabaseRouterIT {
 		configureRuntimeRole(CENTRAL, CENTRAL_RUNTIME_PASSWORD);
 		configureRuntimeRole(TENANT_A, TENANT_A_RUNTIME_PASSWORD);
 		configureRuntimeRole(TENANT_B, TENANT_B_RUNTIME_PASSWORD);
+		configurePolicySnapshotWriterRole(TENANT_A);
+		configurePolicySnapshotWriterRole(TENANT_B);
 
 		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
 				.locations("classpath:db/migration").load().migrate();
@@ -781,6 +784,18 @@ class TenantBusinessDatabaseRouterIT {
 			statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + runtimePassword + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not create the restricted runtime role for routing integration tests", exception);
+		}
+	}
+
+	private static void configurePolicySnapshotWriterRole(PostgreSQLContainer container) {
+		try (Connection connection = DriverManager.getConnection(container.getJdbcUrl(), container.getUsername(), container.getPassword());
+				var statement = connection.createStatement()) {
+			statement.execute("CREATE ROLE nexa_policy_snapshot_writer LOGIN PASSWORD '"
+					+ TENANT_POLICY_SNAPSHOT_WRITER_PASSWORD
+					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("GRANT CONNECT ON DATABASE \"" + container.getDatabaseName() + "\" TO nexa_policy_snapshot_writer");
+		} catch (Exception exception) {
+			throw new IllegalStateException("Could not create the dedicated policy-snapshot writer test role", exception);
 		}
 	}
 

@@ -8,6 +8,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configu
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.RegionalSettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.TenantSecuritySettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.UnitPreferences;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 
 import java.util.List;
 import java.util.Optional;
@@ -21,6 +22,8 @@ public interface TenantConfigurationPort {
 	Optional<UnitPreferences> findUnitPreferences(String tenantId);
 	int updateUnitPreferences(String tenantId, UnitPreferences preferences);
 	Optional<OperationalSettings> findOperationalSettings(String workspaceId);
+	Optional<OperationalSettingsAccess.PurchaseRequestExpiryPolicySource> findPurchaseRequestExpiryPolicy(
+			String tenantId, String workspaceId);
 	int updateOperationalSettings(String workspaceId, OperationalSettings settings);
 	Optional<TenantConfigurationModels.WorkspaceSettingsView> findWorkspaceSettings(String workspaceId);
 	int updateWorkspaceSettings(String workspaceId, String defaultBehavior, String warehouseStrategy, long expectedVersion);

@@ -17,7 +17,7 @@ import java.util.function.Supplier;
 
 /** Applies and clears either request-local central scope or explicit verified Tenant business scope. */
 public final class RlsScopedDataSource implements DataSource {
-    private static final String SET_SCOPE_SQL = "select set_config('app.current_tenant_id', ?, ?), set_config('app.current_workspace_id', ?, ?), set_config('app.cross_scope_workspace_scan', ?, ?), set_config('app.access_context_user_id', '', ?)";
+    private static final String SET_SCOPE_SQL = "select set_config('app.current_tenant_id', ?, ?), set_config('app.current_workspace_id', ?, ?), set_config('app.cross_scope_workspace_scan', ?, ?), set_config('app.access_context_user_id', '', ?), set_config('app.expected_purchase_request_expiry_policy_revision', '', ?)";
     private final DataSource delegate;
     private final Supplier<RlsRequestScope.Scope> scopeProvider;
     private final BooleanSupplier crossScopeScanProvider;
@@ -178,6 +178,7 @@ public final class RlsScopedDataSource implements DataSource {
             statement.setString(5, crossScopeWorkspaceScan ? "true" : "");
             statement.setBoolean(6, local);
             statement.setBoolean(7, local);
+            statement.setBoolean(8, local);
             statement.execute();
         }
     }

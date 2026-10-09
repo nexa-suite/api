@@ -39,15 +39,41 @@ reference tables are loaded as read-only local projections; their logical
 values and counts are checked against the published central migration state.
 V3 creates schema only and contains no normal-Tenant business seed.
 
-One copied V146 trigger remains an explicit cutover dependency. V83's
-`sales.assign_purchase_request_expiry()` reads
-`tenant_management.operational_settings.purchase_request_expiry_days` when a
-non-DRAFT purchase request has no `expires_at`. That BC01 table is
-intentionally excluded from V3. The V3 rehearsal verifies that the function
-definition is preserved but does not execute this transition. Purchase-request
-write routing must remain out of scope until an accepted source for this
-setting is available to the Tenant database; V3 alone does not make this
-trigger executable there.
+V3 preserves V83's `sales.assign_purchase_request_expiry()` definition, whose
+central implementation reads
+`tenant_management.operational_settings.purchase_request_expiry_days`. That
+BC01 table remains excluded from Tenant databases. Additive local migration V4
+replaces the copied trigger with a fail-closed projection reader. Its
+`nexa_platform.purchase_request_expiry_policy_snapshot` is empty after
+migration; it stores no default or normal-Tenant business seed. Each row carries
+the central source state and version, policy days, and a Tenant-local monotonic
+snapshot revision. The composite Tenant/Workspace key references the local
+scope anchor and is protected by RLS. `nexa_runtime` receives SELECT only. The
+separate `nexa_policy_snapshot_writer` login receives SELECT on the identity,
+anchor and snapshot plus INSERT/UPDATE on the snapshot; its credentials must be
+resolved separately from the runtime secret reference.
+
+BC01's public `OperationalSettingsAccess` query validates the central
+Tenant/Workspace pair without creating settings defaults. A present row returns
+its accepted 1–7 day value and row version. A valid Workspace with no settings
+row returns `CONFIRMED_ABSENT`, for which the accepted three-day fallback is
+projected; an unknown or mismatched Workspace returns no source and fails
+closed. If a source row appears after an absence snapshot, the local revision
+advances even when the new central row starts at version zero. A stale central
+version or concurrent local revision fails closed.
+
+The opt-in `TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver` reads
+the BC01 source before a routed operation, reconciles the local snapshot through
+the distinct writer connection in its own Tenant-database transaction, then
+sets the matching snapshot revision with `SET LOCAL` before the business
+transaction. The V4 trigger requires that expected revision for each non-DRAFT
+Purchase Request insert or relevant update, checks it against the scoped local
+snapshot, and uses the snapshot days only when `expires_at` is missing. Missing
+or stale revision fails closed. Connection scope cleanup also clears this GUC.
+These are separate central-read, snapshot-write and business transactions; no
+cross-database atomicity is claimed. The V4 resolver is not wired into the
+global HTTP path or existing adapters, so no production Purchase Request
+cutover is implemented. Central V1–V146, including V83, remain unchanged.
 
 The central row has the determinant `tenant_id -> database_identity,
 credential_secret_reference, lifecycle_state, created_at, updated_at, version`;
@@ -101,9 +127,9 @@ settings when a pooled connection is returned. The database integration test
 exercises a `FORCE ROW LEVEL SECURITY` policy on each of the two business
 databases and checks that pool state is empty after routed work.
 
-The real PostgreSQL integration test creates one central database and two
-physically separate Tenant databases, applies the tenant metadata migrations,
-and checks central authority revalidation, routing and pool reuse,
+The real PostgreSQL router integration test creates one central database and
+two physically separate Tenant databases, applies the tenant metadata
+migrations, and checks central authority revalidation, routing and pool reuse,
 wrong-physical-database rejection, missing or mismatched Workspace-anchor
 denial, runtime read-only access to the anchor, RLS scope application and
 cleanup, pool capacity failure, idle eviction, safe rebinding with an active
@@ -123,11 +149,19 @@ or a production data migration. Neither test proves deployed secret-provider
 behavior, production provisioning, operational recovery or production
 readiness.
 
-Remaining integration work includes operational provisioning and
-reconciliation from an authorized source snapshot, production singleton and
-capacity configuration, Tenant-aware routing for background jobs, and
-adapter-level routing before any production cutover. The test fixture is not an
+The opt-in V4 PostgreSQL integration rehearsal checks the central source query,
+expiry values 1–7, the confirmed-absence three-day fallback, an absent-to-present
+central row transition, local revision advancement, stale and missing expected
+revision denial, distinct writer/runtime grants, and isolation across two
+physical Tenant databases. It proves the local migration and manually wired
+resolver under test credentials only; it does not prove production writer
+credential provisioning or API/HTTP integration.
+
+Remaining integration work includes provisioning the dedicated writer role and
+credentials, an authorized snapshot refresh mechanism, production singleton
+and capacity configuration, Tenant-aware routing for background jobs, and
+adapter-level wiring before any production cutover. The test fixture is not an
 authorized source snapshot. The current global Spring DataSource, existing
 adapters, and published central Flyway history through V146 remain unchanged.
-No existing API business command uses this router yet; no HTTP cutover is
-implemented.
+No existing API business command uses this resolver or router yet; no HTTP
+cutover is implemented.
