@@ -32,6 +32,15 @@ public class CreditExposureQueryController {
         this.service = service;
     }
 
+    @GetMapping("/me/credit-exposure")
+    @Operation(operationId = "getCurrentBuyerCreditExposure",
+            description = "Returns supplier-scoped credit facts for the active Buyer relationship resolved from the verified PORTAL membership. No client account selector is accepted.")
+    public CreditExposureApplicationService.CreditExposureView buyer(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestParam(defaultValue = "PEN") @Pattern(regexp = "[A-Za-z]{3}") String currency) {
+        return service.readBuyer(context, currency);
+    }
+
     @GetMapping("/{clientAccountId}/credit-exposure")
     @Operation(operationId = "getClientCreditExposure",
             description = "Returns the current credit limit, ledger exposure, active reservations, outstanding receivables and available credit for an active customer account. Tenant and workspace scope come from the verified access context.")

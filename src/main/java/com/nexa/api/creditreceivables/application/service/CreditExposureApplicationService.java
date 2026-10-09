@@ -5,6 +5,7 @@ import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,10 +33,26 @@ public class CreditExposureApplicationService {
         String workspaceId = context.workspaceId().toString();
         var customer = customerAccounts.findReference(tenantId, workspaceId, clientAccountId)
                 .orElseThrow(() -> new CreditReceivableOperationException("CLIENT_ACCOUNT_NOT_FOUND"));
+        return projection(tenantId, workspaceId, customer.id(), currency);
+    }
+
+    @Transactional(readOnly = true)
+    public CreditExposureView readBuyer(CurrentAccessContext context, String currency) {
+        context.requireSurface(Surface.PORTAL);
+        context.requirePermission(PermissionKey.PAYMENT_READ);
+        String tenantId = context.tenantId().toString();
+        String workspaceId = context.workspaceId().toString();
+        var customer = customerAccounts.findBuyerReference(tenantId, workspaceId, context.membershipId().toString())
+                .filter(value -> value.active())
+                .orElseThrow(() -> new CreditReceivableOperationException("BUYER_ACCOUNT_NOT_FOUND"));
+        return projection(tenantId, workspaceId, customer.id(), currency);
+    }
+
+    private CreditExposureView projection(String tenantId, String workspaceId, String customerId, String currency) {
         String normalizedCurrency = normalizeCurrency(currency);
         CreditExposureQuery.CreditExposureSnapshot snapshot = exposures.find(
-                tenantId, workspaceId, customer.id(), normalizedCurrency);
-        return new CreditExposureView(customer.id(), snapshot.currency(), snapshot.creditLimit(),
+                tenantId, workspaceId, customerId, normalizedCurrency);
+        return new CreditExposureView(customerId, snapshot.currency(), snapshot.creditLimit(),
                 snapshot.ledgerExposure(), snapshot.outstandingReceivables(), snapshot.reservedExposure(),
                 snapshot.used(), snapshot.availableCredit(), snapshot.active(), Instant.now());
     }
