@@ -150,7 +150,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	public MaterialChangeProposalView proposeMaterialChange(CurrentAccessContext context, String id, long version,
 			String reason, String priority, LocalDate deliveryDate, String deliveryProfile, String paymentOption,
 			String comment, List<RequestedLine> requestedLines, String idempotencyKey) {
-		internal(context, Permission.SALES_WRITE);
+		internal(context, PermissionKey.SALES_PURCHASE_REQUEST_REVIEW);
 		requireIdempotencyKey(idempotencyKey);
 		PurchaseRequestView current = detail(context, id);
 		String actor = context.membershipId().toString();

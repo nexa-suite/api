@@ -17,10 +17,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
-    @Test void companyOwnerCannotReviewApproveRejectOrConvertAndSalesCanStillConvert() throws Exception {
+    @Test void companyOwnerCannotReviewApproveProposeRejectOrConvertAndSalesCanStillConvert() throws Exception {
         var request = createApprovedPurchaseRequest();
         UUID requestId = UUID.fromString(request.id());
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+
+        mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/material-changes")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", request.etag())
+                        .header("Idempotency-Key", "owner-propose-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"Quantity adjustment\",\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":2,\"unit\":\"UNIT\"}]}"))
+                .andExpect(status().isForbidden());
 
         mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/reviews")
                         .header("Authorization", "Bearer " + owner)
