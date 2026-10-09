@@ -53,7 +53,8 @@ public final class TenantBusinessDatabaseRouter implements AutoCloseable {
 			throw exception;
 		}
 		try (TenantBusinessDatabasePoolRegistry.Lease lease = pools.acquire(binding)) {
-			DataSource tenantDataSource = RlsScopedDataSource.forVerifiedTenant(lease.dataSource(), accessContext);
+			DataSource tenantDataSource = RlsScopedDataSource.forVerifiedTenant(
+					lease.dataSource(accessContext.workspaceId()), accessContext);
 			TransactionTemplate transaction = new TransactionTemplate(new DataSourceTransactionManager(tenantDataSource));
 			transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
 
