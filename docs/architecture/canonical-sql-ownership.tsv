@@ -142,6 +142,7 @@ tenant_management.role_definition	BC01	V36__create_business_commerce_foundations
 tenant_management.role_permission	BC01	V36__create_business_commerce_foundations.sql:101 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.tenant	BC01	V4__create_tenant_workspace_tables.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.tenant_security_settings	BC01	V29__create_tenant_administration_configuration.sql:125 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+tenant_management.tenant_business_database_binding	BC01	V146__add_tenant_business_database_binding.sql:1 CREATE TABLE; central tenant-to-business-database registry ownership per accepted v0.19 schema/table ownership specification.
 tenant_management.unit_preferences	BC01	V29__create_tenant_administration_configuration.sql:62 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.workspace	BC01	V4__create_tenant_workspace_tables.sql:11 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.workspace_creation_idempotency	SHARED_TECHNICAL	V29__create_tenant_administration_configuration.sql:240 CREATE TABLE; explicit shared technical idempotency table.

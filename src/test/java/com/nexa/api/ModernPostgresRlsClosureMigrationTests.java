@@ -30,7 +30,7 @@ class ModernPostgresRlsClosureMigrationTests {
             .withPassword("test-only-password");
 
     @Test
-    void freshSchemaMatchesEveryTableClassificationAndV142Policy() throws Exception {
+    void freshSchemaMatchesEveryTableClassificationAndV146Policy() throws Exception {
         try (Connection connection = POSTGRES.createConnection(""); var statement = connection.createStatement()) {
             statement.execute("create role nexa_runtime");
         }
@@ -38,7 +38,7 @@ class ModernPostgresRlsClosureMigrationTests {
                 .locations("classpath:db/migration").load().migrate();
 
         try (Connection connection = POSTGRES.createConnection("")) {
-            Map<String, InventoryEntry> inventory = readInventory("v142");
+            Map<String, InventoryEntry> inventory = readInventory("v146");
             assertHistoricalV102EvidenceRemainsConsistent();
             assertScopeEvidenceCoversCurrentClosureDelta(inventory);
             Map<String, Long> categoryCounts = inventory.values().stream().collect(java.util.stream.Collectors.groupingBy(
@@ -82,6 +82,7 @@ class ModernPostgresRlsClosureMigrationTests {
                     "tenant_management.reference_plan_assignment", "tenant_management.regional_settings",
                     "tenant_management.tenant_security_settings", "tenant_management.unit_preferences",
                     "tenant_management.tenant", "tenant_management.workspace",
+                    "tenant_management.tenant_business_database_binding",
                     "sales.purchase_request_material_change", "warehouse.inventory_transfer_history",
                     "catalog_management.price_list", "catalog_management.price_list_item",
                     "catalog_management.customer_terms"));
@@ -194,11 +195,12 @@ class ModernPostgresRlsClosureMigrationTests {
                 "warehouse.inventory_cycle_count_correction",
                 "warehouse.inventory_transfer_history",
                 "warehouse.inventory_transfer_receipt_observation",
-                "warehouse.physical_allocation_substitution_request");
-        assertThat(newlyForced).as("V103 through V142 add the explicitly classified scoped tables in the current line")
+                "warehouse.physical_allocation_substitution_request",
+                "tenant_management.tenant_business_database_binding");
+        assertThat(newlyForced).as("V103 through V146 add the explicitly classified scoped tables in the current line")
                 .containsExactlyInAnyOrderElementsOf(expectedNewlyForced);
 
-        List<String> evidenceLines = Files.readAllLines(Path.of("docs/security/rls-direct-scope-evidence-v142.tsv"));
+        List<String> evidenceLines = Files.readAllLines(Path.of("docs/security/rls-direct-scope-evidence-v146.tsv"));
         assertThat(evidenceLines.getFirst()).isEqualTo("table\tcategory\tscope_source\ttenant_id\tworkspace_id\tparent_derived\tread_write_paths\tworker_path\trls_required\tpolicy_shape\ttest\treason");
         Set<String> evidenced = new LinkedHashSet<>();
         for (String line : evidenceLines.subList(1, evidenceLines.size())) {
@@ -289,7 +291,11 @@ class ModernPostgresRlsClosureMigrationTests {
                        has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','SELECT'),
                        has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','INSERT'),
                        has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','UPDATE'),
-                       has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','DELETE')
+                       has_table_privilege('nexa_runtime','logistics.stock_temperature_exception','DELETE'),
+                       has_table_privilege('nexa_runtime','tenant_management.tenant_business_database_binding','SELECT'),
+                       has_table_privilege('nexa_runtime','tenant_management.tenant_business_database_binding','INSERT'),
+                       has_table_privilege('nexa_runtime','tenant_management.tenant_business_database_binding','UPDATE'),
+                       has_table_privilege('nexa_runtime','tenant_management.tenant_business_database_binding','DELETE')
                 """)) {
             try (ResultSet rows = statement.executeQuery()) {
                 assertThat(rows.next()).isTrue();
@@ -312,6 +318,10 @@ class ModernPostgresRlsClosureMigrationTests {
                 assertThat(rows.getBoolean(27)).as("V142 grants scoped stock-temperature exception creation").isTrue();
                 assertThat(rows.getBoolean(28)).as("V142 grants scoped stock-temperature exception resolution updates").isTrue();
                 assertThat(rows.getBoolean(29)).as("V142 withholds stock-temperature exception deletion").isFalse();
+                assertThat(rows.getBoolean(30)).as("V146 grants central binding reads").isTrue();
+                assertThat(rows.getBoolean(31)).as("V146 withholds runtime binding inserts").isFalse();
+                assertThat(rows.getBoolean(32)).as("V146 withholds runtime binding updates").isFalse();
+                assertThat(rows.getBoolean(33)).as("V146 withholds runtime binding deletes").isFalse();
             }
         }
     }
@@ -320,7 +330,7 @@ class ModernPostgresRlsClosureMigrationTests {
         Set<String> tenantOnly = Set.of("tenant_management.organization_invitation_idempotency",
                 "tenant_management.organization_settings", "tenant_management.reference_plan_assignment",
                 "tenant_management.regional_settings", "tenant_management.tenant_security_settings",
-                "tenant_management.unit_preferences");
+                "tenant_management.unit_preferences", "tenant_management.tenant_business_database_binding");
         Set<String> policies = tenantIdPolicyTables(connection);
         assertThat(policies).containsExactlyInAnyOrderElementsOf(tenantOnly);
         for (String table : tenantOnly) {
