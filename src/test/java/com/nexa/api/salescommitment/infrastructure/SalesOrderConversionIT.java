@@ -17,6 +17,46 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
+    @Test void companyOwnerCannotReviewApproveRejectOrConvertAndSalesCanStillConvert() throws Exception {
+        var request = createApprovedPurchaseRequest();
+        UUID requestId = UUID.fromString(request.id());
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+
+        mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/reviews")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", request.etag()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/approvals")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", request.etag()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/rejections")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", request.etag())
+                        .header("Idempotency-Key", "owner-reject-" + uuid()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/order-conversions")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", request.etag())
+                        .header("Idempotency-Key", "owner-convert-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isForbidden());
+
+        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, requestId))
+                .isEqualTo("SUBMITTED");
+        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, requestId))
+                .isZero();
+        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event e join sales.sales_order o on e.aggregate_id=o.id "
+                + "where o.source_purchase_request_id=? and e.event_type='SALES_ORDER_CONFIRMED'", Integer.class, requestId))
+                .isZero();
+
+        var order = convert(request, "sales-after-owner-denial-" + uuid());
+        assertThat(order.id()).isNotBlank();
+        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, requestId))
+                .isEqualTo(1);
+    }
+
     @Test void convertsSubmittedPurchaseRequestThroughRealHttpAndPersistsBothAggregates() throws Exception {
         var request = createApprovedPurchaseRequest();
         var order = convert(request, "conversion-" + uuid());

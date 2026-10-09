@@ -8,7 +8,7 @@ import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderConver
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrder;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -71,7 +71,7 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
     }
 
     private static void requireCommercialWrite(CurrentAccessContext context) {
-        context.requirePermission(Permission.SALES_WRITE);
+        context.requirePermission(PermissionKey.SALES_PURCHASE_REQUEST_REVIEW);
     }
 
     private static String requestHash(String purchaseRequestId, long version, String note) {

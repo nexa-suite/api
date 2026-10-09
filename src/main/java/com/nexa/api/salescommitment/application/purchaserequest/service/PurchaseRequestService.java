@@ -40,6 +40,7 @@ import com.nexa.api.shared.application.port.out.NoopChangeEventPersistence;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -393,8 +394,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			if (prior.isPresent()) return replay(prior.get(), context);
 		} else if ("withdraw".equals(normalized)) {
 			if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
-		} else if ("start-review".equals(normalized) || "approve".equals(normalized)) {
-			internal(context, Permission.SALES_WRITE);
+		} else if ("start-review".equals(normalized) || "approve".equals(normalized) || "reject".equals(normalized)) {
+			internal(context, PermissionKey.SALES_PURCHASE_REQUEST_REVIEW);
 		} else {
 			internal(context, Permission.SALES_WRITE);
 		}
@@ -602,6 +603,11 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	}
 
 	private static void internal(CurrentAccessContext context, Permission permission) {
+		if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
+		context.requirePermission(permission);
+	}
+
+	private static void internal(CurrentAccessContext context, PermissionKey permission) {
 		if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
 		context.requirePermission(permission);
 	}
