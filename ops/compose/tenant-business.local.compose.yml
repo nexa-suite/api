@@ -1,0 +1,48 @@
+services:
+  tenant-database:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_DB: nexa_tenant_business
+      POSTGRES_USER: nexa_tenant_bootstrap_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/bootstrap_admin_password
+    secrets:
+      - bootstrap_admin_password
+      - migrator_password
+      - runtime_password
+      - policy_snapshot_writer_password
+    volumes:
+      - tenant-business-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${NEXA_TENANT_DATABASE_PORT:?Set NEXA_TENANT_DATABASE_PORT in the private Tenant compose environment}:5432"
+    networks:
+      tenant-database:
+        aliases:
+          - tenant-db-${NEXA_TENANT_DATABASE_ID:?Set NEXA_TENANT_DATABASE_ID to the central Tenant UUID}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 20
+
+volumes:
+  tenant-business-data:
+    name: nexa-tenant-business-${NEXA_TENANT_DATABASE_ID:?Set NEXA_TENANT_DATABASE_ID to the central Tenant UUID}
+
+networks:
+  tenant-database:
+    name: nexa-tenant-business-${NEXA_TENANT_DATABASE_ID:?Set NEXA_TENANT_DATABASE_ID to the central Tenant UUID}
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+
+secrets:
+  bootstrap_admin_password:
+    file: ${NEXA_TENANT_DATABASE_SECRET_DIR:?Set NEXA_TENANT_DATABASE_SECRET_DIR to the private Tenant directory}/bootstrap-admin-password
+  migrator_password:
+    file: ${NEXA_TENANT_DATABASE_SECRET_DIR:?Set NEXA_TENANT_DATABASE_SECRET_DIR to the private Tenant directory}/migrator-password
+  runtime_password:
+    file: ${NEXA_TENANT_DATABASE_SECRET_DIR:?Set NEXA_TENANT_DATABASE_SECRET_DIR to the private Tenant directory}/runtime-password
+  policy_snapshot_writer_password:
+    file: ${NEXA_TENANT_DATABASE_SECRET_DIR:?Set NEXA_TENANT_DATABASE_SECRET_DIR to the private Tenant directory}/policy-snapshot-writer-password

@@ -19,6 +19,10 @@ import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands.ApprovedPurchaseRequestReserveCommand;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands.ReserveCommand;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands.TransitionCommand;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.BuyerMembershipId;
@@ -30,10 +34,12 @@ import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderLine;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderNumber;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderStatus;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.context.annotation.Profile;
@@ -69,12 +75,21 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	private final FinancialAdjustmentCommands financialAdjustments;
 	private final Clock clock;
 	private final ObjectMapper objectMapper;
+	private final BuyerWalletReservationCommands walletReservations;
 
 	@org.springframework.beans.factory.annotation.Autowired
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
 			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
 			ReceivableCommands receivables, FinancialAdjustmentCommands financialAdjustments, Clock clock, ObjectMapper objectMapper,
 			CanonicalOutboxPort canonicalOutbox) {
+		this(jdbc, changeFeed, commitments, customers, paymentConfirmations, receivables,
+				financialAdjustments, clock, objectMapper, canonicalOutbox, null);
+	}
+
+	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+			CommercialCommitmentPort commitments, CustomerAccountQuery customers, PaymentConfirmationQuery paymentConfirmations,
+			ReceivableCommands receivables, FinancialAdjustmentCommands financialAdjustments, Clock clock, ObjectMapper objectMapper,
+			CanonicalOutboxPort canonicalOutbox, BuyerWalletReservationCommands walletReservations) {
 		this.jdbc = jdbc;
 		this.canonicalOutbox = canonicalOutbox;
 		this.changeFeed = changeFeed;
@@ -85,6 +100,7 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		this.financialAdjustments = financialAdjustments;
 		this.clock = clock == null ? Clock.systemUTC() : clock;
 		this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+		this.walletReservations = walletReservations;
 	}
 
 	public SalesOrderPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
@@ -119,6 +135,13 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	@Override
     public SalesOrderView saveTransition(SalesOrder aggregate, String action, String reason, String actorMembershipId,
             String actorIdentityId, long expectedVersion, long nowEpochMillis) {
+		return saveTransition(aggregate, action, reason, actorMembershipId, actorIdentityId,
+			expectedVersion, nowEpochMillis, null);
+	}
+
+	@Override
+	public SalesOrderView saveTransition(SalesOrder aggregate, String action, String reason, String actorMembershipId,
+			String actorIdentityId, long expectedVersion, long nowEpochMillis, CurrentAccessContext actorContext) {
 		if (aggregate.version() != expectedVersion) throw new SalesConcurrencyConflictException();
 		UUID orderId = uuid(aggregate.id().value()), tenant = aggregate.tenantId().value(), workspace = aggregate.workspaceId().value(), actor = uuid(actorMembershipId);
 		String previousStatus = jdbc.queryForObject("select status from sales.sales_order where tenant_id=? and workspace_id=? and id=? for update",
@@ -130,7 +153,15 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		int changed = jdbc.update("update sales.sales_order set status=?,rejection_reason=?,confirmed_at=?,rejected_at=?,cancelled_at=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status=? and version=?",
 				aggregate.status().name(), aggregate.rejectionReason(), aggregate.confirmedAt() == null ? null : timestamp(aggregate.confirmedAt()), aggregate.rejectedAt() == null ? null : timestamp(aggregate.rejectedAt()), aggregate.cancelledAt() == null ? null : timestamp(aggregate.cancelledAt()), timestamp(nowEpochMillis), tenant, workspace, orderId, previousStatus, expectedVersion);
 		if (changed != 1) throw new SalesConcurrencyConflictException();
-		if ("confirm".equals(action) && aggregate.paymentOption() == PaymentOption.CREDIT_LINE && receivables != null) {
+		if (aggregate.paymentOption() == PaymentOption.WALLET) {
+			BuyerWalletReservationCommands wallet = requireWalletReservations(actorContext);
+			TransitionCommand command = new TransitionCommand(orderId,
+					walletTransitionIdempotencyKey(action, orderId), Instant.ofEpochMilli(nowEpochMillis));
+			if ("confirm".equals(action)) wallet.consumeForSalesOrder(actorContext, command);
+			else if ("cancel".equals(action) || "reject".equals(action)) wallet.releaseForSalesOrder(actorContext, command);
+		}
+		if ("confirm".equals(action) && aggregate.paymentOption() == PaymentOption.CREDIT_LINE) {
+			if (receivables == null) throw new IllegalStateException("Tenant receivable command is not configured");
 			receivables.postForSalesOrder(tenant, workspace, orderId, uuid(aggregate.clientAccountId().value()),
 					aggregate.totalSnapshot(), aggregate.currency(), Instant.ofEpochMilli(nowEpochMillis));
 		}
@@ -206,6 +237,17 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	@Override
 	public Optional<ApprovedPurchaseRequestSnapshot> loadApprovedSnapshot(String tenantId, String workspaceId,
 			String purchaseRequestId, long expectedVersion) {
+		return loadApprovedSnapshot(tenantId, workspaceId, purchaseRequestId, expectedVersion, false);
+	}
+
+	@Override
+	public Optional<ApprovedPurchaseRequestSnapshot> loadApprovedSnapshotForSystemWorkflow(String tenantId,
+			String workspaceId, String purchaseRequestId, long expectedVersion) {
+		return loadApprovedSnapshot(tenantId, workspaceId, purchaseRequestId, expectedVersion, true);
+	}
+
+	private Optional<ApprovedPurchaseRequestSnapshot> loadApprovedSnapshot(String tenantId, String workspaceId,
+			String purchaseRequestId, long expectedVersion, boolean systemWorkflow) {
 		UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), request = uuid(purchaseRequestId);
 		PurchaseRequestRow pr = jdbc.query("select client_account_id,buyer_membership_id,status,version,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments,expires_at from sales.purchase_request where tenant_id=? and workspace_id=? and id=? for update",
 				rs -> rs.next() ? new PurchaseRequestRow(rs.getObject(1).toString(), rs.getObject(2).toString(), rs.getString(3), rs.getLong(4), rs.getString(5), rs.getObject(6, java.time.LocalDate.class), rs.getString(7), rs.getString(8), rs.getString(9), rs.getTimestamp(10) == null ? null : rs.getTimestamp(10).toInstant()) : null,
@@ -222,8 +264,10 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
             }
 			throw new PurchaseRequestExpiredException();
 		}
-		if (!("SUBMITTED".equals(pr.status()) || "IN_REVIEW".equals(pr.status())
-				|| "APPROVED".equals(pr.status()))
+		boolean statusAllowed = systemWorkflow
+				? "APPROVED".equals(pr.status())
+				: "SUBMITTED".equals(pr.status()) || "IN_REVIEW".equals(pr.status()) || "APPROVED".equals(pr.status());
+		if (!statusAllowed
 				|| pr.version() != expectedVersion) throw new SalesConcurrencyConflictException();
 		List<PurchaseRequestLineRow> requestLines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot from sales.purchase_request_line where purchase_request_id=? and superseded_at is null order by created_at,id",
 				(rs, row) -> new PurchaseRequestLineRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getString(5), rs.getBigDecimal(6), rs.getString(7), rs.getObject(8, UUID.class), rs.getObject(9, UUID.class), rs.getString(10), rs.getString(11)), request);
@@ -261,11 +305,42 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	@Override
 	public SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
 			String idempotencyKey, String note, long nowEpochMillis, String requestHash) {
+		return persistConversion(aggregate, purchaseRequestVersion, actorMembershipId, idempotencyKey,
+			note, nowEpochMillis, requestHash, null);
+	}
+
+	@Override
+	public SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
+			String idempotencyKey, String note, long nowEpochMillis, String requestHash,
+			CurrentAccessContext actorContext) {
 		UUID orderId = uuid(aggregate.id().value()), tenant = aggregate.tenantId().value(), workspace = aggregate.workspaceId().value();
 		UUID request = uuid(aggregate.sourcePurchaseRequestId().value()), actor = uuid(actorMembershipId);
-		String previousRequestStatus = jdbc.queryForObject("select status from sales.purchase_request where tenant_id=? and workspace_id=? and id=? for update",
-				String.class, tenant, workspace, request);
+		PurchaseRequestTenderSnapshot requestTender = jdbc.query("select status,payment_option,buyer_wallet_beneficiary_identity_id,client_account_id,buyer_membership_id from sales.purchase_request where tenant_id=? and workspace_id=? and id=? for update",
+				(org.springframework.jdbc.core.ResultSetExtractor<PurchaseRequestTenderSnapshot>) rs -> rs.next()
+						? new PurchaseRequestTenderSnapshot(rs.getString(1), rs.getString(2), rs.getObject(3, UUID.class),
+							rs.getObject(4, UUID.class), rs.getObject(5, UUID.class)) : null,
+				tenant, workspace, request);
+		if (requestTender == null) throw new SalesResourceNotFoundException("purchase-request");
+		String previousRequestStatus = requestTender.status();
+		String snapshotPaymentOption = aggregate.paymentOption() == null ? null : aggregate.paymentOption().name();
+		if (!java.util.Objects.equals(requestTender.paymentOption(), snapshotPaymentOption)
+				|| !uuid(aggregate.clientAccountId().value()).equals(requestTender.clientAccountId())
+				|| !aggregate.buyerMembershipId().value().equals(requestTender.buyerMembershipId())) {
+			throw new CommercialBusinessException("PURCHASE_REQUEST_SNAPSHOT_CHANGED");
+		}
+		boolean systemWorkflow = isSystemWorkflowActor(actorContext);
+		if (systemWorkflow && !"APPROVED".equals(previousRequestStatus)) {
+			throw new SalesConcurrencyConflictException();
+		}
 		boolean awaitingPrepaidPayment = aggregate.paymentOption() == PaymentOption.PREPAID;
+		if (aggregate.paymentOption() == PaymentOption.WALLET) {
+			requireWalletReservations(actorContext);
+			if (!"WALLET".equals(requestTender.paymentOption()) || requestTender.walletBeneficiaryIdentityId() == null) {
+				throw new CommercialBusinessException("WALLET_TENDER_NOT_CONSENTED");
+			}
+			if (!"PEN".equalsIgnoreCase(aggregate.currency())) throw new CommercialBusinessException("WALLET_CURRENCY_UNSUPPORTED");
+			if (aggregate.totalSnapshot().signum() <= 0) throw new CommercialBusinessException("WALLET_AMOUNT_INVALID");
+		}
 		String initialOrderStatus = awaitingPrepaidPayment ? "PENDING" : "CONFIRMED";
 		long initialOrderVersion = awaitingPrepaidPayment ? 0 : 1;
 		UUID commitmentId = jdbc.query("select id from sales.commercial_commitment where tenant_id=? and workspace_id=? and purchase_request_id=? and status='ACTIVE' for update",
@@ -276,10 +351,38 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 				orderId, tenant, workspace, aggregate.number().value(), uuid(aggregate.clientAccountId().value()), actor, aggregate.buyerMembershipId().value(), request, aggregate.priority().name(), aggregate.requestedDeliveryDate(), aggregate.deliverySnapshot(), aggregate.paymentOption() == null ? null : aggregate.paymentOption().name(), aggregate.notes(), aggregate.currency(), aggregate.totalSnapshot(), initialOrderStatus, awaitingPrepaidPayment ? null : timestamp(nowEpochMillis), timestamp(nowEpochMillis), timestamp(nowEpochMillis), initialOrderVersion, commitmentId);
 		for (SalesOrderLine line : aggregate.lines()) jdbc.update("insert into sales.sales_order_line (id,sales_order_id,catalog_item_id,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 				UUID.randomUUID(), orderId, line.catalogItemId(), line.sellableSkuId(), line.productFamilyId(), line.skuCodeSnapshot(), line.productFamilyCodeSnapshot(), line.itemNameSnapshot(), line.presentationSnapshot(), line.quantity(), line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.lineSubtotal(), timestamp(nowEpochMillis));
-		if (jdbc.update("update sales.purchase_request set status='CONVERTED',updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and status in ('SUBMITTED','CHANGES_PROPOSED','IN_REVIEW','APPROVED') and version=?",
+		String expectedStatusPredicate = systemWorkflow ? "status='APPROVED'"
+				: "status in ('SUBMITTED','CHANGES_PROPOSED','IN_REVIEW','APPROVED')";
+		if (jdbc.update("update sales.purchase_request set status='CONVERTED',updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=? and "
+				+ expectedStatusPredicate + " and version=?",
 				 timestamp(nowEpochMillis), tenant, workspace, request, purchaseRequestVersion) != 1) throw new SalesConcurrencyConflictException();
 		commitments.convertForSalesOrder(tenant, workspace, request, orderId);
-		if (!awaitingPrepaidPayment && aggregate.paymentOption() == PaymentOption.CREDIT_LINE && receivables != null) {
+		if (aggregate.paymentOption() == PaymentOption.WALLET) {
+			BuyerWalletReservationCommands wallet = requireWalletReservations(actorContext);
+			Instant occurredAt = Instant.ofEpochMilli(nowEpochMillis);
+			ReserveCommand reservation = new ReserveCommand(orderId,
+					aggregate.buyerMembershipId().value(), uuid(aggregate.clientAccountId().value()),
+					requestTender.walletBeneficiaryIdentityId(), aggregate.totalSnapshot(),
+					"sales-order-wallet-reserve-" + orderId, occurredAt);
+			if (systemWorkflow) {
+				wallet.reserveForApprovedPurchaseRequestConversion(actorContext,
+						new ApprovedPurchaseRequestReserveCommand(request, previousRequestStatus,
+							requestTender.paymentOption(), requestTender.walletBeneficiaryIdentityId(), reservation));
+			} else {
+				wallet.reserveForSalesOrder(actorContext, reservation);
+			}
+			if (!awaitingPrepaidPayment) {
+				TransitionCommand consumption = new TransitionCommand(orderId,
+						"sales-order-wallet-consume-" + orderId, occurredAt);
+				if (systemWorkflow) {
+					wallet.consumeForApprovedPurchaseRequestConversion(actorContext, consumption);
+				} else {
+					wallet.consumeForPurchaseRequestConversion(actorContext, consumption);
+				}
+			}
+		}
+		if (!awaitingPrepaidPayment && aggregate.paymentOption() == PaymentOption.CREDIT_LINE) {
+			if (receivables == null) throw new IllegalStateException("Tenant receivable command is not configured");
 			receivables.postForSalesOrder(tenant, workspace, orderId, uuid(aggregate.clientAccountId().value()),
 					aggregate.totalSnapshot(), aggregate.currency(), Instant.ofEpochMilli(nowEpochMillis));
 		}
@@ -422,9 +525,24 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 			java.time.LocalDate requestedDeliveryDate, String deliverySnapshot, String paymentOption, String notes, Instant expiresAt) { }
 	private record PurchaseRequestLineRow(String catalogItemId, String itemName, String presentation, BigDecimal quantity,
 			String unit, BigDecimal price, String currency, UUID skuId, UUID familyId, String skuCode, String familyCode) { }
+	private record PurchaseRequestTenderSnapshot(String status, String paymentOption, UUID walletBeneficiaryIdentityId,
+			UUID clientAccountId, UUID buyerMembershipId) { }
 	private static UUID parseUuid(String value) { return value == null || value.isBlank() ? null : UUID.fromString(value); }
 	private static String stringUuid(Object value) { return value == null ? null : value.toString(); }
 	private static UUID uuid(String value) { return UUID.fromString(value); }
+	private BuyerWalletReservationCommands requireWalletReservations(CurrentAccessContext actorContext) {
+		if (walletReservations == null || actorContext == null) {
+			throw new com.nexa.api.payments.application.publicapi.BuyerWalletStoreUnavailableException();
+		}
+		return walletReservations;
+	}
+	private static boolean isSystemWorkflowActor(CurrentAccessContext actorContext) {
+		return actorContext != null && actorContext.surface() == Surface.PLATFORM
+				&& actorContext.hasRoleCode("system_workflow");
+	}
+	private static String walletTransitionIdempotencyKey(String action, UUID salesOrderId) {
+		return "sales-order-wallet-" + action + "-" + salesOrderId;
+	}
 	private static Timestamp timestamp(long epoch) { return Timestamp.from(Instant.ofEpochMilli(epoch)); }
 	private static Timestamp timestamp(Instant instant) { return Timestamp.from(instant); }
 	private static String sha256(String value) {

@@ -14,17 +14,21 @@ import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentComm
 import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.payments.application.publicapi.PaymentSalesSource;
+import com.nexa.api.payments.application.publicapi.BuyerWalletRechargeProviderEventProcessor;
 import com.nexa.api.payments.domain.model.payment.Payment;
 import com.nexa.api.payments.domain.model.payment.PaymentMethod;
 import com.nexa.api.payments.domain.model.payment.PaymentStatus;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantEventContextQueryPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -60,7 +64,7 @@ import javax.crypto.spec.SecretKeySpec;
 /** Persistence adapter for payment use cases. Amounts, scope and final status stay server/webhook authoritative. */
 @Profile("!test")
 @Component
-public class PaymentService implements PaymentPersistencePort {
+public class PaymentService implements TenantPaymentSession {
     private static final Logger LOGGER = LoggerFactory.getLogger(PaymentService.class);
     private static final int MAX_RECONCILIATION_ATTEMPTS = 10;
     private final JdbcTemplate jdbc;
@@ -80,8 +84,12 @@ public class PaymentService implements PaymentPersistencePort {
     private final BusinessEvidenceQuery businessEvidence;
     private final CustomerAccountQuery customerAccounts;
     private final PaymentSalesSource salesOrders;
+    private final ObjectProvider<BuyerWalletRechargeProviderEventProcessor> walletRechargeEvents;
+    @Value("${nexa.tenant-business.payments.enabled:false}")
+    private boolean tenantBusinessPaymentsEnabled;
     private static final int MAX_DATABASE_TRANSACTION_ATTEMPTS = 3;
 
+    @Autowired
     public PaymentService(JdbcTemplate jdbc, StripePaymentProvider stripe,
                           @Value("${nexa.payments.publishable-key:}") String publishableKey,
                           @Value("${nexa.payments.webhook-secret:}") String webhookSecret,
@@ -95,12 +103,41 @@ public class PaymentService implements PaymentPersistencePort {
                           CustomerAccountQuery customerAccounts,
                           PaymentSalesSource salesOrders,
                           CanonicalOutboxPort canonicalOutbox,
-                          ReceivablePaymentAccess receivableAccess, WorkspaceDirectory workspaces) {
+                          ReceivablePaymentAccess receivableAccess, WorkspaceDirectory workspaces,
+                          ObjectProvider<BuyerWalletRechargeProviderEventProcessor> walletRechargeEvents) {
+        this(jdbc, stripe, publishableKey, webhookSecret, transactionManager,
+                metrics == null ? null : metrics.getIfAvailable(), receivableApplications, creditPayments,
+                receivables, documents, businessEvidence, customerAccounts, salesOrders, canonicalOutbox,
+                receivableAccess, workspaces, walletRechargeEvents);
+    }
+
+    /** Creates a short-lived Payments adapter bound only to the JDBC session supplied by Tenant routing. */
+    public PaymentService(JdbcTemplate jdbc, StripePaymentProvider stripe, String publishableKey,
+                          String webhookSecret, PlatformTransactionManager transactionManager,
+                          TechnicalMetricsPort metrics, ReceivableApplicationCommands receivableApplications,
+                          CreditPaymentCommands creditPayments, ReceivableCommands receivables,
+                          BusinessDocumentCommands documents, BusinessEvidenceQuery businessEvidence,
+                          CustomerAccountQuery customerAccounts, PaymentSalesSource salesOrders,
+                          CanonicalOutboxPort canonicalOutbox, ReceivablePaymentAccess receivableAccess) {
+        this(jdbc, stripe, publishableKey, webhookSecret, transactionManager, metrics, receivableApplications,
+                creditPayments, receivables, documents, businessEvidence, customerAccounts, salesOrders,
+                canonicalOutbox, receivableAccess, null, null);
+    }
+
+    private PaymentService(JdbcTemplate jdbc, StripePaymentProvider stripe, String publishableKey,
+                           String webhookSecret, PlatformTransactionManager transactionManager,
+                           TechnicalMetricsPort metrics, ReceivableApplicationCommands receivableApplications,
+                           CreditPaymentCommands creditPayments, ReceivableCommands receivables,
+                           BusinessDocumentCommands documents, BusinessEvidenceQuery businessEvidence,
+                           CustomerAccountQuery customerAccounts, PaymentSalesSource salesOrders,
+                           CanonicalOutboxPort canonicalOutbox, ReceivablePaymentAccess receivableAccess,
+                           WorkspaceDirectory workspaces,
+                           ObjectProvider<BuyerWalletRechargeProviderEventProcessor> walletRechargeEvents) {
         this.jdbc = jdbc; this.stripe = stripe; this.publishableKey = publishableKey == null ? "" : publishableKey;
         this.canonicalOutbox = canonicalOutbox;
         this.webhookSecret = webhookSecret == null ? "" : webhookSecret;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
-        this.metrics = metrics == null ? null : metrics.getIfAvailable();
+        this.metrics = metrics;
         this.receivableApplications = receivableApplications;
         this.creditPayments = creditPayments;
         this.receivables = receivables;
@@ -110,6 +147,7 @@ public class PaymentService implements PaymentPersistencePort {
         this.businessEvidence = businessEvidence;
         this.customerAccounts = customerAccounts;
         this.salesOrders = salesOrders;
+        this.walletRechargeEvents = walletRechargeEvents;
         registerInboxGauges();
     }
 
@@ -452,6 +490,162 @@ public class PaymentService implements PaymentPersistencePort {
         return paymentIntentView(payment, intent.clientSecret());
     }
 
+    /** Tenant request phase one. The returned claim contains no JDBC resources and is safe to carry between transactions. */
+    @Override
+    public TenantPaymentSession.TenantCardPaymentPreparation prepareTenantCardPayment(CurrentAccessContext context, UUID receivableId,
+                                                            String idempotencyKey) {
+        context.requirePermission(PermissionKey.PAYMENT_CREATE);
+        requireKey(idempotencyKey);
+        CardPaymentClaim claim = transactionTemplate.execute(status ->
+                prepareCardPaymentClaim(context, receivableId, idempotencyKey));
+        if (claim == null) throw new IllegalStateException("Card payment claim could not be prepared");
+        PaymentModels.PaymentIntentView replay = claim.payment().providerId() == null ? null
+                : paymentIntentView(claim.payment(), providerSecret(claim.payment()));
+        return new TenantPaymentSession.TenantCardPaymentPreparation(claim.payment().id(), claim.receivable().id(), claim.amountMinor(),
+                claim.receivable().currency(), claim.providerIdempotencyKey(), claim.idempotencyKey(),
+                claim.payment().providerId(), replay);
+    }
+
+    /** Tenant request phase three. Call only after the PSP call completed outside the Tenant transaction. */
+    @Override
+    public PaymentModels.PaymentIntentView persistTenantCardPayment(CurrentAccessContext context,
+            TenantPaymentSession.TenantCardPaymentPreparation preparation, StripePaymentProvider.PaymentIntent intent) {
+        Objects.requireNonNull(preparation, "Tenant card payment preparation is required");
+        Objects.requireNonNull(intent, "Provider PaymentIntent is required");
+        PaymentRow payment = transactionTemplate.execute(status -> {
+            CardPaymentClaim claim = prepareCardPaymentClaim(context, preparation.receivableId(),
+                    preparation.idempotencyKey());
+            if (!preparation.paymentId().equals(claim.payment().id())) {
+                throw new IllegalStateException("Payment idempotency claim changed during provider request");
+            }
+            return persistProviderIntent(context, claim, intent);
+        });
+        if (payment == null) throw new IllegalStateException("Payment provider result could not be persisted");
+        return paymentIntentView(payment, intent.clientSecret());
+    }
+
+    /** Stores a PSP failure in the same Tenant-local payment claim when possible. */
+    @Override
+    public void recordTenantCardPaymentFailure(CurrentAccessContext context,
+            TenantPaymentSession.TenantCardPaymentPreparation preparation, RuntimeException failure) {
+        transactionTemplate.executeWithoutResult(status -> {
+            CardPaymentClaim claim = prepareCardPaymentClaim(context, preparation.receivableId(),
+                    preparation.idempotencyKey());
+            if (preparation.paymentId().equals(claim.payment().id())) recordProviderFailure(context, claim, failure);
+        });
+    }
+
+    @Override
+    public TenantPaymentSession.TenantTestCardPreparation prepareTenantTestCardConfirmation(
+            CurrentAccessContext context, UUID receivableId) {
+        context.requirePermission(PermissionKey.PAYMENT_CREATE);
+        ConfirmationClaim claim = transactionTemplate.execute(status -> prepareConfirmationClaim(context, receivableId));
+        if (claim == null || claim.payment() == null) {
+            throw new IllegalArgumentException("Stripe payment intent was not created");
+        }
+        PaymentRow payment = claim.payment();
+        if (payment.providerId() == null) throw new IllegalArgumentException("Stripe payment intent was not created");
+        return new TenantPaymentSession.TenantTestCardPreparation(payment.id(), claim.receivable().id(), payment.status(),
+                payment.providerId(), payment.amount(), payment.currency());
+    }
+
+    @Override
+    public TenantPaymentSession.TenantTestCardWebhook confirmTenantTestCardPayment(CurrentAccessContext context, UUID receivableId,
+            String clientSecret, UUID opaqueRouteId) {
+        context.requirePermission(PermissionKey.PAYMENT_CREATE);
+        if (clientSecret == null || clientSecret.isBlank() || clientSecret.length() > 512) {
+            throw new IllegalArgumentException("Stripe client secret is required");
+        }
+        Objects.requireNonNull(opaqueRouteId, "Opaque Tenant payment route is required");
+        ConfirmationClaim claim = transactionTemplate.execute(status -> prepareConfirmationClaim(context, receivableId));
+        if (claim == null || claim.payment() == null) {
+            throw new IllegalArgumentException("Stripe payment intent was not created");
+        }
+        PaymentRow payment = claim.payment();
+        if (PaymentStatus.SUCCEEDED.name().equals(payment.status())) {
+            return new TenantPaymentSession.TenantTestCardWebhook(null, null);
+        }
+        if (!PaymentStatus.REQUIRES_ACTION.name().equals(payment.status())
+                && !PaymentStatus.PROCESSING.name().equals(payment.status())) {
+            throw new IllegalArgumentException("Stripe payment is not confirmable");
+        }
+        StripePaymentProvider.PaymentIntent current = stripe.retrievePaymentIntent(payment.providerId())
+                .orElseThrow(() -> new IllegalArgumentException("Stripe PaymentIntent was not found"));
+        if (current.clientSecret() == null || !MessageDigest.isEqual(
+                current.clientSecret().getBytes(StandardCharsets.UTF_8), clientSecret.getBytes(StandardCharsets.UTF_8))) {
+            throw new IllegalArgumentException("Stripe client secret does not match the payment intent");
+        }
+        StripePaymentProvider.PaymentIntent confirmed = stripe.confirmPaymentIntent(payment.providerId());
+        if (confirmed == null || !payment.providerId().equals(confirmed.providerId())
+                || !"succeeded".equalsIgnoreCase(confirmed.status())) {
+            throw new IllegalArgumentException("Stripe test payment did not succeed");
+        }
+        String payload = tenantTestSucceededPayload(confirmed, payment, opaqueRouteId);
+        return new TenantPaymentSession.TenantTestCardWebhook(payload, signWebhook(payload));
+    }
+
+    /** Applies a signed, centrally routed callback in the caller's single Tenant transaction. */
+    @Override
+    public TenantPaymentSession.TenantPaymentProviderEventResult applyTenantPaymentProviderEvent(UUID tenantId, UUID workspaceId,
+            UUID expectedPaymentId, String eventId, String eventType, String providerPaymentIntentId,
+            String providerStatus, Long amountMinor, String currency) {
+        Objects.requireNonNull(tenantId, "Tenant callback scope is required");
+        Objects.requireNonNull(workspaceId, "Workspace callback scope is required");
+        Objects.requireNonNull(expectedPaymentId, "Tenant payment route id is required");
+        if (eventId == null || eventId.isBlank() || providerPaymentIntentId == null
+                || providerPaymentIntentId.isBlank() || amountMinor == null || amountMinor < 1
+                || currency == null || !currency.matches("[A-Za-z]{3}")) {
+            throw new IllegalArgumentException("Verified Tenant payment callback is incomplete");
+        }
+        PaymentRow payment = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=? for update",
+                        (rs, n) -> paymentRow(rs), tenantId, workspaceId, expectedPaymentId)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException(
+                        "Centrally routed Tenant payment does not exist"));
+        if (!tenantId.equals(payment.tenantId()) || !workspaceId.equals(payment.workspaceId())
+                || !providerPaymentIntentId.equals(payment.providerId())
+                || minor(payment.amount(), payment.currency()) != amountMinor
+                || !payment.currency().equalsIgnoreCase(currency)) {
+            throw new IllegalArgumentException("Verified provider callback does not match the routed Tenant payment");
+        }
+        PaymentStatus next = statusFromEvent(eventType, providerStatus);
+        if (next == null) return new TenantPaymentSession.TenantPaymentProviderEventResult(
+                TenantPaymentSession.TenantPaymentProviderEventOutcome.IGNORED, payment.status());
+        Payment aggregate = Payment.rehydrate(payment.id().toString(), payment.amount(),
+                PaymentStatus.valueOf(payment.status()));
+        final boolean changed;
+        try {
+            changed = aggregate.applyProviderStatus(next);
+        } catch (IllegalArgumentException staleEvent) {
+            return new TenantPaymentSession.TenantPaymentProviderEventResult(TenantPaymentSession.TenantPaymentProviderEventOutcome.IGNORED,
+                    aggregate.status().name());
+        }
+        if (!changed) return new TenantPaymentSession.TenantPaymentProviderEventResult(TenantPaymentSession.TenantPaymentProviderEventOutcome.IGNORED,
+                aggregate.status().name());
+        if (next == PaymentStatus.SUCCEEDED) applySucceededPaymentForStoredContext(payment, eventId);
+        int updated = jdbc.update("update payments.payment set status=?,updated_at=current_timestamp,"
+                        + "completed_at=case when ?='SUCCEEDED' then current_timestamp else completed_at end,"
+                        + "version=version+1 where tenant_id=? and workspace_id=? and id=? "
+                        + "and provider_payment_intent_id=? and status=?",
+                aggregate.status().name(), aggregate.status().name(), tenantId, workspaceId, payment.id(),
+                providerPaymentIntentId, payment.status());
+        if (updated != 1) throw new IllegalStateException("Tenant payment callback lost its status compare-and-set");
+        recordProviderAttemptForScope(tenantId, workspaceId, payment.id(), aggregate.status().name(),
+                providerPaymentIntentId);
+        if (next == PaymentStatus.SUCCEEDED) reconcileCapturedPaymentIfSalesOrderMissing(payment, eventId);
+        return new TenantPaymentSession.TenantPaymentProviderEventResult(TenantPaymentSession.TenantPaymentProviderEventOutcome.PROCESSED,
+                aggregate.status().name());
+    }
+
+    private void recordProviderAttemptForScope(UUID tenantId, UUID workspaceId, UUID paymentId, String status,
+            String providerReference) {
+        jdbc.update("insert into payments.payment_attempt (id,tenant_id,workspace_id,payment_id,attempt_number,status,provider_reference,failure_code,created_at) "
+                        + "select ?,p.tenant_id,p.workspace_id,p.id,coalesce((select max(a.attempt_number)+1 from payments.payment_attempt a where a.payment_id=p.id),1),?,?,case when ?='FAILED' then 'PROVIDER_DECLINED' else null end,current_timestamp "
+                        + "from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.id=? "
+                        + "and not exists (select 1 from payments.payment_attempt a where a.payment_id=p.id and a.provider_reference is not distinct from ? and a.status=?)",
+                UUID.randomUUID(), status, providerReference, status, tenantId, workspaceId, paymentId,
+                providerReference, status);
+    }
+
     /**
      * Local-only browser acceptance seam. It exercises the official Stripe
      * adapter against the configured Stripe-compatible provider, then sends a
@@ -591,21 +785,43 @@ public class PaymentService implements PaymentPersistencePort {
         requireWebhookIdentity(event);
         UUID eventTenant = metadataUuid(event, "nexa_tenant_id");
         UUID eventWorkspace = metadataUuid(event, "nexa_workspace_id");
+        UUID walletRechargeId = metadataUuid(event, "nexa_wallet_recharge_id");
         if (event.paymentIntentId() != null && (eventTenant == null || eventWorkspace == null)) {
             throw new IllegalArgumentException("Stripe webhook tenant binding is required");
         }
+        if (walletRechargeId != null && (event.paymentIntentId() == null || eventTenant == null || eventWorkspace == null
+                || !event.eventType().startsWith("payment_intent."))) {
+            throw new IllegalArgumentException("Stripe wallet recharge webhook binding is required");
+        }
         String signatureHash = sha256(signature == null ? "" : signature);
-        int inserted = jdbc.update("insert into payments.stripe_event_inbox (event_id,event_type,payment_intent_id,payment_status,amount_minor,currency,tenant_id,workspace_id,signature_sha256,received_at) values (?,?,?,?,?,?,?,?,?,?) on conflict (event_id) do nothing", event.eventId(), event.eventType(), event.paymentIntentId(), event.paymentStatus(), event.amountMinor(), event.currency() == null ? null : event.currency().toUpperCase(Locale.ROOT), eventTenant, eventWorkspace, signatureHash, Timestamp.from(Instant.now()));
+        int inserted = jdbc.update("insert into payments.stripe_event_inbox "
+                        + "(event_id,event_type,payment_intent_id,payment_status,amount_minor,currency,tenant_id,workspace_id,"
+                        + "signature_sha256,received_at,wallet_recharge_id) values (?,?,?,?,?,?,?,?,?,?,?) "
+                        + "on conflict (event_id) do nothing",
+                event.eventId(), event.eventType(), event.paymentIntentId(), event.paymentStatus(), event.amountMinor(),
+                event.currency() == null ? null : event.currency().toUpperCase(Locale.ROOT), eventTenant, eventWorkspace,
+                signatureHash, Timestamp.from(Instant.now()), walletRechargeId);
         return new PaymentModels.WebhookReceipt(event.eventId(), inserted == 0 ? "DUPLICATE" : "ACCEPTED");
     }
 
     @Scheduled(fixedDelayString = "${nexa.payments.webhook-worker-delay-ms:1000}")
     public void processStripeWebhookInbox() {
-        jdbc.update("update payments.stripe_event_inbox set status=case when attempt_count >= 10 then 'DEAD_LETTER' else 'FAILED' end,failure_detail='Stale processing attempt',next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where status='PROCESSING' and lease_until <= current_timestamp");
-        List<WebhookWork> work = jdbc.query("select event_id,tenant_id,workspace_id from payments.stripe_event_inbox where status in ('RECEIVED','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp order by received_at,event_id limit 20", (rs, n) -> new WebhookWork(rs.getString("event_id"), rs.getObject("tenant_id", UUID.class), rs.getObject("workspace_id", UUID.class)));
+        String eventScope = tenantBusinessPaymentsEnabled
+                ? " and wallet_recharge_id is not null"
+                : " and payment_route_id is null";
+        jdbc.update("update payments.stripe_event_inbox set status=case when attempt_count >= 10 then 'DEAD_LETTER' else 'FAILED' end,failure_detail='Stale processing attempt',next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where payment_route_id is null and status='PROCESSING' and lease_until <= current_timestamp"
+                + eventScope);
+        List<WebhookWork> work = jdbc.query("select event_id,tenant_id,workspace_id,wallet_recharge_id "
+                        + "from payments.stripe_event_inbox where status in ('RECEIVED','FAILED') "
+                        + "and payment_route_id is null and attempt_count < 10 and next_attempt_at <= current_timestamp "
+                        + eventScope
+                        + " order by received_at,event_id limit 20",
+                (rs, n) -> new WebhookWork(rs.getString("event_id"), rs.getObject("tenant_id", UUID.class),
+                        rs.getObject("workspace_id", UUID.class), rs.getObject("wallet_recharge_id", UUID.class)));
         for (WebhookWork item : work) {
             UUID claimToken = UUID.randomUUID();
-            if (jdbc.update("update payments.stripe_event_inbox set status='PROCESSING',attempt_count=attempt_count+1,failure_detail=null,processing_started_at=current_timestamp,lease_until=current_timestamp + interval '10 minutes',claim_token=? where event_id=? and status in ('RECEIVED','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp", claimToken, item.eventId()) == 0) {
+            if (jdbc.update("update payments.stripe_event_inbox set status='PROCESSING',attempt_count=attempt_count+1,failure_detail=null,processing_started_at=current_timestamp,lease_until=current_timestamp + interval '10 minutes',claim_token=? where event_id=? and payment_route_id is null and status in ('RECEIVED','FAILED') and attempt_count < 10 and next_attempt_at <= current_timestamp"
+                    + eventScope, claimToken, item.eventId()) == 0) {
                 count("claim", "lost");
                 continue;
             }
@@ -613,12 +829,32 @@ public class PaymentService implements PaymentPersistencePort {
             TechnicalMetricsPort.TimerSample timer = start("process");
             try {
                 if (item.tenantId() != null && item.workspaceId() != null) RlsRequestScope.set(item.tenantId(), item.workspaceId());
-                transactionTemplate.executeWithoutResult(transaction -> {
+                if (item.walletRechargeId() != null) {
                     assertInboxClaim(item.eventId(), claimToken);
-                    InboxOutcome outcome = processWebhook(item.eventId(), claimToken);
-                    int finalized = jdbc.update("update payments.stripe_event_inbox set status=?,processed_at=current_timestamp,next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp", outcome.name(), item.eventId(), claimToken);
+                    BuyerWalletRechargeProviderEventProcessor processor = walletRechargeEvents.getIfAvailable();
+                    if (processor == null) throw new IllegalStateException(
+                            "Tenant wallet recharge callback composition is unavailable");
+                    StripeEventRow event = stripeEvent(item.eventId());
+                    BuyerWalletRechargeProviderEventProcessor.Outcome result = processor.process(
+                            new BuyerWalletRechargeProviderEventProcessor.VerifiedEvent(event.id(), event.eventType(),
+                                    event.paymentIntentId(), event.paymentStatus(), event.amountMinor(), event.currency(),
+                                    event.tenantId(), event.workspaceId(), item.walletRechargeId()));
+                    assertInboxClaim(item.eventId(), claimToken);
+                    int finalized = jdbc.update("update payments.stripe_event_inbox set status=?,processed_at=current_timestamp,"
+                                    + "next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null "
+                                    + "where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp",
+                            result == BuyerWalletRechargeProviderEventProcessor.Outcome.PROCESSED
+                                    || result == BuyerWalletRechargeProviderEventProcessor.Outcome.CANCELLED
+                                    ? InboxOutcome.PROCESSED.name() : InboxOutcome.IGNORED.name(), item.eventId(), claimToken);
                     if (finalized != 1) throw new InboxClaimLostException();
-                });
+                } else {
+                    transactionTemplate.executeWithoutResult(transaction -> {
+                        assertInboxClaim(item.eventId(), claimToken);
+                        InboxOutcome outcome = processWebhook(item.eventId(), claimToken);
+                        int finalized = jdbc.update("update payments.stripe_event_inbox set status=?,processed_at=current_timestamp,next_attempt_at=current_timestamp,processing_started_at=null,lease_until=null,claim_token=null where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp", outcome.name(), item.eventId(), claimToken);
+                        if (finalized != 1) throw new InboxClaimLostException();
+                    });
+                }
                 record(timer, "processed");
                 count("process", "success");
             } catch (RuntimeException exception) {
@@ -656,7 +892,7 @@ public class PaymentService implements PaymentPersistencePort {
     @Transactional
     InboxOutcome processWebhook(String eventId, UUID claimToken) {
         assertInboxClaim(eventId, claimToken);
-        StripeEventRow event = jdbc.query("select event_id,event_type,payment_intent_id,payment_status,amount_minor,currency,tenant_id,workspace_id from payments.stripe_event_inbox where event_id=?", (rs, n) -> new StripeEventRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getObject(5, Long.class), rs.getString(6), rs.getObject(7, UUID.class), rs.getObject(8, UUID.class)), eventId).stream().findFirst().orElseThrow();
+        StripeEventRow event = stripeEvent(eventId);
         if (event.paymentIntentId() == null || !event.eventType().startsWith("payment_intent.")) return InboxOutcome.IGNORED;
         if (event.tenantId() == null || event.workspaceId() == null) throw new IllegalArgumentException("Stripe webhook tenant binding is missing");
         PaymentRow payment = jdbc.query("select p.id,p.tenant_id,p.workspace_id,p.receivable_id,p.status,p.amount,p.currency,p.provider_payment_intent_id,p.created_at,p.completed_at,p.client_account_id from payments.payment p where p.tenant_id=? and p.workspace_id=? and p.provider_payment_intent_id=? for update", (rs, n) -> paymentRow(rs), event.tenantId(), event.workspaceId(), event.paymentIntentId()).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Stripe payment intent is not known"));
@@ -682,13 +918,118 @@ public class PaymentService implements PaymentPersistencePort {
         return InboxOutcome.PROCESSED;
     }
 
+    private StripeEventRow stripeEvent(String eventId) {
+        return jdbc.query("select event_id,event_type,payment_intent_id,payment_status,amount_minor,currency,tenant_id,workspace_id,wallet_recharge_id "
+                        + "from payments.stripe_event_inbox where event_id=?",
+                (rs, n) -> new StripeEventRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                        rs.getObject(5, Long.class), rs.getString(6), rs.getObject(7, UUID.class),
+                        rs.getObject(8, UUID.class), rs.getObject(9, UUID.class)), eventId)
+                .stream().findFirst().orElseThrow();
+    }
+
     private void assertInboxClaim(String eventId, UUID claimToken) {
         Boolean owner = jdbc.queryForObject("select exists(select 1 from payments.stripe_event_inbox where event_id=? and status='PROCESSING' and claim_token=? and lease_until > current_timestamp)", Boolean.class, eventId, claimToken);
         if (!Boolean.TRUE.equals(owner)) throw new InboxClaimLostException();
     }
 
+    /** Claims one Tenant refund in its own transaction; caller must invoke PSP outside router and transaction. */
+    @Override
+    public TenantPaymentSession.TenantReconciliationRefundPreparation claimNextTenantReconciliationRefund(
+            CurrentAccessContext workflowContext) {
+        requireWorkflowPaymentScope(workflowContext);
+        return transactionTemplate.execute(status -> {
+            jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PENDING',lease_until=null,claim_token=null,last_error=coalesce(last_error,'Stale refund claim recovered'),updated_at=current_timestamp where tenant_id=? and workspace_id=? and state='REFUND_PROCESSING' and (lease_until is null or lease_until <= current_timestamp)",
+                    tenant(workflowContext), workspace(workflowContext));
+            List<ReconciliationCandidate> candidates = jdbc.query("""
+                            select c.id,c.payment_id,p.provider_payment_intent_id,p.amount,p.currency,c.attempt_count
+                            from payments.payment_reconciliation_case c
+                            join payments.payment p on p.tenant_id=c.tenant_id and p.workspace_id=c.workspace_id and p.id=c.payment_id
+                            where c.tenant_id=? and c.workspace_id=? and c.state='REFUND_PENDING'
+                              and c.attempt_count < ?
+                            order by c.updated_at,c.id
+                            limit 1
+                            """, (rs, n) -> new ReconciliationCandidate(rs.getObject("id", UUID.class),
+                            rs.getObject("payment_id", UUID.class), rs.getString("provider_payment_intent_id"),
+                            rs.getBigDecimal("amount"), rs.getString("currency"), rs.getInt("attempt_count")),
+                    tenant(workflowContext), workspace(workflowContext), MAX_RECONCILIATION_ATTEMPTS);
+            if (candidates.isEmpty()) return null;
+            ReconciliationCandidate candidate = candidates.getFirst();
+            long amountMinor = minor(candidate.amount(), candidate.currency());
+            UUID claimToken = UUID.randomUUID();
+            int claimed = jdbc.update("update payments.payment_reconciliation_case set state='REFUND_PROCESSING',attempt_count=attempt_count+1,lease_until=current_timestamp + interval '10 minutes',claim_token=?,last_error=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and state='REFUND_PENDING' and attempt_count=? and attempt_count < ? and (lease_until is null or lease_until <= current_timestamp)",
+                    claimToken, tenant(workflowContext), workspace(workflowContext), candidate.caseId(),
+                    candidate.attemptCount(), MAX_RECONCILIATION_ATTEMPTS);
+            if (claimed != 1) return null;
+            return new TenantPaymentSession.TenantReconciliationRefundPreparation(candidate.caseId(),
+                    tenant(workflowContext), workspace(workflowContext), candidate.paymentId(), candidate.providerId(),
+                    candidate.amount(), amountMinor, candidate.currency(), claimToken,
+                    reconciliationRefundKey(candidate.caseId()));
+        });
+    }
+
+    /** Applies a provider result in a fresh Tenant transaction after the external call has completed. */
+    @Override
+    public TenantPaymentSession.TenantReconciliationRefundOutcome recordTenantReconciliationRefund(
+            CurrentAccessContext workflowContext,
+            TenantPaymentSession.TenantReconciliationRefundPreparation preparation,
+            StripePaymentProvider.Refund refund, RuntimeException providerFailure) {
+        requireWorkflowPaymentScope(workflowContext);
+        Objects.requireNonNull(preparation, "Claimed Tenant reconciliation refund is required");
+        if (!preparation.tenantId().equals(tenant(workflowContext))
+                || !preparation.workspaceId().equals(workspace(workflowContext))) {
+            throw new AccessPolicyViolation("Reconciliation claim does not match verified Tenant and Workspace scope");
+        }
+        ReconciliationRefundWork work = new ReconciliationRefundWork(preparation.caseId(), preparation.tenantId(),
+                preparation.workspaceId(), preparation.paymentId(), preparation.providerId(), preparation.amount(),
+                preparation.currency(), preparation.claimToken(), null, null, null);
+        if (providerFailure != null) {
+            return recordTenantReconciliationFailure(work, technicalRefundFailure(providerFailure));
+        }
+        if (refund == null || refund.providerRefundId() == null || refund.providerRefundId().isBlank()
+                || refund.status() == null || refund.status().isBlank()) {
+            return recordTenantReconciliationFailure(work, technicalRefundFailure(
+                    new IllegalStateException("Payment provider returned an incomplete refund")));
+        }
+        String providerStatus = refund.status().trim().toLowerCase(Locale.ROOT);
+        if (!"succeeded".equals(providerStatus)) {
+            boolean pending = "pending".equals(providerStatus);
+            try {
+                transactionTemplate.executeWithoutResult(status -> recordProviderRefundOutcome(work, refund, pending));
+                return pending ? TenantPaymentSession.TenantReconciliationRefundOutcome.PENDING
+                        : TenantPaymentSession.TenantReconciliationRefundOutcome.FAILED;
+            } catch (ReconciliationClaimLostException ignored) {
+                return TenantPaymentSession.TenantReconciliationRefundOutcome.CLAIM_LOST;
+            }
+        }
+        try {
+            transactionTemplate.executeWithoutResult(status -> finalizeReconciliationRefund(work, refund.providerRefundId()));
+            return TenantPaymentSession.TenantReconciliationRefundOutcome.SUCCEEDED;
+        } catch (ReconciliationClaimLostException ignored) {
+            return TenantPaymentSession.TenantReconciliationRefundOutcome.CLAIM_LOST;
+        } catch (RuntimeException exception) {
+            return recordTenantReconciliationFailure(work, technicalRefundFailure(exception));
+        }
+    }
+
+    private TenantPaymentSession.TenantReconciliationRefundOutcome recordTenantReconciliationFailure(
+            ReconciliationRefundWork work, TechnicalFailureException failure) {
+        try {
+            transactionTemplate.executeWithoutResult(status -> failReconciliationRefund(work, failure));
+            return TenantPaymentSession.TenantReconciliationRefundOutcome.FAILED;
+        } catch (ReconciliationClaimLostException ignored) {
+            return TenantPaymentSession.TenantReconciliationRefundOutcome.CLAIM_LOST;
+        }
+    }
+
+    private static void requireWorkflowPaymentScope(CurrentAccessContext context) {
+        if (context == null || !context.hasRoleCode(TenantEventContextQueryPort.SYSTEM_WORKFLOW_ROLE_CODE)) {
+            throw new AccessPolicyViolation("Verified SYSTEM_WORKFLOW Tenant scope is required for reconciliation work");
+        }
+    }
+
     @Scheduled(fixedDelayString = "${nexa.payments.reconciliation-worker-delay-ms:5000}")
     public void processPendingReconciliationCases() {
+        if (tenantBusinessPaymentsEnabled) return;
         UUID lastTenant = null;
         UUID lastWorkspace = null;
         while (true) {
@@ -1091,6 +1432,31 @@ public class PaymentService implements PaymentPersistencePort {
         event.put("type", "payment_intent.succeeded");
         return json(event);
     }
+
+    private String tenantTestSucceededPayload(StripePaymentProvider.PaymentIntent intent, PaymentRow payment,
+            UUID opaqueRouteId) {
+        Map<String, Object> paymentIntent = new LinkedHashMap<>();
+        paymentIntent.put("id", intent.providerId());
+        paymentIntent.put("object", "payment_intent");
+        paymentIntent.put("amount", minor(payment.amount(), payment.currency()));
+        paymentIntent.put("amount_received", minor(payment.amount(), payment.currency()));
+        paymentIntent.put("currency", payment.currency().toLowerCase(Locale.ROOT));
+        paymentIntent.put("livemode", false);
+        paymentIntent.put("metadata", Map.of("nexa_payment_route_id", opaqueRouteId.toString()));
+        paymentIntent.put("status", "succeeded");
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("object", paymentIntent);
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("id", "evt_nexa_local_" + UUID.randomUUID().toString().replace("-", ""));
+        event.put("object", "event");
+        event.put("api_version", "2024-06-20");
+        event.put("created", Instant.now().getEpochSecond());
+        event.put("data", data);
+        event.put("livemode", false);
+        event.put("pending_webhooks", 1);
+        event.put("type", "payment_intent.succeeded");
+        return json(event);
+    }
     private String signWebhook(String payload) {
         if (webhookSecret.isBlank()) throw new IllegalStateException("Stripe webhook secret is not configured");
         long timestamp = Instant.now().getEpochSecond();
@@ -1188,7 +1554,9 @@ public class PaymentService implements PaymentPersistencePort {
                 + context.membershipId().value() + "|" + caseId + "|" + operatorNote);
     }
 
-    private record StripeEventRow(String id, String eventType, String paymentIntentId, String paymentStatus, Long amountMinor, String currency, UUID tenantId, UUID workspaceId) { }
+    private record StripeEventRow(String id, String eventType, String paymentIntentId, String paymentStatus,
+                                  Long amountMinor, String currency, UUID tenantId, UUID workspaceId,
+                                  UUID walletRechargeId) { }
     private record ExistingPayment(PaymentRow payment, String method) { }
     private record BankTransferPayload(String reference, UUID proofEvidenceId) { }
     private record StoredBankReview(String idempotencyKey, String action, String reason) { }
@@ -1197,7 +1565,7 @@ public class PaymentService implements PaymentPersistencePort {
                                     String providerIdempotencyKey, Map<String, String> metadata, String idempotencyKey) { }
     private record ConfirmationClaim(PaymentRow payment, ReceivablePaymentAccess.Snapshot receivable) { }
     private enum InboxOutcome { PROCESSED, IGNORED }
-    private record WebhookWork(String eventId, UUID tenantId, UUID workspaceId) { }
+    private record WebhookWork(String eventId, UUID tenantId, UUID workspaceId, UUID walletRechargeId) { }
     private record WorkspaceScope(UUID tenantId, UUID workspaceId) { }
     private record ReconciliationCandidate(UUID caseId, UUID paymentId, String providerId, BigDecimal amount, String currency, int attemptCount) { }
     private record ReconciliationRefundWork(UUID caseId, UUID tenantId, UUID workspaceId, UUID paymentId,

@@ -2,6 +2,7 @@ package com.nexa.api.bootstrap.runtime.database.tenant;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
+import com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Objects;
@@ -21,6 +22,7 @@ public final class TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver {
 
 	private final OperationalSettingsAccess centralSettings;
 	private final TenantBusinessDatabaseRouter router;
+	private final TenantBusinessDatabaseAuthority authority;
 	private final TenantBusinessDatabasePolicySnapshotWriter writer;
 
 	public TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver(OperationalSettingsAccess centralSettings,
@@ -28,8 +30,9 @@ public final class TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver {
 			TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory writerDataSourceFactory) {
 		this.centralSettings = Objects.requireNonNull(centralSettings, "Central BC01 settings port is required");
 		this.router = Objects.requireNonNull(router, "Tenant business database router is required");
+		this.authority = Objects.requireNonNull(authority, "Central Tenant database authority is required");
 		this.writer = new TenantBusinessDatabasePolicySnapshotWriter(
-				Objects.requireNonNull(authority, "Central Tenant database authority is required"),
+				this.authority,
 				Objects.requireNonNull(writerDataSourceFactory, "Dedicated policy snapshot writer factory is required"));
 	}
 
@@ -53,6 +56,17 @@ public final class TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver {
 					Long.toString(active.snapshotRevision()));
 			return work.execute(jdbc);
 		});
+	}
+
+	/** Checks current manifest evidence and dedicated writer credentials before advertising wallet capability. */
+	public void verifyWalletCapabilityReady(CurrentAccessContext accessContext) {
+		Objects.requireNonNull(accessContext, "Verified Tenant access context is required");
+		TenantBusinessDatabaseBinding binding = authority.requireReadyBinding(accessContext);
+		String currentDigest = TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest();
+		if (!currentDigest.equals(binding.verifiedSchemaManifestSha256())) {
+			throw new TenantBusinessDatabaseSchemaManifestMismatchException();
+		}
+		writer.verifyConfigured(binding);
 	}
 
 	private TenantPurchaseRequestExpiryPolicySnapshot readSnapshot(CurrentAccessContext accessContext) {

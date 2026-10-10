@@ -510,11 +510,11 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         }
         jdbc.update("insert into logistics.fulfillment_handoff_evidence "
                         + "(id,tenant_id,workspace_id,fulfillment_id,delivery_id,fulfillment_version,"
-                        + "warehouse_actor_membership_id,driver_assignment_id,driver_membership_id,"
+                        + "warehouse_actor_membership_id,dispatch_actor_membership_id,driver_assignment_id,driver_membership_id,"
                         + "physical_allocation_id,physical_allocation_version,outgoing_goods_check_id,"
-                        + "idempotency_key,request_hash,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + "idempotency_key,request_hash,occurred_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 UUID.randomUUID(), request.tenantId(), request.workspaceId(), request.fulfillmentId(), deliveryId,
-                request.expectedVersion() + 1, request.actorMembershipId(),
+                request.expectedVersion() + 1, null, request.actorMembershipId(),
                 assignment == null ? null : assignment.id(),
                 assignment == null ? null : assignment.responsibleMembershipId(),
                 request.physicalAllocationId(), request.physicalAllocationVersion(), request.outgoingGoodsCheckId(),
@@ -592,12 +592,13 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<HandoffEvidence> findHandoffEvidence(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
         HandoffEvidenceRow row = jdbc.query("select id,fulfillment_version,delivery_id,"
-                        + "warehouse_actor_membership_id,driver_assignment_id,driver_membership_id,"
+                        + "warehouse_actor_membership_id,dispatch_actor_membership_id,driver_assignment_id,driver_membership_id,"
                         + "physical_allocation_id,physical_allocation_version,outgoing_goods_check_id,occurred_at "
                         + "from logistics.fulfillment_handoff_evidence where tenant_id=? and workspace_id=? and fulfillment_id=?",
                 (rs, index) -> new HandoffEvidenceRow(rs.getObject("id", UUID.class),
                         rs.getLong("fulfillment_version"), rs.getObject("delivery_id", UUID.class),
                         rs.getObject("warehouse_actor_membership_id", UUID.class),
+                        rs.getObject("dispatch_actor_membership_id", UUID.class),
                         rs.getObject("driver_assignment_id", UUID.class),
                         rs.getObject("driver_membership_id", UUID.class),
                         rs.getObject("physical_allocation_id", UUID.class), rs.getLong("physical_allocation_version"),
@@ -608,7 +609,8 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
         boolean stillCurrent = current.version() == row.fulfillmentVersion()
                 && row.deliveryId().equals(current.deliveryId());
         return Optional.of(new HandoffEvidence(row.id(), fulfillmentId, row.fulfillmentVersion(), row.deliveryId(),
-                row.warehouseActorMembershipId(), row.driverAssignmentId(), row.driverMembershipId(),
+                row.warehouseActorMembershipId(), row.dispatchActorMembershipId(),
+                row.driverAssignmentId(), row.driverMembershipId(),
                 row.physicalAllocationId(), row.physicalAllocationVersion(), row.outgoingGoodsCheckId(),
                 row.occurredAt(), stillCurrent));
     }
@@ -954,7 +956,8 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                                        UUID responsibleUserId, String displayName, UUID actorMembershipId,
                                        Instant assignedAt, Instant plannedDispatchAt) { }
     private record HandoffEvidenceRow(UUID id, long fulfillmentVersion, UUID deliveryId,
-                                      UUID warehouseActorMembershipId, UUID driverAssignmentId,
+                                      UUID warehouseActorMembershipId, UUID dispatchActorMembershipId,
+                                      UUID driverAssignmentId,
                                       UUID driverMembershipId, UUID physicalAllocationId,
                                       long physicalAllocationVersion, UUID outgoingGoodsCheckId,
                                       Instant occurredAt) { }

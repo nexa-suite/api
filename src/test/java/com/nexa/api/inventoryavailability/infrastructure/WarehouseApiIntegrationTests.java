@@ -55,17 +55,17 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
                         .content(receiptRequest.replace("\"quantity\":\"10\"", "\"quantity\":\"12\"")))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
-        assertThat(jdbc.queryForObject("select stock_quantity from warehouse.inventory_lot where id=?", java.math.BigDecimal.class, UUID.fromString(lotId)))
+        assertThat(tenantJdbc().queryForObject("select stock_quantity from warehouse.inventory_lot where id=?", java.math.BigDecimal.class, UUID.fromString(lotId)))
                 .isEqualByComparingTo("10");
-        assertThat(jdbc.queryForObject("select batch_number from warehouse.inventory_lot where id=?", String.class, UUID.fromString(lotId)))
+        assertThat(tenantJdbc().queryForObject("select batch_number from warehouse.inventory_lot where id=?", String.class, UUID.fromString(lotId)))
                 .isEqualTo("B-001");
-        assertThat(jdbc.queryForObject("select expiration_date from warehouse.inventory_lot where id=?", java.time.LocalDate.class, UUID.fromString(lotId)))
+        assertThat(tenantJdbc().queryForObject("select expiration_date from warehouse.inventory_lot where id=?", java.time.LocalDate.class, UUID.fromString(lotId)))
                 .isEqualTo(java.time.LocalDate.of(2099, 1, 1));
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class, UUID.fromString(lotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=? and event_type='warehouse.lot.received'", Integer.class, UUID.fromString(lotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class, UUID.fromString(lotId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=? and event_type='warehouse.lot.received'", Integer.class, UUID.fromString(lotId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=? and batch_number='B-001'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=? and batch_number='B-001'",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(warehouseId))).isEqualTo(1);
     }
 
@@ -78,9 +78,9 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String key = "inbound-invalid-" + suffix;
         String receipt = receiptBody(warehouseId, zoneId, "B-INV-" + suffix, "0");
         int lotsBefore = scopedWarehouseLotCount(warehouseId);
-        int movementsBefore = jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
+        int movementsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
-        int eventsBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
+        int eventsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
 
         mockMvc.perform(post("/api/v1/inventory/inbound-receipts").header("Authorization", "Bearer " + token)
@@ -88,11 +88,11 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
 
         assertThat(scopedWarehouseLotCount(warehouseId)).isEqualTo(lotsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(movementsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(eventsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isZero();
 
         mockMvc.perform(post("/api/v1/inventory/inbound-receipts").header("Authorization", "Bearer " + token)
@@ -100,7 +100,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         .content(receipt.replace("\"quantity\":\"0\"", "\"quantity\":\"3\"")))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.onHand").value(3))
                 .andExpect(jsonPath("$.batchNumber").value("B-INV-" + suffix));
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isEqualTo(1);
     }
 
@@ -123,19 +123,19 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
             case "today" -> valid.replace("2099-01-01", java.time.LocalDate.now().toString());
             default -> throw new IllegalArgumentException("Unknown expiry scenario");
         };
-        int movementsBefore = jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+        int movementsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
-        int eventsBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=?",
+        int eventsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
 
         postReceipt(token, key, invalid).andExpect(status().isBadRequest());
 
         assertThat(scopedWarehouseLotCount(warehouseId)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(movementsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(eventsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isZero();
 
         postReceipt(token, key, valid).andExpect(status().isCreated())
@@ -155,6 +155,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String baseZone = createZone(baseToken, baseWarehouse, "Z-SCOPE-A-" + suffix);
 
         WorkspaceScope otherScope = createAdditionalTenantAndWorkspace(WAREHOUSE_EMAIL, suffix);
+        var otherTenantJdbc = tenantJdbcFor(UUID.fromString(otherScope.tenantId()));
         String otherScopeToken = accessTokenForWorkspace(WAREHOUSE_EMAIL, "PLATFORM", otherScope.slug());
         String otherScopeOwnerToken = accessTokenForWorkspace(OWNER_EMAIL, "PLATFORM", otherScope.slug());
         String otherScopeWarehouse = createWarehouse(otherScopeToken, "WH-SCOPE-B-" + suffix,
@@ -175,15 +176,19 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .andExpect(jsonPath("$.code").value("WAREHOUSE_NOT_FOUND"));
 
         String baseLot = tools.jackson.databind.json.JsonMapper.shared().readTree(baseReceipt).get("id").asText();
-        assertThat(jdbc.queryForObject("select tenant_id from warehouse.inventory_lot where id=?", UUID.class, UUID.fromString(baseLot))).isEqualTo(baseTenant);
-        assertThat(jdbc.queryForObject("select workspace_id from warehouse.inventory_lot where id=?", UUID.class, UUID.fromString(baseLot))).isEqualTo(baseWorkspace);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where operation='inbound' and idempotency_key=?",
+        assertThat(tenantJdbc().queryForObject("select tenant_id from warehouse.inventory_lot where id=?", UUID.class, UUID.fromString(baseLot))).isEqualTo(baseTenant);
+        assertThat(tenantJdbc().queryForObject("select workspace_id from warehouse.inventory_lot where id=?", UUID.class, UUID.fromString(baseLot))).isEqualTo(baseWorkspace);
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where operation='inbound' and idempotency_key=?",
                 Integer.class, key)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
-                Integer.class, UUID.fromString(otherScope.tenantId()), UUID.fromString(otherScope.workspaceId()), key)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where batch_number='B-CROSS-' || ?",
+        assertThat(otherTenantJdbc.queryForObject("select count(*) from warehouse.command_idempotency where operation='inbound' and idempotency_key=?",
+                Integer.class, key)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where batch_number='B-CROSS-' || ?",
                 Integer.class, suffix)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where operation='inbound' and idempotency_key=?",
+        assertThat(otherTenantJdbc.queryForObject("select count(*) from warehouse.inventory_lot where batch_number='B-CROSS-' || ?",
+                Integer.class, suffix)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where operation='inbound' and idempotency_key=?",
+                Integer.class, "inbound-cross-scope-" + suffix)).isZero();
+        assertThat(otherTenantJdbc.queryForObject("select count(*) from warehouse.command_idempotency where operation='inbound' and idempotency_key=?",
                 Integer.class, "inbound-cross-scope-" + suffix)).isZero();
     }
 
@@ -197,7 +202,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         String warehouseId = tools.jackson.databind.json.JsonMapper.shared().readTree(warehouse).get("id").asText();
         grantWarehouseAccess(accessToken(OWNER_EMAIL, "PLATFORM"), membershipId(WAREHOUSE_EMAIL), warehouseId);
         token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        var skuRanges = jdbc.query("select temperature_min,temperature_max from catalog_management.sellable_sku "
+        var skuRanges = tenantJdbc().query("select temperature_min,temperature_max from catalog_management.sellable_sku "
                         + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0002'",
                 (rs, row) -> new java.math.BigDecimal[]{rs.getBigDecimal(1), rs.getBigDecimal(2)},
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
@@ -231,15 +236,15 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .andReturn();
         String inRangeLotId = tools.jackson.databind.json.JsonMapper.shared()
                 .readTree(inRange.getResponse().getContentAsString()).get("id").asText();
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?",
                 Integer.class, UUID.fromString(inRangeLotId))).isZero();
 
         int lotsBefore = scopedWarehouseLotCount(warehouseId);
-        int movementsBefore = jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
+        int movementsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
-        int eventsBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
+        int eventsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
-        int evaluationsBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where tenant_id=? and workspace_id=?",
+        int evaluationsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
         String key = "excursion-receipt-" + suffix;
         java.math.BigDecimal excursionReading = acceptedMaximum.add(java.math.BigDecimal.ONE);
@@ -248,15 +253,15 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .andExpect(jsonPath("$.code").value("BUSINESS_EVIDENCE_NOT_AVAILABLE"));
 
         assertThat(scopedWarehouseLotCount(warehouseId)).isEqualTo(lotsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where warehouse_id=? and batch_number=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where warehouse_id=? and batch_number=?",
                 Integer.class, UUID.fromString(warehouseId), "H-" + suffix)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(movementsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where tenant_id=? and workspace_id=? and event_type in ('warehouse.lot.received','warehouse.lot.temperature-hold')",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(eventsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where tenant_id=? and workspace_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(evaluationsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isZero();
 
         String evidence = mockMvc.perform(multipart("/api/v1/business-document-evidence")
@@ -277,16 +282,16 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .andReturn();
         String heldLotId = tools.jackson.databind.json.JsonMapper.shared()
                 .readTree(heldReceipt.getResponse().getContentAsString()).get("id").asText();
-        assertThat(jdbc.queryForObject("select temperature_evidence_object_id from warehouse.inventory_lot where id=?",
+        assertThat(tenantJdbc().queryForObject("select temperature_evidence_object_id from warehouse.inventory_lot where id=?",
                 UUID.class, UUID.fromString(heldLotId))).isEqualTo(UUID.fromString(evidenceId));
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where id=? "
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where id=? "
                         + "and temperature_recorded_by_membership_id is not null and temperature_recorded_at is not null",
                 Integer.class, UUID.fromString(heldLotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation "
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation "
                         + "where lot_id=? and status='OPEN' and disposition='HOLD' and evidence_object_id=? "
                         + "and affected_quantity=10 and actor_membership_id is not null",
                 Integer.class, UUID.fromString(heldLotId), UUID.fromString(evidenceId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='INBOUND_RECEIPT'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='INBOUND_RECEIPT'",
                 Integer.class, UUID.fromString(heldLotId))).isEqualTo(1);
     }
 
@@ -340,7 +345,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
     }
 
     private int scopedWarehouseLotCount(String warehouseId) {
-        return jdbc.queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=?",
+        return tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(warehouseId));
     }
 
@@ -360,7 +365,9 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         jdbc.update("insert into tenant_management.tenant (id,name,slug,status,created_at,updated_at,version) "
                         + "values (?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
                 tenantId, "Receiving isolation tenant", "w4-rec-tenant-" + normalizedSuffix);
-        return createWorkspaceMembership(email, tenantId, "w4-rec-" + normalizedSuffix);
+        WorkspaceScope scope = createWorkspaceMembership(email, tenantId, "w4-rec-" + normalizedSuffix);
+        provisionTenantBusinessDatabase(tenantId, UUID.fromString(scope.workspaceId()));
+        return scope;
     }
 
     private WorkspaceScope createWorkspaceMembership(String email, UUID tenantId, String slug) {

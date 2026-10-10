@@ -1,7 +1,7 @@
 package com.nexa.api.creditreceivables.presentation;
 
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
-import com.nexa.api.creditreceivables.application.service.FinancialAdjustmentApplicationService;
+import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -26,9 +26,9 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class FinancialAdjustmentController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final FinancialAdjustmentApplicationService service;
+    private final FinancialAdjustmentUseCase service;
 
-    public FinancialAdjustmentController(FinancialAdjustmentApplicationService service) {
+    public FinancialAdjustmentController(FinancialAdjustmentUseCase service) {
         this.service = service;
     }
 
@@ -73,8 +73,8 @@ public final class FinancialAdjustmentController {
             @NotBlank @Size(min = 3, max = 3) String currency,
             @NotBlank @Size(max = 2000) String reason,
             @Size(max = 16) String obligationType) {
-        FinancialAdjustmentApplicationService.PostPaymentCommand toCommand() {
-            return new FinancialAdjustmentApplicationService.PostPaymentCommand(salesOrderId, sourceId, sourceType,
+        FinancialAdjustmentUseCase.PostPaymentCommand toCommand() {
+            return new FinancialAdjustmentUseCase.PostPaymentCommand(salesOrderId, sourceId, sourceType,
                     adjustmentKind, effect, amount, currency, reason, obligationType);
         }
     }

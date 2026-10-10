@@ -2,13 +2,13 @@ package com.nexa.api.creditreceivables.application.service;
 
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
+import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -22,7 +22,7 @@ import java.util.UUID;
 /** BC-07 application boundary for post-payment obligation corrections. */
 @Service
 @Profile("!test")
-public class FinancialAdjustmentApplicationService {
+public class FinancialAdjustmentApplicationService implements FinancialAdjustmentUseCase {
     private static final Set<String> POST_PAYMENT_SOURCES = Set.of("SALES_ORDER_CANCELLATION", "SALES_ORDER_REDUCTION");
 
     private final FinancialAdjustmentCommands commands;
@@ -34,9 +34,10 @@ public class FinancialAdjustmentApplicationService {
     }
 
     @Transactional
+    @Override
     public FinancialAdjustmentCommands.Result postPostPayment(CurrentAccessContext context, UUID receivableId,
                                                                long expectedReceivableVersion, String idempotencyKey,
-                                                               PostPaymentCommand command) {
+                                                               FinancialAdjustmentUseCase.PostPaymentCommand command) {
         context.requirePermission(PermissionKey.CLIENT_CREDIT_MANAGE);
         if (receivableId == null || idempotencyKey == null || idempotencyKey.isBlank() || command == null) {
             throw error("INVALID_REQUEST");
@@ -86,15 +87,4 @@ public class FinancialAdjustmentApplicationService {
         return new CreditReceivableOperationException(code);
     }
 
-    public record PostPaymentCommand(UUID salesOrderId, UUID sourceId, String sourceType,
-                                     String adjustmentKind, String effect, BigDecimal amount,
-                                     String currency, String reason, String obligationType) {
-        public PostPaymentCommand {
-            if (salesOrderId == null || sourceId == null || sourceType == null || sourceType.isBlank()
-                    || amount == null || amount.signum() <= 0 || currency == null || currency.isBlank()
-                    || reason == null || reason.isBlank() || reason.length() > 2000) {
-                throw new IllegalArgumentException("Post-payment adjustment request is incomplete");
-            }
-        }
-    }
 }

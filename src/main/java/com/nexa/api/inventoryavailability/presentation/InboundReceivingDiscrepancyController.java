@@ -2,7 +2,7 @@ package com.nexa.api.inventoryavailability.presentation;
 
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.InboundReceivingDiscrepancyCases;
-import com.nexa.api.inventoryavailability.application.service.InboundReceivingDiscrepancyService;
+import com.nexa.api.inventoryavailability.application.port.WarehouseAuxiliaryOperationsRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -36,10 +36,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class InboundReceivingDiscrepancyController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final InboundReceivingDiscrepancyService service;
+    private final WarehouseAuxiliaryOperationsRequestRunner operations;
 
-    public InboundReceivingDiscrepancyController(InboundReceivingDiscrepancyService service) {
-        this.service = service;
+    public InboundReceivingDiscrepancyController(WarehouseAuxiliaryOperationsRequestRunner operations) {
+        this.operations = operations;
     }
 
     @PostMapping
@@ -49,9 +49,10 @@ public final class InboundReceivingDiscrepancyController {
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateCaseBody body) {
         requireKey(idempotencyKey);
-        var fact = service.create(context, body.warehouseId(), body.expectedSkuId(), body.observedSkuId(),
+        var fact = operations.execute(context, services -> services.receivingDiscrepancies().create(
+                context, body.warehouseId(), body.expectedSkuId(), body.observedSkuId(),
                 body.expectedBatchReference(), body.observedBatchReference(), body.expectedQuantity(),
-                body.observedQuantity(), body.unit(), body.reason(), body.observationNotes(), idempotencyKey);
+                body.observedQuantity(), body.unit(), body.reason(), body.observationNotes(), idempotencyKey));
         return ResponseEntity.status(fact.replayed() ? HttpStatus.OK : HttpStatus.CREATED)
                 .eTag(etag(fact.version())).body(response(fact));
     }
@@ -66,7 +67,8 @@ public final class InboundReceivingDiscrepancyController {
             @Valid @RequestBody SubmitCaseBody body) {
         requireKey(idempotencyKey);
         long expectedVersion = version(ifMatch);
-        var fact = service.submit(context, caseId, body.evidenceObjectId(), expectedVersion, idempotencyKey);
+        var fact = operations.execute(context, services -> services.receivingDiscrepancies().submit(
+                context, caseId, body.evidenceObjectId(), expectedVersion, idempotencyKey));
         return ResponseEntity.status(fact.replayed() ? HttpStatus.OK : HttpStatus.CREATED)
                 .eTag(etag(fact.version())).body(response(fact));
     }

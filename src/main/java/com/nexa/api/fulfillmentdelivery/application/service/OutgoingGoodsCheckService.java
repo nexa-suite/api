@@ -134,6 +134,27 @@ public class OutgoingGoodsCheckService {
         return project(context, stored, currentVersion, false);
     }
 
+    /** Current, minimal evidence projection for a scoped Dispatch Coordinator. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public OutgoingGoodsCheckModels.DispatchSummary currentDispatchSummary(
+            CurrentAccessContext context, UUID fulfillmentId) {
+        Objects.requireNonNull(context, "Verified access context is required")
+                .requirePermission(PermissionKey.DISPATCH_READ);
+        Readiness current = readiness.readiness(context, fulfillmentId);
+        StoredCheck stored = checks.latest(tenant(context), workspace(context), fulfillmentId).orElse(null);
+        if (stored == null) return null;
+        boolean currentVersion = stored.fulfillmentVersion() == current.fulfillmentVersion()
+                && stored.physicalAllocationId().equals(current.physicalAllocationId())
+                && stored.physicalAllocationVersion() == current.physicalAllocationVersion();
+        boolean openDiscrepancy = currentVersion && checks.hasOpenDiscrepancy(
+                tenant(context), workspace(context), fulfillmentId,
+                stored.physicalAllocationId(), stored.physicalAllocationVersion());
+        return new OutgoingGoodsCheckModels.DispatchSummary(
+                stored.id(), stored.fulfillmentId(), stored.fulfillmentVersion(),
+                stored.physicalAllocationId(), stored.physicalAllocationVersion(), stored.matches(),
+                currentVersion, openDiscrepancy);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public OutgoingGoodsCheckModels.DiscrepancyResolution resolveDiscrepancy(
             CurrentAccessContext context, UUID fulfillmentId, long expectedFulfillmentVersion,

@@ -33,9 +33,11 @@ import java.util.Set;
 import java.util.UUID;
 
 @Component
-@Profile("local")
+@Profile("local & !local-fixtures")
 @Conditional(LocalBootstrapEnabledCondition.class)
 public class LocalDevelopmentBootstrap {
+	private static final String SYSTEM_WORKFLOW_ACTOR = "11111111-1111-4111-8111-111111111111";
+	private static final String SYSTEM_WORKFLOW_ROLE = "22222222-2222-4222-8222-222222222222";
 	private final JdbcTemplate jdbc;
 	private final BCryptPasswordEncoder encoder;
 	private final org.springframework.core.env.Environment environment;
@@ -242,12 +244,41 @@ public class LocalDevelopmentBootstrap {
 			setTenantScope(tenantId);
 			List<UUID> existing = jdbc.query("select id from tenant_management.workspace where tenant_id = ? and slug = ?",
 					(rs, row) -> rs.getObject(1, UUID.class), tenantId, slug);
-			if (!existing.isEmpty()) return existing.get(0);
-			UUID id = LocalIdentityIds.forWorkspace(tenantId, slug);
-			jdbc.update("insert into tenant_management.workspace (id, tenant_id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)",
-					id, tenantId, name, slug, timestamp(now), timestamp(now));
+			UUID id = existing.isEmpty() ? LocalIdentityIds.forWorkspace(tenantId, slug) : existing.get(0);
+			if (existing.isEmpty()) {
+				jdbc.update("insert into tenant_management.workspace (id, tenant_id, name, slug, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0)",
+						id, tenantId, name, slug, timestamp(now), timestamp(now));
+			}
+			jdbc.queryForObject("select set_config('app.current_workspace_id', ?, true)", String.class, id.toString());
+			jdbc.update("insert into tenant_management.tenant_business_database_provisioning_task "
+					+ "(task_id,tenant_id,workspace_id) values (?,?,?) on conflict (tenant_id) do nothing",
+					UUID.randomUUID(), tenantId, id);
+			jdbc.update("insert into tenant_management.tenant_business_database_workspace_anchor_task "
+					+ "(task_id,tenant_id,workspace_id) values (?,?,?) on conflict (tenant_id,workspace_id) do nothing",
+					UUID.randomUUID(), tenantId, id);
+			ensureSystemWorkflowActor(tenantId, id);
 			return id;
 		});
+	}
+
+	private void ensureSystemWorkflowActor(UUID tenantId, UUID workspaceId) {
+		UUID membershipId = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid",
+				UUID.class, workspaceId);
+		int inserted = jdbc.update("insert into tenant_management.workspace_membership "
+				+ "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+				+ "values (?,?,?,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) "
+				+ "on conflict (workspace_id,user_id) do nothing", membershipId, workspaceId,
+				UUID.fromString(SYSTEM_WORKFLOW_ACTOR));
+		if (inserted == 1) {
+			jdbc.update("insert into tenant_management.membership_role_definition "
+					+ "(membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?,?,?,?,current_timestamp) "
+					+ "on conflict do nothing", membershipId, tenantId, workspaceId,
+				UUID.fromString(SYSTEM_WORKFLOW_ROLE));
+			jdbc.update("insert into tenant_management.membership_authorization_state "
+					+ "(membership_id,tenant_id,workspace_id,authorization_version,updated_at) "
+					+ "values (?,?,?,0,current_timestamp) on conflict (membership_id) do nothing",
+				membershipId, tenantId, workspaceId);
+		}
 	}
 
 	private void setTenantScope(UUID tenantId) {

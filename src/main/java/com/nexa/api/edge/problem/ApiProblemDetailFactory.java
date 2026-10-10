@@ -98,6 +98,8 @@ public final class ApiProblemDetailFactory {
 					case PURCHASE_REQUEST_NOT_CONFIRMABLE -> "Purchase request is not confirmable";
 					case COMMERCIAL_POLICY_CHANGED -> "Commercial policy changed";
 					case INSUFFICIENT_CREDIT -> "Insufficient credit";
+					case CREDIT_LIMIT_BELOW_USED -> "Credit limit below current exposure";
+					case CREDIT_ACCOUNT_CLOSED -> "Credit account is inactive";
 					case PAYMENT_REQUIRED -> "Payment required";
 				case IDEMPOTENCY_KEY_REQUIRED -> "Idempotency key required";
 				case IDEMPOTENCY_PAYLOAD_CONFLICT -> "Idempotency payload conflict";
@@ -212,7 +214,7 @@ public final class ApiProblemDetailFactory {
 			case FORBIDDEN, WORKSPACE_ACCESS_DENIED, SURFACE_ACCESS_DENIED, PERMISSION_DENIED,
 				ORIGIN_NOT_ALLOWED, SYSTEM_OPERATOR_REQUIRED -> "AUTHORIZATION";
 				case CONCURRENCY_CONFLICT, PRECONDITION_FAILED, STALE_ALLOCATION -> "CONCURRENCY";
-			case DATA_INTEGRITY_CONFLICT -> "BUSINESS_CONFLICT";
+			case DATA_INTEGRITY_CONFLICT, CREDIT_LIMIT_BELOW_USED, CREDIT_ACCOUNT_CLOSED -> "BUSINESS_CONFLICT";
 			case PRECONDITION_REQUIRED -> "PRECONDITION";
 			case RESET_RATE_LIMITED, PUBLIC_CONTACT_RATE_LIMITED -> "RATE_LIMIT";
 			case EXTERNAL_TEMPORARY_FAILURE, EXTERNAL_TIMEOUT -> "EXTERNAL";

@@ -44,6 +44,11 @@ public final class OutgoingGoodsCheckModels {
         }
     }
 
+    /** Minimal current check facts consumed by Dispatch; Warehouse retains the full evidence projection. */
+    public record DispatchSummary(UUID id, UUID fulfillmentId, long fulfillmentVersion,
+                                  UUID physicalAllocationId, long physicalAllocationVersion,
+                                  boolean matches, boolean current, boolean openDiscrepancy) { }
+
     public record DiscrepancyResolution(UUID id, UUID fulfillmentId, long fulfillmentVersion,
                                         UUID physicalAllocationId, long physicalAllocationVersion,
                                         UUID discrepancyCheckId, UUID matchingCheckId,

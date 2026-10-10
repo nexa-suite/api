@@ -1,12 +1,11 @@
 package com.nexa.api.notifications.infrastructure;
 
-import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
-import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.port.in.NotificationProjectionPort;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
 import com.nexa.api.notifications.application.port.out.NotificationPreferencePersistencePort;
 import com.nexa.api.notifications.application.port.out.PushNotificationOutboxPort;
 import com.nexa.api.notifications.application.service.NotificationService;
+import com.nexa.api.notifications.application.service.NotificationProjectionService;
 import com.nexa.api.notifications.application.service.PushRoutingService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
@@ -14,9 +13,11 @@ import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAcc
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 @Configuration(proxyBeanMethods = false)
 @Profile("!test")
+@ConditionalOnProperty(prefix = "nexa.tenant-business.notifications", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class NotificationRuntimeConfiguration {
 	@Bean
 	NotificationService notificationUseCase(NotificationInboxPersistencePort inbox,
@@ -29,16 +30,6 @@ public class NotificationRuntimeConfiguration {
 
 	@Bean
 	NotificationProjectionPort notificationProjectionPort(NotificationService service) {
-		return new NotificationProjectionPort() {
-			@Override
-			public void project(NotificationProjection event) {
-				service.project(event);
-			}
-
-			@Override
-			public void deliverPush(PushNotificationCandidate candidate) {
-				service.deliverPush(candidate);
-			}
-		};
+		return new NotificationProjectionService(service);
 	}
 }

@@ -5,6 +5,7 @@ import com.nexa.api.catalogcommercialpolicy.application.port.in.ListCatalogItems
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogItemNotFoundException;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.TenantCatalogHttpReadPort;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.catalogcommercialpolicy.presentation.rest.mapper.CatalogResponseMapper;
 import com.nexa.api.catalogcommercialpolicy.presentation.rest.request.CatalogQueryParameters;
@@ -39,19 +40,27 @@ public class CatalogQueryController {
 	private final GetCatalogItemUseCase getCatalogItem;
 	private final CatalogResponseMapper responseMapper;
 	private final ObjectProvider<CatalogClientAccountPort> clientAccounts;
+	private final ObjectProvider<TenantCatalogHttpReadPort> tenantCatalogReads;
 
 	public CatalogQueryController(ListCatalogItemsUseCase listCatalogItems, GetCatalogItemUseCase getCatalogItem,
 			CatalogResponseMapper responseMapper) {
-		this(listCatalogItems, getCatalogItem, responseMapper, null);
+		this(listCatalogItems, getCatalogItem, responseMapper, null, null);
+	}
+
+	public CatalogQueryController(ListCatalogItemsUseCase listCatalogItems, GetCatalogItemUseCase getCatalogItem,
+			CatalogResponseMapper responseMapper, ObjectProvider<CatalogClientAccountPort> clientAccounts) {
+		this(listCatalogItems, getCatalogItem, responseMapper, clientAccounts, null);
 	}
 
 	@Autowired
 	public CatalogQueryController(ListCatalogItemsUseCase listCatalogItems, GetCatalogItemUseCase getCatalogItem,
-			CatalogResponseMapper responseMapper, ObjectProvider<CatalogClientAccountPort> clientAccounts) {
+			CatalogResponseMapper responseMapper, ObjectProvider<CatalogClientAccountPort> clientAccounts,
+			ObjectProvider<TenantCatalogHttpReadPort> tenantCatalogReads) {
 		this.listCatalogItems = listCatalogItems;
 		this.getCatalogItem = getCatalogItem;
 		this.responseMapper = responseMapper;
 		this.clientAccounts = clientAccounts;
+		this.tenantCatalogReads = tenantCatalogReads;
 	}
 
 	/** Compatibility entry point for application-level callers; HTTP routes always require an access context. */
@@ -69,6 +78,8 @@ public class CatalogQueryController {
 	public CatalogPageResponse list(@RequestAttribute(value = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext", required = false) CurrentAccessContext context,
 			@Valid @ModelAttribute CatalogQueryParameters parameters) {
 		if (context == null) throw new AccessDeniedException("Catalog access context is required");
+		TenantCatalogHttpReadPort tenantRead = tenantCatalogReads == null ? null : tenantCatalogReads.getIfAvailable();
+		if (tenantRead != null) return responseMapper.toPage(tenantRead.list(context, parameters.toCriteria()));
 		CatalogScope scope = scope(context);
 		return responseMapper.toPage(listCatalogItems.list(scope, parameters.toCriteria()));
 	}
@@ -85,6 +96,8 @@ public class CatalogQueryController {
 			@PathVariable @Pattern(regexp = CATALOG_ITEM_ID_PATTERN) String catalogItemId) {
 		try {
 			if (context == null) throw new AccessDeniedException("Catalog access context is required");
+			TenantCatalogHttpReadPort tenantRead = tenantCatalogReads == null ? null : tenantCatalogReads.getIfAvailable();
+			if (tenantRead != null) return responseMapper.toDetail(tenantRead.getByCatalogItemId(context, catalogItemId));
 			CatalogScope scope = scope(context);
 			return responseMapper.toDetail(getCatalogItem.getByCatalogItemId(scope, catalogItemId));
 		} catch (CatalogItemNotFoundException exception) {

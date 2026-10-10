@@ -38,6 +38,7 @@ public class JdbcPushNotificationOutboxAdapter implements PushNotificationOutbox
                 .getBytes(StandardCharsets.UTF_8));
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("sourceEventId", projection.eventId());
+        payload.put("sourcePayloadSha256", projection.sourcePayloadSha256());
         payload.put("tenantId", projection.tenantId());
         payload.put("workspaceId", projection.workspaceId());
         payload.put("clientAccountId", projection.clientAccountId());

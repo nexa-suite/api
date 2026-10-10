@@ -1,5 +1,6 @@
 package com.nexa.api.salescommitment.application.salesorder.port;
 
+import org.springframework.modulith.NamedInterface;
 import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderEventView;
@@ -9,6 +10,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 
 import java.util.List;
 
+@NamedInterface("sales-public")
 public interface SalesOrderUseCase {
 	SalesOrderView convert(CurrentAccessContext context, String purchaseRequestId, long purchaseRequestVersion,
 			String idempotencyKey, String note);

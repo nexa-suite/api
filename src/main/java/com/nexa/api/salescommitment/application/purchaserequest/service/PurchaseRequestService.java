@@ -69,6 +69,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	private final Clock clock;
 	private final ObjectMapper objectMapper;
 	private final MaterialChangePersistencePort materialChanges;
+	private final boolean walletTenderEnabled;
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts) {
@@ -103,6 +104,14 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments, Clock clock, ObjectMapper objectMapper,
 			MaterialChangePersistencePort materialChanges) {
+		this(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, objectMapper,
+				materialChanges, false);
+	}
+
+	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
+			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments, Clock clock, ObjectMapper objectMapper,
+			MaterialChangePersistencePort materialChanges, boolean walletTenderEnabled) {
 		this.persistence = persistence;
 		this.events = events;
 		this.idempotency = idempotency;
@@ -113,6 +122,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		this.clock = clock == null ? Clock.systemUTC() : clock;
 		this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
 		this.materialChanges = materialChanges;
+		this.walletTenderEnabled = walletTenderEnabled;
 	}
 
 	@Override
@@ -203,8 +213,10 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PurchaseRequest aggregate = rehydrate(current);
 		aggregate.acceptProposedChanges();
 			MaterialChangeTerms accepted = revalidateProposal(context, current.clientAccountId(), proposal.proposedTerms());
+		if (PaymentOption.WALLET.name().equals(accepted.paymentOption())) requireWalletTenderEnabled();
 		PurchaseRequestView result = materialChanges().accept(scope(context), workspace(context), buyerAccount(context),
-				id, proposalId, version, actor, accepted, now());
+				id, proposalId, version, actor, accepted,
+				PaymentOption.WALLET.name().equals(accepted.paymentOption()) ? context.userId().toString() : null, now());
 		if (commitments != null) {
 			commitments.releaseForPurchaseRequest(UUID.fromString(scope(context)), UUID.fromString(workspace(context)),
 					UUID.fromString(id), "MATERIAL_CHANGE_REPLACED");
@@ -274,6 +286,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		}
 		PurchaseRequestPriority priorityValue = PurchaseRequestPriority.from(priority);
 		PaymentOption paymentValue = PaymentOption.from(paymentOption);
+		if (paymentValue == PaymentOption.WALLET) requireWalletTenderBuyer(context);
 		new RequestedDeliveryDate(deliveryDate);
 		new DeliveryProfileSnapshot(deliveryProfile);
 		new RequestComment(comment);
@@ -297,7 +310,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		persistence.insert(new PurchaseRequestView(id.toString(), code, account, context.membershipId().toString(),
 				aggregate.status().name(), aggregate.priority().name(), deliveryDate, deliveryProfile,
 				paymentValue == null ? null : paymentValue.name(), comment, null, snapshots, 0),
-				scope(context), workspace(context), id, now());
+				scope(context), workspace(context), id, now(),
+				paymentValue == PaymentOption.WALLET ? context.userId().toString() : null);
 		for (PurchaseRequestLineView line : snapshots) persistence.insertLine(id.toString(), line, UUID.fromString(line.id()), now());
 		changeFeed.append(scope(context), workspace(context), account, "purchase_request", id.toString(),
 				"sales.purchase-request.created", "DRAFT", now(), true);
@@ -310,6 +324,11 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			String deliveryProfile, String paymentOption, String comment, long version) {
 		PurchaseRequestView current = canEdit(context, id);
 		PurchaseRequest aggregate = rehydrate(current);
+		PaymentOption selectedPayment = paymentOption == null ? aggregate.paymentOption() : PaymentOption.from(paymentOption);
+		if (selectedPayment == PaymentOption.WALLET) {
+			requireWalletTenderEnabled();
+			if (paymentOption != null) requireWalletTenderBuyer(context);
+		}
 		aggregate.updateDetails(priority == null ? aggregate.priority() : PurchaseRequestPriority.from(priority),
 				deliveryDate == null ? aggregate.requestedDeliveryDate() : new RequestedDeliveryDate(deliveryDate),
 				deliveryProfile == null ? aggregate.deliveryProfile() : new DeliveryProfileSnapshot(deliveryProfile),
@@ -317,7 +336,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 				comment == null ? aggregate.comment() : new RequestComment(comment));
 		if (persistence.update(scope(context), workspace(context), buyerAccount(context), id,
 				priority == null ? null : aggregate.priority().name(), deliveryDate, deliveryProfile,
-				paymentOption == null ? null : aggregate.paymentOption().name(), comment, version) == 0) {
+				paymentOption == null ? null : aggregate.paymentOption().name(), comment, version,
+				paymentOption == null || selectedPayment != PaymentOption.WALLET ? null : context.userId().toString()) == 0) {
 			throw new SalesConcurrencyConflictException();
 		}
 		PurchaseRequestView result = detail(context, id);
@@ -384,6 +404,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		String commandHash = null;
 		if ("submit".equals(normalized)) {
 			if (context.hasRole(MembershipRole.BUYER)) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
+			if ("WALLET".equalsIgnoreCase(current.paymentOption())) requireWalletTenderBuyer(context);
 			requireIdempotencyKey(idempotencyKey);
 			idempotencyOperation = "purchase-request-submission";
 			commandHash = requestHash(current);
@@ -429,7 +450,9 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			default -> throw new PurchaseRequestTransitionException();
 		};
 		int changed = persistence.transition(scope(context), workspace(context), buyerAccount(context), id,
-				current.status(), target, reviewNote, context.membershipId().toString(), version);
+				current.status(), target, reviewNote, context.membershipId().toString(), version,
+				"submit".equals(normalized) && "WALLET".equalsIgnoreCase(current.paymentOption())
+						? context.userId().toString() : null);
 		if (changed == 0) throw new SalesConcurrencyConflictException();
 		if ("submit".equals(normalized) && commitments != null) {
 			commitments.activateForPurchaseRequest(UUID.fromString(scope(context)), UUID.fromString(workspace(context)), UUID.fromString(id));
@@ -480,6 +503,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 				: new DeliveryProfileSnapshot(deliveryProfile).value();
 		String normalizedPayment = paymentOption == null ? current.paymentOption()
 				: java.util.Objects.requireNonNull(PaymentOption.from(paymentOption), "Payment option is required").name();
+		if (PaymentOption.WALLET.name().equals(normalizedPayment)) requireWalletTenderEnabled();
 		String normalizedComment = comment == null ? current.comment() : new RequestComment(comment).value();
 		List<PurchaseRequestLineView> lines;
 		if (requestedLines == null) {
@@ -600,6 +624,20 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	private static void buyerWrite(CurrentAccessContext context) {
 		if (!context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Purchase request creation is buyer-only");
 		context.requirePermission(Permission.SALES_BUYER_WRITE);
+	}
+
+	private void requireWalletTenderBuyer(CurrentAccessContext context) {
+		if (!context.hasRole(MembershipRole.BUYER)) {
+			throw new AccessPolicyViolation("Only the active Buyer can select wallet tender");
+		}
+		buyerWrite(context);
+		requireWalletTenderEnabled();
+	}
+
+	private void requireWalletTenderEnabled() {
+		if (!walletTenderEnabled) {
+			throw new com.nexa.api.payments.application.publicapi.BuyerWalletStoreUnavailableException();
+		}
 	}
 
 	private static void internal(CurrentAccessContext context, Permission permission) {

@@ -30,6 +30,33 @@ server:
   forward-headers-strategy: framework
 
 nexa:
+  tenant-business:
+    local-credentials-directory: ${NEXA_TENANT_BUSINESS_LOCAL_CREDENTIALS_DIRECTORY:}
+    purchase-request:
+      enabled: ${NEXA_TENANT_BUSINESS_PURCHASE_REQUEST_ENABLED:false}
+      wallet-tender-enabled: ${NEXA_TENANT_BUSINESS_PURCHASE_REQUEST_WALLET_TENDER_ENABLED:false}
+    catalog-detail-read:
+      enabled: ${NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED:false}
+    fulfillment-delivery:
+      enabled: ${NEXA_TENANT_BUSINESS_FULFILLMENT_DELIVERY_ENABLED:false}
+    warehouse-operations:
+      enabled: ${NEXA_TENANT_BUSINESS_WAREHOUSE_OPERATIONS_ENABLED:false}
+    buyer-wallet-read:
+      enabled: ${NEXA_TENANT_BUSINESS_BUYER_WALLET_READ_ENABLED:false}
+    buyer-wallet-recharge:
+      enabled: ${NEXA_TENANT_BUSINESS_BUYER_WALLET_RECHARGE_ENABLED:false}
+    support-sales-order-read:
+      enabled: ${NEXA_TENANT_BUSINESS_SUPPORT_SALES_ORDER_READ_ENABLED:false}
+    business-documents:
+      enabled: ${NEXA_TENANT_BUSINESS_BUSINESS_DOCUMENTS_ENABLED:false}
+    catalog-management:
+      enabled: ${NEXA_TENANT_BUSINESS_CATALOG_MANAGEMENT_ENABLED:false}
+    payments:
+      enabled: ${NEXA_TENANT_BUSINESS_PAYMENTS_ENABLED:false}
+    business-traceability:
+      enabled: ${NEXA_TENANT_BUSINESS_BUSINESS_TRACEABILITY_ENABLED:false}
+    notifications:
+      enabled: ${NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED:false}
   database:
     require-least-privilege-runtime: ${NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME:false}
   clamav:

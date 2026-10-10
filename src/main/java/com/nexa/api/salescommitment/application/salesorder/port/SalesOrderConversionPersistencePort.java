@@ -5,6 +5,7 @@ import com.nexa.api.salescommitment.domain.model.salesorder.ApprovedPurchaseRequ
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrder;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderId;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderNumber;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.util.Optional;
 
@@ -20,6 +21,10 @@ public interface SalesOrderConversionPersistencePort {
     Optional<ApprovedPurchaseRequestSnapshot> loadApprovedSnapshot(String tenantId, String workspaceId,
                                                                     String purchaseRequestId, long expectedVersion);
 
+    /** Loads only an APPROVED request for the verified SYSTEM_WORKFLOW conversion path. */
+    Optional<ApprovedPurchaseRequestSnapshot> loadApprovedSnapshotForSystemWorkflow(String tenantId,
+            String workspaceId, String purchaseRequestId, long expectedVersion);
+
     Optional<SalesOrderView> findBySourcePurchaseRequest(String tenantId, String workspaceId, String purchaseRequestId);
 
     SalesOrderIdentity nextIdentity(String tenantId, String workspaceId);
@@ -30,6 +35,13 @@ public interface SalesOrderConversionPersistencePort {
     default SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
                                              String idempotencyKey, String note, long nowEpochMillis, String requestHash) {
         return persistConversion(aggregate, purchaseRequestVersion, actorMembershipId, idempotencyKey, note, nowEpochMillis);
+    }
+
+    default SalesOrderView persistConversion(SalesOrder aggregate, long purchaseRequestVersion, String actorMembershipId,
+                                             String idempotencyKey, String note, long nowEpochMillis,
+                                             String requestHash, CurrentAccessContext actorContext) {
+        return persistConversion(aggregate, purchaseRequestVersion, actorMembershipId, idempotencyKey, note,
+                nowEpochMillis, requestHash);
     }
 
     record SalesOrderIdentity(SalesOrderId id, SalesOrderNumber number) { }

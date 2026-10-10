@@ -2,10 +2,13 @@ package com.nexa.api.catalogcommercialpolicy.presentation.rest;
 
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogManagementModels;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogPromotionUseCase;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,26 +34,45 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class CatalogPromotionController {
     private final CatalogPromotionUseCase promotions;
+    private final ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests;
 
-    public CatalogPromotionController(CatalogPromotionUseCase promotions) { this.promotions = promotions; }
+    public CatalogPromotionController(CatalogPromotionUseCase promotions) { this(promotions, null); }
+
+    @Autowired
+    public CatalogPromotionController(CatalogPromotionUseCase promotions,
+            ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests) {
+        this.promotions = promotions;
+        this.tenantRequests = tenantRequests;
+    }
 
     @GetMapping
     @Operation(operationId = "listCatalogPromotions")
     public CatalogManagementModels.Page<CatalogManagementModels.PromotionView> list(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) String status) { return promotions.promotions(CatalogHttpSupport.scope(context), page, size, status); }
+            @RequestParam(required = false) String status) {
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> promotions.promotions(CatalogHttpSupport.scope(context), page, size, status),
+                request -> request.promotions().promotions(request.scope(), page, size, status));
+    }
 
     @GetMapping("/{id}")
     @Operation(operationId = "getCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> detail(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
-            @PathVariable UUID id) { var value = promotions.promotion(CatalogHttpSupport.scope(context), id); return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value); }
+            @PathVariable UUID id) {
+        var value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> promotions.promotion(CatalogHttpSupport.scope(context), id),
+                request -> request.promotions().promotion(request.scope(), id));
+        return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
+    }
 
     @PostMapping
     @Operation(operationId = "createCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> create(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody PromotionRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
-        var value = promotions.create(CatalogHttpSupport.scope(context), request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), idempotencyKey, request.priority());
+        var value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> promotions.create(CatalogHttpSupport.scope(context), request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), idempotencyKey, request.priority()),
+                scoped -> scoped.promotions().create(scoped.scope(), request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), idempotencyKey, request.priority()));
         return ResponseEntity.status(201).eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
 
@@ -58,7 +80,9 @@ public final class CatalogPromotionController {
     @Operation(operationId = "updateCatalogPromotion")
     public ResponseEntity<CatalogManagementModels.PromotionView> update(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestBody PromotionRequest request) {
-        var value = promotions.update(CatalogHttpSupport.scope(context), id, request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), CatalogHttpSupport.version(ifMatch), request.priority());
+        var value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> promotions.update(CatalogHttpSupport.scope(context), id, request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), CatalogHttpSupport.version(ifMatch), request.priority()),
+                scoped -> scoped.promotions().update(scoped.scope(), id, request.slug(), request.name(), request.description(), request.discountType(), request.discountValue(), request.currency(), request.startsAt(), request.endsAt(), request.minimumQuantity(), request.stackingPolicy(), request.productIds(), request.categoryIds(), request.clientAccountIds(), request.rules(), CatalogHttpSupport.version(ifMatch), request.priority()));
         return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
 
@@ -88,7 +112,9 @@ public final class CatalogPromotionController {
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return status(context, id, "EXPIRED", ifMatch); }
 
     private ResponseEntity<CatalogManagementModels.PromotionView> status(CurrentAccessContext context, UUID id, String status, String ifMatch) {
-        var value = promotions.changeStatus(CatalogHttpSupport.scope(context), id, status, CatalogHttpSupport.version(ifMatch));
+        var value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> promotions.changeStatus(CatalogHttpSupport.scope(context), id, status, CatalogHttpSupport.version(ifMatch)),
+                request -> request.promotions().changeStatus(request.scope(), id, status, CatalogHttpSupport.version(ifMatch)));
         return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
 

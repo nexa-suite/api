@@ -93,14 +93,24 @@ public class JdbcMaterialChangePersistenceAdapter implements MaterialChangePersi
     public PurchaseRequestView accept(String tenantId, String workspaceId, String buyerAccountId,
             String purchaseRequestId, String proposalId, long expectedVersion, String actorMembershipId,
             MaterialChangeTerms acceptedTerms, long nowEpochMillis) {
+		return accept(tenantId, workspaceId, buyerAccountId, purchaseRequestId, proposalId,
+			expectedVersion, actorMembershipId, acceptedTerms, null, nowEpochMillis);
+	}
+
+	@Override
+	@Transactional(propagation = Propagation.MANDATORY)
+	public PurchaseRequestView accept(String tenantId, String workspaceId, String buyerAccountId,
+			String purchaseRequestId, String proposalId, long expectedVersion, String actorMembershipId,
+			MaterialChangeTerms acceptedTerms, String walletBeneficiaryIdentityId, long nowEpochMillis) {
         LockedProposal proposal = lockProposal(tenantId, workspaceId, buyerAccountId, purchaseRequestId,
                 proposalId, expectedVersion);
         Timestamp now = timestamp(nowEpochMillis);
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), request = uuid(purchaseRequestId);
-        if (jdbc.update("update sales.purchase_request set status='SUBMITTED',priority=?,requested_delivery_date=?,delivery_profile_snapshot=?,payment_option=?,comments=?,review_note=null,reviewed_by_membership_id=?,reviewed_at=?,updated_at=?,version=version+1 "
+        if (jdbc.update("update sales.purchase_request set status='SUBMITTED',priority=?,requested_delivery_date=?,delivery_profile_snapshot=?,payment_option=?,comments=?,buyer_wallet_beneficiary_identity_id=?,review_note=null,reviewed_by_membership_id=?,reviewed_at=?,updated_at=?,version=version+1 "
                         + "where tenant_id=? and workspace_id=? and id=? and status='CHANGES_PROPOSED' and version=? and client_account_id=?",
                 acceptedTerms.priority(), acceptedTerms.requestedDeliveryDate(), acceptedTerms.deliveryProfileSnapshot(),
-                acceptedTerms.paymentOption(), acceptedTerms.comment(), uuid(actorMembershipId), now, now,
+                acceptedTerms.paymentOption(), acceptedTerms.comment(), walletBeneficiaryIdentityId == null ? null : uuid(walletBeneficiaryIdentityId),
+                uuid(actorMembershipId), now, now,
                 tenant, workspace, request, expectedVersion, uuid(buyerAccountId)) != 1) {
             throw new SalesConcurrencyConflictException();
         }

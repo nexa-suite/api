@@ -2,7 +2,7 @@ package com.nexa.api.salescommitment.infrastructure.purchaserequestdraft;
 
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
 import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAddressQuery;
@@ -61,6 +61,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private final CreditExposureQuery creditExposure;
     private final SellableSkuQuery sellableSkus;
     private final WarehouseSelectionQuery warehouses;
+    private final boolean walletTenderEnabled;
 
     @Autowired
     public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
@@ -68,6 +69,17 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
                                        CustomerAccountQuery customers, CustomerAddressQuery addresses,
                                        CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
                                        WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox) {
+        this(jdbc, objectMapper, commitments, maps, customers, addresses, creditExposure,
+                sellableSkus, warehouses, canonicalOutbox, false);
+    }
+
+    /** Tenant composition opts in only after every local dependency is bound to this JDBC session. */
+    public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                       CommercialCommitmentPort commitments, MapRoutingPort maps,
+                                       CustomerAccountQuery customers, CustomerAddressQuery addresses,
+                                       CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
+                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
+                                       boolean walletTenderEnabled) {
         this.jdbc = jdbc;
         this.canonicalOutbox = canonicalOutbox;
         this.objectMapper = objectMapper;
@@ -78,6 +90,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         this.creditExposure = creditExposure;
         this.sellableSkus = sellableSkus;
         this.warehouses = warehouses;
+        this.walletTenderEnabled = walletTenderEnabled;
     }
 
     @Transactional
@@ -214,9 +227,11 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     public PurchaseRequestDraftModels.DraftView setPreferences(CurrentAccessContext context, UUID draftId, long expectedVersion, String paymentPreference, LocalDate requestedDeliveryDate) {
         buyerWrite(context);
         DraftRow draft = mutable(context, draftId, expectedVersion);
-        if (paymentPreference == null || !Set.of("CREDIT_LINE", "BANK_TRANSFER", "CARD_STRIPE", "CASH", "CASH_ON_DELIVERY").contains(paymentPreference.trim().toUpperCase(java.util.Locale.ROOT))) throw new IllegalArgumentException("Payment preference is invalid");
+        String normalizedPayment = paymentPreference == null ? null : paymentPreference.trim().toUpperCase(java.util.Locale.ROOT);
+        if ("WALLET".equals(normalizedPayment)) requireWalletTenderEnabled();
+        if (normalizedPayment == null || !Set.of("CREDIT_LINE", "BANK_TRANSFER", "CARD_STRIPE", "CASH", "CASH_ON_DELIVERY", "WALLET").contains(normalizedPayment)) throw new IllegalArgumentException("Payment preference is invalid");
         if (requestedDeliveryDate == null || requestedDeliveryDate.isBefore(LocalDate.now())) throw new IllegalArgumentException("Requested delivery date is invalid");
-        jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", paymentPreference.trim().toUpperCase(java.util.Locale.ROOT), requestedDeliveryDate, creditResult(context, draftId, draft.clientAccountId, paymentPreference), tenant(context), workspace(context), draftId, expectedVersion);
+        jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", normalizedPayment, requestedDeliveryDate, creditResult(context, draftId, draft.clientAccountId, normalizedPayment), tenant(context), workspace(context), draftId, expectedVersion);
         updateStatus(context, draftId, expectedVersion + 1, hasLines(draftId, context), hasDestination(draftId, context), hasRoute(draftId, context), true);
         return get(context, draftId);
     }
@@ -243,6 +258,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
             return get(context, existingClaim.draftId());
         }
         DraftRow draft = mutable(context, draftId, expectedVersion);
+        if ("WALLET".equals(draft.paymentPreference())) requireWalletTenderEnabled();
         PurchaseRequestDraftModels.ReviewView review = review(context, draftId);
         if (!review.readyToSubmit()) throw new PurchaseRequestDraftInvariantException("Purchase request draft is not ready to submit");
         int idempotencyClaimed = jdbc.update("insert into sales.purchase_request_draft_idempotency (tenant_id,workspace_id,buyer_membership_id,idempotency_key,request_hash,draft_id,created_at) values (?,?,?,?,?,?,current_timestamp) on conflict do nothing", tenant(context), workspace(context), context.membershipId().value(), idempotencyKey, requestHash, draftId);
@@ -337,13 +353,14 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     }
 
     private void submitPurchaseRequest(CurrentAccessContext context, DraftRow draft) {
+        if ("WALLET".equals(draft.paymentPreference())) requireWalletTenderEnabled();
         UUID requestId = draft.id();
         String code = "PR-" + requestId.toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
         String addressSnapshot = jdbc.query("select address_snapshot::text from sales.purchase_request_draft_destination where tenant_id=? and workspace_id=? and draft_id=?", (rs, n) -> rs.getString(1), tenant(context), workspace(context), draft.id()).stream().findFirst().orElse("{}");
         String routeSnapshot = jdbc.query("select route_snapshot::text from sales.purchase_request_draft_route where tenant_id=? and workspace_id=? and draft_id=?", (rs, n) -> rs.getString(1), tenant(context), workspace(context), draft.id()).stream().findFirst().orElse("{}");
         String warehouseSnapshot = jdbc.query("select selection_snapshot::text from sales.purchase_request_draft_warehouse_selection where tenant_id=? and workspace_id=? and draft_id=?", (rs, n) -> rs.getString(1), tenant(context), workspace(context), draft.id()).stream().findFirst().orElse("{}");
         Instant now = Instant.now();
-        jdbc.update("insert into sales.purchase_request (id,tenant_id,workspace_id,client_account_id,buyer_membership_id,code,status,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments,created_at,updated_at,submitted_at,version,delivery_address_snapshot,route_snapshot,warehouse_selection_snapshot) values (?,?,?,?,?,?,'SUBMITTED','NORMAL',?,?,?,null,?,?,?,0,?::jsonb,?::jsonb,?::jsonb) on conflict (id) do nothing", requestId, tenant(context), workspace(context), draft.clientAccountId(), draft.buyerMembershipId(), code, draft.requestedDeliveryDate(), addressSnapshot, draft.paymentPreference(), Timestamp.from(draft.createdAt()), Timestamp.from(now), Timestamp.from(now), addressSnapshot, routeSnapshot, warehouseSnapshot);
+        jdbc.update("insert into sales.purchase_request (id,tenant_id,workspace_id,client_account_id,buyer_membership_id,code,status,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments,created_at,updated_at,submitted_at,version,delivery_address_snapshot,route_snapshot,warehouse_selection_snapshot,buyer_wallet_beneficiary_identity_id) values (?,?,?,?,?,?,'SUBMITTED','NORMAL',?,?,?,null,?,?,?,0,?::jsonb,?::jsonb,?::jsonb,?) on conflict (id) do nothing", requestId, tenant(context), workspace(context), draft.clientAccountId(), draft.buyerMembershipId(), code, draft.requestedDeliveryDate(), addressSnapshot, draft.paymentPreference(), Timestamp.from(draft.createdAt()), Timestamp.from(now), Timestamp.from(now), addressSnapshot, routeSnapshot, warehouseSnapshot, "WALLET".equals(draft.paymentPreference()) ? context.userId().value() : null);
         List<DraftLine> draftLines = jdbc.query("select sku_id,quantity,unit,effective_unit_price,currency,notes from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=? order by created_at,id",
                 (rs, n) -> new DraftLine(rs.getObject(1, UUID.class), rs.getBigDecimal(2), rs.getString(3), rs.getBigDecimal(4), rs.getString(5), rs.getString(6)), tenant(context), workspace(context), draft.id());
         List<SubmittedLine> lines = draftLines.stream().map(line -> {
@@ -380,6 +397,9 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     }
     private static void buyerRead(CurrentAccessContext context) { if (!context.hasRole(MembershipRole.BUYER)) throw new IllegalStateException("Buyer surface required"); context.requirePermission(PermissionKey.BUYER_SALES_READ); }
     private static void buyerWrite(CurrentAccessContext context) { if (!context.hasRole(MembershipRole.BUYER)) throw new IllegalStateException("Buyer surface required"); context.requirePermission(PermissionKey.BUYER_SALES_WRITE); }
+    private void requireWalletTenderEnabled() {
+        if (!walletTenderEnabled) throw new com.nexa.api.payments.application.publicapi.BuyerWalletStoreUnavailableException();
+    }
     private static UUID tenant(CurrentAccessContext c) { return c.tenantId().value(); }
     private static UUID workspace(CurrentAccessContext c) { return c.workspaceId().value(); }
     private String json(Map<String, Object> value) { try { return objectMapper.writeValueAsString(value); } catch (Exception e) { throw new IllegalStateException("Snapshot serialization failed", e); } }

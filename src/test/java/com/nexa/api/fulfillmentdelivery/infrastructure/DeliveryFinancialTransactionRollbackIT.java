@@ -85,7 +85,7 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
                 + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
                 + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
         MvcResult handedOver = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/dispatches")
-                        .header("Authorization", "Bearer " + warehouse).header("If-Match", fulfillmentEtag)
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", fulfillmentEtag)
                         .header("Idempotency-Key", "rollback-financial-dispatch-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk()).andReturn();

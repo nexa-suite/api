@@ -5,7 +5,7 @@ import com.nexa.api.salescommitment.application.port.out.DistanceMatrixPort;
 import com.nexa.api.salescommitment.application.port.out.GeocodedPlace;
 import com.nexa.api.salescommitment.application.port.out.GeocodingPort;
 import com.nexa.api.salescommitment.application.port.out.MapCoordinate;
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.salescommitment.application.port.out.PlaceAutocompletePort;
 import com.nexa.api.salescommitment.application.port.out.ReverseGeocodingPort;
 import com.nexa.api.salescommitment.application.port.out.RoutePreviewPort;

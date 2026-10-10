@@ -8,6 +8,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -20,17 +21,29 @@ public class JdbcNotificationPreferenceAdapter implements NotificationPreference
         NotificationPreferenceAccess {
 	private final JdbcTemplate jdbc;
 	private final WorkspaceDirectory workspaces;
+	private final UUID tenantId;
+	private final UUID workspaceId;
 
+	@Autowired
 	public JdbcNotificationPreferenceAdapter(JdbcTemplate jdbc, WorkspaceDirectory workspaces) {
 		this.jdbc = jdbc;
 		this.workspaces = workspaces;
+		this.tenantId = null;
+		this.workspaceId = null;
+	}
+
+	public JdbcNotificationPreferenceAdapter(JdbcTemplate jdbc, UUID tenantId, UUID workspaceId) {
+		this.jdbc = jdbc;
+		this.workspaces = null;
+		this.tenantId = java.util.Objects.requireNonNull(tenantId, "Tenant scope is required");
+		this.workspaceId = java.util.Objects.requireNonNull(workspaceId, "Workspace scope is required");
 	}
 
 	@Override
 	public List<NotificationPreferenceView> find(String tenantId, String workspaceId) {
 		UUID workspace = uuid(workspaceId);
 		UUID tenant = uuid(tenantId);
-		if (!workspaces.exists(tenant, workspace)) return List.of();
+		if (!allowed(tenant, workspace)) return List.of();
 		return jdbc.query("select p.event_category,p.channel,p.enabled,p.version from tenant_management.notification_preference p where p.workspace_id=? order by p.event_category,p.channel",
 				(rs, row) -> new NotificationPreferenceView(rs.getString(1), rs.getString(2), rs.getBoolean(3), rs.getLong(4)), workspace);
 	}
@@ -39,7 +52,7 @@ public class JdbcNotificationPreferenceAdapter implements NotificationPreference
 	public long version(String tenantId, String workspaceId) {
 		UUID workspace = uuid(workspaceId);
 		UUID tenant = uuid(tenantId);
-		if (!workspaces.exists(tenant, workspace)) return 0;
+		if (!allowed(tenant, workspace)) return 0;
 		Long value = jdbc.queryForObject("select coalesce(max(p.version),0) from tenant_management.notification_preference p where p.workspace_id=?",
 				Long.class, workspace);
 		return value == null ? 0 : value;
@@ -49,7 +62,7 @@ public class JdbcNotificationPreferenceAdapter implements NotificationPreference
 	public int update(String tenantId, String workspaceId, NotificationPreferenceView preference) {
 		UUID workspace = uuid(workspaceId);
 		UUID tenant = uuid(tenantId);
-		if (!workspaces.exists(tenant, workspace)) return 0;
+		if (!allowed(tenant, workspace)) return 0;
 		return jdbc.update("update tenant_management.notification_preference set enabled=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and event_category=? and channel=? and version=?",
 				preference.enabled(), workspace, preference.eventCategory(), preference.channel(), preference.version());
 	}
@@ -58,7 +71,7 @@ public class JdbcNotificationPreferenceAdapter implements NotificationPreference
 	public boolean isEnabled(String tenantId, String workspaceId, String eventCategory, String channel) {
 		UUID workspace = uuid(workspaceId);
 		UUID tenant = uuid(tenantId);
-		if (!workspaces.exists(tenant, workspace)) return true;
+		if (!allowed(tenant, workspace)) return true;
 		List<Boolean> values = jdbc.query("select p.enabled from tenant_management.notification_preference p where p.workspace_id=? and p.event_category=? and p.channel=?",
 				(rs, row) -> rs.getBoolean(1), workspace, eventCategory, channel);
 		return values.isEmpty() || values.getFirst();
@@ -86,11 +99,32 @@ public class JdbcNotificationPreferenceAdapter implements NotificationPreference
 
 	@Override
 	public void ensureNotificationDefaults(UUID workspaceId) {
+		requireWorkspace(workspaceId);
 		for (String category : NotificationPreference.eventCategories()) {
 			for (String channel : NotificationPreference.channels()) {
 				jdbc.update("insert into tenant_management.notification_preference (workspace_id,event_category,channel,enabled,version,updated_at) values (?,?,?,true,0,current_timestamp) on conflict (workspace_id,event_category,channel) do nothing",
 						workspaceId, category, channel);
 			}
+		}
+	}
+
+	private boolean allowed(UUID requestedTenant, UUID requestedWorkspace) {
+		if (this.workspaceId != null) {
+			requireScope(requestedTenant, requestedWorkspace);
+			return true;
+		}
+		return workspaces.exists(requestedTenant, requestedWorkspace);
+	}
+
+	private void requireWorkspace(UUID requestedWorkspace) {
+		if (workspaceId != null && !workspaceId.equals(requestedWorkspace)) {
+			throw new IllegalStateException("Notification preferences escaped their Tenant Workspace scope");
+		}
+	}
+
+	private void requireScope(UUID requestedTenant, UUID requestedWorkspace) {
+		if (!tenantId.equals(requestedTenant) || !workspaceId.equals(requestedWorkspace)) {
+			throw new IllegalStateException("Notification preferences escaped their Tenant/Workspace scope");
 		}
 	}
 

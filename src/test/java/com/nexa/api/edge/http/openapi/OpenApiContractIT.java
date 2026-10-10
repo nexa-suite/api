@@ -54,6 +54,9 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/buyer/warehouses")).isTrue();
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/route-starts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/handoff-notes")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/buyer/deliveries")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/buyer/deliveries/{deliveryId}")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/buyer/deliveries/{deliveryId}/events")).isTrue();
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
         assertThat(document.get("paths").has("/api/v1/skus/resolve")).isTrue();
         assertThat(document.get("paths").has("/api/v1/inventory/lots/resolve")).isTrue();

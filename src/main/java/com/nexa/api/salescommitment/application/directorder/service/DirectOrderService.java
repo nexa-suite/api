@@ -68,6 +68,9 @@ public class DirectOrderService implements DirectOrderUseCase {
         }
         PaymentOption payment = PaymentOption.from(paymentOption);
         if (payment == null) throw new CommercialBusinessException("VALIDATION_ERROR");
+        if (payment == PaymentOption.WALLET) {
+            throw new CommercialBusinessException("WALLET_TENDER_PURCHASE_REQUEST_ONLY");
+        }
         String normalizedPriority = PurchaseRequestPriority.from(priority).name();
         List<Line> canonicalLines = lines.stream().map(line -> canonicalLine(context.tenantId().value(), context.workspaceId().value(), line)).toList();
         String hash = hash(clientAccount.toString(), normalizedPriority, requestedDeliveryDate, deliverySnapshot, payment.name(), notes, canonicalLines);

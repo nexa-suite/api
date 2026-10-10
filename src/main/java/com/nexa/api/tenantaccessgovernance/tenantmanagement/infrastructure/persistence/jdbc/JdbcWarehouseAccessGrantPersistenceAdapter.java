@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.ArrayList;
 import java.util.stream.Collectors;
 
 /** BC-01-owned JDBC persistence for Warehouse access grants. */
@@ -28,6 +29,16 @@ import java.util.stream.Collectors;
 public class JdbcWarehouseAccessGrantPersistenceAdapter implements WarehouseAccessGrantPersistencePort {
     private static final String SELECT = "select tenant_id,workspace_id,membership_id,warehouse_id,status,version,changed_by_membership_id,changed_at "
             + "from tenant_management.warehouse_access_grant ";
+    private static final UUID SYSTEM_WORKFLOW_USER_ID = UUID.fromString("11111111-1111-4111-8111-111111111111");
+    private static final UUID SYSTEM_WORKFLOW_ROLE_ID = UUID.fromString("22222222-2222-4222-8222-222222222222");
+    private static final String VERIFIED_SYSTEM_WORKFLOW_TARGET = "m.membership_type='SYSTEM_WORKFLOW' "
+            + "and m.user_id=? and exists (select 1 from iam.user_account u "
+            + "join tenant_management.membership_role_definition mr on mr.membership_id=m.id "
+            + "and mr.tenant_id=t.id and mr.workspace_id=w.id "
+            + "join tenant_management.role_definition r on r.id=mr.role_id "
+            + "where u.id=m.user_id and u.status='ACTIVE' and u.username=? and u.normalized_email=? "
+            + "and r.id=? and r.code=? and r.role_type='SYSTEM_RESERVED' and r.status='ACTIVE' "
+            + "and r.tenant_id is null and r.workspace_id is null)";
 
     private final JdbcTemplate jdbc;
 
@@ -51,19 +62,23 @@ public class JdbcWarehouseAccessGrantPersistenceAdapter implements WarehouseAcce
                         + "join tenant_management.workspace w on w.tenant_id=t.id "
                         + "join tenant_management.workspace_membership m on m.workspace_id=w.id "
                         + "where t.id=? and t.status='ACTIVE' and w.id=? and w.status='ACTIVE' "
-                        + "and m.id=? and m.status='ACTIVE' and m.membership_type='INTERNAL')", Boolean.class,
-                tenantId.value(), workspaceId.value(), membershipId.value()));
+                        + "and m.id=? and m.status='ACTIVE' and (m.membership_type='INTERNAL' or ("
+                        + VERIFIED_SYSTEM_WORKFLOW_TARGET + "))) ", Boolean.class,
+                membershipScopeParameters(tenantId, workspaceId, membershipId)));
     }
 
     @Override
     public Set<UUID> activeWarehouseIds(TenantId tenantId, WorkspaceId workspaceId, MembershipId membershipId) {
-        return jdbc.query("select distinct g.warehouse_id from tenant_management.warehouse_access_grant g "
+        String sql = "select distinct g.warehouse_id from tenant_management.warehouse_access_grant g "
                         + "join tenant_management.tenant t on t.id=g.tenant_id and t.status='ACTIVE' "
                         + "join tenant_management.workspace w on w.tenant_id=g.tenant_id and w.id=g.workspace_id and w.status='ACTIVE' "
                         + "join tenant_management.workspace_membership m on m.workspace_id=g.workspace_id "
-                        + "and m.id=g.membership_id and m.status='ACTIVE' and m.membership_type='INTERNAL' "
-                        + "where g.tenant_id=? and g.workspace_id=? and g.membership_id=? and g.status='ACTIVE' order by g.warehouse_id",
-                (rs, row) -> rs.getObject(1, UUID.class), tenantId.value(), workspaceId.value(), membershipId.value())
+                        + "and m.id=g.membership_id and m.status='ACTIVE' "
+                        + "where g.tenant_id=? and g.workspace_id=? and g.membership_id=? "
+                        + "and (m.membership_type='INTERNAL' or (" + VERIFIED_SYSTEM_WORKFLOW_TARGET + ")) "
+                        + "and g.status='ACTIVE' order by g.warehouse_id";
+        return jdbc.query(sql, (rs, row) -> rs.getObject(1, UUID.class),
+                        membershipScopeParameters(tenantId, workspaceId, membershipId))
                 .stream().collect(Collectors.toUnmodifiableSet());
     }
 
@@ -113,5 +128,13 @@ public class JdbcWarehouseAccessGrantPersistenceAdapter implements WarehouseAcce
                 WarehouseAccessGrantStatus.valueOf(rs.getString("status")), rs.getLong("version"),
                 new MembershipId(rs.getObject("changed_by_membership_id", UUID.class)),
                 rs.getTimestamp("changed_at").toInstant());
+    }
+
+    private static Object[] membershipScopeParameters(TenantId tenantId, WorkspaceId workspaceId,
+                                                       MembershipId membershipId) {
+        List<Object> parameters = new ArrayList<>(List.of(tenantId.value(), workspaceId.value(), membershipId.value(),
+                SYSTEM_WORKFLOW_USER_ID, "NEXA_AUTOMATION", "nexa-automation@system.invalid",
+                SYSTEM_WORKFLOW_ROLE_ID, "system_workflow"));
+        return parameters.toArray();
     }
 }

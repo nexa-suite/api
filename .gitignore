@@ -7,6 +7,7 @@ coverage/
 .env.local
 .local-keys/
 .local-object-storage/
+/.local/tenant-databases/
 *.pem
 .DS_Store
 ._*

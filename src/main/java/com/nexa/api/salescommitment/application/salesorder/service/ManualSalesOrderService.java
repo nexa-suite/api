@@ -9,6 +9,7 @@ import com.nexa.api.salescommitment.application.workflow.SalesSnapshotAssembler;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrder;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderId;
+import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
@@ -41,6 +42,10 @@ public class ManualSalesOrderService implements ManualSalesOrderUseCase {
             throw new IdempotencyKeyRequiredException();
         }
         if (command == null) throw new IllegalArgumentException("Manual sales order command is required");
+        if (command.paymentOption() == PaymentOption.WALLET) {
+            throw new com.nexa.api.salescommitment.application.exception.CommercialBusinessException(
+                    "WALLET_TENDER_PURCHASE_REQUEST_ONLY");
+        }
 
         String tenant = context.tenantId().toString();
         String workspace = context.workspaceId().toString();

@@ -1,5 +1,6 @@
 package com.nexa.api.salescommitment.application.purchaserequest.port;
 
+import org.springframework.modulith.NamedInterface;
 import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestFilter;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestEventView;
@@ -11,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
+@NamedInterface("sales-public")
 public interface PurchaseRequestUseCase {
 	SalesPage<PurchaseRequestView> list(CurrentAccessContext context, PurchaseRequestFilter filter);
 	PurchaseRequestView detail(CurrentAccessContext context, String id);
@@ -32,5 +34,6 @@ public interface PurchaseRequestUseCase {
 			long version, String idempotencyKey);
 	PurchaseRequestView rejectMaterialChange(CurrentAccessContext context, String id, String proposalId,
 			long version, String idempotencyKey);
+	@NamedInterface("sales-public")
 	record RequestedLine(String catalogItemId, BigDecimal quantity, String unit, String notes) { }
 }

@@ -71,9 +71,12 @@ Purchase Request insert or relevant update, checks it against the scoped local
 snapshot, and uses the snapshot days only when `expires_at` is missing. Missing
 or stale revision fails closed. Connection scope cleanup also clears this GUC.
 These are separate central-read, snapshot-write and business transactions; no
-cross-database atomicity is claimed. The V4 resolver is not wired into the
-global HTTP path or existing adapters, so no production Purchase Request
-cutover is implemented. Central V1–V146, including V83, remain unchanged.
+cross-database atomicity is claimed. When explicitly invoked with a verified
+access context, the V4 resolver refreshes a stale snapshot before executing
+the supplied business work. It is not wired into the global HTTP path or
+existing adapters and does not authorize a Purchase Request write by itself,
+so no production Purchase Request cutover is implemented. Central V1–V146,
+including V83, remain unchanged.
 
 The central row has the determinant `tenant_id -> database_identity,
 credential_secret_reference, lifecycle_state, created_at, updated_at, version`;
@@ -157,11 +160,11 @@ physical Tenant databases. It proves the local migration and manually wired
 resolver under test credentials only; it does not prove production writer
 credential provisioning or API/HTTP integration.
 
-Remaining integration work includes provisioning the dedicated writer role and
-credentials, an authorized snapshot refresh mechanism, production singleton
-and capacity configuration, Tenant-aware routing for background jobs, and
-adapter-level wiring before any production cutover. The test fixture is not an
-authorized source snapshot. The current global Spring DataSource, existing
-adapters, and published central Flyway history through V146 remain unchanged.
-No existing API business command uses this resolver or router yet; no HTTP
-cutover is implemented.
+Remaining integration work includes production provisioning and resolution of
+the dedicated writer credentials, wiring the opt-in resolver into an
+authorized Purchase Request command and adapter, production singleton and
+capacity configuration, and Tenant-aware routing for background jobs before
+any production cutover. The test fixture is not an authorized source snapshot.
+The current global Spring DataSource, existing adapters, and published central
+Flyway history through V146 remain unchanged. No existing API business command
+uses this resolver or router yet; no HTTP cutover is implemented.

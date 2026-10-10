@@ -31,6 +31,11 @@ import java.util.List;
 import java.util.UUID;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException;
+import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferenceView;
+import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
+import com.nexa.api.notifications.application.publicapi.TenantNotificationSettingsCommands;
+import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -39,8 +44,14 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exceptio
 @SecurityRequirement(name = "bearerAuth")
 public final class TenantConfigurationController {
 	private final TenantConfigurationUseCase configuration;
+	private TenantNotificationSettingsCommands tenantNotificationSettings;
 
 	public TenantConfigurationController(TenantConfigurationUseCase configuration) { this.configuration = configuration; }
+
+	@Autowired(required = false)
+	public void tenantNotificationSettings(TenantNotificationSettingsCommands tenantNotificationSettings) {
+		this.tenantNotificationSettings = tenantNotificationSettings;
+	}
 
 	@GetMapping("/organization")
 	public ResponseEntity<TenantConfigurationModels.OrganizationProfileView> organization(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) {
@@ -106,13 +117,16 @@ public final class TenantConfigurationController {
 	}
 
 	@GetMapping("/workspaces/{workspaceId}/notifications")
-	public ResponseEntity<TenantConfigurationModels.NotificationSettingsView> notifications(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context, @PathVariable String workspaceId) { var value = configuration.notificationSettings(context, workspaceId); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
+	public ResponseEntity<TenantConfigurationModels.NotificationSettingsView> notifications(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context, @PathVariable String workspaceId) { var value = tenantNotificationSettings == null ? configuration.notificationSettings(context, workspaceId) : configurationPreferences(tenantNotificationSettings.settings(context, workspaceUuid(workspaceId))); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
 
 	@PatchMapping("/workspaces/{workspaceId}/notifications")
 	public ResponseEntity<TenantConfigurationModels.NotificationSettingsView> updateNotifications(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
 			@PathVariable String workspaceId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
 			@RequestBody TenantConfigurationModels.NotificationSettingsView request, HttpServletRequest servletRequest) {
-		var value = configuration.updateNotificationSettings(context, workspaceId, request, version(ifMatch), correlation(servletRequest));
+		var value = tenantNotificationSettings == null
+				? configuration.updateNotificationSettings(context, workspaceId, request, version(ifMatch), correlation(servletRequest))
+				: configurationPreferences(tenantNotificationSettings.updateSettings(context, workspaceUuid(workspaceId),
+						notificationPreferences(request, version(ifMatch)), version(ifMatch), correlation(servletRequest)));
 		return ResponseEntity.ok().eTag(etag(value.version())).body(value);
 	}
 
@@ -183,6 +197,19 @@ public final class TenantConfigurationController {
 	}
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
+	private static UUID workspaceUuid(String value) {
+		try { return UUID.fromString(value); } catch (IllegalArgumentException exception) { throw new ApiResourceNotFoundException("workspace"); }
+	}
+	private static NotificationPreferencesView notificationPreferences(TenantConfigurationModels.NotificationSettingsView value, long version) {
+		return new NotificationPreferencesView(value.preferences().stream()
+				.map(preference -> new NotificationPreferenceView(preference.eventCategory(), preference.channel(), preference.enabled(), preference.version()))
+				.toList(), version);
+	}
+	private static TenantConfigurationModels.NotificationSettingsView configurationPreferences(NotificationPreferencesView value) {
+		return new TenantConfigurationModels.NotificationSettingsView(value.preferences().stream()
+				.map(preference -> new TenantConfigurationModels.NotificationPreferenceView(preference.eventCategory(), preference.channel(), preference.enabled(), preference.version()))
+				.toList(), value.version());
+	}
 
 	public record OrganizationProfileRequest(String legalName, String displayName, String businessIdentifier, String operationCategory) {
 		TenantConfigurationModels.OrganizationProfileView toView() { return new TenantConfigurationModels.OrganizationProfileView(legalName, displayName, businessIdentifier, operationCategory, 0); }

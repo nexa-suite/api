@@ -13,6 +13,9 @@ See [Compose details](./compose/README.md) and the
 [script inventory](../scripts/README.md). This navigation does not change
 service topology or runtime behavior.
 
+The opt-in per-Tenant local business database workflow is documented in
+[Local Tenant business database provisioning](./tenant-business-database-local.md).
+
 ## Academic Render and Neon deployment
 
 The Render service uses GitHub `main`, the Free plan and the existing Neon

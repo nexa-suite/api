@@ -362,7 +362,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                 + "\",\"driverAssignmentVersion\":" + assignmentView.get("fulfillmentVersion").asLong()
                 + ",\"outgoingGoodsCheckId\":\"" + json(outgoingCheck).get("id").asText() + "\"}";
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/dispatches")
-                        .header("Authorization", bearer(warehouseToken))
+                        .header("Authorization", bearer(logisticsToken))
                         .header("If-Match", assignment.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "delivery-instructions-handover-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))

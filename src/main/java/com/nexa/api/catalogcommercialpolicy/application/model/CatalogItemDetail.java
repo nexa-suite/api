@@ -3,6 +3,7 @@ package com.nexa.api.catalogcommercialpolicy.application.model;
 import java.math.BigDecimal;
 import java.time.Instant;
 
+@org.springframework.modulith.NamedInterface("catalog-item-detail")
 public record CatalogItemDetail(
 		String catalogItemId,
 		String productId,

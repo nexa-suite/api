@@ -1,6 +1,6 @@
 package com.nexa.api.creditreceivables.presentation;
 
-import com.nexa.api.creditreceivables.application.service.CreditExposureApplicationService;
+import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -26,16 +26,16 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public class CreditExposureQueryController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final CreditExposureApplicationService service;
+    private final CreditExposureUseCase service;
 
-    public CreditExposureQueryController(CreditExposureApplicationService service) {
+    public CreditExposureQueryController(CreditExposureUseCase service) {
         this.service = service;
     }
 
     @GetMapping("/me/credit-exposure")
     @Operation(operationId = "getCurrentBuyerCreditExposure",
             description = "Returns supplier-scoped credit facts for the active Buyer relationship resolved from the verified PORTAL membership. No client account selector is accepted.")
-    public CreditExposureApplicationService.CreditExposureView buyer(
+    public CreditExposureUseCase.CreditExposureView buyer(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @RequestParam(defaultValue = "PEN") @Pattern(regexp = "[A-Za-z]{3}") String currency) {
         return service.readBuyer(context, currency);
@@ -44,7 +44,7 @@ public class CreditExposureQueryController {
     @GetMapping("/{clientAccountId}/credit-exposure")
     @Operation(operationId = "getClientCreditExposure",
             description = "Returns the current credit limit, ledger exposure, active reservations, outstanding receivables and available credit for an active customer account. Tenant and workspace scope come from the verified access context.")
-    public CreditExposureApplicationService.CreditExposureView get(
+    public CreditExposureUseCase.CreditExposureView get(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID clientAccountId,
             @Parameter(description = "Three-letter currency code; defaults to PEN")

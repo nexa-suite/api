@@ -468,12 +468,41 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
                 + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/dispatches")
-                        .header("Authorization", "Bearer " + warehouse).header("If-Match", fulfillmentEtag)
+                        .header("Authorization", "Bearer " + logistics).header("If-Match", fulfillmentEtag)
                         .header("Idempotency-Key", "handoff-dispatch-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk()).andReturn();
         String deliveryId = json(dispatched).get("deliveryId").asText();
         UUID delivery = UUID.fromString(deliveryId);
+
+        MvcResult buyerDeliveryPage = mockMvc.perform(get("/api/v1/buyer/deliveries")
+                        .param("page", "0").param("size", "100").param("clientAccountId", uuid())
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk()).andReturn();
+        var buyerDeliveryItems = json(buyerDeliveryPage).get("items");
+        assertThat(buyerDeliveryItems.toString()).contains("\"id\":\"" + deliveryId + "\"");
+        assertThat(json(buyerDeliveryPage).get("total").asLong()).isGreaterThan(0);
+        assertThat(buyerDeliveryItems.toString()).doesNotContain(
+                "salesOrderId", "clientAccountId", "fulfillmentId", "driverMembershipId", "operatorId");
+        mockMvc.perform(get("/api/v1/buyer/deliveries")
+                        .header("Authorization", "Bearer " + sales))
+                .andExpect(status().isForbidden());
+
+        MvcResult buyerDeliveryDetail = mockMvc.perform(get("/api/v1/buyer/deliveries/" + deliveryId)
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(deliveryId))
+                .andExpect(jsonPath("$.status").value("DISPATCHED"))
+                .andReturn();
+        assertThat(buyerDeliveryDetail.getResponse().getContentAsString()).doesNotContain(
+                "salesOrderId", "clientAccountId", "fulfillmentId", "driverMembershipId", "operatorId");
+
+        MvcResult buyerDeliveryEvents = mockMvc.perform(get("/api/v1/buyer/deliveries/" + deliveryId + "/events")
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(buyerDeliveryEvents.getResponse().getContentAsString())
+                .contains("HANDED_OVER")
+                .doesNotContain("actorMembershipId", "reason", "driverMembershipId", "operatorId");
 
         MvcResult deliveryView = mockMvc.perform(get("/api/v1/deliveries/" + deliveryId)
                         .header("Authorization", "Bearer " + logistics)).andExpect(status().isOk()).andReturn();
@@ -1126,7 +1155,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
                 + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + flow.fulfillmentId() + "/dispatches")
-                        .header("Authorization", "Bearer " + warehouse)
+                        .header("Authorization", "Bearer " + logistics)
                         .header("If-Match", assignedEtag)
                         .header("Idempotency-Key", key + "-dispatch")
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))

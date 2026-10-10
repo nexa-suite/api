@@ -163,7 +163,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
 
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/dispatches")
-                        .header("Authorization", "Bearer " + warehouse)
+                        .header("Authorization", "Bearer " + logistics)
                         .header("If-Match", fulfillmentEtag)
                         .header("Idempotency-Key", "canonical-dispatch-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))

@@ -15,10 +15,14 @@ Product Owner approved the explicit grant policy below before implementation.
 ## Decision
 
 An explicit grant binds one active Workforce Membership to one Warehouse in the
-same Tenant and Workspace. Absence of a grant denies Warehouse object access.
-The grant is necessary but never sufficient: every operation must also satisfy
-the current permission, active Tenant/Workspace/Membership and resource scope.
-No role, permission hint or client-selected Warehouse creates an implicit grant.
+same Tenant and Workspace. The Owner subsequently approved one technical target:
+the exact active reserved `SYSTEM_WORKFLOW` membership for `NEXA_AUTOMATION` may
+also receive an explicit grant for an individual Warehouse in that same scope.
+No global or automatic Warehouse grant is authorized. Absence of a grant denies
+Warehouse object access. The grant is necessary but never sufficient: every
+operation must also satisfy the current permission, active Tenant/Workspace/
+Membership and resource scope. No role, permission hint or client-selected
+Warehouse creates an implicit grant.
 
 Grant administration requires the existing `tenant.role.assign` authority.
 Assignment and revocation must use current server-verified authority and scoped

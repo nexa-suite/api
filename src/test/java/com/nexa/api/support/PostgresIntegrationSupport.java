@@ -4,6 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @TestPropertySource(properties = "spring.autoconfigure.exclude=")
+@Import(TenantBusinessIntegrationTestConfiguration.class)
 public abstract class PostgresIntegrationSupport {
 	protected static final String TEST_PASSWORD = "integration-test-password";
 	protected static final String MIGRATOR_USERNAME = "nexa";
@@ -67,6 +70,9 @@ public abstract class PostgresIntegrationSupport {
 
 	@Autowired
 	protected JdbcTemplate jdbc;
+
+	@Autowired
+	private Environment environment;
 
 	@DynamicPropertySource
 	static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -110,6 +116,24 @@ public abstract class PostgresIntegrationSupport {
 	void resetThrottleState() {
 		ensureTestRolePrivileges();
 		jdbc.update("delete from iam.authentication_failure");
+		if (tenantBusinessRoutingEnabled()) {
+			provisionTenantBusinessDatabase(UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+		}
+	}
+
+	/** Direct test-only SQL handle for assertions/seeding against the actual routed Tenant database. */
+	protected JdbcTemplate tenantJdbc() {
+		return tenantJdbcFor(UUID.fromString(tenantId()));
+	}
+
+	/** Direct test-only SQL handle for an explicitly provisioned Tenant database. */
+	protected JdbcTemplate tenantJdbcFor(UUID tenantId) {
+		return TenantBusinessIntegrationFixture.jdbcFor(tenantId);
+	}
+
+	/** Provisions the physical Tenant database and central READY binding for an existing exact Workspace. */
+	protected void provisionTenantBusinessDatabase(UUID tenantId, UUID workspaceId) {
+		TenantBusinessIntegrationFixture.provision(jdbc, tenantId, workspaceId);
 	}
 
 	/** Signs in through the real HTTP stack and returns the access token. */
@@ -150,6 +174,14 @@ public abstract class PostgresIntegrationSupport {
 
 	protected static String uuid() {
 		return UUID.randomUUID().toString();
+	}
+
+	private boolean tenantBusinessRoutingEnabled() {
+		return java.util.Arrays.stream(new String[]{"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request", "catalog-detail-read",
+				"catalog-management", "payments", "fulfillment-delivery", "warehouse-operations", "local-fixtures",
+				"support-sales-order-read", "business-documents", "business-traceability", "notifications"})
+				.anyMatch(capability -> environment.getProperty(
+						"nexa.tenant-business." + capability + ".enabled", Boolean.class, false));
 	}
 
 	public static Connection openRuntimeConnection() throws SQLException {

@@ -59,6 +59,27 @@ public class SalesOrderFulfillmentPersistenceAdapter
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public OrderReferencePage findReferencesByClientAccount(UUID tenantId, UUID workspaceId,
+                                                             UUID clientAccountId, int page, int size) {
+        if (tenantId == null || workspaceId == null || clientAccountId == null
+                || page < 0 || size < 1 || size > 250) {
+            throw new IllegalArgumentException("A scoped sales-order page is required");
+        }
+        long offset = Math.multiplyExact((long) page, size);
+        List<OrderReference> selected = jdbc.query(
+                "select id,number,created_at from sales.sales_order "
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? "
+                        + "order by created_at desc,id asc limit ? offset ?",
+                (rs, row) -> new OrderReference(rs.getObject("id", UUID.class), rs.getString("number"),
+                        rs.getTimestamp("created_at").toInstant()),
+                tenantId, workspaceId, clientAccountId, size + 1, offset);
+        boolean hasMore = selected.size() > size;
+        List<OrderReference> items = hasMore ? selected.subList(0, size) : selected;
+        return new OrderReferencePage(items, page, size, hasMore);
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void markInFulfillment(UUID tenantId, UUID workspaceId, UUID salesOrderId,
                                   UUID actorMembershipId, Instant now) {

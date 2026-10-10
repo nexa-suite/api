@@ -20,4 +20,14 @@ public final class BuyerMembershipDirectoryService implements BuyerMembershipDir
                 .map(value -> new BuyerMembershipReference(value.id(), value.email(), value.displayName()))
                 .toList();
     }
+
+    @Override
+    public java.util.Optional<ActiveBuyerIdentityReference> findActiveBuyerIdentity(
+            String tenantId, String workspaceId, String membershipId) {
+        return memberships.findMembership(tenantId, membershipId)
+                .filter(value -> workspaceId.equals(value.workspaceId()))
+                .filter(value -> "ACTIVE".equals(value.status()))
+                .filter(value -> value.roles().stream().anyMatch("BUYER"::equalsIgnoreCase))
+                .map(value -> new ActiveBuyerIdentityReference(value.id(), value.userId()));
+    }
 }

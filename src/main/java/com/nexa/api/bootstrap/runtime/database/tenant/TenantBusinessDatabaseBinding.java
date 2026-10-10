@@ -9,7 +9,13 @@ import java.util.UUID;
 public record TenantBusinessDatabaseBinding(
 		TenantId tenantId,
 		UUID databaseIdentity,
-		String credentialSecretReference) {
+		String credentialSecretReference,
+		String verifiedSchemaManifestSha256) {
+
+	public TenantBusinessDatabaseBinding(TenantId tenantId, UUID databaseIdentity,
+			String credentialSecretReference) {
+		this(tenantId, databaseIdentity, credentialSecretReference, null);
+	}
 
 	public TenantBusinessDatabaseBinding {
 		tenantId = Objects.requireNonNull(tenantId, "Tenant id is required");
@@ -18,6 +24,10 @@ public record TenantBusinessDatabaseBinding(
 				"Business database credential reference is required").strip();
 		if (credentialSecretReference.isEmpty()) {
 			throw new IllegalArgumentException("Business database credential reference is required");
+		}
+		if (verifiedSchemaManifestSha256 != null
+				&& !verifiedSchemaManifestSha256.matches("[0-9a-f]{64}")) {
+			throw new IllegalArgumentException("Verified Tenant schema manifest digest is invalid");
 		}
 	}
 

@@ -1,7 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort.FulfillmentDriverAssignmentView;
-import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentDriverAssignmentService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -35,10 +35,10 @@ import java.util.UUID;
 public final class FulfillmentDriverAssignmentController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
 
-    private final FulfillmentDriverAssignmentService service;
+    private final FulfillmentDeliveryRequestRunner requests;
 
-    public FulfillmentDriverAssignmentController(FulfillmentDriverAssignmentService service) {
-        this.service = service;
+    public FulfillmentDriverAssignmentController(FulfillmentDeliveryRequestRunner requests) {
+        this.requests = requests;
     }
 
     @GetMapping
@@ -46,7 +46,9 @@ public final class FulfillmentDriverAssignmentController {
     public ResponseEntity<AssignmentResponse> current(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
-        Optional<FulfillmentDriverAssignmentView> current = service.current(context, fulfillmentId);
+        Optional<FulfillmentDriverAssignmentView> current = requests.execute(context,
+                FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
+                composition -> composition.driverAssignments().current(context, fulfillmentId));
         return current.map(value -> ResponseEntity.ok().eTag(etag(value.fulfillmentVersion()))
                         .body(response(value)))
                 .orElseGet(() -> ResponseEntity.noContent().build());
@@ -60,9 +62,11 @@ public final class FulfillmentDriverAssignmentController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody AssignmentRequest request) {
-        FulfillmentDriverAssignmentView value = service.assign(context, fulfillmentId, version(ifMatch),
-                request.physicalAllocationId(), request.physicalAllocationVersion(),
-                request.responsibleMembershipId(), idempotencyKey);
+        FulfillmentDriverAssignmentView value = requests.execute(context,
+                FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(),
+                composition -> composition.driverAssignments().assign(context, fulfillmentId, version(ifMatch),
+                        request.physicalAllocationId(), request.physicalAllocationVersion(),
+                        request.responsibleMembershipId(), idempotencyKey));
         return ResponseEntity.ok().eTag(etag(value.fulfillmentVersion())).body(response(value));
     }
 
@@ -74,10 +78,12 @@ public final class FulfillmentDriverAssignmentController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody PlanChangeRequest request) {
-        FulfillmentDriverAssignmentView value = service.changePlan(context, fulfillmentId, version(ifMatch),
-                request.expectedAssignmentId(), request.expectedAssignmentVersion(),
-                request.physicalAllocationId(), request.physicalAllocationVersion(),
-                request.responsibleMembershipId(), request.plannedDispatchAt(), idempotencyKey);
+        FulfillmentDriverAssignmentView value = requests.execute(context,
+                FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(),
+                composition -> composition.driverAssignments().changePlan(context, fulfillmentId, version(ifMatch),
+                        request.expectedAssignmentId(), request.expectedAssignmentVersion(),
+                        request.physicalAllocationId(), request.physicalAllocationVersion(),
+                        request.responsibleMembershipId(), request.plannedDispatchAt(), idempotencyKey));
         return ResponseEntity.ok().eTag(etag(value.fulfillmentVersion())).body(response(value));
     }
 
@@ -86,7 +92,9 @@ public final class FulfillmentDriverAssignmentController {
     public ResponseEntity<List<AssignmentResponse>> history(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
-        return ResponseEntity.ok(service.history(context, fulfillmentId).stream()
+        return ResponseEntity.ok(requests.execute(context,
+                        FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
+                        composition -> composition.driverAssignments().history(context, fulfillmentId)).stream()
                 .map(FulfillmentDriverAssignmentController::response).toList());
     }
 

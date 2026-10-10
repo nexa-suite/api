@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -34,6 +35,9 @@ public class JdbcBusinessTraceabilityAdapter implements BusinessTraceabilityComm
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void record(TraceRequest request) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Business traceability must join an active transaction");
+        }
         UUID auditId = UUID.nameUUIDFromBytes((request.tenantId() + "|" + request.workspaceId()
                 + "|" + request.eventType() + "|" + request.subjectType() + "|"
                 + request.subjectId() + "|" + request.occurrenceKey()).getBytes(StandardCharsets.UTF_8));

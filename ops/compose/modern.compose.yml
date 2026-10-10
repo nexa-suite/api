@@ -1,6 +1,34 @@
 name: nexa-modern
 
 services:
+  modern-tenant-credentials:
+    image: alpine:3.22
+    container_name: nexa-modern-tenant-credentials
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/usr/local/bin/project-local-tenant-api-credentials.sh"]
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /run/tenant-credentials-sync:mode=0700
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "test -f /run/tenant-credentials-sync/ready"]
+      interval: 2s
+      timeout: 1s
+      start_period: 2s
+      retries: 5
+    volumes:
+      - type: bind
+        source: ../../.local/tenant-databases
+        target: /source
+        read_only: true
+        bind:
+          create_host_path: false
+      - nexa-modern-tenant-runtime-credentials:/projection
+      - ./scripts/project-local-tenant-api-credentials.sh:/usr/local/bin/project-local-tenant-api-credentials.sh:ro
+
   modern-postgres:
     image: postgres:18.4-alpine
     container_name: nexa-modern-postgres
@@ -34,6 +62,20 @@ services:
       NEXA_DATABASE_RUNTIME_USERNAME: nexa_runtime
       NEXA_DATABASE_RUNTIME_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
       NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME: "true"
+      NEXA_TENANT_BUSINESS_PURCHASE_REQUEST_ENABLED: ${NEXA_TENANT_BUSINESS_PURCHASE_REQUEST_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_PURCHASE_REQUEST_WALLET_TENDER_ENABLED: ${NEXA_TENANT_BUSINESS_PURCHASE_REQUEST_WALLET_TENDER_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED: ${NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_CATALOG_MANAGEMENT_ENABLED: ${NEXA_TENANT_BUSINESS_CATALOG_MANAGEMENT_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_FULFILLMENT_DELIVERY_ENABLED: ${NEXA_TENANT_BUSINESS_FULFILLMENT_DELIVERY_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_WAREHOUSE_OPERATIONS_ENABLED: ${NEXA_TENANT_BUSINESS_WAREHOUSE_OPERATIONS_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_BUYER_WALLET_READ_ENABLED: ${NEXA_TENANT_BUSINESS_BUYER_WALLET_READ_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_BUYER_WALLET_RECHARGE_ENABLED: ${NEXA_TENANT_BUSINESS_BUYER_WALLET_RECHARGE_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_PAYMENTS_ENABLED: ${NEXA_TENANT_BUSINESS_PAYMENTS_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_SUPPORT_SALES_ORDER_READ_ENABLED: ${NEXA_TENANT_BUSINESS_SUPPORT_SALES_ORDER_READ_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_BUSINESS_DOCUMENTS_ENABLED: ${NEXA_TENANT_BUSINESS_BUSINESS_DOCUMENTS_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_BUSINESS_TRACEABILITY_ENABLED: ${NEXA_TENANT_BUSINESS_BUSINESS_TRACEABILITY_ENABLED:-true}
+      NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED: ${NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED:-true}
+      NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD: ${NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD:?Set NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD in api/.env.local}
       NEXA_DATABASE_MIGRATOR_USERNAME: ${NEXA_MODERN_POSTGRES_USER:?Set NEXA_MODERN_POSTGRES_USER in api/.env.local}
       NEXA_DATABASE_MIGRATOR_PASSWORD: ${NEXA_MODERN_POSTGRES_PASSWORD:?Set NEXA_MODERN_POSTGRES_PASSWORD in api/.env.local}
       NEXA_FLYWAY_ENABLED: "true"
@@ -59,6 +101,7 @@ services:
       NEXA_PASSWORD_RESET_THROTTLE_KEY: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:?Set NEXA_PASSWORD_RESET_THROTTLE_KEY in api/.env.local}
       NEXA_NOTIFICATION_OUTBOX_KEY: ${NEXA_NOTIFICATION_OUTBOX_KEY:?Set NEXA_NOTIFICATION_OUTBOX_KEY in api/.env.local}
       NEXA_SYSTEM_OPERATOR_TOKEN: ${NEXA_SYSTEM_OPERATOR_TOKEN:?Set NEXA_SYSTEM_OPERATOR_TOKEN in api/.env.local}
+      NEXA_INTERNAL_OPERATOR_ALLOWLIST: ${NEXA_INTERNAL_OPERATOR_ALLOWLIST:-}
       NEXA_DEV_BOOTSTRAP_ENABLED: ${NEXA_DEV_BOOTSTRAP_ENABLED:-false}
       NEXA_DEV_DEMO_PASSWORD: ${NEXA_DEV_DEMO_PASSWORD:-}
       NEXA_DEV_TENANT_NAME: ${NEXA_DEV_TENANT_NAME:-}
@@ -90,12 +133,16 @@ services:
       NEXA_OBJECT_STORAGE_REGION: ${NEXA_OBJECT_STORAGE_REGION:-us-east-1}
       NEXA_CLAMAV_HOST: ${NEXA_CLAMAV_HOST:-modern-clamav}
       NEXA_CLAMAV_PORT: ${NEXA_CLAMAV_PORT:-3310}
+      NEXA_TENANT_BUSINESS_LOCAL_CREDENTIALS_DIRECTORY: /run/secrets/tenant-databases
     volumes:
       - ../../.local-keys/access-token-public.pem:/run/secrets/nexa_access_token_public:ro
       - ../../.local-keys/access-token-private.pem:/run/secrets/nexa_access_token_private:ro
+      - nexa-modern-tenant-runtime-credentials:/run/secrets/tenant-databases:ro
       - nexa-modern-object-storage:/app/.local-object-storage
     depends_on:
       modern-postgres:
+        condition: service_healthy
+      modern-tenant-credentials:
         condition: service_healthy
       modern-mailpit:
         condition: service_healthy
@@ -191,6 +238,8 @@ services:
       dockerfile: Dockerfile
     image: nexa/modern-platform:local
     container_name: nexa-modern-platform
+    environment:
+      NEXA_PLATFORM_API_BASE_URL: ${NEXA_PLATFORM_API_BASE_URL:-http://localhost:8080/api/v1}
     depends_on:
       modern-api:
         condition: service_healthy
@@ -211,6 +260,8 @@ services:
       dockerfile: Dockerfile
     image: nexa/modern-portal:local
     container_name: nexa-modern-portal
+    environment:
+      NEXA_PORTAL_API_BASE_URL: ${NEXA_PORTAL_API_BASE_URL:-http://localhost:8080/api/v1}
     depends_on:
       modern-api:
         condition: service_healthy
@@ -257,6 +308,8 @@ networks:
     name: nexa-modern-data
 
 volumes:
+  nexa-modern-tenant-runtime-credentials:
+    name: nexa-modern-tenant-runtime-credentials
   nexa-modern-postgres-data:
     name: nexa-modern-postgres-data
   nexa-modern-object-storage:

@@ -368,7 +368,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
         MvcResult latest = mockMvc.perform(get(fulfillmentPath).header("Authorization", bearer(fixture.warehouseToken())))
                 .andExpect(status().isOk()).andReturn();
         MvcResult handedOver = mockMvc.perform(post(fulfillmentPath + "/dispatches")
-                        .header("Authorization", bearer(fixture.warehouseToken()))
+                        .header("Authorization", bearer(fixture.logisticsToken()))
                         .header("If-Match", latest.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "load-handover-" + fixture.fulfillmentId())
                         .contentType(MediaType.APPLICATION_JSON)

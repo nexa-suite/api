@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Arrays;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,13 +66,21 @@ class ModernPostgresUpgradeMigrationTests {
             }
         }
 
-        Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-                .locations("classpath:db/migration").load().migrate();
+        Flyway currentMigrations = Flyway.configure()
+                .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .locations("classpath:db/migration").load();
+        String latestResolvedMigration = Arrays.stream(currentMigrations.info().all())
+                .filter(org.flywaydb.core.api.MigrationInfo::isVersioned)
+                .map(org.flywaydb.core.api.MigrationInfo::getVersion)
+                .max(Comparator.naturalOrder())
+                .orElseThrow(() -> new IllegalStateException("No resolved versioned migrations were found"))
+                .getVersion();
+        currentMigrations.migrate();
 
         try (var connection = POSTGRES.createConnection("")) {
             try (var statement = connection.createStatement(); var version = statement.executeQuery("select version from flyway_schema_history order by installed_rank desc limit 1")) {
                 assertThat(version.next()).isTrue();
-                assertThat(version.getString(1)).isEqualTo("146");
+                assertThat(version.getString(1)).isEqualTo(latestResolvedMigration);
             }
             try (var statement = connection.prepareStatement("select count(*) from catalog_management.product where id=?")) {
                 statement.setObject(1, product);

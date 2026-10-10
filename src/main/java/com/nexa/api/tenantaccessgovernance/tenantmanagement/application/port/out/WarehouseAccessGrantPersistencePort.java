@@ -14,6 +14,7 @@ import java.util.UUID;
 public interface WarehouseAccessGrantPersistencePort {
     boolean isActiveScope(TenantId tenantId, WorkspaceId workspaceId, MembershipId membershipId);
 
+    /** Allows current INTERNAL members and the exact persisted SYSTEM_WORKFLOW/NEXA_AUTOMATION actor. */
     boolean isActiveMembership(TenantId tenantId, WorkspaceId workspaceId, MembershipId membershipId);
 
     Set<UUID> activeWarehouseIds(TenantId tenantId, WorkspaceId workspaceId, MembershipId membershipId);

@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PersistenceOwnershipTests {
     private static final Path SOURCE_ROOT = Path.of("src/main/java/com/nexa/api");
     private static final Path MIGRATION_ROOT = Path.of("src/main/resources/db/migration");
+    private static final Path TENANT_MIGRATION_ROOT = Path.of("src/main/resources/db/tenant-migration");
     private static final Path OWNERSHIP_FILE = Path.of("docs/architecture/canonical-sql-ownership.tsv");
     private static final Pattern SQL_TABLE = Pattern.compile(
             "\\b(?:from|join|into|update|delete\\s+from)\\s+(?:only\\s+)?"
@@ -62,7 +63,8 @@ class PersistenceOwnershipTests {
     @Test
     void prescribedOwnershipExceptionsAreExplicit() throws IOException {
         Map<String, Ownership> ownership = ownershipManifest();
-        assertOwners(ownership, "BC01", "iam.user_account", "tenant_management.workspace");
+        assertOwners(ownership, "BC01", "iam.user_account", "tenant_management.workspace",
+                "tenant_management.wallet_recharge_provider_route");
         assertOwners(ownership, "BC02", "sales.client_account", "sales.client_account_address",
                 "sales.client_account_membership");
         assertOwners(ownership, "BC03", "catalog_management.sellable_sku");
@@ -73,7 +75,10 @@ class PersistenceOwnershipTests {
                 "payments.receivable", "payments.receivable_allocation", "payments.receivable_application",
                 "payments.financial_adjustment", "payments.financial_ledger_entry",
                 "payments.refund_credit_obligation");
-        assertOwners(ownership, "BC08", "payments.payment");
+        assertOwners(ownership, "BC08", "payments.payment", "payments.buyer_wallet_account",
+                "payments.buyer_wallet_ledger_entry", "payments.buyer_wallet_reservation",
+                "payments.buyer_wallet_reservation_event", "payments.buyer_wallet_recharge",
+                "payments.buyer_wallet_recharge_processed_event");
         assertOwners(ownership, "BC09", "business_documents.business_document");
         assertOwners(ownership, "BC10", "notifications.inbox_item", "tenant_management.notification_preference");
         assertOwners(ownership, "BC11", "audit.event");
@@ -162,13 +167,15 @@ class PersistenceOwnershipTests {
 
     private static Set<String> migrationTables() throws IOException {
         Set<String> result = new HashSet<>();
-        try (Stream<Path> files = Files.list(MIGRATION_ROOT)) {
-            for (Path file : files.filter(path -> path.getFileName().toString().matches("V\\d+__.*\\.sql"))
-                    .sorted().toList()) {
-                Matcher matcher = CREATED_TABLE.matcher(Files.readString(file));
-                while (matcher.find()) {
-                    String table = (matcher.group(1) + "." + matcher.group(2)).toLowerCase(Locale.ROOT);
-                    result.add(table);
+        for (Path migrationRoot : List.of(MIGRATION_ROOT, TENANT_MIGRATION_ROOT)) {
+            try (Stream<Path> files = Files.list(migrationRoot)) {
+                for (Path file : files.filter(path -> path.getFileName().toString().matches("V\\d+__.*\\.sql"))
+                        .sorted().toList()) {
+                    Matcher matcher = CREATED_TABLE.matcher(Files.readString(file));
+                    while (matcher.find()) {
+                        String table = (matcher.group(1) + "." + matcher.group(2)).toLowerCase(Locale.ROOT);
+                        result.add(table);
+                    }
                 }
             }
         }

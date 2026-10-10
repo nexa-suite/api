@@ -2,7 +2,7 @@ package com.nexa.api.inventoryavailability.presentation;
 
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationSubstitutionRequests;
-import com.nexa.api.inventoryavailability.application.service.PhysicalAllocationSubstitutionService;
+import com.nexa.api.inventoryavailability.application.port.WarehouseAuxiliaryOperationsRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -34,10 +34,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class PhysicalAllocationSubstitutionController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final PhysicalAllocationSubstitutionService service;
+    private final WarehouseAuxiliaryOperationsRequestRunner operations;
 
-    public PhysicalAllocationSubstitutionController(PhysicalAllocationSubstitutionService service) {
-        this.service = service;
+    public PhysicalAllocationSubstitutionController(WarehouseAuxiliaryOperationsRequestRunner operations) {
+        this.operations = operations;
     }
 
     @PostMapping("/inventory/physical-allocation-substitution-requests")
@@ -51,10 +51,10 @@ public final class PhysicalAllocationSubstitutionController {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new WarehouseOperationsService.WarehouseException("PRECONDITION_REQUIRED", false);
         }
-        PhysicalAllocationSubstitutionRequests.Result result = service.request(
-                context, request.fulfillmentId(), request.allocationId(), request.physicalAllocationLineId(),
+        PhysicalAllocationSubstitutionRequests.Result result = operations.execute(context, services ->
+                services.substitutions().request(context, request.fulfillmentId(), request.allocationId(), request.physicalAllocationLineId(),
                 request.expectedLotId(), request.alternativeLotId(), request.quantity(), request.unit(),
-                request.reason(), idempotencyKey, expectedVersion);
+                request.reason(), idempotencyKey, expectedVersion));
         var fact = result.fact();
         SubstitutionRequestResponse response = new SubstitutionRequestResponse(
                 fact.id(), fact.expectedLotId(), fact.alternativeLotId(), fact.quantity(), fact.reason(),

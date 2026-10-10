@@ -52,6 +52,7 @@ import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftPr
 import com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipConflictException;
 import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipPreconditionRequiredException;
+import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipsStoreUnavailableException;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerRelationshipInvariantViolation;
 import com.nexa.api.salescommitment.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
@@ -63,9 +64,13 @@ import com.nexa.api.salescommitment.application.exception.SalesOrderRejectionRea
 import com.nexa.api.salescommitment.application.exception.SalesOrderTransitionException;
 import com.nexa.api.edge.streaming.ChangeFeedCapacityException;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationException;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationsStoreUnavailableException;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperationException;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
+import com.nexa.api.creditreceivables.application.exception.CreditAccountConfigurationUnavailableException;
+import com.nexa.api.creditreceivables.application.exception.CreditReceivablesUnavailableException;
+import com.nexa.api.payments.application.publicapi.BuyerWalletStoreUnavailableException;
 import com.nexa.api.fulfillmentdelivery.domain.publicapi.DispatchTransitionViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -320,6 +325,40 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.ROLE_DEFINITION_STORAGE_UNAVAILABLE, "Role definition persistence is unavailable", request);
 	}
 
+	@ExceptionHandler(BuyerWalletStoreUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleBuyerWalletStoreUnavailable(BuyerWalletStoreUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Buyer wallet capability is unavailable", request);
+	}
+
+	@ExceptionHandler(WarehouseOperationsStoreUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleWarehouseOperationsStoreUnavailable(
+			WarehouseOperationsStoreUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Warehouse operations capability is unavailable", request);
+	}
+
+	@ExceptionHandler(CreditAccountConfigurationUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleCreditAccountConfigurationUnavailable(
+			CreditAccountConfigurationUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant credit configuration is unavailable", request);
+	}
+
+	@ExceptionHandler(CreditReceivablesUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleCreditReceivablesUnavailable(
+			CreditReceivablesUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant Credit and Receivables are unavailable", request);
+	}
+
+	@ExceptionHandler(CustomerRelationshipsStoreUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleCustomerRelationshipsStoreUnavailable(
+			CustomerRelationshipsStoreUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant Customer Relationships are unavailable", request);
+	}
+
 	@ExceptionHandler(SalesResourceNotFoundException.class)
 	public ResponseEntity<ProblemDetail> handleSalesNotFound(SalesResourceNotFoundException exception, HttpServletRequest request) {
 		ApiErrorCode code = switch (exception.getMessage()) {
@@ -371,13 +410,17 @@ public final class GlobalExceptionHandler {
 		if ("PRECONDITION_REQUIRED".equals(exception.code())) {
 			return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
 		}
+		if ("PRECONDITION_FAILED".equals(exception.code())) {
+			return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED,
+					"Credit account changed by another request", request);
+		}
 		if ("CONCURRENCY_CONFLICT".equals(exception.code())) {
 			return staleOrConflict(ApiErrorCode.CONCURRENCY_CONFLICT, "Credit or receivable resource changed by another request", request);
 		}
 		HttpStatus status = switch (exception.code()) {
-			case "CREDIT_ACCOUNT_NOT_FOUND", "RECEIVABLE_NOT_FOUND", "ADJUSTMENT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+			case "CREDIT_ACCOUNT_NOT_FOUND", "CLIENT_ACCOUNT_NOT_FOUND", "RECEIVABLE_NOT_FOUND", "ADJUSTMENT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
 			case "IDEMPOTENCY_PAYLOAD_CONFLICT", "RECEIVABLE_APPLICATION_CONFLICT",
-					"DATA_INTEGRITY_CONFLICT" -> HttpStatus.CONFLICT;
+					"DATA_INTEGRITY_CONFLICT", "CREDIT_LIMIT_BELOW_USED", "CREDIT_ACCOUNT_CLOSED" -> HttpStatus.CONFLICT;
 			case "INSUFFICIENT_CREDIT" -> HttpStatus.BAD_REQUEST;
 			default -> HttpStatus.BAD_REQUEST;
 		};

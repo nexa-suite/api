@@ -1,7 +1,7 @@
 package com.nexa.api.inventoryavailability.presentation;
 
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
-import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
+import com.nexa.api.inventoryavailability.application.port.WarehouseSelectionRequestRunner;
 import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseAccessGrantView;
@@ -37,10 +37,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class WarehouseAccessGrantController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final WarehouseSelectionQuery warehouses;
+    private final WarehouseSelectionRequestRunner warehouses;
     private final WarehouseObjectAccess objectAccess;
 
-    public WarehouseAccessGrantController(WarehouseSelectionQuery warehouses, WarehouseObjectAccess objectAccess) {
+    public WarehouseAccessGrantController(WarehouseSelectionRequestRunner warehouses, WarehouseObjectAccess objectAccess) {
         this.warehouses = warehouses;
         this.objectAccess = objectAccess;
     }
@@ -56,7 +56,7 @@ public final class WarehouseAccessGrantController {
 
     @PostMapping
     @Operation(operationId = "grantWarehouseAccess", summary = "Grant Warehouse access",
-            description = "Grants a Warehouse to an active internal workforce membership. If-Match is required to reactivate a revoked grant.")
+            description = "Grants one Warehouse to an active internal membership or the exact active reserved SYSTEM_WORKFLOW/NEXA_AUTOMATION membership. The current workspace administrator selects the membership explicitly. If-Match is required to reactivate a revoked grant.")
     public ResponseEntity<WarehouseAccessGrantView> grant(
             @RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID warehouseId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -84,7 +84,7 @@ public final class WarehouseAccessGrantController {
 
     private void requireWarehouse(CurrentAccessContext context, UUID warehouseId) {
         objectAccess.authorizeAdministration(context);
-        if (!warehouses.existsInScope(context.tenantId().value(), context.workspaceId().value(), warehouseId)) {
+        if (!warehouses.existsInScope(context, warehouseId)) {
             throw new WarehouseOperationsService.WarehouseException("WAREHOUSE_NOT_FOUND", true);
         }
     }
@@ -116,5 +116,5 @@ public final class WarehouseAccessGrantController {
         return value == null ? "unknown" : value.toString();
     }
 
-    public record GrantRequest(@NotNull @Schema(description = "Active internal workspace membership receiving access") UUID membershipId) { }
+    public record GrantRequest(@NotNull @Schema(description = "Exact active internal or verified SYSTEM_WORKFLOW workspace membership receiving this Warehouse grant") UUID membershipId) { }
 }

@@ -1,6 +1,6 @@
 package com.nexa.api.inventoryavailability.presentation;
 
-import com.nexa.api.inventoryavailability.application.service.LotIdentifierResolutionService;
+import com.nexa.api.inventoryavailability.application.port.WarehouseAuxiliaryOperationsRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -20,17 +20,17 @@ import org.springframework.web.bind.annotation.RestController;
 @SecurityRequirement(name = "bearerAuth")
 public final class LotIdentifierResolutionController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final LotIdentifierResolutionService service;
+    private final WarehouseAuxiliaryOperationsRequestRunner operations;
 
-    public LotIdentifierResolutionController(LotIdentifierResolutionService service) {
-        this.service = service;
+    public LotIdentifierResolutionController(WarehouseAuxiliaryOperationsRequestRunner operations) {
+        this.operations = operations;
     }
 
     @GetMapping("/inventory/lots/resolve")
     @Operation(operationId = "resolveInventoryLotIdentifier")
-    public LotIdentifierResolutionService.Resolution resolve(
+    public com.nexa.api.inventoryavailability.application.service.LotIdentifierResolutionService.Resolution resolve(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @RequestParam String batchNumber) {
-        return service.resolve(context, batchNumber);
+        return operations.execute(context, services -> services.lotIdentifiers().resolve(context, batchNumber));
     }
 }

@@ -3,7 +3,7 @@ package com.nexa.api.salescommitment.infrastructure;
 import com.nexa.api.salescommitment.SalesTestFixtures;
 import com.nexa.api.salescommitment.application.port.out.GoogleMapsBoundaryPort;
 import com.nexa.api.salescommitment.application.port.out.MapCoordinate;
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.salescommitment.domain.model.delivery.DeliveryAddressSnapshot;
 import com.nexa.api.salescommitment.domain.model.delivery.WarehouseSnapshot;
 import com.nexa.api.salescommitment.infrastructure.maps.GoogleMapsRoutingAdapter;

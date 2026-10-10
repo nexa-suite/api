@@ -28,6 +28,24 @@ import java.util.Set;
 @EnableMethodSecurity
 public class ApiSecurityConfiguration {
 	@Bean
+	@Order(-200)
+	SecurityFilterChain internalOperatorSecurityFilterChain(HttpSecurity http,
+			InternalOperatorAuthenticationFilter operatorFilter, CorsConfigurationSource corsConfigurationSource,
+			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) throws Exception {
+		http.securityMatcher("/api/v1/internal/console/**", "/api/v1/internal/support/**")
+				.csrf(AbstractHttpConfigurer::disable)
+				.cors(cors -> cors.configurationSource(corsConfigurationSource))
+				.formLogin(AbstractHttpConfigurer::disable)
+				.httpBasic(AbstractHttpConfigurer::disable)
+				.logout(AbstractHttpConfigurer::disable)
+				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+				.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint).accessDeniedHandler(accessDeniedHandler))
+				.addFilterBefore(operatorFilter, BearerTokenAuthenticationFilter.class)
+				.authorizeHttpRequests(authorize -> authorize.anyRequest().hasAuthority(InternalOperatorAuthenticationFilter.AUTHORITY));
+		return http.build();
+	}
+
+	@Bean
 	@Order(-100)
 	SecurityFilterChain systemOperatorSecurityFilterChain(HttpSecurity http, SystemOperatorAuthenticationFilter operatorFilter,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) throws Exception {
@@ -109,7 +127,7 @@ public class ApiSecurityConfiguration {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Resume-Token", "X-Organization-Registration-Token", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-Client", "X-Nexa-Context-Ticket"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Resume-Token", "X-Organization-Registration-Token", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-Client", "X-Nexa-Context-Ticket", InternalOperatorAuthenticationFilter.OPERATOR_ID_HEADER, InternalOperatorAuthenticationFilter.OPERATOR_TOKEN_HEADER));
 		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-ID", "X-Trace-ID"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();

@@ -2,7 +2,7 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.DispatchReadinessModels;
 import com.nexa.api.fulfillmentdelivery.application.model.DispatchReadinessModels.Readiness;
-import com.nexa.api.fulfillmentdelivery.application.service.DispatchReadinessService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -32,10 +32,10 @@ import java.util.UUID;
 public class DispatchReadinessController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
 
-    private final DispatchReadinessService service;
+    private final FulfillmentDeliveryRequestRunner requests;
 
-    public DispatchReadinessController(DispatchReadinessService service) {
-        this.service = service;
+    public DispatchReadinessController(FulfillmentDeliveryRequestRunner requests) {
+        this.requests = requests;
     }
 
     @GetMapping
@@ -45,7 +45,8 @@ public class DispatchReadinessController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                .body(service.list(context, page, size));
+                .body(requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
+                        composition -> composition.dispatchReadiness().list(context, page, size)));
     }
 
     @GetMapping("/{fulfillmentId}")
@@ -54,6 +55,7 @@ public class DispatchReadinessController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
-                .body(service.readiness(context, fulfillmentId));
+                .body(requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
+                        composition -> composition.dispatchReadiness().readiness(context, fulfillmentId)));
     }
 }

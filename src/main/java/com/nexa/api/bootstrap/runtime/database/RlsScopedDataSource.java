@@ -3,6 +3,8 @@ package com.nexa.api.bootstrap.runtime.database;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import javax.sql.DataSource;
 import java.io.PrintWriter;
 import java.lang.reflect.InvocationHandler;
@@ -42,6 +44,21 @@ public final class RlsScopedDataSource implements DataSource {
         RlsRequestScope.Scope verifiedScope = new RlsRequestScope.Scope(
                 accessContext.tenantId().value(), accessContext.workspaceId().value());
         return new RlsScopedDataSource(delegate, () -> verifiedScope, () -> false, false);
+    }
+
+    /** Applies an explicit trusted system-worker scope without inventing a human access context. */
+    public static DataSource forVerifiedSystemTenant(DataSource delegate, TenantId tenantId,
+            WorkspaceId workspaceId) {
+        Objects.requireNonNull(tenantId, "Verified system Tenant id is required");
+        Objects.requireNonNull(workspaceId, "Verified system Workspace id is required");
+        RlsRequestScope.Scope verifiedScope = new RlsRequestScope.Scope(tenantId.value(), workspaceId.value());
+        return new RlsScopedDataSource(delegate, () -> verifiedScope, () -> false, false);
+    }
+
+    /** Wraps an isolated central worker pool with the same request-local RLS context as the primary pool. */
+    public static DataSource forCurrentCentralScope(DataSource delegate) {
+        return new RlsScopedDataSource(delegate, RlsRequestScope::current,
+                RlsRequestScope::crossScopeWorkspaceScanEnabled, true);
     }
 
     @Override

@@ -6,8 +6,8 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.P
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
-import com.nexa.api.fulfillmentdelivery.application.service.DriverDeliveryService;
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentLifecycleService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -44,23 +44,25 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class DriverDeliveryController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final DriverDeliveryService service;
+    private final FulfillmentDeliveryRequestRunner requests;
 
-    public DriverDeliveryController(DriverDeliveryService service) {
-        this.service = service;
+    public DriverDeliveryController(FulfillmentDeliveryRequestRunner requests) {
+        this.requests = requests;
     }
 
     @GetMapping
     @Operation(operationId = "listCurrentDriverDeliveries")
     public List<DeliveryView> list(@RequestAttribute(ACCESS) CurrentAccessContext context) {
-        return service.listAssigned(context);
+        return requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.driverDeliveries().listAssigned(context));
     }
 
     @GetMapping("/{deliveryId}")
     @Operation(operationId = "getCurrentDriverDelivery")
     public ResponseEntity<DeliveryView> get(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                             @PathVariable UUID deliveryId) {
-        DeliveryView value = service.getAssigned(context, deliveryId);
+        DeliveryView value = requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.driverDeliveries().getAssigned(context, deliveryId));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -70,7 +72,8 @@ public final class DriverDeliveryController {
                                                      @PathVariable UUID deliveryId,
                                                      @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                      @RequestHeader(name = "Idempotency-Key", required = false) String key) {
-        AttemptStartResult value = service.startAttempt(context, deliveryId, version(ifMatch), key);
+        AttemptStartResult value = requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.driverDeliveries().startAttempt(context, deliveryId, version(ifMatch), key));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.delivery().version())).body(value);
     }
@@ -90,8 +93,10 @@ public final class DriverDeliveryController {
                         new FulfillmentLifecycleService.AttemptLineCommand(line.fulfillmentLineId(), line.skuId(),
                                 line.attemptedQuantity(), line.deliveredQuantity(), line.rejectedQuantity(),
                                 line.cancelledQuantity(), line.unit())).toList());
-        FulfillmentModels.DeliveryOutcomeResult value = service.recordOutcome(
-                context, deliveryId, attemptId, version(ifMatch), key, command);
+        FulfillmentModels.DeliveryOutcomeResult value = requests.execute(context,
+                FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.driverDeliveries().recordOutcome(
+                        context, deliveryId, attemptId, version(ifMatch), key, command));
         return ResponseEntity.ok().eTag(etag(value.delivery().version())).body(value);
     }
 
@@ -103,7 +108,9 @@ public final class DriverDeliveryController {
             @PathVariable UUID attemptId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key) {
-        ArrivalView value = service.signalArrival(context, deliveryId, attemptId, version(ifMatch), key);
+        ArrivalView value = requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.driverDeliveries().signalArrival(
+                        context, deliveryId, attemptId, version(ifMatch), key));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
@@ -117,9 +124,10 @@ public final class DriverDeliveryController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody ProofOfDeliveryCreateRequest request) {
-        ProofOfDeliveryView value = service.createProofOfDelivery(context, deliveryId, attemptId,
-                version(ifMatch), key, new FulfillmentLifecycleService.DriverProofCommand(
-                        request.receiverName(), request.capturedAt(), request.notes()));
+        ProofOfDeliveryView value = requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.driverDeliveries().createProofOfDelivery(context, deliveryId, attemptId,
+                        version(ifMatch), key, new FulfillmentLifecycleService.DriverProofCommand(
+                                request.receiverName(), request.capturedAt(), request.notes())));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
@@ -134,8 +142,9 @@ public final class DriverDeliveryController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody ProofEvidenceAttachmentRequest request) {
-        ProofOfDeliveryView value = service.attachProofEvidence(context, deliveryId, attemptId, podId,
-                version(ifMatch), key, request.kind(), request.evidenceObjectId());
+        ProofOfDeliveryView value = requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.driverDeliveries().attachProofEvidence(context, deliveryId, attemptId, podId,
+                        version(ifMatch), key, request.kind(), request.evidenceObjectId()));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }

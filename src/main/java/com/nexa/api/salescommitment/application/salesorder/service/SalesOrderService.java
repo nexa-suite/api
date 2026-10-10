@@ -11,6 +11,7 @@ import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilte
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderApprovedWorkflowConversion;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderAggregatePersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderConversionPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.IdempotencyPersistencePort;
@@ -31,7 +32,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 
-public class SalesOrderService implements SalesOrderUseCase {
+public class SalesOrderService implements SalesOrderUseCase, SalesOrderApprovedWorkflowConversion {
 	private final SalesOrderPersistencePort persistence;
 	private final CustomerAccountQuery accounts;
 	private final SalesOrderAggregatePersistencePort aggregatePersistence;
@@ -79,6 +80,14 @@ public class SalesOrderService implements SalesOrderUseCase {
 	public SalesOrderView convert(CurrentAccessContext context, String purchaseRequestId, long purchaseRequestVersion,
 			String idempotencyKey, String note) {
 		return conversionService.convert(context, purchaseRequestId, purchaseRequestVersion, idempotencyKey, note);
+	}
+
+	@Override
+	@Transactional(noRollbackFor = com.nexa.api.salescommitment.application.exception.PurchaseRequestExpiredException.class)
+	public SalesOrderView convertApprovedBySystemWorkflow(CurrentAccessContext context, String purchaseRequestId,
+			long purchaseRequestVersion, String idempotencyKey, String note) {
+		return conversionService.convertApprovedBySystemWorkflow(context, purchaseRequestId, purchaseRequestVersion,
+				idempotencyKey, note);
 	}
 
 	@Override
@@ -130,7 +139,8 @@ public class SalesOrderService implements SalesOrderUseCase {
 			case "cancel" -> aggregate.cancel(at);
 		}
         SalesOrderView result = aggregatePersistence.saveTransition(aggregate, normalized, reason,
-                context.membershipId().toString(), context.userId().toString(), expectedVersion, at.toEpochMilli());
+                context.membershipId().toString(), context.userId().toString(), expectedVersion,
+                at.toEpochMilli(), context);
 		if (requestHash != null) {
 			idempotency.save(scope(context), workspace(context), context.membershipId().toString(), "sales-order-transition", idempotencyKey,
 						result.id(), result.version(), java.util.UUID.randomUUID(), at.toEpochMilli(), requestHash, serialize(result));

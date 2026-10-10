@@ -79,7 +79,8 @@ public final class PermissionCatalog {
 					PermissionKey.SALES_DASHBOARD_READ, PermissionKey.SALES_PURCHASE_REQUEST_READ,
 					PermissionKey.SALES_ORDER_READ, PermissionKey.CLIENT_READ, PermissionKey.CLIENT_MANAGE,
 					PermissionKey.CLIENT_ADDRESS_MANAGE, PermissionKey.CLIENT_COMMERCIAL_TERMS_MANAGE,
-					PermissionKey.CLIENT_CREDIT_MANAGE, PermissionKey.DOCUMENT_READ,
+					PermissionKey.CLIENT_CREDIT_MANAGE, PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE,
+					PermissionKey.DOCUMENT_READ,
 					PermissionKey.DOCUMENT_GENERATE, PermissionKey.DOCUMENT_REGENERATE,
 					PermissionKey.DOCUMENT_UPLOAD, PermissionKey.DOCUMENT_DOWNLOAD,
 					PermissionKey.PAYMENT_READ, PermissionKey.PAYMENT_CREATE,
@@ -115,6 +116,7 @@ public final class PermissionCatalog {
 					PermissionKey.NOTIFICATION_READ);
 			case BUSINESS_OPERATIONS_MANAGER -> Set.of(
 					PermissionKey.DELIVERY_EXCEPTION_READ, PermissionKey.DELIVERY_EXCEPTION_COORDINATE,
+					PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE,
 					PermissionKey.NOTIFICATION_READ, PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
 			case BUYER -> Set.of(
 					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PROMOTION_READ,

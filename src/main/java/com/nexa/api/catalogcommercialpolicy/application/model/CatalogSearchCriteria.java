@@ -3,7 +3,7 @@ package com.nexa.api.catalogcommercialpolicy.application.model;
 import com.nexa.api.catalogcommercialpolicy.domain.model.catalogitem.ColdChainRequirement;
 import com.nexa.api.catalogcommercialpolicy.domain.model.catalogitem.CatalogInvariantViolation;
 
-
+@org.springframework.modulith.NamedInterface("catalog-list-read")
 public record CatalogSearchCriteria(
 		String query,
 		String brand,

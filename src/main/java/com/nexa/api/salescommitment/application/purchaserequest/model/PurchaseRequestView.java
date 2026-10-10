@@ -1,9 +1,11 @@
 package com.nexa.api.salescommitment.application.purchaserequest.model;
 
+import org.springframework.modulith.NamedInterface;
 import java.time.LocalDate;
 import java.time.Instant;
 import java.util.List;
 
+@NamedInterface("sales-public")
 public record PurchaseRequestView(String id, String code, String clientAccountId, String buyerMembershipId,
 		String status, String priority, LocalDate requestedDeliveryDate, String deliveryProfileSnapshot,
 		String paymentOption, String comment, String reviewNote, List<PurchaseRequestLineView> lines, long version,

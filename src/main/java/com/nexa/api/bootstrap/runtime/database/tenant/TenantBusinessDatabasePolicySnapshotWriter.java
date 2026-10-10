@@ -4,10 +4,15 @@ import com.nexa.api.bootstrap.runtime.database.RlsScopedDataSource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Objects;
 
 /** Writes only the non-authoritative Tenant-local expiry-policy projection using its dedicated DB login. */
@@ -78,5 +83,38 @@ final class TenantBusinessDatabasePolicySnapshotWriter {
 				.stream().findFirst().orElseThrow(TenantBusinessDatabasePolicySnapshotConflictException::new);
 		});
 		return Objects.requireNonNull(written, "Tenant policy snapshot transaction returned no value");
+	}
+
+	void verifyConfigured(TenantBusinessDatabaseBinding binding) {
+		TenantBusinessDatabaseBinding expected = Objects.requireNonNull(binding,
+				"Tenant database binding is required to verify the policy writer");
+		DataSource dataSource = Objects.requireNonNull(dataSourceFactory.create(expected),
+				"Tenant policy-snapshot writer factory returned no DataSource");
+		try (Connection connection = dataSource.getConnection();
+				PreparedStatement schema = connection.prepareStatement("SELECT current_user, "
+						+ "to_regclass('nexa_platform.purchase_request_expiry_policy_snapshot') IS NOT NULL");
+				ResultSet schemaResult = schema.executeQuery()) {
+			if (!schemaResult.next() || !WRITER_ROLE.equals(schemaResult.getString(1)) || !schemaResult.getBoolean(2)) {
+				throw new TenantBusinessDatabasePolicySnapshotWriterUnavailableException();
+			}
+			try (PreparedStatement privileges = connection.prepareStatement("SELECT "
+					+ "has_table_privilege(current_user, 'nexa_platform.purchase_request_expiry_policy_snapshot', 'SELECT'), "
+					+ "has_table_privilege(current_user, 'nexa_platform.purchase_request_expiry_policy_snapshot', 'INSERT'), "
+					+ "has_table_privilege(current_user, 'nexa_platform.purchase_request_expiry_policy_snapshot', 'UPDATE')");
+				ResultSet privilegeResult = privileges.executeQuery()) {
+				if (!privilegeResult.next() || !privilegeResult.getBoolean(1)
+						|| !privilegeResult.getBoolean(2) || !privilegeResult.getBoolean(3)) {
+					throw new TenantBusinessDatabasePolicySnapshotWriterUnavailableException();
+				}
+			}
+		} catch (CannotGetJdbcConnectionException unavailable) {
+			throw new TenantBusinessDatabasePolicySnapshotWriterUnavailableException(unavailable);
+		} catch (SQLException failure) {
+			String state = failure.getSQLState();
+			if (state != null && (state.startsWith("08") || state.startsWith("28"))) {
+				throw new TenantBusinessDatabasePolicySnapshotWriterUnavailableException(failure);
+			}
+			throw new IllegalStateException("Tenant policy-snapshot writer readiness query failed", failure);
+		}
 	}
 }

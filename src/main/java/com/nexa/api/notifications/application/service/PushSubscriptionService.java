@@ -1,11 +1,13 @@
 package com.nexa.api.notifications.application.service;
 
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
+import com.nexa.api.notifications.application.port.in.PushSubscriptionUseCase;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,7 +22,8 @@ import java.util.UUID;
 /** Application boundary for register, rotate, disable and unregister operations. */
 @Service
 @Profile("!test")
-public class PushSubscriptionService {
+@ConditionalOnProperty(prefix = "nexa.tenant-business.notifications", name = "enabled", havingValue = "false", matchIfMissing = true)
+public class PushSubscriptionService implements PushSubscriptionUseCase {
     private final PushSubscriptionPersistencePort persistence;
     private final Clock clock;
 
@@ -35,6 +38,7 @@ public class PushSubscriptionService {
     }
 
     @Transactional
+    @Override
     public PushSubscriptionPersistencePort.PushSubscription register(CurrentAccessContext context, String nativeClient,
                                                                        String installationId, String platform,
                                                                        String providerToken, String idempotencyKey) {
@@ -54,6 +58,7 @@ public class PushSubscriptionService {
     }
 
     @Transactional
+    @Override
     public PushSubscriptionPersistencePort.PushSubscription disable(CurrentAccessContext context, String nativeClient,
                                                                      UUID subscriptionId, String idempotencyKey, boolean unregister) {
         context.requirePermission(PermissionKey.NOTIFICATION_READ);

@@ -14,6 +14,15 @@ public interface BuyerMembershipDirectory {
                 .findFirst();
     }
 
+    /** Stable BC-01 identity for an active Buyer membership; exposes no profile data. */
+    default Optional<ActiveBuyerIdentityReference> findActiveBuyerIdentity(
+            String tenantId, String workspaceId, String membershipId) {
+        return Optional.empty();
+    }
+
     record BuyerMembershipReference(String id, String email, String displayName) {
+    }
+
+    record ActiveBuyerIdentityReference(String membershipId, String humanIdentityId) {
     }
 }

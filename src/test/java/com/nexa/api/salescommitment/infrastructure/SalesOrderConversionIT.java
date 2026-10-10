@@ -51,17 +51,17 @@ class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
                         .content("{}"))
                 .andExpect(status().isForbidden());
 
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, requestId))
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, requestId))
                 .isEqualTo("SUBMITTED");
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, requestId))
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, requestId))
                 .isZero();
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event e join sales.sales_order o on e.aggregate_id=o.id "
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event e join sales.sales_order o on e.aggregate_id=o.id "
                 + "where o.source_purchase_request_id=? and e.event_type='SALES_ORDER_CONFIRMED'", Integer.class, requestId))
                 .isZero();
 
         var order = convert(request, "sales-after-owner-denial-" + uuid());
         assertThat(order.id()).isNotBlank();
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, requestId))
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, requestId))
                 .isEqualTo(1);
     }
 
@@ -69,15 +69,15 @@ class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
         var request = createApprovedPurchaseRequest();
         var order = convert(request, "conversion-" + uuid());
         assertThat(order.id()).isNotBlank();
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo("CONVERTED");
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, java.util.UUID.fromString(request.id()))).isEqualTo(1);
-        String orderId = jdbc.queryForObject("select id::text from sales.sales_order where source_purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()));
-        assertThat(jdbc.queryForObject("select status from sales.sales_order where id=?", String.class, java.util.UUID.fromString(orderId))).isEqualTo("CONFIRMED");
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where aggregate_id=? and event_type='SALES_ORDER_CONFIRMED'", Integer.class, java.util.UUID.fromString(orderId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo("CONVERTED");
-        assertThat(jdbc.queryForObject("select sales_order_id::text from sales.commercial_commitment where purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo(orderId);
-        assertThat(jdbc.queryForObject("select created_by_membership_id::text from sales.sales_order where source_purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo(membershipId(SALES_EMAIL));
-        assertThat(jdbc.queryForObject("select buyer_membership_id::text from sales.sales_order where source_purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo(jdbc.queryForObject("select buyer_membership_id::text from sales.purchase_request where id=?", String.class, java.util.UUID.fromString(request.id())));
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo("CONVERTED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, java.util.UUID.fromString(request.id()))).isEqualTo(1);
+        String orderId = tenantJdbc().queryForObject("select id::text from sales.sales_order where source_purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()));
+        assertThat(tenantJdbc().queryForObject("select status from sales.sales_order where id=?", String.class, java.util.UUID.fromString(orderId))).isEqualTo("CONFIRMED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where aggregate_id=? and event_type='SALES_ORDER_CONFIRMED'", Integer.class, java.util.UUID.fromString(orderId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo("CONVERTED");
+        assertThat(tenantJdbc().queryForObject("select sales_order_id::text from sales.commercial_commitment where purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo(orderId);
+        assertThat(tenantJdbc().queryForObject("select created_by_membership_id::text from sales.sales_order where source_purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo(membershipId(SALES_EMAIL));
+        assertThat(tenantJdbc().queryForObject("select buyer_membership_id::text from sales.sales_order where source_purchase_request_id=?", String.class, java.util.UUID.fromString(request.id()))).isEqualTo(tenantJdbc().queryForObject("select buyer_membership_id::text from sales.purchase_request where id=?", String.class, java.util.UUID.fromString(request.id())));
     }
 
     @Test void conversionRejectsUnacceptedMaterialChangeThenSucceedsAfterBuyerAcceptance() throws Exception {
@@ -106,13 +106,13 @@ class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PROPOSED")).andReturn();
         String proposalId = json(proposed).get("id").asText();
 
-        UUID commitmentId = jdbc.queryForObject("select id from sales.commercial_commitment where purchase_request_id=?", UUID.class, request);
-        long commitmentVersion = jdbc.queryForObject("select version from sales.commercial_commitment where id=?", Long.class, commitmentId);
-        String commitmentStatus = jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitmentId);
-        BigDecimal committedQuantity = jdbc.queryForObject("select sum(quantity) from sales.commercial_commitment_line where commitment_id=?", BigDecimal.class, commitmentId);
-        UUID backingId = jdbc.queryForObject("select id from warehouse.inventory_backing where commercial_commitment_id=?", UUID.class, commitmentId);
-        long backingVersion = jdbc.queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId);
-        BigDecimal backedRequestQuantity = jdbc.queryForObject("select sum(requested_quantity) from warehouse.inventory_backing_line where backing_id=?", BigDecimal.class, backingId);
+        UUID commitmentId = tenantJdbc().queryForObject("select id from sales.commercial_commitment where purchase_request_id=?", UUID.class, request);
+        long commitmentVersion = tenantJdbc().queryForObject("select version from sales.commercial_commitment where id=?", Long.class, commitmentId);
+        String commitmentStatus = tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitmentId);
+        BigDecimal committedQuantity = tenantJdbc().queryForObject("select sum(quantity) from sales.commercial_commitment_line where commitment_id=?", BigDecimal.class, commitmentId);
+        UUID backingId = tenantJdbc().queryForObject("select id from warehouse.inventory_backing where commercial_commitment_id=?", UUID.class, commitmentId);
+        long backingVersion = tenantJdbc().queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId);
+        BigDecimal backedRequestQuantity = tenantJdbc().queryForObject("select sum(requested_quantity) from warehouse.inventory_backing_line where backing_id=?", BigDecimal.class, backingId);
 
         mockMvc.perform(post("/api/v1/purchase-requests/" + requestId + "/order-conversions")
                         .header("Authorization", "Bearer " + sales)
@@ -123,14 +123,14 @@ class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isPreconditionFailed())
                 .andExpect(jsonPath("$.code").value("PRECONDITION_FAILED"));
 
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, request)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event e join sales.sales_order o on e.aggregate_id=o.id where o.source_purchase_request_id=? and e.event_type='SALES_ORDER_CONFIRMED'", Integer.class, request)).isZero();
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, request)).isEqualTo("CHANGES_PROPOSED");
-        assertThat(jdbc.queryForObject("select version from sales.commercial_commitment where id=?", Long.class, commitmentId)).isEqualTo(commitmentVersion);
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitmentId)).isEqualTo(commitmentStatus);
-        assertThat(jdbc.queryForObject("select sum(quantity) from sales.commercial_commitment_line where commitment_id=?", BigDecimal.class, commitmentId)).isEqualByComparingTo(committedQuantity);
-        assertThat(jdbc.queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId)).isEqualTo(backingVersion);
-        assertThat(jdbc.queryForObject("select sum(requested_quantity) from warehouse.inventory_backing_line where backing_id=?", BigDecimal.class, backingId)).isEqualByComparingTo(backedRequestQuantity);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, request)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event e join sales.sales_order o on e.aggregate_id=o.id where o.source_purchase_request_id=? and e.event_type='SALES_ORDER_CONFIRMED'", Integer.class, request)).isZero();
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, request)).isEqualTo("CHANGES_PROPOSED");
+        assertThat(tenantJdbc().queryForObject("select version from sales.commercial_commitment where id=?", Long.class, commitmentId)).isEqualTo(commitmentVersion);
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitmentId)).isEqualTo(commitmentStatus);
+        assertThat(tenantJdbc().queryForObject("select sum(quantity) from sales.commercial_commitment_line where commitment_id=?", BigDecimal.class, commitmentId)).isEqualByComparingTo(committedQuantity);
+        assertThat(tenantJdbc().queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId)).isEqualTo(backingVersion);
+        assertThat(tenantJdbc().queryForObject("select sum(requested_quantity) from warehouse.inventory_backing_line where backing_id=?", BigDecimal.class, backingId)).isEqualByComparingTo(backedRequestQuantity);
 
         MvcResult accepted = mockMvc.perform(post("/api/v1/purchase-requests/" + requestId + "/material-changes/" + proposalId + "/acceptances")
                         .header("Authorization", "Bearer " + buyer)
@@ -140,8 +140,8 @@ class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
 
         var order = convert(new PurchaseRequestResource(requestId, accepted.getResponse().getHeader("ETag"), sales), "accepted-material-conversion-" + uuid());
         assertThat(order.id()).isNotBlank();
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, request)).isEqualTo("CONVERTED");
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitmentId)).isEqualTo("CONVERTED");
-        assertThat(jdbc.queryForObject("select sum(quantity) from sales.sales_order_line where sales_order_id=?", BigDecimal.class, UUID.fromString(order.id()))).isEqualByComparingTo("2");
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, request)).isEqualTo("CONVERTED");
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitmentId)).isEqualTo("CONVERTED");
+        assertThat(tenantJdbc().queryForObject("select sum(quantity) from sales.sales_order_line where sales_order_id=?", BigDecimal.class, UUID.fromString(order.id()))).isEqualByComparingTo("2");
     }
 }

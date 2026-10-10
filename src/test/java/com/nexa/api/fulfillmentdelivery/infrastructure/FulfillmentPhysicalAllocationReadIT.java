@@ -191,7 +191,7 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
                 + "\",\"driverAssignmentVersion\":" + json(assignment).get("fulfillmentVersion").asLong()
                 + ",\"outgoingGoodsCheckId\":\"" + json(outgoing).get("id").asText() + "\"}";
         mockMvc.perform(post("/api/v1/fulfillments/" + fixture.fulfillmentId() + "/dispatches")
-                        .header("Authorization", "Bearer " + fixture.warehouseToken())
+                        .header("Authorization", "Bearer " + logistics)
                         .header("If-Match", assignment.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "physical-read-dispatch-" + suffix())
                         .contentType(MediaType.APPLICATION_JSON).content(handoverBody))

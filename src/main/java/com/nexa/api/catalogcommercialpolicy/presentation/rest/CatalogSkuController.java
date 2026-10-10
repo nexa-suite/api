@@ -5,6 +5,7 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogVariantMode
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogSkuUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogVariantUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -32,32 +33,48 @@ public final class CatalogSkuController {
     private final CatalogSkuUseCase service;
     private final CatalogVariantUseCase variants;
     private final ObjectProvider<CatalogClientAccountPort> clientAccounts;
+    private final ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests;
 
     public CatalogSkuController(CatalogSkuUseCase service, CatalogVariantUseCase variants) {
         this(service, variants, null);
     }
 
-    @Autowired
     public CatalogSkuController(CatalogSkuUseCase service, CatalogVariantUseCase variants,
             ObjectProvider<CatalogClientAccountPort> clientAccounts) {
+        this(service, variants, clientAccounts, null);
+    }
+
+    @Autowired
+    public CatalogSkuController(CatalogSkuUseCase service, CatalogVariantUseCase variants,
+            ObjectProvider<CatalogClientAccountPort> clientAccounts,
+            ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests) {
         this.service = service;
         this.variants = variants;
         this.clientAccounts = clientAccounts;
+        this.tenantRequests = tenantRequests;
     }
 
     @GetMapping("/product-families")
     @Operation(operationId = "listProductFamilies")
     public CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(@RequestAttribute(ACCESS) CurrentAccessContext context,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search) {
-        return service.families(readScope(context), page, size, search);
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.families(readScope(context), page, size, search),
+                request -> request.skus().families(request.readScope(), page, size, search));
     }
     @GetMapping("/product-families/{familyId}")
     @Operation(operationId = "getProductFamily")
-    public CatalogSkuModels.FamilyView family(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId) { return service.family(readScope(context), familyId); }
+    public CatalogSkuModels.FamilyView family(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId) {
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.family(readScope(context), familyId),
+                request -> request.skus().family(request.readScope(), familyId));
+    }
     @PostMapping("/product-families")
     @Operation(operationId = "createProductFamily")
     public ResponseEntity<CatalogSkuModels.FamilyView> createFamily(@RequestAttribute(ACCESS) CurrentAccessContext context, @RequestBody FamilyRequest request) {
-        CatalogSkuModels.FamilyView value = service.createFamily(CatalogHttpSupport.scope(context), request.code(), request.name(), request.description(), request.categoryId(), request.brandId(), request.countryOfOrigin(), request.manufacturerReference(), request.supplierReference(), request.storageFamily());
+        CatalogSkuModels.FamilyView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.createFamily(CatalogHttpSupport.scope(context), request.code(), request.name(), request.description(), request.categoryId(), request.brandId(), request.countryOfOrigin(), request.manufacturerReference(), request.supplierReference(), request.storageFamily()),
+                scoped -> scoped.skus().createFamily(scoped.scope(), request.code(), request.name(), request.description(), request.categoryId(), request.brandId(), request.countryOfOrigin(), request.manufacturerReference(), request.supplierReference(), request.storageFamily()));
         return ResponseEntity.created(URI.create("/api/v1/product-families/" + value.id())).eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
     @PostMapping("/product-families/{familyId}/activations")
@@ -69,13 +86,19 @@ public final class CatalogSkuController {
 
     @GetMapping("/product-families/{familyId}/skus")
     @Operation(operationId = "listFamilySkus")
-    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> familySkus(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search) { return service.skus(readScope(context), page, size, search, familyId); }
+    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> familySkus(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search) {
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.skus(readScope(context), page, size, search, familyId),
+                request -> request.skus().skus(request.readScope(), page, size, search, familyId));
+    }
     @GetMapping("/product-families/{familyId}/variants")
     @Operation(operationId = "listProductFamilyVariants")
     public CatalogVariantModels.Page<CatalogVariantModels.VariantView> familyVariants(@RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID familyId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String search) {
-        return variants.variants(readScope(context), familyId, page, size, search);
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> variants.variants(readScope(context), familyId, page, size, search),
+                request -> request.variants().variants(request.readScope(), familyId, page, size, search));
     }
     @PostMapping("/product-families/{familyId}/variants")
     @Operation(operationId = "createProductVariant")
@@ -83,31 +106,47 @@ public final class CatalogSkuController {
             @PathVariable UUID familyId, @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody VariantRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
-        CatalogVariantModels.VariantView value = variants.create(CatalogHttpSupport.scope(context), familyId, request.code(), request.name(), request.description());
+        CatalogVariantModels.VariantView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> variants.create(CatalogHttpSupport.scope(context), familyId, request.code(), request.name(), request.description()),
+                scoped -> scoped.variants().create(scoped.scope(), familyId, request.code(), request.name(), request.description()));
         return ResponseEntity.created(URI.create("/api/v1/product-variants/" + value.id())).body(value);
     }
     @GetMapping("/product-variants/{variantId}")
     @Operation(operationId = "getProductVariant")
     public CatalogVariantModels.VariantView variant(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID variantId) {
-        return variants.variant(readScope(context), variantId);
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> variants.variant(readScope(context), variantId),
+                request -> request.variants().variant(request.readScope(), variantId));
     }
     @GetMapping("/product-variants/{variantId}/skus")
     @Operation(operationId = "listProductVariantSkus")
     public CatalogSkuModels.Page<CatalogSkuModels.SkuView> variantSkus(@RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID variantId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String search) {
-        return variants.skus(readScope(context), variantId, page, size, search);
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> variants.skus(readScope(context), variantId, page, size, search),
+                request -> request.variants().skus(request.readScope(), variantId, page, size, search));
     }
     @GetMapping("/skus")
     @Operation(operationId = "listSellableSkus")
-    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(@RequestAttribute(ACCESS) CurrentAccessContext context, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search, @RequestParam(required = false) UUID familyId) { return service.skus(readScope(context), page, size, search, familyId); }
+    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(@RequestAttribute(ACCESS) CurrentAccessContext context, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search, @RequestParam(required = false) UUID familyId) {
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.skus(readScope(context), page, size, search, familyId),
+                request -> request.skus().skus(request.readScope(), page, size, search, familyId));
+    }
     @GetMapping("/skus/{skuId}")
     @Operation(operationId = "getSellableSku")
-    public CatalogSkuModels.SkuView sku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId) { return service.sku(readScope(context), skuId); }
+    public CatalogSkuModels.SkuView sku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId) {
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.sku(readScope(context), skuId),
+                request -> request.skus().sku(request.readScope(), skuId));
+    }
     @PostMapping("/product-families/{familyId}/skus")
     @Operation(operationId = "createSellableSku")
     public ResponseEntity<CatalogSkuModels.SkuView> createSku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestBody SkuRequest request) {
-        CatalogSkuModels.SkuView value = service.createSku(CatalogHttpSupport.scope(context), familyId, request.skuCode(), request.gtin(), request.presentation(), request.packagingType(), request.unitOfMeasure(), request.netWeight(), request.grossWeight(), request.packQuantity(), request.temperatureMin(), request.temperatureMax(), request.shelfLifeDays(), request.minimumRemainingShelfLifeDays(), request.lotTrackingRequired(), request.expiryTrackingRequired(), request.taxCategory());
+        CatalogSkuModels.SkuView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.createSku(CatalogHttpSupport.scope(context), familyId, request.skuCode(), request.gtin(), request.presentation(), request.packagingType(), request.unitOfMeasure(), request.netWeight(), request.grossWeight(), request.packQuantity(), request.temperatureMin(), request.temperatureMax(), request.shelfLifeDays(), request.minimumRemainingShelfLifeDays(), request.lotTrackingRequired(), request.expiryTrackingRequired(), request.taxCategory()),
+                scoped -> scoped.skus().createSku(scoped.scope(), familyId, request.skuCode(), request.gtin(), request.presentation(), request.packagingType(), request.unitOfMeasure(), request.netWeight(), request.grossWeight(), request.packQuantity(), request.temperatureMin(), request.temperatureMax(), request.shelfLifeDays(), request.minimumRemainingShelfLifeDays(), request.lotTrackingRequired(), request.expiryTrackingRequired(), request.taxCategory()));
         return ResponseEntity.created(URI.create("/api/v1/skus/" + value.id())).eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
     @PostMapping("/skus/{skuId}/deactivations")
@@ -121,15 +160,25 @@ public final class CatalogSkuController {
     public ResponseEntity<CatalogSkuModels.PriceView> createPrice(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody PriceRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
-        CatalogSkuModels.PriceView value = service.createPrice(CatalogHttpSupport.scope(context), skuId, request.amount(), request.currency(), request.validFrom(), request.validUntil(), request.sourceCode(), request.sourceDescription(), idempotencyKey);
+        CatalogSkuModels.PriceView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.createPrice(CatalogHttpSupport.scope(context), skuId, request.amount(), request.currency(), request.validFrom(), request.validUntil(), request.sourceCode(), request.sourceDescription(), idempotencyKey),
+                scoped -> scoped.skus().createPrice(scoped.scope(), skuId, request.amount(), request.currency(), request.validFrom(), request.validUntil(), request.sourceCode(), request.sourceDescription(), idempotencyKey));
         return ResponseEntity.created(URI.create("/api/v1/skus/" + skuId + "/prices/" + value.id())).body(value);
     }
     @GetMapping("/skus/{skuId}/prices")
     @Operation(operationId = "listSkuPrices")
-    public List<CatalogSkuModels.PriceView> prices(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId) { return service.prices(readScope(context), skuId); }
+    public List<CatalogSkuModels.PriceView> prices(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId) {
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.prices(readScope(context), skuId),
+                request -> request.skus().prices(request.readScope(), skuId));
+    }
     @GetMapping("/skus/{skuId}/price-history")
     @Operation(operationId = "listSkuPriceHistory")
-    public List<CatalogSkuModels.PriceView> priceHistory(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId) { return service.prices(readScope(context), skuId); }
+    public List<CatalogSkuModels.PriceView> priceHistory(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId) {
+        return CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.prices(readScope(context), skuId),
+                request -> request.skus().prices(request.readScope(), skuId));
+    }
 
     private com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope readScope(CurrentAccessContext context) {
         return CatalogHttpSupport.scope(context, clientAccounts);
@@ -137,11 +186,15 @@ public final class CatalogSkuController {
 
     private ResponseEntity<CatalogSkuModels.FamilyView> statusFamily(CurrentAccessContext context, UUID id, String status, String ifMatch) {
         long version = CatalogHttpSupport.version(ifMatch);
-        CatalogSkuModels.FamilyView value = service.changeFamilyStatus(CatalogHttpSupport.scope(context), id, status, version);
+        CatalogSkuModels.FamilyView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.changeFamilyStatus(CatalogHttpSupport.scope(context), id, status, version),
+                request -> request.skus().changeFamilyStatus(request.scope(), id, status, version));
         return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
     private ResponseEntity<CatalogSkuModels.SkuView> statusSku(CurrentAccessContext context, UUID id, String status, String ifMatch) {
-        CatalogSkuModels.SkuView value = service.changeSkuStatus(CatalogHttpSupport.scope(context), id, status, CatalogHttpSupport.version(ifMatch));
+        CatalogSkuModels.SkuView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> service.changeSkuStatus(CatalogHttpSupport.scope(context), id, status, CatalogHttpSupport.version(ifMatch)),
+                request -> request.skus().changeSkuStatus(request.scope(), id, status, CatalogHttpSupport.version(ifMatch)));
         return ResponseEntity.ok().eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
 

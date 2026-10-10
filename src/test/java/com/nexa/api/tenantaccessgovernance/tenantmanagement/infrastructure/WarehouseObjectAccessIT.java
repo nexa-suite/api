@@ -2,20 +2,30 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure;
 
 import com.nexa.api.support.PostgresIntegrationSupport;
 import com.nexa.api.bootstrap.local.LocalDevelopmentBootstrap;
+import com.nexa.api.inventoryavailability.application.port.WarehouseSelectionRequestRunner;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.WarehouseAccessGrantPersistencePort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.UUID;
 import java.util.List;
+import java.util.stream.StreamSupport;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -26,6 +36,82 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
     @Autowired
     private LocalDevelopmentBootstrap localDevelopmentBootstrap;
+
+    @Autowired
+    private WarehouseAccessGrantPersistencePort warehouseAccessGrants;
+
+    @MockitoBean
+    private WarehouseSelectionRequestRunner warehouseSelection;
+
+    private static final UUID SYSTEM_WORKFLOW_USER_ID = UUID.fromString("11111111-1111-4111-8111-111111111111");
+    private static final UUID SYSTEM_WORKFLOW_ROLE_ID = UUID.fromString("22222222-2222-4222-8222-222222222222");
+
+    @Test
+    void ownerCanExplicitlyGrantAndRevokeWarehouseAccessToVerifiedSystemWorkflowActor() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        UUID warehouse = UUID.randomUUID();
+        when(warehouseSelection.existsInScope(any(), eq(warehouse))).thenReturn(true);
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID workflowMembership = jdbc.queryForObject("select id from tenant_management.workspace_membership "
+                        + "where workspace_id=? and user_id=? and membership_type='SYSTEM_WORKFLOW' and status='ACTIVE'",
+                UUID.class, workspace, SYSTEM_WORKFLOW_USER_ID);
+        MvcResult directory = mockMvc.perform(get("/api/v1/workspace-memberships")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        var listedWorkflowActor = StreamSupport.stream(json(directory).spliterator(), false)
+                .filter(item -> workflowMembership.toString().equals(item.get("id").asText()))
+                .findFirst().orElseThrow();
+        assertThat(listedWorkflowActor.get("membershipType").asText()).isEqualTo("SYSTEM_WORKFLOW");
+        assertThat(listedWorkflowActor.get("status").asText()).isEqualTo("ACTIVE");
+        assertThat(listedWorkflowActor.get("userId").asText()).isEqualTo(SYSTEM_WORKFLOW_USER_ID.toString());
+        assertThat(listedWorkflowActor.get("roles").toString()).contains("system_workflow");
+        assertThat(listedWorkflowActor.get("roleDefinitionIds").toString()).contains(SYSTEM_WORKFLOW_ROLE_ID.toString());
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                        + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=?",
+                Integer.class, tenant, workspace, warehouse, workflowMembership)).isZero();
+
+        long authorizationVersion = authorizationVersion(workflowMembership.toString());
+        MvcResult created = mockMvc.perform(post("/api/v1/warehouses/" + warehouse + "/access-grants")
+                        .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + workflowMembership + "\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE")).andReturn();
+        assertThat(authorizationVersion(workflowMembership.toString())).isEqualTo(authorizationVersion + 1);
+        assertThat(warehouseAccessGrants.activeWarehouseIds(new TenantId(tenant), new WorkspaceId(workspace),
+                new MembershipId(workflowMembership))).contains(warehouse);
+
+        mockMvc.perform(delete("/api/v1/warehouses/" + warehouse + "/access-grants/" + workflowMembership)
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", created.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("REVOKED"));
+        assertThat(authorizationVersion(workflowMembership.toString())).isEqualTo(authorizationVersion + 2);
+        assertThat(warehouseAccessGrants.activeWarehouseIds(new TenantId(tenant), new WorkspaceId(workspace),
+                new MembershipId(workflowMembership))).doesNotContain(warehouse);
+    }
+
+    @Test
+    void systemWorkflowMembershipTypeAloneDoesNotAuthorizeWarehouseGrant() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        UUID warehouse = UUID.randomUUID();
+        when(warehouseSelection.existsInScope(any(), eq(warehouse))).thenReturn(true);
+        UUID target = UUID.fromString(membershipId(WAREHOUSE_EMAIL));
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        jdbc.update("update tenant_management.workspace_membership set membership_type='SYSTEM_WORKFLOW' where id=?", target);
+        try {
+            assertThat(warehouseAccessGrants.isActiveMembership(new TenantId(tenant), new WorkspaceId(workspace),
+                    new MembershipId(target))).isFalse();
+            mockMvc.perform(post("/api/v1/warehouses/" + warehouse + "/access-grants")
+                            .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"membershipId\":\"" + target + "\"}"))
+                    .andExpect(status().isForbidden());
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                            + "where tenant_id=? and workspace_id=? and warehouse_id=? and membership_id=?",
+                    Integer.class, tenant, workspace, warehouse, target)).isZero();
+        } finally {
+            jdbc.update("update tenant_management.workspace_membership set membership_type='INTERNAL' where id=?", target);
+        }
+    }
 
     @Test
     void localBootstrapGrantsItsWarehouseOperatorAndPreservesExistingGrantsOnRerun() throws Exception {

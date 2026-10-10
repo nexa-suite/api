@@ -1,7 +1,7 @@
 package com.nexa.api.notifications.presentation;
 
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
-import com.nexa.api.notifications.application.service.PushSubscriptionService;
+import com.nexa.api.notifications.application.port.in.PushSubscriptionUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -32,9 +32,9 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class PushSubscriptionController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final PushSubscriptionService service;
+    private final PushSubscriptionUseCase service;
 
-    public PushSubscriptionController(PushSubscriptionService service) { this.service = service; }
+    public PushSubscriptionController(PushSubscriptionUseCase service) { this.service = service; }
 
     @PostMapping
     @Operation(operationId = "registerNativePushSubscription")

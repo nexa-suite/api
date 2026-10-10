@@ -4,7 +4,7 @@ import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQue
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAddressQuery;
 import com.nexa.api.salescommitment.application.port.out.ClientAccountCommercialPort;
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.salescommitment.application.port.out.WarehouseReferencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.*;
 import com.nexa.api.salescommitment.application.purchaserequest.service.PurchaseRequestService;

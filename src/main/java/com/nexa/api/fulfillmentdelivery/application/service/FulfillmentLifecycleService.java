@@ -370,7 +370,7 @@ public class FulfillmentLifecycleService {
     public FulfillmentModels.FulfillmentView dispatch(CurrentAccessContext context, UUID fulfillmentId,
                                                        long expectedVersion, String idempotencyKey,
                                                        FulfillmentModels.DispatchRequest frozenFacts) {
-        fulfillmentWrite(context);
+        context.requirePermission(PermissionKey.DISPATCH_COMPLETE);
         requireKey(idempotencyKey);
         requireVersion(expectedVersion);
         physicalAllocations.lockForFulfillment(tenant(context), workspace(context), fulfillmentId, actor(context));

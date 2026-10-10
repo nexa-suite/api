@@ -79,6 +79,12 @@ notifications.push_delivery_attempt	BC10	V94__native_push_subscription_foundatio
 notifications.push_delivery_claim	BC10	V100__mobile_v1_push_delivery_claim_fencing.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 notifications.push_subscription	BC10	V94__native_push_subscription_foundation.sql:4 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 notifications.push_subscription_command_idempotency	SHARED_TECHNICAL	V94__native_push_subscription_foundation.sql:34 CREATE TABLE; explicit shared technical idempotency table.
+payments.buyer_wallet_account	BC08	V148__buyer_wallet_ledger_and_reservations.sql:3 CREATE TABLE; tenant-local stored-funds account owned by BC08.
+payments.buyer_wallet_ledger_entry	BC08	V148__buyer_wallet_ledger_and_reservations.sql:66 CREATE TABLE; append-only stored-funds ledger owned by BC08.
+payments.buyer_wallet_reservation	BC08	V148__buyer_wallet_ledger_and_reservations.sql:27 CREATE TABLE; Sales Order wallet reservation owned by BC08.
+payments.buyer_wallet_reservation_event	BC08	V148__buyer_wallet_ledger_and_reservations.sql:110 CREATE TABLE; append-only reservation history owned by BC08.
+payments.buyer_wallet_recharge	BC08	db/tenant-migration/V9__buyer_wallet_provider_recharges.sql:3 CREATE TABLE; Tenant-local Stripe recharge intent owned by BC08.
+payments.buyer_wallet_recharge_processed_event	BC08	db/tenant-migration/V9__buyer_wallet_provider_recharges.sql:42 CREATE TABLE; append-only Tenant-local verified provider callback evidence owned by BC08.
 payments.credit_account	BC07	V43__create_receivables_credit_and_payments.sql:3 CREATE TABLE; explicit Credit & Receivables ownership exception.
 payments.credit_reservation	BC07	V43__create_receivables_credit_and_payments.sql:135 CREATE TABLE; explicit Credit & Receivables ownership exception.
 payments.financial_adjustment	BC07	V91__fulfillment_financial_completion.sql:870 CREATE TABLE; explicit Credit & Receivables ownership exception.
@@ -143,6 +149,7 @@ tenant_management.role_permission	BC01	V36__create_business_commerce_foundations
 tenant_management.tenant	BC01	V4__create_tenant_workspace_tables.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.tenant_security_settings	BC01	V29__create_tenant_administration_configuration.sql:125 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.tenant_business_database_binding	BC01	V146__add_tenant_business_database_binding.sql:1 CREATE TABLE; central tenant-to-business-database registry ownership per accepted v0.19 schema/table ownership specification.
+tenant_management.wallet_recharge_provider_route	BC01	V153__register_wallet_recharge_provider_routes.sql:22 CREATE TABLE; central PSP event locator only, with no balance or Tenant-local recharge fact.
 tenant_management.unit_preferences	BC01	V29__create_tenant_administration_configuration.sql:62 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.workspace	BC01	V4__create_tenant_workspace_tables.sql:11 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 tenant_management.workspace_creation_idempotency	SHARED_TECHNICAL	V29__create_tenant_administration_configuration.sql:240 CREATE TABLE; explicit shared technical idempotency table.

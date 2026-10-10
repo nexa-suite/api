@@ -42,6 +42,7 @@ final class TenantBusinessDatabaseBaselineGenerator {
     private static final Pattern FORCE_RLS_DUMP_STATEMENT = Pattern.compile(
             "(?m)^ALTER TABLE(?: ONLY)?\\s+[^;]+? FORCE ROW LEVEL SECURITY;\\s*");
     private static final Pattern VERSIONED_MIGRATION_FILENAME = Pattern.compile("V(\\d+)__.*\\.sql");
+    private static final Pattern OWNERSHIP_CREATION_MIGRATION = Pattern.compile("\\bV(\\d+)__[^:\\t]+\\.sql:");
     private static final Set<String> ACTOR_REFERENCE_TARGETS = Set.of(
             "iam.user_account", "tenant_management.workspace_membership");
     private static final List<String> TABLE_PRIVILEGES = List.of(
@@ -68,18 +69,25 @@ final class TenantBusinessDatabaseBaselineGenerator {
         Path ownershipPath = repositoryRoot.resolve(CANONICAL_OWNERSHIP_PATH);
         Map<String, String> manifest = readOwnerTableTsv(manifestPath);
         Map<String, String> canonical = readOwnerTableTsv(ownershipPath);
+        Map<String, Integer> creationVersions = readOwnershipCreationVersions(ownershipPath);
         Map<String, String> expected = new TreeMap<>();
         canonical.forEach((table, owner) -> {
-            if (owner.equals("GLOBAL_REFERENCE") || owner.matches("BC(0[2-9]|1[01])")) expected.put(table, owner);
+            if (creationVersions.get(table) <= CENTRAL_BASELINE_VERSION
+                    && (owner.equals("GLOBAL_REFERENCE") || owner.matches("BC(0[2-9]|1[01])"))) {
+                expected.put(table, owner);
+            }
         });
         for (String table : TENANT_LOCAL_SHARED_TECHNICAL_TABLES) {
             if (!"SHARED_TECHNICAL".equals(canonical.get(table))) {
                 throw new IllegalStateException("Approved tenant-local technical table is not canonically classified: " + table);
             }
+            if (creationVersions.get(table) > CENTRAL_BASELINE_VERSION) {
+                throw new IllegalStateException("Approved V3 tenant-local technical table was not present at central V146: " + table);
+            }
             expected.put(table, "SHARED_TECHNICAL");
         }
         if (!manifest.equals(expected)) {
-            throw new IllegalStateException("V3 selector must equal all canonical BC02-BC11, shared-technical, and global-reference rows; expected "
+            throw new IllegalStateException("V3 selector must equal canonical Tenant-projected tables created by central V146; expected "
                     + expected.size() + " entries but found " + manifest.size());
         }
         if (!manifest.keySet().containsAll(GLOBAL_REFERENCE_TABLES)) {
@@ -96,7 +104,7 @@ final class TenantBusinessDatabaseBaselineGenerator {
             if (centralVersion != CENTRAL_BASELINE_VERSION) {
                 throw new IllegalStateException("V3 baseline requires published central Flyway V146; found V" + centralVersion);
             }
-            String ownershipDigest = sha256(Files.readAllBytes(repositoryRoot.resolve(CANONICAL_OWNERSHIP_PATH)));
+            String ownershipDigest = publishedV146OwnershipDigest(repositoryRoot.resolve(CANONICAL_OWNERSHIP_PATH));
             String selectorDigest = sha256(Files.readAllBytes(repositoryRoot.resolve(MANIFEST_PATH)));
             String migrationDigest = migrationCorpusDigest(repositoryRoot.resolve(SOURCE_MIGRATIONS_PATH));
 
@@ -183,6 +191,57 @@ final class TenantBusinessDatabaseBaselineGenerator {
             if (rows.put(table, owner) != null) throw new IllegalStateException("Duplicate table in " + path + ": " + table);
         }
         return rows;
+    }
+
+    private static Map<String, Integer> readOwnershipCreationVersions(Path path) throws IOException {
+        Map<String, Integer> result = new TreeMap<>();
+        List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+        for (int index = 0; index < lines.size(); index++) {
+            String line = lines.get(index);
+            if (line.isBlank() || line.startsWith("#") || line.startsWith("table\t")) continue;
+            String[] fields = line.split("\\t", -1);
+            if (fields.length != 3 || !fields[0].contains(".")) {
+                throw new IllegalStateException("Invalid canonical ownership row at " + path + ":" + (index + 1));
+            }
+            result.put(fields[0], ownershipCentralCreationVersion(fields[0], fields[2]));
+        }
+        return Map.copyOf(result);
+    }
+
+    /** Digest for the exact ownership rows projected into the immutable V3/V146 Tenant baseline. */
+    static String publishedV146OwnershipDigest(Path ownershipPath) throws IOException {
+        String source = Files.readString(ownershipPath, StandardCharsets.UTF_8);
+        StringBuilder projection = new StringBuilder(source.length());
+        int cursor = 0;
+        while (cursor < source.length()) {
+            int newline = source.indexOf('\n', cursor);
+            int next = newline < 0 ? source.length() : newline + 1;
+            String rawLine = source.substring(cursor, next);
+            String line = rawLine.endsWith("\n") ? rawLine.substring(0, rawLine.length() - 1) : rawLine;
+            String logical = line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
+            if (logical.isBlank() || logical.startsWith("#") || logical.startsWith("table\t")) {
+                projection.append(rawLine);
+            } else {
+                String[] fields = logical.split("\\t", -1);
+                if (fields.length != 3) {
+                    throw new IllegalStateException("Invalid canonical ownership row in " + ownershipPath);
+                }
+                if (ownershipCentralCreationVersion(fields[0], fields[2])
+                        <= CENTRAL_BASELINE_VERSION) projection.append(rawLine);
+            }
+            cursor = next;
+        }
+        return sha256(projection.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static int ownershipCentralCreationVersion(String table, String evidence) {
+        if (evidence.contains("db/tenant-migration/")) return Integer.MAX_VALUE;
+        Matcher migration = OWNERSHIP_CREATION_MIGRATION.matcher(evidence);
+        if (!migration.find()) {
+            throw new IllegalStateException("Canonical ownership row lacks creation-migration evidence"
+                    + (table == null ? "" : ": " + table));
+        }
+        return Integer.parseInt(migration.group(1));
     }
 
     private static int successfulCentralVersion(Connection connection) throws SQLException {

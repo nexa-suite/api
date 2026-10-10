@@ -1,8 +1,10 @@
 package com.nexa.api.salescommitment.application.purchaserequest.model;
 
+import org.springframework.modulith.NamedInterface;
 import java.time.LocalDate;
 import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 
+@NamedInterface("sales-public")
 public record PurchaseRequestFilter(String status, String priority, String search, LocalDate createdFrom,
 		LocalDate createdTo, int page, int size, String sort) {
 	public PurchaseRequestFilter {

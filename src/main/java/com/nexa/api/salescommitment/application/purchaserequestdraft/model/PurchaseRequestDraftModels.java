@@ -1,5 +1,7 @@
 package com.nexa.api.salescommitment.application.purchaserequestdraft.model;
 
+import org.springframework.modulith.NamedInterface;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -9,9 +11,11 @@ public final class PurchaseRequestDraftModels {
     private PurchaseRequestDraftModels() { }
     public record DraftSummaryView(String id, String status, long version, LocalDate requestedDeliveryDate,
             int lineCount, Instant createdAt, Instant updatedAt) { }
+    @NamedInterface("sales-public")
     public record DraftPage(List<DraftSummaryView> items, int page, int size, long totalItems, int totalPages) {
         public DraftPage { items = List.copyOf(items == null ? List.of() : items); }
     }
+    @NamedInterface("sales-public")
     public record DraftView(String id, String clientAccountId, String buyerMembershipId, String status, long version,
             LocalDate requestedDeliveryDate, String paymentPreference, String creditResult, String routeProvider,
             List<LineView> lines, DestinationView destination, RouteView route, WarehouseSelectionView warehouseSelection,
@@ -23,6 +27,7 @@ public final class PurchaseRequestDraftModels {
     public record DestinationView(String addressId, String snapshot, String schemaVersion) { }
     public record RouteView(String provider, boolean estimated, String snapshot, String schemaVersion, Instant calculatedAt) { }
     public record WarehouseSelectionView(String warehouseId, String snapshot, String schemaVersion, Instant selectedAt) { }
+    @NamedInterface("sales-public")
     public record ReviewView(DraftView draft, boolean productsComplete, boolean destinationComplete, boolean routeValidated,
             boolean commercialReviewComplete, boolean readyToSubmit, List<String> missing) {
         public ReviewView { missing = List.copyOf(missing); }

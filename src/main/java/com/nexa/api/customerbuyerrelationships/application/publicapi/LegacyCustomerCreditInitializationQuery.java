@@ -10,5 +10,16 @@ import java.util.UUID;
  */
 public interface LegacyCustomerCreditInitializationQuery {
     Optional<Snapshot> find(UUID tenantId, UUID workspaceId, UUID customerAccountId, String currency);
-    record Snapshot(UUID customerAccountId, String currency, BigDecimal initialLimit) { }
+    record Snapshot(UUID customerAccountId, String currency, BigDecimal initialLimit, BigDecimal initialExposure) {
+        public Snapshot(UUID customerAccountId, String currency, BigDecimal initialLimit) {
+            this(customerAccountId, currency, initialLimit, BigDecimal.ZERO);
+        }
+
+        public Snapshot {
+            if (customerAccountId == null || currency == null || initialLimit == null || initialExposure == null
+                    || initialLimit.signum() < 0 || initialExposure.signum() < 0) {
+                throw new IllegalArgumentException("Legacy credit initialization snapshot is invalid");
+            }
+        }
+    }
 }

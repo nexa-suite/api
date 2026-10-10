@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Optional;
 
 public interface StripePaymentProvider {
+    default boolean supportsPaymentIntentCreation() { return true; }
     PaymentIntent createPaymentIntent(PaymentIntentRequest request);
     default Optional<PaymentIntent> retrievePaymentIntent(String providerId) { return Optional.empty(); }
     /**

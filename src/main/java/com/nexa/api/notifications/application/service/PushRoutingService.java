@@ -20,6 +20,7 @@ public final class PushRoutingService {
     private final PushSubscriptionPersistencePort subscriptions;
     private final PushProviderPort provider;
     private final TransactionTemplate attemptTransactions;
+    private final TransactionTemplate providerWithoutTransaction;
 
     public PushRoutingService(PushSubscriptionPersistencePort subscriptions, PushProviderPort provider) {
         this(subscriptions, provider, null);
@@ -32,10 +33,14 @@ public final class PushRoutingService {
         this.provider = provider;
         if (transactionManager == null) {
             this.attemptTransactions = null;
+            this.providerWithoutTransaction = null;
         } else {
             TransactionTemplate template = new TransactionTemplate(transactionManager);
             template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             this.attemptTransactions = template;
+            TransactionTemplate providerTemplate = new TransactionTemplate(transactionManager);
+            providerTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+            this.providerWithoutTransaction = providerTemplate;
         }
     }
 
@@ -62,7 +67,7 @@ public final class PushRoutingService {
                     : subscriptions.activeForRecipient(tenant, workspace, membership)) {
                 PushSubscriptionPersistencePort.DeliveryClaim claim;
                 try {
-                    claim = subscriptions.claimDelivery(tenant, workspace, subscription.id(), event.eventId(),
+                    claim = claimDelivery(tenant, workspace, subscription.id(), event.eventId(),
                             deliveryKey(event.eventId(), subscription.id()), java.time.Instant.now());
                     if (claim == null || claim.status() == null) {
                         throw new NotificationOperationException("PUSH_DELIVERY_CLAIM_UNAVAILABLE", false);
@@ -81,9 +86,10 @@ public final class PushRoutingService {
                 boolean sent = false;
                 java.time.Instant attemptAt = java.time.Instant.now();
                 try {
-                    result = provider.deliver(new PushProviderPort.Delivery(subscription.id(), event.eventId(),
+                    PushProviderPort.Delivery delivery = new PushProviderPort.Delivery(subscription.id(), event.eventId(),
                             event.eventType(), category, title, message, deepLink,
-                            deliveryKey(event.eventId(), subscription.id())));
+                            deliveryKey(event.eventId(), subscription.id()));
+                    result = deliverWithoutTransaction(delivery);
                     if (result == null) {
                         result = new PushProviderPort.DeliveryResult("RETRYABLE", "PROVIDER_INVALID_RESULT", "Provider returned no result");
                     }
@@ -107,7 +113,7 @@ public final class PushRoutingService {
                     retryableFailure = exception;
                 } finally {
                     try {
-                        subscriptions.completeDelivery(tenant, workspace, subscription.id(), event.eventId(),
+                        completeDelivery(tenant, workspace, subscription.id(), event.eventId(),
                                 claim.claimToken(), sent, java.time.Instant.now());
                     } catch (RuntimeException exception) {
                         retryableFailure = exception;
@@ -124,6 +130,30 @@ public final class PushRoutingService {
             return;
         }
         attemptTransactions.executeWithoutResult(transaction -> subscriptions.recordAttempt(attempt));
+    }
+
+    private PushSubscriptionPersistencePort.DeliveryClaim claimDelivery(UUID tenant, UUID workspace,
+            UUID subscriptionId, String eventId, String deliveryKey, java.time.Instant now) {
+        if (attemptTransactions == null) {
+            return subscriptions.claimDelivery(tenant, workspace, subscriptionId, eventId, deliveryKey, now);
+        }
+        return attemptTransactions.execute(status -> subscriptions.claimDelivery(tenant, workspace, subscriptionId,
+                eventId, deliveryKey, now));
+    }
+
+    private void completeDelivery(UUID tenant, UUID workspace, UUID subscriptionId, String eventId,
+            UUID claimToken, boolean sent, java.time.Instant now) {
+        if (attemptTransactions == null) {
+            subscriptions.completeDelivery(tenant, workspace, subscriptionId, eventId, claimToken, sent, now);
+            return;
+        }
+        attemptTransactions.executeWithoutResult(status -> subscriptions.completeDelivery(tenant, workspace,
+                subscriptionId, eventId, claimToken, sent, now));
+    }
+
+    private PushProviderPort.DeliveryResult deliverWithoutTransaction(PushProviderPort.Delivery delivery) {
+        if (providerWithoutTransaction == null) return provider.deliver(delivery);
+        return providerWithoutTransaction.execute(status -> provider.deliver(delivery));
     }
 
     private static String normalizedStatus(String value) {

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0-alpha.1] - 2026-10-10
+
+Source checkpoint prerelease; incomplete integration and distribution gates. See [checkpoint notes](docs/releases/v1.1.0-alpha.1.md).
+
+## Unreleased — v1.1.0 candidate
+
+- Introduce explicit Tenant-scoped business database routing and local provisioning while retaining central identity, control and onboarding authority.
+- Extend Buyer wallet recharge and full-order wallet tender with supplier-scoped balances, durable reservations and authoritative provider confirmation.
+- Add commercial credit configuration bounded by financed exposure, outstanding receivables and reservations.
+- Add explicit Warehouse access grants for the verified workflow actor and scoped, time-limited read-only support.
+- Compose Tenant-owned notifications, document generation and business traceability through narrow application boundaries.
+
+The source candidate is not released. Full integration verification, migration/runtime evidence, connected client flows and publication remain pending. No cloud database cutover is claimed.
+
 ## [1.0.0] - 2026-10-05
 
 First stable-version API repository boundary, based on the v0.21.0 contract.
