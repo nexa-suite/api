@@ -222,8 +222,8 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
             }
 			throw new PurchaseRequestExpiredException();
 		}
-		if (!("SUBMITTED".equals(pr.status()) || "CHANGES_PROPOSED".equals(pr.status())
-				|| "IN_REVIEW".equals(pr.status()) || "APPROVED".equals(pr.status()))
+		if (!("SUBMITTED".equals(pr.status()) || "IN_REVIEW".equals(pr.status())
+				|| "APPROVED".equals(pr.status()))
 				|| pr.version() != expectedVersion) throw new SalesConcurrencyConflictException();
 		List<PurchaseRequestLineRow> requestLines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot from sales.purchase_request_line where purchase_request_id=? and superseded_at is null order by created_at,id",
 				(rs, row) -> new PurchaseRequestLineRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getString(5), rs.getBigDecimal(6), rs.getString(7), rs.getObject(8, UUID.class), rs.getObject(9, UUID.class), rs.getString(10), rs.getString(11)), request);

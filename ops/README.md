@@ -51,3 +51,17 @@ remains. The cleanup script is idempotent and removes only the expected
 `nexa_v140_migrator_insert` policy.
 Neither script changes ownership, grants `BYPASSRLS`, grants runtime write
 access, or stores credentials. Do not deploy while the temporary policy remains.
+
+### V146 Tenant business database binding migration grant
+
+V146 adds the central `tenant_management.tenant_business_database_binding`
+table with a foreign key to the central Tenant registry. The restricted
+`nexa_migrator` needs `REFERENCES` on `tenant_management.tenant` to create that
+foreign key. Before Flyway applies V146, run
+[`database/grant-v146-tenant-reference-to-migrator.sql`](./database/grant-v146-tenant-reference-to-migrator.sql)
+once as a database provisioner that owns the Tenant table or has grant option.
+The script grants only that table privilege to `nexa_migrator`; it does not
+grant ownership, broad DDL rights, or any privilege to `nexa_runtime`. The
+grant is a migration-role precondition and does not provision a Tenant business
+database or perform a deployment or cutover. This repository change does not
+execute it against any managed database.

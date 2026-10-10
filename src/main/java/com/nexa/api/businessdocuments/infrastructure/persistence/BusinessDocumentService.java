@@ -207,6 +207,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
 
     @Transactional(readOnly = true)
     public BusinessDocumentModels.Download download(CurrentAccessContext context, UUID documentId) {
+        context.requirePermission(PermissionKey.DOCUMENT_DOWNLOAD);
         BusinessDocumentModels.DocumentView document = get(context, documentId);
         if (!(BusinessDocumentStatus.GENERATED.name().equals(document.status())
                 || BusinessDocumentStatus.SUPERSEDED.name().equals(document.status()))
@@ -638,7 +639,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
             Instant createdAt, Instant scannedAt, String failureCode, Instant updatedAt) { }
     private void outbox(CurrentAccessContext context, String type, UUID aggregateId, Map<String, Object> payload) { canonicalOutbox.append(type, "BusinessDocument", aggregateId, tenant(context), workspace(context), Instant.now(), "document-" + aggregateId, null, "1.0", payload); }
     private void read(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_READ); }
-    private void requireGeneration(CurrentAccessContext context) { if (context.hasRole(MembershipRole.BUYER)) context.requirePermission(PermissionKey.DOCUMENT_READ); else context.requirePermission(PermissionKey.DOCUMENT_GENERATE); }
+    private void requireGeneration(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_GENERATE); }
     private void authorizeClientScope(CurrentAccessContext context, String clientAccountId) { if (context.hasRole(MembershipRole.BUYER)) { if (clientAccountId == null || !customerAccounts.hasBuyerRelationship(tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString(), clientAccountId)) throw new IllegalArgumentException("Document is outside buyer scope"); } }
     private boolean authorizedDocument(CurrentAccessContext context, String clientAccountId) { return !context.hasRole(MembershipRole.BUYER) || clientAccountId != null && customerAccounts.hasBuyerRelationship(tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString(), clientAccountId); }
     private void appendBuyerAccountFilter(StringBuilder where, List<Object> params, CurrentAccessContext context, String alias) {

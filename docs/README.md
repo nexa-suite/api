@@ -10,6 +10,7 @@ architecture source: [nexa-suite/blueprint](https://github.com/nexa-suite/bluepr
 - [Canonical bounded-context implementation map](./architecture/bounded-context-module-map.md)
 - [Logical layer boundaries](./architecture/logical-layering.md)
 - [Architecture decisions](./architecture/decisions/README.md)
+- [Tenant physical-database routing foundation](./architecture/tenant-database-routing-foundation.md)
 - [Context implementation notes](./architecture/bounded-contexts/)
 
 The eleven business context roots are listed in the module map. `edge`,

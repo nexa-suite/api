@@ -27,8 +27,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
- * Proves the narrow operational bridge required by V140 on a non-superuser Neon-style database.
- * The bridge is removed in a finally block, including when a later migration fails.
+ * Proves the narrow V140 RLS bridge and V146 Tenant-reference grant on a non-superuser database.
+ * The temporary policy is removed in a finally block, including when a later migration fails.
  */
 @Testcontainers(disabledWithoutDocker = true)
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
@@ -46,6 +46,8 @@ class V140RoleDefinitionOperationalPolicyIT {
             "Coordinates operational exceptions without implicit stock or cold-chain authority";
     private static final Path PREPARE_SCRIPT = Path.of("ops/database/prepare-v140-role-definition.sql");
     private static final Path CLEANUP_SCRIPT = Path.of("ops/database/cleanup-v140-role-definition.sql");
+    private static final Path V146_TENANT_REFERENCE_GRANT =
+            Path.of("ops/database/grant-v146-tenant-reference-to-migrator.sql");
 
     @Container
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
@@ -54,7 +56,7 @@ class V140RoleDefinitionOperationalPolicyIT {
             .withPassword(ADMIN_PASSWORD);
 
     @Test
-    void migratorCanApplyV140OnlyThroughTheTemporaryExactPolicyAndAlwaysCleansItUp() throws Exception {
+    void migratorNeedsV140PolicyAndProvisionedV146TenantReferenceGrant() throws Exception {
         createRolesBeforeBaselineMigration();
         migrateAs(ADMIN_USERNAME, ADMIN_PASSWORD, "139");
         transferPendingMigrationOwnership();
@@ -86,12 +88,22 @@ class V140RoleDefinitionOperationalPolicyIT {
             executeScriptAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, PREPARE_SCRIPT);
             prepared = true;
 
-            migrateAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, null);
+            migrateAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, "145");
             assertThat(schemaHistoryVersion()).isEqualTo("145");
             assertThat(canonicalRoleExists()).isTrue();
 
             assertRuntimeCannotInsertWithMatchedContext();
             assertThatCode(() -> newRuntimeValidator()).doesNotThrowAnyException();
+
+            Throwable missingTenantReferenceGrant = catchThrowable(
+                    () -> migrateAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, null));
+            assertThat(missingTenantReferenceGrant).isInstanceOf(FlywayException.class);
+            assertThat(sqlState(missingTenantReferenceGrant)).isEqualTo("42501");
+            assertThat(schemaHistoryVersion()).isEqualTo("145");
+
+            executeScriptAs(ADMIN_USERNAME, ADMIN_PASSWORD, V146_TENANT_REFERENCE_GRANT);
+            migrateAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, null);
+            assertThat(schemaHistoryVersion()).isEqualTo("146");
         } finally {
             if (prepared) {
                 executeScriptAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, CLEANUP_SCRIPT);
