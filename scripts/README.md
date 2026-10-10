@@ -20,6 +20,8 @@ commands reference them directly.
 
 - `verify-local-security.sh` runs local security checks.
 - `create-review-snapshot.sh` creates a review evidence snapshot.
+- `generate-tenant-business-baseline-v3.sh` regenerates and verifies the additive
+  Tenant schema baseline from a fresh central V146 Testcontainers database.
 
 Use only the commands needed for the task. Reset scripts change local demo
 data; they are not part of routine verification.
