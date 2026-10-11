@@ -366,7 +366,9 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         + "values (?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
                 tenantId, "Receiving isolation tenant", "w4-rec-tenant-" + normalizedSuffix);
         WorkspaceScope scope = createWorkspaceMembership(email, tenantId, "w4-rec-" + normalizedSuffix);
-        provisionTenantBusinessDatabase(tenantId, UUID.fromString(scope.workspaceId()));
+        UUID workspaceId = UUID.fromString(scope.workspaceId());
+        provisionTenantBusinessDatabase(tenantId, workspaceId);
+        seedTenantCatalogFixture(tenantId, workspaceId);
         return scope;
     }
 

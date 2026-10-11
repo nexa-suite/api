@@ -14,10 +14,13 @@ import com.nexa.api.payments.application.publicapi.BuyerWalletRefundBalanceQuery
 import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.salescommitment.application.purchaserequest.port.FieldPurchaseRequestSubmissionUseCase;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
+import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderDraftUseCase;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderApprovedWorkflowConversion;
 import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase;
+import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderUseCase;
 import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
@@ -74,10 +77,14 @@ public interface TenantSalesCommitmentCompositionFactory {
 
     record Composition(PurchaseRequestDraftPort purchaseRequestDrafts, PurchaseRequestUseCase purchaseRequests,
                        SalesOrderUseCase salesOrders, SalesOrderApprovedWorkflowConversion approvedWorkflowConversion,
-                       DirectOrderUseCase directOrders) {
+                       DirectOrderUseCase directOrders, ManualSalesOrderUseCase manualSalesOrders,
+                       ManualSalesOrderDraftUseCase manualSalesOrderDrafts,
+                       FieldPurchaseRequestSubmissionUseCase fieldPurchaseRequestSubmissions) {
         public Composition {
             if (purchaseRequestDrafts == null || purchaseRequests == null || salesOrders == null
-                    || approvedWorkflowConversion == null || directOrders == null) {
+                    || approvedWorkflowConversion == null || directOrders == null || manualSalesOrders == null
+                    || manualSalesOrderDrafts == null
+                    || fieldPurchaseRequestSubmissions == null) {
                 throw new IllegalArgumentException("Tenant Sales Commitment composition is incomplete");
             }
         }

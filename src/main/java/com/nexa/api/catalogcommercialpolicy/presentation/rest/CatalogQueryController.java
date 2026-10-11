@@ -5,7 +5,7 @@ import com.nexa.api.catalogcommercialpolicy.application.port.in.ListCatalogItems
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogItemNotFoundException;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
-import com.nexa.api.catalogcommercialpolicy.application.publicapi.TenantCatalogHttpReadPort;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogHttpReadPort;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.catalogcommercialpolicy.presentation.rest.mapper.CatalogResponseMapper;
 import com.nexa.api.catalogcommercialpolicy.presentation.rest.request.CatalogQueryParameters;

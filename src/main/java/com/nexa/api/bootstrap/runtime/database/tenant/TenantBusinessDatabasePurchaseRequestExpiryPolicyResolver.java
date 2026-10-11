@@ -39,6 +39,17 @@ public final class TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver {
 	public <T> T inTransaction(CurrentAccessContext accessContext, TenantBusinessDatabaseWork<T> work) {
 		Objects.requireNonNull(accessContext, "Verified Tenant access context is required");
 		Objects.requireNonNull(work, "Tenant business work is required");
+		ValidatedPolicy validated = prepareForCallback(accessContext);
+
+		return router.inTransaction(accessContext, jdbc -> {
+			installValidatedRevision(jdbc, accessContext, validated);
+			return work.execute(jdbc);
+		});
+	}
+
+	/** Reads BC01 outside a callback transaction and reconciles the Tenant projection using its dedicated writer. */
+	public ValidatedPolicy prepareForCallback(CurrentAccessContext accessContext) {
+		Objects.requireNonNull(accessContext, "Verified Tenant access context is required");
 		OperationalSettingsAccess.PurchaseRequestExpiryPolicySource source = centralSettings
 				.findPurchaseRequestExpiryPolicy(accessContext.tenantId(), accessContext.workspaceId())
 				.orElseThrow(TenantBusinessDatabasePolicySnapshotConflictException::new);
@@ -46,16 +57,46 @@ public final class TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver {
 		if (current == null || !current.matches(source)) {
 			current = writer.refresh(accessContext, source, current == null ? 0 : current.snapshotRevision());
 		}
+		return new ValidatedPolicy(accessContext.tenantId(), accessContext.workspaceId(), source,
+				current.snapshotRevision());
+	}
 
-		return router.inTransaction(accessContext, jdbc -> {
-			TenantPurchaseRequestExpiryPolicySnapshot active = readSnapshot(jdbc, accessContext);
-			if (active == null || !active.matches(source)) {
-				throw new TenantBusinessDatabasePolicySnapshotConflictException();
-			}
-			jdbc.queryForObject("select set_config('" + EXPECTED_REVISION_SETTING + "', ?, true)", String.class,
-					Long.toString(active.snapshotRevision()));
-			return work.execute(jdbc);
-		});
+	/** Verifies the preflighted BC01 evidence against this callback's Tenant JDBC transaction before installing it. */
+	public void installValidatedRevision(JdbcTemplate tenantJdbc, CurrentAccessContext accessContext,
+			ValidatedPolicy validated) {
+		Objects.requireNonNull(tenantJdbc, "Routed Tenant JDBC session is required");
+		Objects.requireNonNull(accessContext, "Verified Tenant access context is required");
+		Objects.requireNonNull(validated, "Centrally validated expiry policy is required");
+		if (!validated.tenantId.equals(accessContext.tenantId())
+				|| !validated.workspaceId.equals(accessContext.workspaceId())) {
+			throw new TenantBusinessDatabasePolicySnapshotConflictException();
+		}
+		TenantPurchaseRequestExpiryPolicySnapshot active = readSnapshot(tenantJdbc, accessContext);
+		if (active == null || active.snapshotRevision() != validated.snapshotRevision
+				|| !active.matches(validated.source)) {
+			throw new TenantBusinessDatabasePolicySnapshotConflictException();
+		}
+		tenantJdbc.queryForObject("select set_config(?, ?, true)", String.class,
+				EXPECTED_REVISION_SETTING, Long.toString(validated.snapshotRevision));
+	}
+
+	/** Opaque evidence captured after BC01 validation and checked again on the callback's JDBC session. */
+	public static final class ValidatedPolicy {
+		private final com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId tenantId;
+		private final com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId workspaceId;
+		private final OperationalSettingsAccess.PurchaseRequestExpiryPolicySource source;
+		private final long snapshotRevision;
+
+		private ValidatedPolicy(
+				com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId tenantId,
+				com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId workspaceId,
+				OperationalSettingsAccess.PurchaseRequestExpiryPolicySource source, long snapshotRevision) {
+			this.tenantId = Objects.requireNonNull(tenantId);
+			this.workspaceId = Objects.requireNonNull(workspaceId);
+			this.source = Objects.requireNonNull(source);
+			if (snapshotRevision < 1) throw new IllegalArgumentException("Validated expiry-policy revision must be positive");
+			this.snapshotRevision = snapshotRevision;
+		}
 	}
 
 	/** Checks current manifest evidence and dedicated writer credentials before advertising wallet capability. */

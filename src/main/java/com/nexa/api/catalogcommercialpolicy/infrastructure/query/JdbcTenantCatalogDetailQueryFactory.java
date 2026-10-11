@@ -6,6 +6,7 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPage;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSearchCriteria;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.AuthoritativeOfferQuery;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogAvailabilityQuery;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.application.service.CatalogQueryService;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogDetailQueryFactory;
@@ -44,8 +45,9 @@ public final class JdbcTenantCatalogDetailQueryFactory implements TenantCatalogD
 		CatalogClientAccountPort resolvedBuyer = resolvedBuyerProfile(buyerProfile);
 		AuthoritativeOfferQuery offers = new JdbcAuthoritativeOfferQuery(jdbc, resolvedBuyer);
 		var sellableSkus = new JdbcSellableSkuQuery(jdbc, offers);
-		var availability = Objects.requireNonNull(availabilityBinding.bindTo(jdbc, sellableSkus),
+		CatalogAvailabilityQuery availabilityQuery = Objects.requireNonNull(availabilityBinding.bindTo(jdbc, sellableSkus),
 				"Tenant inventory adapter factory returned no availability query");
+		var availability = new CatalogAvailabilityPortAdapter(availabilityQuery);
 		var itemQuery = new JdbcCatalogItemQueryAdapter(jdbc, availability, offers, clock);
 		CatalogQueryService catalog = new CatalogQueryService(itemQuery, authorization);
 		return new TenantCatalogReadQuery() {

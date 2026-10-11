@@ -26,6 +26,7 @@ import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOr
 import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOrderDraftService;
 import com.nexa.api.salescommitment.application.workflow.SalesSnapshotAssembler;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -48,7 +49,8 @@ public class SalesRuntimeConfiguration {
 	@Bean ManualSalesOrderUseCase manualSalesOrderUseCase(SalesSnapshotAssembler snapshots,
 			ManualSalesOrderPersistencePort persistence) { return new ManualSalesOrderService(snapshots, persistence); }
 	@Bean ManualSalesOrderDraftUseCase manualSalesOrderDraftUseCase(ManualSalesOrderDraftPersistencePort drafts,
-			ManualSalesOrderUseCase manualOrders, ManualSalesOrderPersistencePort orders) {
+			@Qualifier("manualSalesOrderUseCase") ManualSalesOrderUseCase manualOrders,
+			ManualSalesOrderPersistencePort orders) {
 		return new ManualSalesOrderDraftService(drafts, manualOrders, orders);
 	}
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,

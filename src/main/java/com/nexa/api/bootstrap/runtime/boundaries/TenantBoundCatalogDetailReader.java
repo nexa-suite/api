@@ -6,8 +6,8 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPage;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSearchCriteria;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
-import com.nexa.api.catalogcommercialpolicy.application.publicapi.TenantCatalogHttpReadPort;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogDetailQueryFactory;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogHttpReadPort;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountDetails;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;

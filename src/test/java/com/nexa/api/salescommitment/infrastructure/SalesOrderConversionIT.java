@@ -81,6 +81,7 @@ class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test void conversionRejectsUnacceptedMaterialChangeThenSucceedsAfterBuyerAcceptance() throws Exception {
+        ensureBuyerCreditAccountConfigured();
         ensureCommercialInventory();
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")

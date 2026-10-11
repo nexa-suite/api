@@ -2,6 +2,7 @@ package com.nexa.api.inventoryavailability.application.service;
 
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationSubstitutionRequests;
+import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationSubstitutionUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
@@ -22,7 +23,7 @@ import java.util.UUID;
 /** Records a reasoned request for a controlled physical-lot substitution decision. */
 @Service
 @Profile("!test")
-public class PhysicalAllocationSubstitutionService {
+public class PhysicalAllocationSubstitutionService implements PhysicalAllocationSubstitutionUseCase {
     private final PhysicalAllocationSubstitutionRequests requests;
     private final Clock clock;
 

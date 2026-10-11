@@ -17,9 +17,11 @@ import com.nexa.api.inventoryavailability.application.ReleaseReservation;
 import com.nexa.api.inventoryavailability.application.ReserveInventory;
 import com.nexa.api.inventoryavailability.application.RestoreLot;
 import com.nexa.api.inventoryavailability.application.TransferInventory;
+import com.nexa.api.inventoryavailability.application.WarehouseOperationsApplicationService;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -38,8 +40,8 @@ public final class JdbcTenantWarehouseOperationsCompositionFactory
     public WarehouseOperationsService bindTo(JdbcTemplate tenantJdbc, Bindings bindings) {
         JdbcTemplate jdbc = Objects.requireNonNull(tenantJdbc, "Routed Tenant JDBC session is required");
         Bindings verified = Objects.requireNonNull(bindings, "Tenant Warehouse bindings are required");
-        WarehouseOperationalSettingsPort settings = new CentralSettingsSnapshot(
-                verified.centralSettingsSnapshot());
+        WarehouseOperationalSettingsPort settings = new CentralSettingsSnapshot(verified.centralSettingsSnapshot()
+                .map(JdbcTenantWarehouseOperationsCompositionFactory::warehouseSettings));
 
         WarehouseConfigurationPersistenceAdapter configuration = new WarehouseConfigurationPersistenceAdapter(
                 jdbc, verified.changeFeed(), verified.sellableSkus(), null, settings,
@@ -61,7 +63,7 @@ public final class JdbcTenantWarehouseOperationsCompositionFactory
         WarehouseOutboxPersistenceAdapter outbox = new WarehouseOutboxPersistenceAdapter(jdbc,
                 verified.canonicalOutbox());
 
-        return new WarehouseOperationsService(configuration, inventory, reservations, dashboard,
+        return new WarehouseOperationsApplicationService(configuration, inventory, reservations, dashboard,
                 new ConfigureWarehouse(configuration), new ConfigureWarehouseZone(configuration),
                 new ReceiveInventory(inventory), new AdjustInventory(inventory), new RegisterWaste(inventory),
                 new BlockLot(inventory), new QuarantineLot(inventory), new RestoreLot(inventory),
@@ -70,6 +72,14 @@ public final class JdbcTenantWarehouseOperationsCompositionFactory
                 new MarkFulfillmentReady(dashboard), new QueryAvailability(inventory),
                 new ManageSafetyStock(safetyStock), new TransferInventory(transfers),
                 new CycleCountInventory(inventory));
+    }
+
+    private static WarehouseOperationalSettingsPort.Snapshot warehouseSettings(
+            OperationalSettingsAccess.Snapshot value) {
+        return new WarehouseOperationalSettingsPort.Snapshot(value.selectionPolicy(), value.orderCutoffPolicy(),
+                value.fulfillmentDefaults(), value.inventoryVisibilityPolicy(), value.buyerAvailabilityPolicy(),
+                value.startsAt(), value.endsAt(), value.orderCutoffMinutes(), value.thermalLogRequired(),
+                value.version());
     }
 
     private static final class CentralSettingsSnapshot implements WarehouseOperationalSettingsPort {

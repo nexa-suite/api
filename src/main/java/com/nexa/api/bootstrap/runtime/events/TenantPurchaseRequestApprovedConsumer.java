@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.events;
 
 import com.nexa.api.bootstrap.runtime.boundaries.TenantSalesCommitmentCompositionProvider;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
 import com.nexa.api.salescommitment.application.publicapi.SalesWorkflowEventSnapshotQuery;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesWorkflowEventSnapshotQueryFactory;
@@ -30,14 +31,17 @@ public final class TenantPurchaseRequestApprovedConsumer implements TenantOutbox
     private final TenantSalesWorkflowEventSnapshotQueryFactory snapshots;
     private final ObjectProvider<TenantSalesCommitmentCompositionProvider> salesCompositions;
     private final VerifiedSystemWorkflowAccessContextResolver workflowActors;
+    private final TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies;
     private final ObjectMapper mapper;
 
     public TenantPurchaseRequestApprovedConsumer(TenantSalesWorkflowEventSnapshotQueryFactory snapshots,
             ObjectProvider<TenantSalesCommitmentCompositionProvider> salesCompositions,
-            VerifiedSystemWorkflowAccessContextResolver workflowActors, ObjectMapper mapper) {
+            VerifiedSystemWorkflowAccessContextResolver workflowActors,
+            TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies, ObjectMapper mapper) {
         this.snapshots = Objects.requireNonNull(snapshots, "Tenant Sales event snapshot factory is required");
         this.salesCompositions = Objects.requireNonNull(salesCompositions, "Tenant Sales composition provider is required");
         this.workflowActors = Objects.requireNonNull(workflowActors, "Verified workflow actor resolver is required");
+        this.expiryPolicies = Objects.requireNonNull(expiryPolicies, "Tenant expiry policy resolver is required");
         this.mapper = Objects.requireNonNull(mapper, "Outbox payload mapper is required");
     }
 
@@ -57,8 +61,11 @@ public final class TenantPurchaseRequestApprovedConsumer implements TenantOutbox
         return () -> {
             CurrentAccessContext actor = workflowActors.resolve(event.tenantId(), event.workspaceId());
             requireActorScope(actor, event);
+            TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver.ValidatedPolicy expiryPolicy =
+                    expiryPolicies.prepareForCallback(actor);
             return (jdbc, transactionManager, current) -> {
                 requireSameScope(event, current);
+                expiryPolicies.installValidatedRevision(jdbc, actor, expiryPolicy);
                 if (snapshots.bindTo(jdbc).findSalesOrderBySourcePurchaseRequest(
                         current.tenantId(), current.workspaceId(), requestId).isPresent()) return;
                 TenantSalesCommitmentCompositionProvider composition = salesCompositions.getIfAvailable();

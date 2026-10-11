@@ -4,7 +4,7 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPage;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSearchCriteria;
-import com.nexa.api.catalogcommercialpolicy.application.port.out.ProductAvailabilityPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogAvailabilityQuery;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,7 +26,7 @@ public interface TenantCatalogDetailQueryFactory {
 
 	@FunctionalInterface
 	interface TenantAvailabilityAdapterFactory {
-		ProductAvailabilityPort bindTo(JdbcTemplate tenantJdbc, SellableSkuQuery tenantSellableSkus);
+		CatalogAvailabilityQuery bindTo(JdbcTemplate tenantJdbc, SellableSkuQuery tenantSellableSkus);
 	}
 
 	interface TenantCatalogReadQuery {

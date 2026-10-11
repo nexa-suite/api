@@ -2,6 +2,7 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.ProductAvailabilityPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogAvailabilityQuery;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -20,7 +21,7 @@ import static com.nexa.api.inventoryavailability.infrastructure.persistence.Ware
 
 @Repository
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
-public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPort {
+public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPort, CatalogAvailabilityQuery {
     private final JdbcTemplate jdbc;
     private final SellableSkuQuery sellableSkus;
 
@@ -30,7 +31,7 @@ public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPor
     }
 
     @Override
-    public List<Snapshot> find(CatalogScope scope, List<String> catalogItemIds) {
+    public List<ProductAvailabilityPort.Snapshot> find(CatalogScope scope, List<String> catalogItemIds) {
         List<String> ids = catalogItemIds == null ? List.of() : catalogItemIds.stream()
                 .filter(value -> value != null && !value.isBlank()).distinct().toList();
         if (ids.isEmpty()) return List.of();
@@ -39,7 +40,7 @@ public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPor
     }
 
     @Override
-    public List<Snapshot> findWithPolicies(CatalogScope scope, List<String> catalogItemIds,
+    public List<ProductAvailabilityPort.Snapshot> findWithPolicies(CatalogScope scope, List<String> catalogItemIds,
                                           List<SellableSkuQuery.InventorySkuSnapshot> policies) {
         List<String> ids = catalogItemIds == null ? List.of() : catalogItemIds.stream()
                 .filter(value -> value != null && !value.isBlank()).distinct().toList();
@@ -49,7 +50,7 @@ public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPor
         List<Object> args = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
         args.addAll(ids);
         Instant asOf = Instant.now();
-        List<Snapshot> found = jdbc.query("with " + catalogSnapshots.cte() + ", scoped_sku as ("
+        List<ProductAvailabilityPort.Snapshot> found = jdbc.query("with " + catalogSnapshots.cte() + ", scoped_sku as ("
                         + "select id,legacy_catalog_item_id,temperature_min,temperature_max "
                         + "from catalog_sku_snapshot where tenant_id=? and workspace_id=? "
                         + "and status='ACTIVE' and legacy_catalog_item_id in (" + placeholders + ")), "
@@ -94,14 +95,38 @@ public class CatalogProductAvailabilityAdapter implements ProductAvailabilityPor
                     boolean nearExpiry = expiry != null && !expiry.toLocalDate().isAfter(LocalDate.now().plusDays(7));
                     String status = available.signum() <= 0 ? "OUT_OF_STOCK"
                             : available.compareTo(BigDecimal.TEN) <= 0 ? "LOW" : "AVAILABLE";
-                    return new Snapshot(rs.getString("legacy_catalog_item_id"), status, nearExpiry, asOf, available);
+                    return new ProductAvailabilityPort.Snapshot(rs.getString("legacy_catalog_item_id"), status,
+                            nearExpiry, asOf, available);
                 },
                 // After snapshot CTE parameters, scope values constrain SKU, inventory,
                 // and policy rows to the same request scope throughout the query.
                 catalogSnapshots.prepend(mergeArgs(args, scope)));
-        Map<String, Snapshot> byId = found.stream().collect(Collectors.toMap(Snapshot::catalogItemId, Function.identity()));
+        Map<String, ProductAvailabilityPort.Snapshot> byId = found.stream().collect(Collectors.toMap(
+                ProductAvailabilityPort.Snapshot::catalogItemId, Function.identity()));
         return ids.stream().map(id -> byId.getOrDefault(id,
-                new Snapshot(id, "OUT_OF_STOCK", false, asOf, BigDecimal.ZERO))).toList();
+                new ProductAvailabilityPort.Snapshot(id, "OUT_OF_STOCK", false, asOf, BigDecimal.ZERO))).toList();
+    }
+
+    @Override
+    public List<CatalogAvailabilityQuery.Snapshot> findForCatalogItems(java.util.UUID tenantId,
+            java.util.UUID workspaceId, List<String> catalogItemIds) {
+        return find(new CatalogScope(tenantId, workspaceId), catalogItemIds).stream()
+                .map(CatalogProductAvailabilityAdapter::snapshot)
+                .toList();
+    }
+
+    @Override
+    public List<CatalogAvailabilityQuery.Snapshot> findForCatalogItems(java.util.UUID tenantId,
+            java.util.UUID workspaceId, List<String> catalogItemIds,
+            List<SellableSkuQuery.InventorySkuSnapshot> inventoryPolicies) {
+        return findWithPolicies(new CatalogScope(tenantId, workspaceId), catalogItemIds, inventoryPolicies).stream()
+                .map(CatalogProductAvailabilityAdapter::snapshot)
+                .toList();
+    }
+
+    private static CatalogAvailabilityQuery.Snapshot snapshot(ProductAvailabilityPort.Snapshot value) {
+        return new CatalogAvailabilityQuery.Snapshot(value.catalogItemId(), value.status(), value.nearExpiry(),
+                value.asOf(), value.sellableAvailability());
     }
 
     private static Object[] mergeArgs(List<Object> catalogArgs, CatalogScope scope) {

@@ -1,7 +1,6 @@
 package com.nexa.api.inventoryavailability.tenantdatabase;
 
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
-import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuery;
@@ -9,6 +8,7 @@ import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQue
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Optional;
@@ -19,7 +19,7 @@ public interface TenantWarehouseOperationsCompositionFactory {
     WarehouseOperationsService bindTo(JdbcTemplate tenantJdbc, Bindings bindings);
 
     record Bindings(WarehouseObjectAccess verifiedWarehouseAccess,
-                    Optional<WarehouseOperationalSettingsPort.Snapshot> centralSettingsSnapshot,
+                    Optional<OperationalSettingsAccess.Snapshot> centralSettingsSnapshot,
                     SellableSkuQuery sellableSkus,
                     InventoryCommercialSource commercialSource,
                     InventoryFulfillmentSource fulfillmentSource,

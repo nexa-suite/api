@@ -1,7 +1,6 @@
 package com.nexa.api.bootstrap.local;
 
-import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceBootstrap;
-import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogSkuPersistenceBootstrap;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogLocalFixtureProjection;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -31,20 +30,18 @@ public final class LocalTenantBusinessFixtureRunner implements ApplicationRunner
 	private final JdbcTemplate centralJdbc;
 	private final ResolveCurrentAccessContextUseCase accessContexts;
 	private final TenantBusinessDatabaseRouter tenantRouter;
-	private final CatalogPersistenceBootstrap catalogSeed;
-	private final CatalogSkuPersistenceBootstrap skuSeed;
+	private final TenantCatalogLocalFixtureProjection catalogSeed;
 	private final LocalTenantBusinessFixtureSeeder businessSeed;
 
 	public LocalTenantBusinessFixtureRunner(Environment environment, JdbcTemplate centralJdbc,
 			ResolveCurrentAccessContextUseCase accessContexts, TenantBusinessDatabaseRouter tenantRouter,
-			CatalogPersistenceBootstrap catalogSeed, CatalogSkuPersistenceBootstrap skuSeed,
+			TenantCatalogLocalFixtureProjection catalogSeed,
 			LocalTenantBusinessFixtureSeeder businessSeed) {
 		this.environment = environment;
 		this.centralJdbc = centralJdbc;
 		this.accessContexts = accessContexts;
 		this.tenantRouter = tenantRouter;
 		this.catalogSeed = catalogSeed;
-		this.skuSeed = skuSeed;
 		this.businessSeed = businessSeed;
 	}
 
@@ -61,8 +58,7 @@ public final class LocalTenantBusinessFixtureRunner implements ApplicationRunner
 		RlsRequestScope.set(tenantId, workspaceId);
 		try {
 			tenantRouter.inTransaction(buyer, targetJdbc -> {
-				catalogSeed.importExactTenantWorkspace(targetJdbc, tenantId, workspaceId);
-				skuSeed.reconcileExactTenantWorkspace(targetJdbc, tenantId, workspaceId);
+				catalogSeed.seedExactTenantWorkspace(targetJdbc, tenantId, workspaceId);
 				businessSeed.seed(targetJdbc, tenantId, workspaceId, buyerMembershipId, buyerClientCode);
 				return Boolean.TRUE;
 			});

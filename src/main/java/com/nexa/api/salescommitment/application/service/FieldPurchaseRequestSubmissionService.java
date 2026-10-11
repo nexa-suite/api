@@ -7,6 +7,7 @@ import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundE
 import com.nexa.api.salescommitment.application.model.FieldPurchaseRequestModels.Command;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestView;
 import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
+import com.nexa.api.salescommitment.application.purchaserequest.port.FieldPurchaseRequestSubmissionUseCase;
 import com.nexa.api.salescommitment.application.purchaserequest.port.IdempotencyPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
 import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
@@ -28,7 +29,7 @@ import java.util.UUID;
 /** One atomic field submission reuses the accepted draft and submission workflow. */
 @Service
 @Profile("!test")
-public class FieldPurchaseRequestSubmissionService {
+public class FieldPurchaseRequestSubmissionService implements FieldPurchaseRequestSubmissionUseCase {
     private static final String OPERATION = "purchase-request-field-submission";
     private final PurchaseRequestUseCase requests;
     private final CustomerAccountQuery accounts;
@@ -43,6 +44,7 @@ public class FieldPurchaseRequestSubmissionService {
         this.idempotency = idempotency; this.mapper = mapper; this.clock = clock;
     }
 
+    @Override
     @Transactional
     public PurchaseRequestView submit(CurrentAccessContext context, Command command, String key) {
         if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Field submission requires internal sales authority");

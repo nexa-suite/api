@@ -5,4 +5,8 @@ public final class BuyerWalletRefundUnavailableException extends RuntimeExceptio
     public BuyerWalletRefundUnavailableException() {
         super("Tenant wallet refund capability is unavailable");
     }
+
+    public BuyerWalletRefundUnavailableException(Throwable cause) {
+        super("Tenant wallet refund capability is unavailable", cause);
+    }
 }

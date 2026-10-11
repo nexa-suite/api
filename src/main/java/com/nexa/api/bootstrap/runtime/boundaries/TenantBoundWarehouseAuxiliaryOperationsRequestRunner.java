@@ -24,6 +24,7 @@ import com.nexa.api.inventoryavailability.tenantdatabase.TenantInboundReceivingD
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantLotIdentifierResolutionQueryFactory;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantPhysicalAllocationCommandsFactory;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantPhysicalAllocationSubstitutionRequestsFactory;
+import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseAuxiliaryOperationsCompositionFactory;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
@@ -53,6 +54,7 @@ public final class TenantBoundWarehouseAuxiliaryOperationsRequestRunner
     private final TenantPhysicalAllocationCommandsFactory allocations;
     private final TenantPhysicalAllocationSubstitutionRequestsFactory substitutions;
     private final TenantLotIdentifierResolutionQueryFactory lotIdentifiers;
+    private final TenantWarehouseAuxiliaryOperationsCompositionFactory compositions;
     private final WarehouseObjectAccess centralWarehouseAccess;
     private final Clock clock;
 
@@ -67,6 +69,7 @@ public final class TenantBoundWarehouseAuxiliaryOperationsRequestRunner
             TenantPhysicalAllocationCommandsFactory allocations,
             TenantPhysicalAllocationSubstitutionRequestsFactory substitutions,
             TenantLotIdentifierResolutionQueryFactory lotIdentifiers,
+            TenantWarehouseAuxiliaryOperationsCompositionFactory compositions,
             WarehouseObjectAccess centralWarehouseAccess, Clock clock) {
         this.router = Objects.requireNonNull(router);
         this.customerAccounts = Objects.requireNonNull(customerAccounts);
@@ -79,6 +82,7 @@ public final class TenantBoundWarehouseAuxiliaryOperationsRequestRunner
         this.allocations = Objects.requireNonNull(allocations);
         this.substitutions = Objects.requireNonNull(substitutions);
         this.lotIdentifiers = Objects.requireNonNull(lotIdentifiers);
+        this.compositions = Objects.requireNonNull(compositions);
         this.centralWarehouseAccess = Objects.requireNonNull(centralWarehouseAccess);
         this.clock = Objects.requireNonNull(clock);
     }
@@ -124,14 +128,8 @@ public final class TenantBoundWarehouseAuxiliaryOperationsRequestRunner
                 "Tenant substitution factory returned no requests");
         LotIdentifierResolutionQuery lotQuery = Objects.requireNonNull(lotIdentifiers.bindTo(jdbc),
                 "Tenant lot identifier factory returned no query");
-        return new Operations(
-                new com.nexa.api.inventoryavailability.application.service.InboundReceivingDiscrepancyService(
-                        cases, evidence, clock),
-                new com.nexa.api.inventoryavailability.application.service.PhysicalAllocationSubstitutionService(
-                        substitutionRequests, clock),
-                new com.nexa.api.inventoryavailability.application.service.PhysicalScanValidationService(
-                        physicalAllocations, clock, access),
-                new com.nexa.api.inventoryavailability.application.service.LotIdentifierResolutionService(
-                        lotQuery, access));
+        return Objects.requireNonNull(compositions.bindTo(cases, evidence, physicalAllocations,
+                substitutionRequests, lotQuery, access, clock),
+                "Tenant Warehouse auxiliary composition factory returned no operations");
     }
 }

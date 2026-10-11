@@ -52,7 +52,7 @@ class InboundReceivingDiscrepancyApiIntegrationTests extends NexaWorkflowIntegra
                         .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
                 .andExpect(status().isOk());
         warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        UUID skuId = UUID.fromString(jdbc.queryForObject("select id::text from catalog_management.sellable_sku "
+        UUID skuId = UUID.fromString(tenantJdbc().queryForObject("select id::text from catalog_management.sellable_sku "
                 + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0002' and status='ACTIVE' limit 1",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId())));
         String createBody = "{\"warehouseId\":\"" + warehouseB + "\",\"expectedSkuId\":\"" + skuId
@@ -110,7 +110,7 @@ class InboundReceivingDiscrepancyApiIntegrationTests extends NexaWorkflowIntegra
                         .content("{\"evidenceObjectId\":\"" + availableEvidence + "\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("WAREHOUSE_NOT_FOUND"));
-        assertThat(jdbc.queryForObject("select status from warehouse.inbound_receiving_discrepancy_case where id=?",
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inbound_receiving_discrepancy_case where id=?",
                 String.class, caseId)).isEqualTo("PENDING_EVIDENCE");
     }
 
@@ -131,7 +131,7 @@ class InboundReceivingDiscrepancyApiIntegrationTests extends NexaWorkflowIntegra
                         .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
                 .andExpect(status().isOk());
         warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        UUID skuId = UUID.fromString(jdbc.queryForObject("select id::text from catalog_management.sellable_sku "
+        UUID skuId = UUID.fromString(tenantJdbc().queryForObject("select id::text from catalog_management.sellable_sku "
                 + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0002' and status='ACTIVE' limit 1",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId())));
         MvcResult ungrantedWarehouse = mockMvc.perform(post("/api/v1/warehouses")
@@ -140,7 +140,7 @@ class InboundReceivingDiscrepancyApiIntegrationTests extends NexaWorkflowIntegra
                         .content("{\"code\":\"WH-NOG-" + suffix + "\",\"name\":\"Ungrant test\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
 
-        int stockMovementsBefore = jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+        int stockMovementsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
         String createKey = "inbound-discrepancy-" + uuid();
         String body = "{\"warehouseId\":\"" + warehouseId + "\",\"expectedSkuId\":\"" + skuId
@@ -228,13 +228,13 @@ class InboundReceivingDiscrepancyApiIntegrationTests extends NexaWorkflowIntegra
                         .header("Idempotency-Key", submitKey)
                         .contentType(MediaType.APPLICATION_JSON).content(submitBody))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("READY_FOR_REVIEW"));
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(stockMovementsBefore);
     }
 
     private UUID insertEvidence(UUID caseId, String status) {
         UUID evidenceId = UUID.randomUUID();
-        jdbc.update("insert into business_documents.evidence_object (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,"
+        tenantJdbc().update("insert into business_documents.evidence_object (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,"
                         + "object_key,lifecycle_status,declared_content_type,original_filename,created_at,requested_by_membership_id,idempotency_key) "
                         + "values (?,?,?,null,'INBOUND_RECEIVING_DISCREPANCY',?,null,?,'image/jpeg','receipt.jpg',?,?,?)",
                 evidenceId, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), caseId, status,

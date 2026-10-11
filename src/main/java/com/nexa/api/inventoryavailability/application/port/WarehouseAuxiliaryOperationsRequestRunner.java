@@ -1,22 +1,24 @@
 package com.nexa.api.inventoryavailability.application.port;
 
-import com.nexa.api.inventoryavailability.application.service.InboundReceivingDiscrepancyService;
-import com.nexa.api.inventoryavailability.application.service.LotIdentifierResolutionService;
-import com.nexa.api.inventoryavailability.application.service.PhysicalAllocationSubstitutionService;
-import com.nexa.api.inventoryavailability.application.service.PhysicalScanValidationService;
+import com.nexa.api.inventoryavailability.application.publicapi.InboundReceivingDiscrepancyUseCase;
+import com.nexa.api.inventoryavailability.application.publicapi.LotIdentifierResolutionUseCase;
+import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationSubstitutionUseCase;
+import com.nexa.api.inventoryavailability.application.publicapi.PhysicalScanValidationUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.util.Objects;
 import java.util.function.Function;
 
 /** Runs the auxiliary Warehouse HTTP use cases against one verified Tenant session. */
+@org.springframework.modulith.NamedInterface("warehouse-operations")
 public interface WarehouseAuxiliaryOperationsRequestRunner {
     <T> T execute(CurrentAccessContext context, Function<Operations, T> operation);
 
-    record Operations(InboundReceivingDiscrepancyService receivingDiscrepancies,
-                      PhysicalAllocationSubstitutionService substitutions,
-                      PhysicalScanValidationService scanValidation,
-                      LotIdentifierResolutionService lotIdentifiers) {
+    @org.springframework.modulith.NamedInterface("warehouse-operations")
+    record Operations(InboundReceivingDiscrepancyUseCase receivingDiscrepancies,
+                      PhysicalAllocationSubstitutionUseCase substitutions,
+                      PhysicalScanValidationUseCase scanValidation,
+                      LotIdentifierResolutionUseCase lotIdentifiers) {
         public Operations {
             Objects.requireNonNull(receivingDiscrepancies);
             Objects.requireNonNull(substitutions);

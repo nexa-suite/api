@@ -32,7 +32,7 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         try {
-            jdbc.update("update sales.client_account set status='INACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+            tenantJdbc().update("update sales.client_account set status='INACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
                     tenant, workspace, UUID.fromString(accountId));
             mockMvc.perform(get("/api/v1/buyer/purchase-request-drafts/" + draftId)
                             .header("Authorization", "Bearer " + buyer))
@@ -43,7 +43,7 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                             .header("Idempotency-Key", "inactive-account-" + uuid()))
                     .andExpect(status().isForbidden());
         } finally {
-            jdbc.update("update sales.client_account set status='ACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+            tenantJdbc().update("update sales.client_account set status='ACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
                     tenant, workspace, UUID.fromString(accountId));
         }
     }
@@ -53,7 +53,7 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String clientId = buyerClientAccountId();
-        List<String> skuIds = jdbc.query("""
+        List<String> skuIds = tenantJdbc().query("""
                 select s.id::text
                 from catalog_management.sellable_sku s
                 join warehouse.inventory_lot l on l.tenant_id=s.tenant_id and l.workspace_id=s.workspace_id and l.sku_id=s.id
@@ -133,8 +133,8 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DESTINATION_COMPLETE"))
                 .andExpect(jsonPath("$.route").doesNotExist()).andExpect(jsonPath("$.warehouseSelection").doesNotExist())
                 .andReturn();
-        assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request_draft_route where draft_id=?", Integer.class, UUID.fromString(draftId))).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request_draft_warehouse_selection where draft_id=?", Integer.class, UUID.fromString(draftId))).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_route where draft_id=?", Integer.class, UUID.fromString(draftId))).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_warehouse_selection where draft_id=?", Integer.class, UUID.fromString(draftId))).isZero();
         mockMvc.perform(get("/api/v1/buyer/purchase-request-drafts/" + draftId + "/review")
                         .header("Authorization", "Bearer " + buyer))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.routeValidated").value(false))
@@ -143,7 +143,7 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                         .header("Authorization", "Bearer " + buyer).header("If-Match", replaced.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "blocked-submit-" + uuid()))
                 .andExpect(status().isConflict());
-        assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request where id=?", Integer.class, UUID.fromString(draftId))).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request where id=?", Integer.class, UUID.fromString(draftId))).isZero();
 
         MvcResult recalculated = mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/route-previews")
                         .header("Authorization", "Bearer " + buyer).header("If-Match", replaced.getResponse().getHeader("ETag"))
@@ -160,10 +160,10 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(afterSubmit).path("items").findValues("id").stream()
                 .map(tools.jackson.databind.JsonNode::asText).toList()).doesNotContain(draftId);
-        assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request where id=?", Integer.class, UUID.fromString(draftId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where tenant_id=? and workspace_id=? and purchase_request_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request where id=?", Integer.class, UUID.fromString(draftId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where tenant_id=? and workspace_id=? and purchase_request_id=?",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(draftId))).isEqualTo("ACTIVE");
-        assertThat(jdbc.queryForObject("select count(*) from sales.commercial_commitment_line c join sales.commercial_commitment h on h.id=c.commitment_id where h.purchase_request_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment_line c join sales.commercial_commitment h on h.id=c.commitment_id where h.purchase_request_id=?",
                 Integer.class, UUID.fromString(draftId))).isEqualTo(1);
     }
 

@@ -12,9 +12,8 @@ import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAcco
 import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentInventoryQuery;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
-import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
-import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
+import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationsStoreUnavailableException;
@@ -83,17 +82,11 @@ public final class TenantBoundWarehouseOperationsRequestRunner implements Wareho
         Set<UUID> allowedWarehouses = Set.copyOf(centralWarehouseAccess.activeWarehouseIds(verified));
         Optional<OperationalSettingsAccess.Snapshot> settings = centralOperationalSettings
                 .find(verified.workspaceId().toString());
-        Optional<WarehouseOperationalSettingsPort.Snapshot> settingsSnapshot = settings.map(value ->
-                new WarehouseOperationalSettingsPort.Snapshot(value.selectionPolicy(), value.orderCutoffPolicy(),
-                        value.fulfillmentDefaults(), value.inventoryVisibilityPolicy(), value.buyerAvailabilityPolicy(),
-                        value.startsAt(), value.endsAt(), value.orderCutoffMinutes(), value.thermalLogRequired(),
-                        value.version()));
-
         WarehouseObjectAccess verifiedWarehouseAccess = TenantWarehouseRequestBindings.warehouseAccessSnapshot(
                 verified, allowedWarehouses);
         try {
             return router.inTransaction(verified, tenantJdbc -> executeWithinTenant(verified, tenantJdbc,
-                    verifiedWarehouseAccess, settingsSnapshot, request));
+                    verifiedWarehouseAccess, settings, request));
         } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                  | CannotGetJdbcConnectionException | CannotCreateTransactionException unavailable) {
             throw new WarehouseOperationsStoreUnavailableException(unavailable);
@@ -101,7 +94,7 @@ public final class TenantBoundWarehouseOperationsRequestRunner implements Wareho
     }
 
     private <T> T executeWithinTenant(CurrentAccessContext context, JdbcTemplate jdbc,
-            WarehouseObjectAccess access, Optional<WarehouseOperationalSettingsPort.Snapshot> settings,
+            WarehouseObjectAccess access, Optional<OperationalSettingsAccess.Snapshot> settings,
             Function<WarehouseOperationsService, T> operation) {
         CustomerAccountQuery tenantAccounts = Objects.requireNonNull(customerAccounts.bindTo(jdbc),
                 "Tenant Customer Account factory returned no query");

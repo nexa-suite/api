@@ -1,14 +1,27 @@
 package com.nexa.api.salescommitment.infrastructure;
 
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
+import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import com.nexa.api.salescommitment.tenantdatabase.TenantSalesCommitmentCompositionFactory;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -19,7 +32,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** v0.14 commercial, inventory backing, credit and idempotency gates. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@Import(CommercialInventoryCoreIT.ExpiryClockConfiguration.class)
 class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
+
+    @Autowired
+    private MutableTenantSalesTime integrationTime;
+
+    @Autowired
+    private ConversionRollbackFailures rollbackFailures;
+
+    @BeforeEach
+    void resetIntegrationTime() {
+        integrationTime.set(Clock.systemUTC().instant());
+    }
 
     @Test
     void directOrderConfirmsWithoutSyntheticPurchaseRequestAndReplaysExactly() throws Exception {
@@ -46,15 +71,15 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
 
         UUID order = UUID.fromString(orderId);
-        String commitmentId = jdbc.queryForObject(
+        String commitmentId = tenantJdbc().queryForObject(
                 "select commercial_commitment_id::text from sales.sales_order where tenant_id=?::uuid and workspace_id=?::uuid and id=?",
                 String.class, tenantId(), workspaceId(), order);
-        assertThat(jdbc.queryForObject("select source_purchase_request_id from sales.sales_order where id=?", Object.class, order)).isNull();
-        assertThat(jdbc.queryForObject("select order_source from sales.sales_order where id=?", String.class, order)).isEqualTo("DIRECT_ORDER");
-        assertThat(jdbc.queryForObject("select origin_type from sales.sales_order where id=?", String.class, order)).isEqualTo("DIRECT_ORDER");
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, UUID.fromString(commitmentId))).isEqualTo("CONVERTED");
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_backing where commercial_commitment_id=? and status='BACKED'", Integer.class, UUID.fromString(commitmentId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where event_type='SALES_ORDER_CONFIRMED' and aggregate_id=?", Integer.class, order)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select source_purchase_request_id from sales.sales_order where id=?", Object.class, order)).isNull();
+        assertThat(tenantJdbc().queryForObject("select order_source from sales.sales_order where id=?", String.class, order)).isEqualTo("DIRECT_ORDER");
+        assertThat(tenantJdbc().queryForObject("select origin_type from sales.sales_order where id=?", String.class, order)).isEqualTo("DIRECT_ORDER");
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, UUID.fromString(commitmentId))).isEqualTo("CONVERTED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_backing where commercial_commitment_id=? and status='BACKED'", Integer.class, UUID.fromString(commitmentId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where event_type='SALES_ORDER_CONFIRMED' and aggregate_id=?", Integer.class, order)).isEqualTo(1);
         assertThat(json(replay).get("id").asText()).isEqualTo(orderId);
     }
 
@@ -81,7 +106,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
         String fulfillmentEtag = allocated.getResponse().getHeader("ETag");
         String fulfillmentLineId = json(allocated).get("lines").get(0).get("id").asText();
         String skuId = json(allocated).get("lines").get(0).get("skuId").asText();
-        UUID lotId = jdbc.queryForObject(
+        UUID lotId = tenantJdbc().queryForObject(
                 "select l.lot_id from warehouse.physical_allocation_line l "
                         + "join logistics.fulfillment f on f.tenant_id=l.tenant_id and f.workspace_id=l.workspace_id "
                         + "and f.physical_allocation_id=l.physical_allocation_id where f.id=?",
@@ -171,9 +196,9 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.status").value("HANDED_OVER"))
                 .andReturn();
         String deliveryId = json(dispatched).get("deliveryId").asText();
-        assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment where sales_order_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.fulfillment where sales_order_id=?", Integer.class,
                 UUID.fromString(orderId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery where fulfillment_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery where fulfillment_id=?", Integer.class,
                 UUID.fromString(fulfillmentId))).isEqualTo(1);
 
         MvcResult delivery = mockMvc.perform(get("/api/v1/deliveries/" + deliveryId)
@@ -192,18 +217,18 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         configureAllocatedLotTemperatureRange(UUID.fromString(fulfillmentId), lotId);
-        int temperatureEvidenceBefore = jdbc.queryForObject(
+        int temperatureEvidenceBefore = tenantJdbc().queryForObject(
                 "select count(*) from logistics.temperature_evidence where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, tenant, workspace, deliveryUuid);
-        int deliveryEventsBefore = jdbc.queryForObject(
+        int deliveryEventsBefore = tenantJdbc().queryForObject(
                 "select count(*) from logistics.delivery_event where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, tenant, workspace, deliveryUuid);
         UUID logisticsMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
-        int temperatureCommandsBefore = jdbc.queryForObject(
+        int temperatureCommandsBefore = tenantJdbc().queryForObject(
                 "select count(*) from logistics.delivery_command_idempotency where tenant_id=? and workspace_id=? "
                         + "and actor_membership_id=? and operation='TEMPERATURE'",
                 Integer.class, tenant, workspace, logisticsMembership);
-        long deliveryVersionBefore = jdbc.queryForObject(
+        long deliveryVersionBefore = tenantJdbc().queryForObject(
                 "select version from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
                 Long.class, tenant, workspace, deliveryUuid);
         String outOfRangeKey = "canonical-temperature-out-of-range-" + uuid();
@@ -215,23 +240,23 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                         .content("{\"lotId\":\"" + lotId + "\",\"temperatureCelsius\":21,\"unit\":\"CELSIUS\",\"source\":\"MANUAL\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP"));
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from logistics.temperature_evidence where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, tenant, workspace, deliveryUuid)).isEqualTo(temperatureEvidenceBefore);
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select version from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
                 Long.class, tenant, workspace, deliveryUuid)).isEqualTo(deliveryVersionBefore);
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select status from logistics.delivery where tenant_id=? and workspace_id=? and id=?",
                 String.class, tenant, workspace, deliveryUuid)).isEqualTo("IN_TRANSIT");
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from logistics.delivery_event where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, tenant, workspace, deliveryUuid)).isEqualTo(deliveryEventsBefore);
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from logistics.delivery_command_idempotency where tenant_id=? and workspace_id=? "
                         + "and actor_membership_id=? and operation='TEMPERATURE'",
                 Integer.class, tenant, workspace, logisticsMembership)).isEqualTo(temperatureCommandsBefore);
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from logistics.delivery_command_idempotency where tenant_id=? and workspace_id=? "
                         + "and actor_membership_id=? and operation='TEMPERATURE' and idempotency_key=?",
                 Integer.class, tenant, workspace, logisticsMembership, outOfRangeKey)).isZero();
@@ -249,7 +274,7 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andReturn();
 
         UUID evidenceId = UUID.fromString(json(evidence).get("id").asText());
-        String expectedTemperatureStatus = jdbc.queryForObject(
+        String expectedTemperatureStatus = tenantJdbc().queryForObject(
                 "select case when z.temperature_min is null or z.temperature_max is null then 'UNKNOWN' "
                         + "when ? between z.temperature_min and z.temperature_max then 'WITHIN_RANGE' "
                         + "else 'OUT_OF_RANGE' end from logistics.fulfillment f "
@@ -260,16 +285,17 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 String.class, BigDecimal.valueOf(5), lotId, UUID.fromString(fulfillmentId));
         assertThat(json(evidence).get("status").asText()).isEqualTo(expectedTemperatureStatus);
         assertThat(json(evidence).get("status").asText()).isEqualTo("WITHIN_RANGE");
-        assertThat(jdbc.queryForObject("select lot_id from logistics.temperature_evidence where id=?", UUID.class, evidenceId))
+        assertThat(tenantJdbc().queryForObject("select lot_id from logistics.temperature_evidence where id=?", UUID.class, evidenceId))
                 .isEqualTo(lotId);
-        assertThat(jdbc.queryForObject("select subject_type from logistics.temperature_evidence where id=?", String.class, evidenceId))
+        assertThat(tenantJdbc().queryForObject("select subject_type from logistics.temperature_evidence where id=?", String.class, evidenceId))
                 .isEqualTo("DELIVERY");
-        assertThat(jdbc.queryForObject("select subject_id from logistics.temperature_evidence where id=?", UUID.class, evidenceId))
+        assertThat(tenantJdbc().queryForObject("select subject_id from logistics.temperature_evidence where id=?", UUID.class, evidenceId))
                 .isEqualTo(deliveryUuid);
     }
 
     @Test
     void creditLineConfirmationPostsReceivableAndConsumesReservation() throws Exception {
+        ensureBuyerCreditAccountConfigured();
         ensureCommercialInventory();
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         MvcResult created = directOrder(sales, "direct-credit-success-" + uuid(), directBody("CREDIT_LINE", "1"))
@@ -278,14 +304,15 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andReturn();
         UUID order = UUID.fromString(json(created).get("id").asText());
 
-        UUID receivable = jdbc.queryForObject("select id from payments.receivable where tenant_id=?::uuid and workspace_id=?::uuid and subject_type='SALES_ORDER' and subject_id=?", UUID.class, tenantId(), workspaceId(), order);
+        UUID receivable = tenantJdbc().queryForObject("select id from payments.receivable where tenant_id=?::uuid and workspace_id=?::uuid and subject_type='SALES_ORDER' and subject_id=?", UUID.class, tenantId(), workspaceId(), order);
         assertThat(receivable).isNotNull();
-        assertThat(jdbc.queryForObject("select status from payments.credit_reservation where tenant_id=?::uuid and workspace_id=?::uuid and sales_order_id=?", String.class, tenantId(), workspaceId(), order)).isEqualTo("CONSUMED");
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where tenant_id=?::uuid and workspace_id=?::uuid and event_type='RECEIVABLE_CREATED' and aggregate_id=?", Integer.class, tenantId(), workspaceId(), receivable)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select status from payments.credit_reservation where tenant_id=?::uuid and workspace_id=?::uuid and sales_order_id=?", String.class, tenantId(), workspaceId(), order)).isEqualTo("CONSUMED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=?::uuid and workspace_id=?::uuid and event_type='RECEIVABLE_CREATED' and aggregate_id=?", Integer.class, tenantId(), workspaceId(), receivable)).isEqualTo(1);
     }
 
     @Test
     void purchaseRequestCreditLineTransfersReservationAndPostsReceivableOnConfirmation() throws Exception {
+        ensureBuyerCreditAccountConfigured();
         ensureCommercialInventory();
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
@@ -323,10 +350,10 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andReturn();
 
         UUID order = UUID.fromString(orderId);
-        UUID receivable = jdbc.queryForObject("select id from payments.receivable where tenant_id=?::uuid and workspace_id=?::uuid and subject_type='SALES_ORDER' and subject_id=?", UUID.class, tenantId(), workspaceId(), order);
+        UUID receivable = tenantJdbc().queryForObject("select id from payments.receivable where tenant_id=?::uuid and workspace_id=?::uuid and subject_type='SALES_ORDER' and subject_id=?", UUID.class, tenantId(), workspaceId(), order);
         assertThat(receivable).isNotNull();
-        assertThat(jdbc.queryForObject("select status from payments.credit_reservation where tenant_id=?::uuid and workspace_id=?::uuid and purchase_request_id=?", String.class, tenantId(), workspaceId(), UUID.fromString(requestId))).isEqualTo("CONSUMED");
-        assertThat(jdbc.queryForObject("select status from payments.credit_reservation where tenant_id=?::uuid and workspace_id=?::uuid and sales_order_id=?", String.class, tenantId(), workspaceId(), order)).isEqualTo("CONSUMED");
+        assertThat(tenantJdbc().queryForObject("select status from payments.credit_reservation where tenant_id=?::uuid and workspace_id=?::uuid and purchase_request_id=?", String.class, tenantId(), workspaceId(), UUID.fromString(requestId))).isEqualTo("CONSUMED");
+        assertThat(tenantJdbc().queryForObject("select status from payments.credit_reservation where tenant_id=?::uuid and workspace_id=?::uuid and sales_order_id=?", String.class, tenantId(), workspaceId(), order)).isEqualTo("CONSUMED");
         assertThat(json(confirmed).get("status").asText()).isEqualTo("CONFIRMED");
     }
 
@@ -334,21 +361,210 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
     void conversionAtOrAfterExpiryReleasesBackingAndMarksCommitmentExpired() throws Exception {
         PurchaseRequestResource request = createApprovedPurchaseRequest();
         UUID requestId = UUID.fromString(request.id());
-        jdbc.update("update sales.purchase_request set expires_at=current_timestamp where tenant_id=?::uuid and workspace_id=?::uuid and id=?",
-                tenantId(), workspaceId(), requestId);
+        String key = "expired-convert-" + uuid();
+        Instant expiresAt = tenantJdbc().queryForObject(
+                "select expires_at from sales.purchase_request where tenant_id=?::uuid and workspace_id=?::uuid and id=?",
+                Instant.class, tenantId(), workspaceId(), requestId);
+        assertThat(expiresAt).isNotNull().isAfter(integrationTime.instant());
+        integrationTime.set(expiresAt.plusMillis(1));
 
         mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/order-conversions")
                         .header("Authorization", "Bearer " + request.salesToken())
                         .header("If-Match", request.etag())
-                        .header("Idempotency-Key", "expired-convert-" + uuid())
+                        .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PURCHASE_REQUEST_EXPIRED"));
 
-        UUID commitment = jdbc.queryForObject("select id from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and purchase_request_id=?", UUID.class, tenantId(), workspaceId(), requestId);
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, requestId)).isEqualTo("EXPIRED");
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitment)).isEqualTo("EXPIRED");
-        assertThat(jdbc.queryForObject("select status from warehouse.inventory_backing where commercial_commitment_id=?", String.class, commitment)).isEqualTo("RELEASED");
+        UUID commitment = tenantJdbc().queryForObject("select id from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and purchase_request_id=?", UUID.class, tenantId(), workspaceId(), requestId);
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, requestId)).isEqualTo("EXPIRED");
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitment)).isEqualTo("EXPIRED");
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_backing where commercial_commitment_id=?", String.class, commitment)).isEqualTo("RELEASED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.idempotency_record where tenant_id=?::uuid "
+                + "and workspace_id=?::uuid and operation='purchase-request-order-conversion' and idempotency_key=?",
+                Integer.class, tenantId(), workspaceId(), key)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?",
+                Integer.class, requestId)).isZero();
+    }
+
+    @Test
+    void conversionRollsBackAllWritesWhenCallbackFailsAfterPersistence() throws Exception {
+        PurchaseRequestResource request = createApprovedPurchaseRequest();
+        UUID requestId = UUID.fromString(request.id());
+        String key = "conversion-rollback-" + uuid();
+        UUID commitment = tenantJdbc().queryForObject(
+                "select id from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and purchase_request_id=?",
+                UUID.class, tenantId(), workspaceId(), requestId);
+        String requestStatus = tenantJdbc().queryForObject(
+                "select status from sales.purchase_request where tenant_id=?::uuid and workspace_id=?::uuid and id=?",
+                String.class, tenantId(), workspaceId(), requestId);
+        long requestVersion = tenantJdbc().queryForObject(
+                "select version from sales.purchase_request where tenant_id=?::uuid and workspace_id=?::uuid and id=?",
+                Long.class, tenantId(), workspaceId(), requestId);
+        String backingStatus = tenantJdbc().queryForObject(
+                "select status from warehouse.inventory_backing where commercial_commitment_id=? order by requested_at,id limit 1",
+                String.class, commitment);
+        rollbackFailures.arm(key);
+        try {
+            mockMvc.perform(post("/api/v1/purchase-requests/" + request.id() + "/order-conversions")
+                            .header("Authorization", "Bearer " + request.salesToken())
+                            .header("If-Match", request.etag())
+                            .header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isInternalServerError());
+            assertThat(rollbackFailures.isArmed()).isFalse();
+        } finally {
+            rollbackFailures.clear(key);
+        }
+
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, requestId))
+                .isEqualTo(requestStatus);
+        assertThat(tenantJdbc().queryForObject("select version from sales.purchase_request where id=?", Long.class, requestId))
+                .isEqualTo(requestVersion);
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitment))
+                .isEqualTo("ACTIVE");
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_backing where commercial_commitment_id=? order by requested_at,id limit 1", String.class, commitment))
+                .isEqualTo(backingStatus);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, requestId))
+                .isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_event where purchase_request_id=? and event_type='CONVERTED'", Integer.class, requestId))
+                .isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.idempotency_record where tenant_id=?::uuid and workspace_id=?::uuid and operation='purchase-request-order-conversion' and idempotency_key=?", Integer.class, tenantId(), workspaceId(), key))
+                .isZero();
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ExpiryClockConfiguration {
+        @Bean
+        ConversionRollbackFailures conversionRollbackFailures() {
+            return new ConversionRollbackFailures();
+        }
+
+        @Bean
+        MutableTenantSalesTime mutableTenantSalesTime() {
+            return new MutableTenantSalesTime(Clock.systemUTC().instant());
+        }
+
+        @Bean
+        @Primary
+        TenantSalesCommitmentCompositionFactory expiryClockTenantSalesCommitmentFactory(
+                TenantSalesCommitmentCompositionFactoryAdapter delegate, MutableTenantSalesTime integrationTime,
+                ConversionRollbackFailures rollbackFailures) {
+            return (tenantJdbc, bindings) -> {
+                var composition = delegate.bindTo(tenantJdbc,
+                        new TenantSalesCommitmentCompositionFactory.Bindings(bindings.customerAccounts(),
+                            bindings.customerAddresses(), bindings.sellableSkus(), bindings.creditExposure(),
+                            bindings.catalogItemSnapshots(), bindings.creditReservations(), bindings.warehouses(),
+                            bindings.inventoryBacking(), bindings.walletReservations(), bindings.paymentConfirmations(),
+                            bindings.receivables(), bindings.financialAdjustments(), bindings.canonicalOutbox(),
+                            bindings.changeFeed(), bindings.maps(), integrationTime.clock(), bindings.objectMapper(),
+                            bindings.walletTenderEnabled(), bindings.walletRefundBalances()));
+                SalesOrderUseCase underlying = composition.salesOrders();
+                SalesOrderUseCase failureInjected = (SalesOrderUseCase) Proxy.newProxyInstance(
+                        SalesOrderUseCase.class.getClassLoader(), new Class<?>[] { SalesOrderUseCase.class },
+                        (proxy, method, arguments) -> {
+                            try {
+                                Object result = method.invoke(underlying, arguments);
+                                if ("convert".equals(method.getName()) && arguments != null
+                                        && arguments.length == 5 && rollbackFailures.failAfter(arguments[3].toString())) {
+                                    throw new IllegalStateException("injected failure after conversion persistence");
+                                }
+                                return result;
+                            } catch (InvocationTargetException invocation) {
+                                throw invocation.getCause();
+                            }
+                        });
+                return new TenantSalesCommitmentCompositionFactory.Composition(composition.purchaseRequestDrafts(),
+                        composition.purchaseRequests(), failureInjected, composition.approvedWorkflowConversion(),
+                        composition.directOrders(), composition.manualSalesOrders(),
+                        composition.manualSalesOrderDrafts(), composition.fieldPurchaseRequestSubmissions());
+            };
+        }
+    }
+
+    static final class ConversionRollbackFailures {
+        private final AtomicReference<String> armedKey = new AtomicReference<>();
+
+        void arm(String key) {
+            if (!armedKey.compareAndSet(null, key)) {
+                throw new IllegalStateException("A conversion rollback failure is already armed");
+            }
+        }
+
+        boolean failAfter(String key) {
+            String armed = armedKey.get();
+            return armed != null && armed.equals(key) && armedKey.compareAndSet(armed, null);
+        }
+
+        boolean isArmed() {
+            return armedKey.get() != null;
+        }
+
+        void clear(String key) {
+            armedKey.compareAndSet(key, null);
+        }
+    }
+
+    static final class MutableTenantSalesTime {
+        private final AtomicReference<Instant> currentInstant;
+        private final Clock clock;
+
+        MutableTenantSalesTime(Instant initialInstant) {
+            currentInstant = new AtomicReference<>(initialInstant);
+            clock = new Clock() {
+                @Override
+                public ZoneId getZone() {
+                    return ZoneId.of("UTC");
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                    return new MutableZoneClock(currentInstant, zone);
+                }
+
+                @Override
+                public Instant instant() {
+                    return currentInstant.get();
+                }
+            };
+        }
+
+        Clock clock() {
+            return clock;
+        }
+
+        Instant instant() {
+            return currentInstant.get();
+        }
+
+        void set(Instant instant) {
+            currentInstant.set(instant);
+        }
+    }
+
+    private static final class MutableZoneClock extends Clock {
+        private final AtomicReference<Instant> currentInstant;
+        private final ZoneId zone;
+
+        private MutableZoneClock(AtomicReference<Instant> currentInstant, ZoneId zone) {
+            this.currentInstant = currentInstant;
+            this.zone = zone;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return zone;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return new MutableZoneClock(currentInstant, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return currentInstant.get();
+        }
     }
 
     @Test
@@ -360,15 +576,15 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.status").value("PENDING"))
                 .andReturn();
         UUID order = UUID.fromString(json(pending).get("id").asText());
-        UUID commitment = jdbc.queryForObject("select commercial_commitment_id from sales.sales_order where id=?", UUID.class, order);
+        UUID commitment = tenantJdbc().queryForObject("select commercial_commitment_id from sales.sales_order where id=?", UUID.class, order);
 
         mockMvc.perform(post("/api/v1/sales-orders/" + order + "/confirmations")
                         .header("Authorization", "Bearer " + sales)
                         .header("If-Match", pending.getResponse().getHeader("ETag")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("PAYMENT_REQUIRED"));
-        assertThat(jdbc.queryForObject("select status from sales.sales_order where id=?", String.class, order)).isEqualTo("PENDING");
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitment)).isEqualTo("ACTIVE");
+        assertThat(tenantJdbc().queryForObject("select status from sales.sales_order where id=?", String.class, order)).isEqualTo("PENDING");
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitment)).isEqualTo("ACTIVE");
 
         mockMvc.perform(post("/api/v1/sales-orders/" + order + "/cancellations")
                         .header("Authorization", "Bearer " + sales)
@@ -376,8 +592,8 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "direct-prepaid-cancel-" + uuid()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitment)).isEqualTo("RELEASED");
-        assertThat(jdbc.queryForObject("select status from warehouse.inventory_backing where commercial_commitment_id=?", String.class, commitment)).isEqualTo("RELEASED");
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where id=?", String.class, commitment)).isEqualTo("RELEASED");
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_backing where commercial_commitment_id=?", String.class, commitment)).isEqualTo("RELEASED");
     }
 
     @Test
@@ -386,19 +602,19 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String tenant = tenantId();
         String workspace = workspaceId();
-        int commitmentsBefore = jdbc.queryForObject("select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace);
-        int ordersBefore = jdbc.queryForObject("select count(*) from sales.sales_order where tenant_id=?::uuid and workspace_id=?::uuid and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace);
-        int backingBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid", Integer.class, tenant, workspace);
-        int outboxBefore = jdbc.queryForObject("select count(*) from integration.outbox_event where tenant_id=?::uuid and workspace_id=?::uuid and event_type='SALES_ORDER_CONFIRMED'", Integer.class, tenant, workspace);
+        int commitmentsBefore = tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace);
+        int ordersBefore = tenantJdbc().queryForObject("select count(*) from sales.sales_order where tenant_id=?::uuid and workspace_id=?::uuid and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace);
+        int backingBefore = tenantJdbc().queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid", Integer.class, tenant, workspace);
+        int outboxBefore = tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=?::uuid and workspace_id=?::uuid and event_type='SALES_ORDER_CONFIRMED'", Integer.class, tenant, workspace);
 
         directOrder(sales, "direct-short-" + uuid(), directBody("IMMEDIATE", "1000000"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_SELLABLE_AVAILABILITY"));
 
-        assertThat(jdbc.queryForObject("select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(commitmentsBefore);
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where tenant_id=?::uuid and workspace_id=?::uuid and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(ordersBefore);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid", Integer.class, tenant, workspace)).isEqualTo(backingBefore);
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where tenant_id=?::uuid and workspace_id=?::uuid and event_type='SALES_ORDER_CONFIRMED'", Integer.class, tenant, workspace)).isEqualTo(outboxBefore);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(commitmentsBefore);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where tenant_id=?::uuid and workspace_id=?::uuid and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(ordersBefore);
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid", Integer.class, tenant, workspace)).isEqualTo(backingBefore);
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=?::uuid and workspace_id=?::uuid and event_type='SALES_ORDER_CONFIRMED'", Integer.class, tenant, workspace)).isEqualTo(outboxBefore);
     }
 
     @Test
@@ -421,11 +637,11 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_SELLABLE_AVAILABILITY"));
 
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, request)).isEqualTo("DRAFT");
-        assertThat(jdbc.queryForObject("select count(*) from sales.commercial_commitment where purchase_request_id=?", Integer.class, request)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_backing b join sales.commercial_commitment c on c.id=b.commercial_commitment_id where c.purchase_request_id=?", Integer.class, request)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from payments.credit_reservation where purchase_request_id=?", Integer.class, request)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from sales.idempotency_record where resource_id=? and operation='purchase-request-submission'", Integer.class, request)).isZero();
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, request)).isEqualTo("DRAFT");
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment where purchase_request_id=?", Integer.class, request)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_backing b join sales.commercial_commitment c on c.id=b.commercial_commitment_id where c.purchase_request_id=?", Integer.class, request)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.credit_reservation where purchase_request_id=?", Integer.class, request)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.idempotency_record where resource_id=? and operation='purchase-request-submission'", Integer.class, request)).isZero();
     }
 
     @Test
@@ -435,32 +651,32 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         UUID client = UUID.fromString(buyerClientAccountId());
-        CreditAccountState original = jdbc.query(
+        CreditAccountState original = tenantJdbc().query(
                 "select credit_limit,credit_exposure,reserved_exposure,status from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                 (rs, row) -> new CreditAccountState(rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getString(4)), tenant, workspace, client)
                 .stream().findFirst().orElse(null);
-        BigDecimal originalClientLimit = jdbc.queryForObject("select credit_limit from sales.client_account where tenant_id=? and workspace_id=? and id=?", BigDecimal.class, tenant, workspace, client);
-        int commitmentsBefore = jdbc.queryForObject("select count(*) from sales.commercial_commitment where tenant_id=? and workspace_id=? and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace);
-        int ordersBefore = jdbc.queryForObject("select count(*) from sales.sales_order where tenant_id=? and workspace_id=? and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace);
-        int backingBefore = jdbc.queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=? and workspace_id=?", Integer.class, tenant, workspace);
-        int reservationsBefore = jdbc.queryForObject("select count(*) from payments.credit_reservation where tenant_id=? and workspace_id=? and commercial_commitment_id is not null and status='RESERVED'", Integer.class, tenant, workspace);
+        BigDecimal originalClientLimit = tenantJdbc().queryForObject("select credit_limit from sales.client_account where tenant_id=? and workspace_id=? and id=?", BigDecimal.class, tenant, workspace, client);
+        int commitmentsBefore = tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment where tenant_id=? and workspace_id=? and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace);
+        int ordersBefore = tenantJdbc().queryForObject("select count(*) from sales.sales_order where tenant_id=? and workspace_id=? and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace);
+        int backingBefore = tenantJdbc().queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=? and workspace_id=?", Integer.class, tenant, workspace);
+        int reservationsBefore = tenantJdbc().queryForObject("select count(*) from payments.credit_reservation where tenant_id=? and workspace_id=? and commercial_commitment_id is not null and status='RESERVED'", Integer.class, tenant, workspace);
         try {
-            jdbc.update("update sales.client_account set credit_limit=0,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?", tenant, workspace, client);
-            jdbc.update("update payments.credit_account set credit_limit=0,credit_exposure=0,reserved_exposure=0,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
+            tenantJdbc().update("update sales.client_account set credit_limit=0,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?", tenant, workspace, client);
+            tenantJdbc().update("update payments.credit_account set credit_limit=0,credit_exposure=0,reserved_exposure=0,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                     tenant, workspace, client);
 
             directOrder(sales, "direct-credit-short-" + uuid(), directBody("CREDIT_LINE", "1"))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.code").value("INSUFFICIENT_CREDIT"));
 
-            assertThat(jdbc.queryForObject("select count(*) from sales.commercial_commitment where tenant_id=? and workspace_id=? and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(commitmentsBefore);
-            assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where tenant_id=? and workspace_id=? and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(ordersBefore);
-            assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=? and workspace_id=?", Integer.class, tenant, workspace)).isEqualTo(backingBefore);
-            assertThat(jdbc.queryForObject("select count(*) from payments.credit_reservation where tenant_id=? and workspace_id=? and commercial_commitment_id is not null and status='RESERVED'", Integer.class, tenant, workspace)).isEqualTo(reservationsBefore);
+            assertThat(tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment where tenant_id=? and workspace_id=? and origin_type='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(commitmentsBefore);
+            assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where tenant_id=? and workspace_id=? and order_source='DIRECT_ORDER'", Integer.class, tenant, workspace)).isEqualTo(ordersBefore);
+            assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_backing where tenant_id=? and workspace_id=?", Integer.class, tenant, workspace)).isEqualTo(backingBefore);
+            assertThat(tenantJdbc().queryForObject("select count(*) from payments.credit_reservation where tenant_id=? and workspace_id=? and commercial_commitment_id is not null and status='RESERVED'", Integer.class, tenant, workspace)).isEqualTo(reservationsBefore);
         } finally {
-            jdbc.update("update sales.client_account set credit_limit=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?", originalClientLimit, tenant, workspace, client);
+            tenantJdbc().update("update sales.client_account set credit_limit=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?", originalClientLimit, tenant, workspace, client);
             if (original != null) {
-                jdbc.update("update payments.credit_account set credit_limit=?,credit_exposure=?,reserved_exposure=?,status=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
+                tenantJdbc().update("update payments.credit_account set credit_limit=?,credit_exposure=?,reserved_exposure=?,status=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                         original.limit(), original.exposure(), original.reserved(), original.status(), tenant, workspace, client);
             }
         }
@@ -496,11 +712,11 @@ class CommercialInventoryCoreIT extends NexaWorkflowIntegrationSupport {
     }
 
     private void configureAllocatedLotTemperatureRange(UUID fulfillmentId, UUID lotId) throws Exception {
-        UUID warehouseId = jdbc.queryForObject("select l.warehouse_id from warehouse.physical_allocation_line l "
+        UUID warehouseId = tenantJdbc().queryForObject("select l.warehouse_id from warehouse.physical_allocation_line l "
                         + "join logistics.fulfillment f on f.tenant_id=l.tenant_id and f.workspace_id=l.workspace_id "
                         + "and f.physical_allocation_id=l.physical_allocation_id where f.id=? and l.lot_id=?",
                 UUID.class, fulfillmentId, lotId);
-        UUID zoneId = jdbc.queryForObject("select l.zone_id from warehouse.physical_allocation_line l "
+        UUID zoneId = tenantJdbc().queryForObject("select l.zone_id from warehouse.physical_allocation_line l "
                         + "join logistics.fulfillment f on f.tenant_id=l.tenant_id and f.workspace_id=l.workspace_id "
                         + "and f.physical_allocation_id=l.physical_allocation_id where f.id=? and l.lot_id=?",
                 UUID.class, fulfillmentId, lotId);

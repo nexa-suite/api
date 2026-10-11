@@ -2,6 +2,10 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.payments.application.exception.BuyerWalletRefundUnavailableException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestExpiredException;
 import com.nexa.api.salescommitment.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderEventView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
@@ -13,8 +17,8 @@ import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCas
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesCommitmentCompositionFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
-import java.util.List;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.function.Function;
 
 /** Routes Sales Order reads, transitions, and PR conversion through the Tenant transaction. */
@@ -33,8 +37,16 @@ public final class TenantBoundSalesOrderUseCase implements SalesOrderUseCase {
 
     @Override public SalesOrderView convert(CurrentAccessContext c, String request, long version,
             String key, String note) {
-        return expiryPolicies.inTransaction(c,
-                jdbc -> compositions.bindTo(jdbc).salesOrders().convert(c, request, version, key, note));
+        ConversionOutcome outcome = expiryPolicies.<ConversionOutcome>inTransaction(c, jdbc -> {
+            try {
+                return new ConversionCompleted(
+                        compositions.bindTo(jdbc).salesOrders().convert(c, request, version, key, note));
+            } catch (PurchaseRequestExpiredException expired) {
+                return new ConversionExpired(expired);
+            }
+        });
+        if (outcome instanceof ConversionExpired expired) throw expired.failure();
+        return ((ConversionCompleted) outcome).order();
     }
     @Override public SalesPage<SalesOrderView> list(CurrentAccessContext c, SalesOrderFilter filter) {
         return call(c, useCase -> useCase.list(c, filter));
@@ -52,11 +64,11 @@ public final class TenantBoundSalesOrderUseCase implements SalesOrderUseCase {
     }
     @Override public SalesOrderWalletRefundView refundBuyerWallet(CurrentAccessContext c, String id,
             BigDecimal amountPEN, String reason, String key) {
-        return call(c, useCase -> useCase.refundBuyerWallet(c, id, amountPEN, reason, key));
+        return callRefundCapability(c, useCase -> useCase.refundBuyerWallet(c, id, amountPEN, reason, key));
     }
     @Override public SalesPage<SalesOrderWalletRefundCandidateView> walletRefundCandidates(CurrentAccessContext c,
             int page, int size) {
-        return call(c, useCase -> useCase.walletRefundCandidates(c, page, size));
+        return callRefundCapability(c, useCase -> useCase.walletRefundCandidates(c, page, size));
     }
     @Override public List<SalesOrderEventView> events(CurrentAccessContext c, String id) {
         return call(c, useCase -> useCase.events(c, id));
@@ -66,7 +78,21 @@ public final class TenantBoundSalesOrderUseCase implements SalesOrderUseCase {
         return call(c, useCase -> useCase.fulfillmentCandidates(c, filter));
     }
 
-    private <T> T call(CurrentAccessContext context, Function<com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase, T> action) {
+    private <T> T call(CurrentAccessContext context, Function<SalesOrderUseCase, T> action) {
         return router.inTransaction(context, jdbc -> action.apply(compositions.bindTo(jdbc).salesOrders()));
     }
+
+    private <T> T callRefundCapability(CurrentAccessContext context,
+            Function<SalesOrderUseCase, T> action) {
+        try {
+            return call(context, action);
+        } catch (TenantBusinessDatabaseUnavailableException
+                | TenantBusinessDatabaseSchemaManifestMismatchException unavailable) {
+            throw new BuyerWalletRefundUnavailableException(unavailable);
+        }
+    }
+
+    private sealed interface ConversionOutcome permits ConversionCompleted, ConversionExpired { }
+    private record ConversionCompleted(SalesOrderView order) implements ConversionOutcome { }
+    private record ConversionExpired(PurchaseRequestExpiredException failure) implements ConversionOutcome { }
 }

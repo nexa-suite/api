@@ -1,7 +1,9 @@
 package com.nexa.api.salescommitment.application.salesorder.model;
 
 import java.math.BigDecimal;
+import org.springframework.modulith.NamedInterface;
 
+@NamedInterface(value = "sales-public", propagate = false)
 public record SalesOrderLineView(String catalogItemId, String itemName, String presentation, BigDecimal quantity, String unit,
 		BigDecimal unitPriceAmount, String unitPriceCurrency, BigDecimal lineSubtotal,
 		String skuId, String familyId, String skuCode, String familyCode) {

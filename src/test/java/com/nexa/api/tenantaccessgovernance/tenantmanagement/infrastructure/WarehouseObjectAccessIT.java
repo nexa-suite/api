@@ -117,7 +117,7 @@ class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
     void localBootstrapGrantsItsWarehouseOperatorAndPreservesExistingGrantsOnRerun() throws Exception {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID warehouse = jdbc.queryForObject("select id from warehouse.warehouse where tenant_id=? and workspace_id=? and code=?",
+        UUID warehouse = tenantJdbc().queryForObject("select id from warehouse.warehouse where tenant_id=? and workspace_id=? and code=?",
                 UUID.class, tenant, workspace, "ICISA-COLD-01");
         UUID operatorMembership = UUID.fromString(membershipId(WAREHOUSE_EMAIL));
         UUID ownerMembership = UUID.fromString(membershipId(OWNER_EMAIL));
@@ -346,11 +346,11 @@ class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(receipt))
                 .andExpect(status().isNotFound());
 
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot where id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where id=?",
                 Integer.class, UUID.fromString(lotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=?",
                 Integer.class, UUID.fromString(lotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.command_idempotency "
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency "
                         + "where tenant_id=? and workspace_id=? and operation='inbound' and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), key)).isEqualTo(1);
     }
@@ -404,7 +404,9 @@ class WarehouseObjectAccessIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"" + code + "\",\"name\":\"Warehouse " + code + "\",\"address\":\"Lima\"}"))
                 .andExpect(status().isCreated()).andReturn();
-        return json(result).get("id").asText();
+        String warehouseId = json(result).get("id").asText();
+        when(warehouseSelection.existsInScope(any(), eq(UUID.fromString(warehouseId)))).thenReturn(true);
+        return warehouseId;
     }
 
     private MvcResult grant(String owner, String warehouseId, String memberId) throws Exception {

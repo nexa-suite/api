@@ -10,7 +10,6 @@ import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFa
 import com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentInventoryQuery;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
-import com.nexa.api.inventoryavailability.application.port.WarehouseOperationalSettingsPort;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
@@ -22,6 +21,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -30,6 +31,8 @@ import java.util.UUID;
 
 /** Binds the existing BC-05 owner composition from immutable central authority snapshots. */
 @Component
+@Profile("local")
+@ConditionalOnProperty(name = "nexa.tenant-business.business-traceability.enabled", havingValue = "true")
 public final class TenantWarehouseOperationsCompositionBinder {
     private final TenantWarehouseOperationsCompositionFactory compositions;
     private final TenantCustomerAccountQueryFactory customerAccounts;
@@ -77,14 +80,9 @@ public final class TenantWarehouseOperationsCompositionBinder {
         InventoryFulfillmentSource fulfillment = TenantWarehouseRequestBindings.fulfillmentSource(tenantFulfillment);
         WarehouseObjectAccess tenantWarehouseAccess = TenantWarehouseRequestBindings.warehouseAccessSnapshot(context,
                 warehouses);
-        Optional<WarehouseOperationalSettingsPort.Snapshot> tenantSettings = settings.map(value ->
-                new WarehouseOperationalSettingsPort.Snapshot(value.selectionPolicy(), value.orderCutoffPolicy(),
-                        value.fulfillmentDefaults(), value.inventoryVisibilityPolicy(), value.buyerAvailabilityPolicy(),
-                        value.startsAt(), value.endsAt(), value.orderCutoffMinutes(), value.thermalLogRequired(),
-                        value.version()));
         return Objects.requireNonNull(compositions.bindTo(jdbc,
                 new com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory.Bindings(
-                        tenantWarehouseAccess, tenantSettings, tenantSkus, commercial, fulfillment, tenantEvidence,
+                        tenantWarehouseAccess, settings, tenantSkus, commercial, fulfillment, tenantEvidence,
                         tenantChangeFeed, traceBindings.canonicalOutbox())),
                 "Tenant Warehouse composition factory returned no service");
     }

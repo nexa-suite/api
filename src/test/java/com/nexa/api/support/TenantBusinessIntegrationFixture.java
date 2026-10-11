@@ -10,6 +10,10 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import javax.sql.DataSource;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -42,6 +46,7 @@ final class TenantBusinessIntegrationFixture {
 	private static final String TRACEABILITY_WORKER_USERNAME = "nexa_business_traceability_worker";
 	private static final String TRACEABILITY_WORKER_PASSWORD = "test-only-traceability-worker-password";
 	private static final String CREDENTIAL_REFERENCE_PREFIX = "test-tenant-business:";
+	private static final Path CREDENTIAL_DIRECTORY = privateCredentialDirectory();
 	private static final PostgreSQLContainer TENANT_POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
 			.withDatabaseName(DATABASE_TEMPLATE)
 			.withUsername(ADMIN_USERNAME)
@@ -62,6 +67,7 @@ final class TenantBusinessIntegrationFixture {
 		seedPhysicalIdentity(databaseName, tenantId, workspaceId);
 		registerReadyBinding(centralJdbc, tenantId);
 		DATABASE_NAMES.put(tenantId, databaseName);
+		registerReadyWorkspaceAnchor(centralJdbc, tenantId, workspaceId);
 	}
 
 	static JdbcTemplate jdbcFor(UUID tenantId) {
@@ -82,6 +88,21 @@ final class TenantBusinessIntegrationFixture {
 		return new TenantBusinessDatabaseCredentials(jdbcUrl(databaseName), RUNTIME_USERNAME, RUNTIME_PASSWORD);
 	}
 
+	static TenantBusinessDatabaseCredentials documentWorkerCredentials(String reference) {
+		return workerCredentials(reference, "local-tenant-business-documents-worker:",
+				DOCUMENTS_WORKER_USERNAME, DOCUMENTS_WORKER_PASSWORD);
+	}
+
+	static TenantBusinessDatabaseCredentials traceabilityWorkerCredentials(String reference) {
+		return workerCredentials(reference, "local-tenant-business-traceability-worker:",
+				TRACEABILITY_WORKER_USERNAME, TRACEABILITY_WORKER_PASSWORD);
+	}
+
+	static TenantBusinessDatabaseCredentials paymentCallbackWorkerCredentials(String reference) {
+		return workerCredentials(reference, "local-tenant-payment-callback-worker:",
+				PAYMENTS_WORKER_USERNAME, PAYMENTS_WORKER_PASSWORD);
+	}
+
 	static DataSource policyWriterDataSource(TenantBusinessDatabaseBinding binding) {
 		if (binding == null) throw new IllegalArgumentException("Tenant database binding is required");
 		UUID tenantId = binding.tenantId().value();
@@ -94,6 +115,19 @@ final class TenantBusinessIntegrationFixture {
 
 	static String credentialReference(UUID tenantId) {
 		return CREDENTIAL_REFERENCE_PREFIX + tenantId;
+	}
+
+	static String credentialDirectory() {
+		return CREDENTIAL_DIRECTORY.toString();
+	}
+
+	private static Path privateCredentialDirectory() {
+		try {
+			return Files.createTempDirectory("nexa-tenant-integration-credentials-",
+					PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+		} catch (IOException exception) {
+			throw new ExceptionInInitializerError(exception);
+		}
 	}
 
 	private static void ensureStarted() {
@@ -221,9 +255,11 @@ final class TenantBusinessIntegrationFixture {
 		String credentialReference = credentialReference(tenantId);
 		String manifestDigest = TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest();
 		centralJdbc.update("INSERT INTO tenant_management.tenant_business_database_binding "
-				+ "(tenant_id,database_identity,credential_secret_reference,lifecycle_state,verified_schema_manifest_sha256) "
-				+ "VALUES (?,?,?,'READY',?) ON CONFLICT (tenant_id) DO NOTHING",
-			tenantId, databaseIdentity, credentialReference, manifestDigest);
+				+ "(tenant_id,database_identity,credential_secret_reference,lifecycle_state,verified_schema_manifest_sha256,"
+				+ "payment_callback_credential_secret_reference) "
+				+ "VALUES (?,?,?,'READY',?,?) ON CONFLICT (tenant_id) DO NOTHING",
+			tenantId, databaseIdentity, credentialReference, manifestDigest,
+			"local-tenant-payment-callback-worker:" + tenantId);
 		var binding = centralJdbc.query("SELECT database_identity,credential_secret_reference,lifecycle_state,"
 				+ "verified_schema_manifest_sha256 FROM tenant_management.tenant_business_database_binding WHERE tenant_id=?",
 			(result, row) -> new BindingState(result.getObject("database_identity", UUID.class),
@@ -234,6 +270,23 @@ final class TenantBusinessIntegrationFixture {
 				|| !"READY".equals(binding.getFirst().state())
 				|| !manifestDigest.equals(binding.getFirst().manifestDigest())) {
 			throw new IllegalStateException("Central Tenant integration binding conflicts with the verified fixture");
+		}
+	}
+
+	private static void registerReadyWorkspaceAnchor(JdbcTemplate centralJdbc, UUID tenantId, UUID workspaceId) {
+		centralJdbc.update("INSERT INTO tenant_management.tenant_business_database_workspace_anchor_task "
+				+ "(task_id,tenant_id,workspace_id,status,completed_at,updated_at) "
+				+ "VALUES (?, ?, ?, 'READY', current_timestamp, current_timestamp) "
+				+ "ON CONFLICT (tenant_id,workspace_id) DO UPDATE SET status='READY',claim_token=NULL,lease_until=NULL, "
+				+ "failure_code=NULL,completed_at=current_timestamp,updated_at=current_timestamp, "
+				+ "version=tenant_management.tenant_business_database_workspace_anchor_task.version+1",
+			UUID.randomUUID(), tenantId, workspaceId);
+		Integer readyRows = centralJdbc.queryForObject("SELECT count(*) "
+				+ "FROM tenant_management.tenant_business_database_workspace_anchor_task "
+				+ "WHERE tenant_id=? AND workspace_id=? AND status='READY' AND completed_at IS NOT NULL",
+			Integer.class, tenantId, workspaceId);
+		if (readyRows == null || readyRows != 1) {
+			throw new IllegalStateException("Central Workspace anchor task is not READY for the verified physical Tenant database");
 		}
 	}
 
@@ -258,6 +311,27 @@ final class TenantBusinessIntegrationFixture {
 		} catch (IllegalArgumentException exception) {
 			throw new IllegalArgumentException("Invalid Tenant integration credential reference");
 		}
+	}
+
+	private static TenantBusinessDatabaseCredentials workerCredentials(String reference, String prefix,
+			String username, String password) {
+		if (reference == null || !reference.startsWith(prefix)) {
+			throw new IllegalArgumentException("Unknown Tenant integration worker credential reference");
+		}
+		UUID tenantId;
+		try {
+			tenantId = UUID.fromString(reference.substring(prefix.length()));
+		} catch (IllegalArgumentException exception) {
+			throw new IllegalArgumentException("Invalid Tenant integration worker credential reference");
+		}
+		if (!(prefix + tenantId).equals(reference)) {
+			throw new IllegalArgumentException("Non-canonical Tenant integration worker credential reference");
+		}
+		String databaseName = DATABASE_NAMES.get(tenantId);
+		if (databaseName == null) {
+			throw new IllegalStateException("Tenant database has not been provisioned for this worker scope");
+		}
+		return new TenantBusinessDatabaseCredentials(jdbcUrl(databaseName), username, password);
 	}
 
 	private static String databaseName(UUID tenantId) {

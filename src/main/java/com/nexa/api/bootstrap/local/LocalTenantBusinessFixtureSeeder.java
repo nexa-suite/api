@@ -2,7 +2,7 @@ package com.nexa.api.bootstrap.local;
 
 import com.nexa.api.bootstrap.local.seed.ClientAccountSeedLoader;
 import com.nexa.api.bootstrap.local.seed.ClientAccountSeedRecord;
-import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogFamilySkuMappingLoader;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogLocalFixtureProjection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -21,9 +21,9 @@ public final class LocalTenantBusinessFixtureSeeder {
 	private final List<String> catalogItemIds;
 
 	public LocalTenantBusinessFixtureSeeder(ClientAccountSeedLoader accountSeeds,
-			CatalogFamilySkuMappingLoader catalogMappings) {
+			TenantCatalogLocalFixtureProjection catalogFixtures) {
 		this.accountSeeds = accountSeeds;
-		this.catalogItemIds = catalogMappings.byLegacyCatalogItemId().keySet().stream().sorted().toList();
+		this.catalogItemIds = catalogFixtures.catalogItemIds();
 	}
 
 	public String validateBuyerClientCode(String buyerClientCode) {

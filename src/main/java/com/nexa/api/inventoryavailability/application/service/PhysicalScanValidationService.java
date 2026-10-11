@@ -1,6 +1,7 @@
 package com.nexa.api.inventoryavailability.application.service;
 
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
+import com.nexa.api.inventoryavailability.application.publicapi.PhysicalScanValidationUseCase;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
@@ -15,7 +16,7 @@ import java.util.Objects;
 /** Application boundary for read-only physical allocation scan validation. */
 @Service
 @Profile("!test")
-public class PhysicalScanValidationService {
+public class PhysicalScanValidationService implements PhysicalScanValidationUseCase {
     private final PhysicalAllocationCommands allocations;
     private final Clock clock;
     private final WarehouseObjectAccess warehouseAccess;

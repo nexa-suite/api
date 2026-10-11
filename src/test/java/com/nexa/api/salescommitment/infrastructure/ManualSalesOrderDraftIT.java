@@ -22,7 +22,7 @@ class ManualSalesOrderDraftIT extends PostgresIntegrationSupport {
     void manualOrderDraftPersistsEachStepUsesIfMatchAndReplaysFinalSubmission() throws Exception {
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         String clientId = buyerClientAccountId();
-        String skuId = jdbc.queryForObject("select s.id::text from catalog_management.sellable_sku s "
+        String skuId = tenantJdbc().queryForObject("select s.id::text from catalog_management.sellable_sku s "
                 + "where s.tenant_id=? and s.workspace_id=? and s.legacy_catalog_item_id='CAT-0002' "
                 + "and s.status='ACTIVE' and s.visible and exists (select 1 from warehouse.inventory_lot l "
                 + "where l.tenant_id=s.tenant_id and l.workspace_id=s.workspace_id and l.sku_id=s.id "
@@ -52,6 +52,21 @@ class ManualSalesOrderDraftIT extends PostgresIntegrationSupport {
                 .andExpect(jsonPath("$.status").value("DRAFT"))
                 .andReturn();
         String draftId = json(created).get("id").asText();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID actor = UUID.fromString(membershipId(SALES_EMAIL));
+        UUID persistedDraft = UUID.fromString(draftId);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.manual_sales_order_draft "
+                        + "where tenant_id=? and workspace_id=? and id=?", Integer.class,
+                tenant, workspace, persistedDraft)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.manual_sales_order_draft_idempotency "
+                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? and idempotency_key=?",
+                Integer.class, tenant, workspace, actor, draftKey)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from sales.manual_sales_order_draft where id=?",
+                Integer.class, persistedDraft)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from sales.manual_sales_order_draft_idempotency "
+                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? and idempotency_key=?",
+                Integer.class, tenant, workspace, actor, draftKey)).isZero();
 
         mockMvc.perform(post("/api/v1/sales-orders/manual-drafts")
                         .header("Authorization", "Bearer " + token)
@@ -103,8 +118,19 @@ class ManualSalesOrderDraftIT extends PostgresIntegrationSupport {
         String orderId = json(submitted).get("id").asText();
         String orderNumber = json(submitted).get("number").asText();
         UUID persistedOrder = UUID.fromString(orderId);
-        assertThat(jdbc.queryForObject("select buyer_membership_id is null from sales.sales_order where id=?", Boolean.class, persistedOrder)).isTrue();
-        assertThat(jdbc.queryForObject("select created_by_membership_id::text from sales.sales_order where id=?", String.class, persistedOrder)).isEqualTo(membershipId(SALES_EMAIL));
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.manual_sales_order_draft "
+                        + "where tenant_id=? and workspace_id=? and id=? and status='CREATED' and sales_order_id=?",
+                Integer.class, tenant, workspace, persistedDraft, persistedOrder)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.manual_order_idempotency "
+                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? and idempotency_key=?",
+                Integer.class, tenant, workspace, actor, submitKey)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from sales.manual_order_idempotency "
+                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? and idempotency_key=?",
+                Integer.class, tenant, workspace, actor, submitKey)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where id=?", Integer.class,
+                persistedOrder)).isZero();
+        assertThat(tenantJdbc().queryForObject("select buyer_membership_id is null from sales.sales_order where id=?", Boolean.class, persistedOrder)).isTrue();
+        assertThat(tenantJdbc().queryForObject("select created_by_membership_id::text from sales.sales_order where id=?", String.class, persistedOrder)).isEqualTo(membershipId(SALES_EMAIL));
 
         mockMvc.perform(get("/api/v1/sales-orders?search=" + orderNumber)
                         .header("Authorization", "Bearer " + token))

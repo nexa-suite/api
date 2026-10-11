@@ -3,6 +3,7 @@ package com.nexa.api.catalogcommercialpolicy.infrastructure.query;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.GetCatalogItemSnapshotUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.ProductAvailabilityPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogAvailabilityQuery;
 import com.nexa.api.catalogcommercialpolicy.application.service.CatalogQueryService;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogItemSnapshotQueryFactory;
 import org.springframework.context.annotation.Profile;
@@ -17,12 +18,12 @@ import java.util.Objects;
 public final class JdbcTenantCatalogItemSnapshotQueryFactory implements TenantCatalogItemSnapshotQueryFactory {
     @Override
     public GetCatalogItemSnapshotUseCase bindTo(JdbcTemplate tenantJdbc,
-            CatalogClientAccountPort tenantClientAccounts, ProductAvailabilityPort tenantAvailability) {
+            CatalogClientAccountPort tenantClientAccounts, CatalogAvailabilityQuery tenantAvailability) {
         JdbcTemplate jdbc = Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required");
         CatalogClientAccountPort accounts = Objects.requireNonNull(tenantClientAccounts,
                 "Tenant Catalog account port is required");
-        ProductAvailabilityPort availability = Objects.requireNonNull(tenantAvailability,
-                "Tenant Catalog availability port is required");
+        ProductAvailabilityPort availability = new CatalogAvailabilityPortAdapter(Objects.requireNonNull(
+                tenantAvailability, "Tenant Catalog availability query is required"));
         var offers = new JdbcAuthoritativeOfferQuery(jdbc, accounts);
         var query = new JdbcCatalogItemQueryAdapter(jdbc, availability, offers);
         return new CatalogQueryService(query);

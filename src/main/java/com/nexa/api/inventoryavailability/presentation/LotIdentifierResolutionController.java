@@ -28,7 +28,7 @@ public final class LotIdentifierResolutionController {
 
     @GetMapping("/inventory/lots/resolve")
     @Operation(operationId = "resolveInventoryLotIdentifier")
-    public com.nexa.api.inventoryavailability.application.service.LotIdentifierResolutionService.Resolution resolve(
+    public com.nexa.api.inventoryavailability.application.publicapi.LotIdentifierResolutionUseCase.Resolution resolve(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @RequestParam String batchNumber) {
         return operations.execute(context, services -> services.lotIdentifiers().resolve(context, batchNumber));

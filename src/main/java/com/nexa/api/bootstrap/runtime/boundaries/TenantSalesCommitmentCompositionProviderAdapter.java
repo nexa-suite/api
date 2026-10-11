@@ -1,7 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.catalogcommercialpolicy.application.port.in.GetCatalogItemSnapshotUseCase;
-import com.nexa.api.catalogcommercialpolicy.application.port.out.ProductAvailabilityPort;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogAvailabilityQuery;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogItemSnapshotQueryFactory;
@@ -119,7 +119,7 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
         CatalogClientAccountPort tenantCatalogAccounts = catalogClientAccounts(tenantAccounts);
         SellableSkuQuery tenantSkus = Objects.requireNonNull(sellableSkus.bindTo(jdbc, tenantCatalogAccounts),
                 "Tenant Catalog factory returned no SKU query");
-        ProductAvailabilityPort tenantAvailability = Objects.requireNonNull(
+        CatalogAvailabilityQuery tenantAvailability = Objects.requireNonNull(
                 catalogAvailability.bindTo(jdbc, tenantSkus), "Tenant Inventory factory returned no availability query");
         GetCatalogItemSnapshotUseCase snapshotQuery = Objects.requireNonNull(
                 catalogSnapshots.bindTo(jdbc, tenantCatalogAccounts, tenantAvailability),

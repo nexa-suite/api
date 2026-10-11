@@ -12,6 +12,7 @@ import com.nexa.api.inventoryavailability.tenantdatabase.TenantInboundReceivingD
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantLotIdentifierResolutionQueryFactory;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantPhysicalAllocationCommandsFactory;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantPhysicalAllocationSubstitutionRequestsFactory;
+import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseAuxiliaryOperationsCompositionFactory;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
@@ -44,10 +45,11 @@ public class TenantBoundWarehouseAuxiliaryOperationsConfiguration {
             TenantPhysicalAllocationCommandsFactory allocations,
             TenantPhysicalAllocationSubstitutionRequestsFactory substitutions,
             TenantLotIdentifierResolutionQueryFactory lotIdentifiers,
+            TenantWarehouseAuxiliaryOperationsCompositionFactory compositions,
             WarehouseObjectAccess warehouseAccess, Clock clock) {
         return new TenantBoundWarehouseAuxiliaryOperationsRequestRunner(router, customerAccounts, sellableSkus,
                 salesOrders, fulfillmentQueries, businessEvidence, traceabilityBindings, discrepancyCases,
-                allocations, substitutions, lotIdentifiers, warehouseAccess, clock);
+                allocations, substitutions, lotIdentifiers, compositions, warehouseAccess, clock);
     }
 
     @Bean
