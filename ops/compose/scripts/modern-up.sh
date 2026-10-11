@@ -6,6 +6,18 @@ compose_dir="$(CDPATH= cd -- "${script_dir}/.." && pwd)"
 api_dir="$(CDPATH= cd -- "${compose_dir}/../.." && pwd)"
 compose_file="${compose_dir}/modern.compose.yml"
 env_file="${api_dir}/.env.local"
+requested_mode="${1:-fullstack}"
+if [ "$#" -gt 1 ]; then
+	printf '%s\n' 'Usage: modern-up.sh [fullstack|api-runtime]' >&2
+	exit 2
+fi
+case "$requested_mode" in
+	fullstack|api-runtime) ;;
+	*)
+		printf '%s\n' 'Usage: modern-up.sh [fullstack|api-runtime]' >&2
+		exit 2
+		;;
+esac
 if [ ! -f "$env_file" ]; then
 	printf '%s\n' "Missing $env_file; run scripts/setup-local-environment.sh first" >&2
 	exit 1
@@ -93,7 +105,13 @@ END
 $do$;
 SQL
 
-docker compose --env-file "$env_file" -f "$compose_file" $compose_profile_args up --build -d
+if [ "$requested_mode" = "api-runtime" ]; then
+	# CI needs the API and its declared runtime dependencies, while the UI build
+	# contexts live in sibling repositories that are not part of this checkout.
+	docker compose --env-file "$env_file" -f "$compose_file" $compose_profile_args up --build -d modern-api
+else
+	docker compose --env-file "$env_file" -f "$compose_file" $compose_profile_args up --build -d
+fi
 docker compose --env-file "$env_file" -f "$compose_file" $compose_profile_args up -d \
 	--force-recreate modern-tenant-credentials modern-api
 
