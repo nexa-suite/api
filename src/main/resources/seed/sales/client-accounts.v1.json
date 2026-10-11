@@ -17,6 +17,9 @@
     "district": "Miraflores",
     "province": "Lima",
     "deliveryReference": "Recepcion principal, ingreso para proveedores",
+    "departmentCode": "15",
+    "provinceCode": "1501",
+    "districtCode": "150122",
     "portalAccess": true,
     "sellerWorkspaceEmail": "commercial@nexa.test",
     "status": "active"

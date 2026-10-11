@@ -3,6 +3,8 @@ package com.nexa.api.bootstrap.local;
 import com.nexa.api.bootstrap.local.seed.ClientAccountSeedLoader;
 import com.nexa.api.bootstrap.local.seed.ClientAccountSeedRecord;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogLocalFixtureProjection;
+import com.nexa.api.customerbuyerrelationships.contract.Address;
+import com.nexa.api.customerbuyerrelationships.domain.model.clientaccount.ClientAccountAddress;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -93,33 +95,125 @@ public final class LocalTenantBusinessFixtureSeeder {
 		String addressKey = "CLI-001".equals(seed.code()) ? "buyer-demo-pueblo-libre"
 				: "buyer-demo-" + seed.code().toLowerCase(java.util.Locale.ROOT);
 		UUID addressId = LocalIdentityIds.forClientAccountAddress(accountId, addressKey);
-		Integer existing = jdbc.queryForObject("select count(*) from sales.client_account_address where id=? "
-				+ "and tenant_id=? and workspace_id=? and client_account_id=?", Integer.class,
-			addressId, tenantId, workspaceId, accountId);
-		if (existing != null && existing > 0) return;
-		Integer otherDefault = jdbc.queryForObject("select count(*) from sales.client_account_address where tenant_id=? "
-				+ "and workspace_id=? and client_account_id=? and default_address", Integer.class,
-			tenantId, workspaceId, accountId);
-		if (otherDefault != null && otherDefault > 0) {
-			throw new IllegalStateException("Existing default buyer address conflicts with the local fixture");
+		List<BuyerAddress> existing = findBuyerAddress(jdbc, addressId);
+		if (seed.address() == null || seed.address().isBlank()) {
+			if (existing.size() != 1) {
+				throw new IllegalStateException("Selected Buyer seed account has no reviewed delivery address");
+			}
+			BuyerAddress persisted = existing.getFirst();
+			rehydrateBuyerAddress(persisted, addressId, tenantId, workspaceId, accountId);
+			return;
 		}
+		Address seedAddress = addressForBuyerSeed(seed);
+		if (existing.isEmpty()) {
+			Integer otherDefault = jdbc.queryForObject("select count(*) from sales.client_account_address where tenant_id=? "
+					+ "and workspace_id=? and client_account_id=? and default_address", Integer.class,
+				tenantId, workspaceId, accountId);
+			if (otherDefault != null && otherDefault > 0) {
+				throw new IllegalStateException("Existing default buyer address conflicts with the local fixture");
+			}
+			jdbc.update("insert into sales.client_account_address "
+					+ "(id,tenant_id,workspace_id,client_account_id,label,recipient_name,recipient_phone,road_type,street_name,street_number,"
+					+ "address_line,reference,receiving_instructions,receiving_hours,latitude,longitude,source,department_code,province_code,"
+					+ "district_code,default_address,status,version,created_at,updated_at) "
+					+ "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,true,'ACTIVE',0,?,?) on conflict (id) do nothing",
+				addressId, tenantId, workspaceId, accountId, "Buyer delivery · " + seed.code(), seed.contact(), seed.phone(),
+				null, null, null, seedAddress.line(), seedAddress.reference(), seed.deliveryPreference(), null, null,
+				null, seedAddress.source(), seedAddress.departmentCode(), seedAddress.provinceCode(), seedAddress.districtCode(),
+				timestamp(now), timestamp(now));
+			existing = findBuyerAddress(jdbc, addressId);
+		}
+		if (existing.size() != 1) throw new IllegalStateException("Deterministic buyer address identity conflicts with existing data");
+		BuyerAddress row = existing.getFirst();
+		if (!sameScope(row, addressId, tenantId, workspaceId, accountId)) {
+			throw new IllegalStateException("Deterministic buyer address identity conflicts with existing data");
+		}
+		if (!matchesGeography(row, seedAddress)) {
+			if (!isRepairableUngeocodedFixture(row, addressId, tenantId, workspaceId, accountId, seed)) {
+				throw new IllegalStateException("Existing buyer address differs from the known ungeocoded local fixture");
+			}
+			int updated = jdbc.update("update sales.client_account_address set department_code=?,province_code=?,district_code=?,"
+					+ "updated_at=?,version=version+1 where id=? and tenant_id=? and workspace_id=? and client_account_id=? "
+					+ "and label=? and recipient_name=? and recipient_phone=? and road_type is null and street_name is null "
+					+ "and street_number is null and interior is null and address_line=? and postal_code is null and reference=? "
+					+ "and receiving_instructions=? and receiving_hours is null and latitude is null and longitude is null "
+					+ "and place_id is null and source='MANUAL' and department_code is null and province_code is null "
+					+ "and district_code is null and default_address and status='ACTIVE' and version=0",
+				seedAddress.departmentCode(), seedAddress.provinceCode(), seedAddress.districtCode(), timestamp(now),
+				addressId, tenantId, workspaceId, accountId, "Buyer delivery · " + seed.code(), seed.contact(), seed.phone(),
+				seed.address(), seed.deliveryReference(), seed.deliveryPreference());
+			if (updated != 1) {
+				throw new IllegalStateException("Known ungeocoded buyer fixture changed before its scoped repair");
+			}
+			existing = findBuyerAddress(jdbc, addressId);
+			if (existing.size() != 1) throw new IllegalStateException("Repaired buyer address could not be reloaded");
+			row = existing.getFirst();
+		}
+		rehydrateBuyerAddress(row, addressId, tenantId, workspaceId, accountId);
+	}
+
+	static Address addressForBuyerSeed(ClientAccountSeedRecord seed) {
 		if (seed.address() == null || seed.address().isBlank()) {
 			throw new IllegalStateException("Selected Buyer seed account has no reviewed delivery address");
 		}
-		jdbc.update("insert into sales.client_account_address "
-				+ "(id,tenant_id,workspace_id,client_account_id,label,recipient_name,recipient_phone,road_type,street_name,street_number,"
-				+ "address_line,reference,receiving_instructions,receiving_hours,latitude,longitude,source,department_code,province_code,"
-				+ "district_code,default_address,status,version,created_at,updated_at) "
-				+ "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,true,'ACTIVE',0,?,?) on conflict (id) do nothing",
-			addressId, tenantId, workspaceId, accountId, "Buyer delivery · " + seed.code(), seed.contact(), seed.phone(),
-			null, null, null, seed.address(), seed.deliveryReference(), seed.deliveryPreference(), null, null,
-			null, "MANUAL", null, null, null, timestamp(now), timestamp(now));
-		Integer persisted = jdbc.queryForObject("select count(*) from sales.client_account_address where id=? "
-				+ "and tenant_id=? and workspace_id=? and client_account_id=?", Integer.class,
-			addressId, tenantId, workspaceId, accountId);
-		if (persisted == null || persisted != 1) {
+		return Address.peru("STREET", seed.address(), seed.deliveryReference(), seed.departmentCode(),
+				seed.provinceCode(), seed.districtCode());
+	}
+
+	private static List<BuyerAddress> findBuyerAddress(JdbcTemplate jdbc, UUID addressId) {
+		return jdbc.query("select id,tenant_id,workspace_id,client_account_id,label,recipient_name,recipient_phone,road_type,"
+				+ "street_name,street_number,interior,address_line,postal_code,reference,receiving_instructions,receiving_hours,"
+				+ "latitude,longitude,place_id,source,department_code,province_code,district_code,default_address,status,version "
+				+ "from sales.client_account_address where id=?",
+			(rs, row) -> new BuyerAddress(rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class),
+					rs.getObject("workspace_id", UUID.class), rs.getObject("client_account_id", UUID.class),
+					rs.getString("label"), rs.getString("recipient_name"), rs.getString("recipient_phone"),
+					rs.getString("road_type"), rs.getString("street_name"), rs.getString("street_number"),
+					rs.getString("interior"), rs.getString("address_line"), rs.getString("postal_code"),
+					rs.getString("reference"), rs.getString("receiving_instructions"), rs.getString("receiving_hours"),
+					rs.getBigDecimal("latitude"), rs.getBigDecimal("longitude"), rs.getString("place_id"),
+					rs.getString("source"), rs.getString("department_code"), rs.getString("province_code"),
+					rs.getString("district_code"), rs.getBoolean("default_address"), rs.getString("status"),
+					rs.getLong("version")), addressId);
+	}
+
+	private static boolean sameScope(BuyerAddress row, UUID addressId, UUID tenantId, UUID workspaceId, UUID accountId) {
+		return addressId.equals(row.id()) && tenantId.equals(row.tenantId()) && workspaceId.equals(row.workspaceId())
+				&& accountId.equals(row.clientAccountId());
+	}
+
+	private static boolean matchesGeography(BuyerAddress row, Address address) {
+		return address.departmentCode().equals(row.departmentCode()) && address.provinceCode().equals(row.provinceCode())
+				&& address.districtCode().equals(row.districtCode());
+	}
+
+	private static boolean isRepairableUngeocodedFixture(BuyerAddress row, UUID addressId, UUID tenantId,
+			UUID workspaceId, UUID accountId, ClientAccountSeedRecord seed) {
+		return sameScope(row, addressId, tenantId, workspaceId, accountId)
+				&& (row.departmentCode() == null && row.provinceCode() == null && row.districtCode() == null)
+				&& ("Buyer delivery · " + seed.code()).equals(row.label())
+				&& seed.contact().equals(row.recipientName()) && seed.phone().equals(row.recipientPhone())
+				&& row.roadType() == null && row.streetName() == null && row.streetNumber() == null
+				&& row.interior() == null && seed.address().equals(row.addressLine()) && row.postalCode() == null
+				&& java.util.Objects.equals(seed.deliveryReference(), row.reference())
+				&& java.util.Objects.equals(seed.deliveryPreference(), row.receivingInstructions())
+				&& row.receivingHours() == null && row.latitude() == null && row.longitude() == null
+				&& row.placeId() == null && "MANUAL".equals(row.source()) && row.defaultAddress()
+				&& "ACTIVE".equalsIgnoreCase(row.status()) && row.version() == 0;
+	}
+
+	private static void rehydrateBuyerAddress(BuyerAddress row, UUID addressId, UUID tenantId, UUID workspaceId,
+			UUID accountId) {
+		if (!sameScope(row, addressId, tenantId, workspaceId, accountId)) {
 			throw new IllegalStateException("Deterministic buyer address identity conflicts with existing data");
 		}
+		String roadType = row.roadType() == null ? "STREET" : row.roadType();
+		Address address = new Address(roadType, row.addressLine(), row.reference(), "PE", row.departmentCode(),
+				row.provinceCode(), row.districtCode(), row.recipientName(), row.recipientPhone(), roadType,
+				row.streetName(), row.streetNumber(), row.interior(), row.postalCode(), row.receivingInstructions(),
+				row.receivingHours(), row.latitude(), row.longitude(), row.placeId(), row.source());
+		ClientAccountAddress.rehydrate(row.id(), row.tenantId(), row.workspaceId(), row.clientAccountId().toString(),
+				row.label(), address, row.defaultAddress(), "ACTIVE".equalsIgnoreCase(row.status()), row.version());
 	}
 
 	private void seedWarehouse(JdbcTemplate jdbc, UUID tenantId, UUID workspaceId, Instant now) {
@@ -204,6 +298,12 @@ public final class LocalTenantBusinessFixtureSeeder {
 	private static Timestamp timestamp(Instant instant) { return Timestamp.from(instant); }
 
 	private record ClientAccount(UUID id, UUID workspaceId, String businessName) { }
+	private record BuyerAddress(UUID id, UUID tenantId, UUID workspaceId, UUID clientAccountId, String label,
+			String recipientName, String recipientPhone, String roadType, String streetName, String streetNumber,
+			String interior, String addressLine, String postalCode, String reference, String receivingInstructions,
+			String receivingHours, BigDecimal latitude, BigDecimal longitude, String placeId, String source,
+			String departmentCode, String provinceCode, String districtCode, boolean defaultAddress, String status,
+			long version) { }
 	private record SkuSeed(UUID id, String legacyCatalogItemId, String unitOfMeasure) { }
 	private record InventoryLotIdentity(UUID id, UUID warehouseId, UUID zoneId, String catalogItemId,
 			UUID skuId, String batchNumber) { }
