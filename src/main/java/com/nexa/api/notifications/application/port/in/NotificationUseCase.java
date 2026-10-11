@@ -4,6 +4,7 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
+@org.springframework.modulith.NamedInterface(value = "notifications-in", propagate = false)
 public interface NotificationUseCase {
 	NotificationPage inbox(CurrentAccessContext context, boolean unreadOnly, int limit);
 	long unreadCount(CurrentAccessContext context);

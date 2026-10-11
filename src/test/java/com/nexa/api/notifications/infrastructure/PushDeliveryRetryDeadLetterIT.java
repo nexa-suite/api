@@ -7,6 +7,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.TestPropertySource;
 
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -15,8 +16,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Real PostgreSQL proof that deferred push remains in canonical retry/dead-letter flow. */
+/** Central legacy outbox proof for deferred push retry/dead-letter handling; does not cover Tenant outbox delivery. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@TestPropertySource(properties = "nexa.tenant-business.notifications.enabled=false")
 class PushDeliveryRetryDeadLetterIT extends NexaWorkflowIntegrationSupport {
     @Autowired
     private CanonicalOutboxEventProcessor processor;

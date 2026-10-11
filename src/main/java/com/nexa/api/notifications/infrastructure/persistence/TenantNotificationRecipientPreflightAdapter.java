@@ -4,7 +4,7 @@ import com.nexa.api.notifications.application.publicapi.NotificationRecipientPre
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantEventContextQueryPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionCatalog;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuiltInRolePermissionQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
@@ -21,17 +21,21 @@ import java.util.UUID;
 @Profile("!test")
 public final class TenantNotificationRecipientPreflightAdapter implements NotificationRecipientPreflightPort {
     private static final Set<String> INTERNAL_NOTIFICATION_ROLES = Set.of("sales", "company_owner", "tenant_admin");
-    private static final Set<String> BUYER_NOTIFICATION_EVENTS = Set.of("DISPATCH_DELIVERED", "PAYMENT_SUCCEEDED");
+    private static final Set<String> BUYER_NOTIFICATION_EVENTS = Set.of(
+            "DISPATCH_DELIVERED", "DeliveryCompleted.v1", "PAYMENT_SUCCEEDED");
 
     private final TenantEventContextQueryPort tenantContext;
     private final WorkforceDirectory workforce;
     private final WarehouseObjectAccess warehouseAccess;
+    private final BuiltInRolePermissionQuery rolePermissions;
 
     public TenantNotificationRecipientPreflightAdapter(TenantEventContextQueryPort tenantContext,
-            WorkforceDirectory workforce, WarehouseObjectAccess warehouseAccess) {
+            WorkforceDirectory workforce, WarehouseObjectAccess warehouseAccess,
+            BuiltInRolePermissionQuery rolePermissions) {
         this.tenantContext = Objects.requireNonNull(tenantContext, "Central Tenant membership query is required");
         this.workforce = Objects.requireNonNull(workforce, "Central active Buyer membership filter is required");
         this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Current Warehouse grant query is required");
+        this.rolePermissions = Objects.requireNonNull(rolePermissions, "Owner built-in role permission query is required");
     }
 
     @Override
@@ -70,8 +74,8 @@ public final class TenantNotificationRecipientPreflightAdapter implements Notifi
         return aggregateType != null && aggregateType.equalsIgnoreCase("warehouse") && aggregateId != null;
     }
 
-    private static void requireNotificationPermission(MembershipRole role) {
-        if (!PermissionCatalog.forBuiltInRole(role).contains(PermissionKey.NOTIFICATION_READ)) {
+    private void requireNotificationPermission(MembershipRole role) {
+        if (!rolePermissions.allows(role, PermissionKey.NOTIFICATION_READ)) {
             throw new IllegalStateException("Built-in notification recipient role lacks notification.read permission");
         }
     }

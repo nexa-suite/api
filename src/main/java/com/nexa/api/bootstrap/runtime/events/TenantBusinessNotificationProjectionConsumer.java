@@ -1,14 +1,18 @@
 package com.nexa.api.bootstrap.runtime.events;
 
+import com.nexa.api.bootstrap.runtime.boundaries.TenantBusinessTraceabilityBindingsFactory;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantCreditAccountAdapterFactory;
+import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerMembershipQueryFactory;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsEventContextQueryPort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentDocumentSourceQuery;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantLogisticsEventContextQueryFactory;
+import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentDocumentSourceQueryFactory;
 import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
 import com.nexa.api.notifications.application.publicapi.NotificationRecipientPreflightPort;
 import com.nexa.api.notifications.application.publicapi.PreflightedNotificationRecipients;
-import com.nexa.api.notifications.application.publicapi.TenantNotificationBusinessBindingsFactory;
+import com.nexa.api.notifications.tenantdatabase.TenantNotificationBusinessBindingsFactory;
 import com.nexa.api.salescommitment.application.publicapi.SalesWorkflowEventSnapshotQuery;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesWorkflowEventSnapshotQueryFactory;
 import com.nexa.api.shared.events.TenantOutboxEvent;
@@ -35,26 +39,36 @@ import java.util.stream.Collectors;
 public final class TenantBusinessNotificationProjectionConsumer implements TenantOutboxEventConsumer {
     private static final String CONSUMER = "notifications-business-projection-v1";
     private static final Set<String> EVENT_TYPES = Set.of("PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED",
-            "SALES_ORDER_CONFIRMED", "DISPATCH_DELIVERED", "DELIVERY_COMPLETED", "POD_COMPLETED",
-            "PAYMENT_SUCCEEDED");
+            "SALES_ORDER_CONFIRMED", "DISPATCH_DELIVERED", "DeliveryCompleted.v1", "DELIVERY_COMPLETED",
+            "POD_COMPLETED", "PAYMENT_SUCCEEDED");
+    private static final Set<String> BUYER_NOTIFICATION_EVENTS = Set.of(
+            "DISPATCH_DELIVERED", "DeliveryCompleted.v1", "PAYMENT_SUCCEEDED");
 
     private final TenantSalesWorkflowEventSnapshotQueryFactory salesSnapshots;
     private final TenantLogisticsEventContextQueryFactory logisticsSnapshots;
+    private final TenantFulfillmentDocumentSourceQueryFactory fulfillmentDocuments;
     private final TenantCreditAccountAdapterFactory creditAdapters;
     private final TenantCustomerMembershipQueryFactory customerMemberships;
     private final NotificationRecipientPreflightPort recipientPreflight;
     private final TenantNotificationBusinessBindingsFactory notifications;
+    private final TenantBusinessTraceabilityBindingsFactory traceabilityBindings;
+    private final TenantCustomerAccountQueryFactory customerAccounts;
     private final ObjectMapper mapper;
 
     public TenantBusinessNotificationProjectionConsumer(TenantSalesWorkflowEventSnapshotQueryFactory salesSnapshots,
             TenantLogisticsEventContextQueryFactory logisticsSnapshots,
+            TenantFulfillmentDocumentSourceQueryFactory fulfillmentDocuments,
             TenantCreditAccountAdapterFactory creditAdapters,
             TenantCustomerMembershipQueryFactory customerMemberships,
             NotificationRecipientPreflightPort recipientPreflight,
-            TenantNotificationBusinessBindingsFactory notifications, ObjectMapper mapper) {
+            TenantNotificationBusinessBindingsFactory notifications,
+            TenantBusinessTraceabilityBindingsFactory traceabilityBindings,
+            TenantCustomerAccountQueryFactory customerAccounts, ObjectMapper mapper) {
         this.salesSnapshots = Objects.requireNonNull(salesSnapshots, "Tenant Sales event snapshot factory is required");
         this.logisticsSnapshots = Objects.requireNonNull(logisticsSnapshots,
                 "Tenant Logistics event snapshot factory is required");
+        this.fulfillmentDocuments = Objects.requireNonNull(fulfillmentDocuments,
+                "Tenant Fulfillment sealed-POD source factory is required");
         this.creditAdapters = Objects.requireNonNull(creditAdapters, "Tenant Credit factory is required");
         this.customerMemberships = Objects.requireNonNull(customerMemberships,
                 "Tenant Buyer membership factory is required");
@@ -62,6 +76,10 @@ public final class TenantBusinessNotificationProjectionConsumer implements Tenan
                 "Central notification recipient preflight is required");
         this.notifications = Objects.requireNonNull(notifications,
                 "Tenant notification composition factory is required");
+        this.traceabilityBindings = Objects.requireNonNull(traceabilityBindings,
+                "Tenant canonical outbox bindings are required");
+        this.customerAccounts = Objects.requireNonNull(customerAccounts,
+                "Tenant BC-02 account query factory is required");
         this.mapper = Objects.requireNonNull(mapper, "Outbox payload mapper is required");
     }
 
@@ -74,7 +92,7 @@ public final class TenantBusinessNotificationProjectionConsumer implements Tenan
         Map<String, Object> payload = payload(event.payload());
         UUID clientAccountId = clientAccountId(tenantJdbc, event, payload);
         Set<UUID> tenantBuyerMembershipIds = clientAccountId == null
-                || !Set.of("DISPATCH_DELIVERED", "PAYMENT_SUCCEEDED").contains(event.eventType())
+                || !BUYER_NOTIFICATION_EVENTS.contains(event.eventType())
                 ? Set.of() : Set.copyOf(customerMemberships.bindTo(tenantJdbc)
                         .findMembershipIds(event.tenantId(), event.workspaceId(), clientAccountId));
         return () -> {
@@ -105,7 +123,8 @@ public final class TenantBusinessNotificationProjectionConsumer implements Tenan
         }
         if (recipients.membershipIds().isEmpty()) return;
         TenantNotificationBusinessBindingsFactory.Bindings bindings = notifications.bindTo(jdbc,
-                transactionManager, recipients);
+                transactionManager, recipients, customerAccounts.bindTo(jdbc),
+                traceabilityBindings.bindTo(jdbc).canonicalOutbox());
         NotificationProjection projection = new NotificationProjection(event.eventId().toString(),
                 event.tenantId().toString(), event.workspaceId().toString(),
                 clientAccountId == null ? null : clientAccountId.toString(), event.aggregateType(),
@@ -117,6 +136,34 @@ public final class TenantBusinessNotificationProjectionConsumer implements Tenan
     }
 
     private UUID clientAccountId(JdbcTemplate jdbc, TenantOutboxEvent event, Map<String, Object> payload) {
+        if ("DeliveryCompleted.v1".equals(event.eventType())) {
+            if (!"Delivery".equals(event.aggregateType())) {
+                throw new IllegalArgumentException("Delivery completion notification requires a Delivery aggregate");
+            }
+            UUID deliveryId = event.aggregateId();
+            Object payloadDeliveryId = payload.get("deliveryId");
+            if (payloadDeliveryId != null && !deliveryId.equals(uuid(payloadDeliveryId))) {
+                throw new IllegalArgumentException("Delivery completion notification escaped its Delivery scope");
+            }
+            FulfillmentDocumentSourceQuery.ProofOfDelivery pod = fulfillmentDocuments.bindTo(jdbc)
+                    .findSealedPodForDelivery(event.tenantId(), event.workspaceId(), deliveryId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Delivery completion notification has no immutable Tenant POD source"));
+            if (!"SEALED".equals(pod.status()) || !deliveryId.equals(pod.deliveryId())) {
+                throw new IllegalStateException("Delivery completion notification escaped its sealed Tenant POD source");
+            }
+            Object payloadPodId = payload.get("podId");
+            if (payloadPodId != null && !pod.id().equals(uuid(payloadPodId))) {
+                throw new IllegalStateException("Delivery completion notification references a different sealed Tenant POD");
+            }
+            UUID salesOrderId = Objects.requireNonNull(pod.salesOrderId(),
+                    "Sealed Tenant POD has no Sales Order notification source");
+            return salesSnapshots.bindTo(jdbc)
+                    .findSalesOrder(event.tenantId(), event.workspaceId(), salesOrderId)
+                    .map(SalesWorkflowEventSnapshotQuery.SalesOrderSnapshot::clientAccountId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Sealed Tenant POD Sales Order notification source is unavailable"));
+        }
         Object explicit = payload.get("clientAccountId");
         if (explicit != null) return uuid(explicit);
         return switch (event.aggregateType()) {

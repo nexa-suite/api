@@ -21,7 +21,8 @@ import java.util.UUID;
 public class JdbcPushNotificationOutboxAdapter implements PushNotificationOutboxPort {
     private static final Set<String> SUPPORTED_EVENTS = Set.of(
             "PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED", "SALES_ORDER_CONFIRMED",
-            "DISPATCH_DELIVERED", "DELIVERY_COMPLETED", "POD_COMPLETED", "PAYMENT_SUCCEEDED");
+            "DISPATCH_DELIVERED", "DeliveryCompleted.v1", "DELIVERY_COMPLETED", "POD_COMPLETED",
+            "PAYMENT_SUCCEEDED");
 
     private final CanonicalOutboxPort outbox;
 

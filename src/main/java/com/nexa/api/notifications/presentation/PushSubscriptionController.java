@@ -1,7 +1,7 @@
 package com.nexa.api.notifications.presentation;
 
-import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
 import com.nexa.api.notifications.application.port.in.PushSubscriptionUseCase;
+import com.nexa.api.notifications.application.publicapi.PushSubscriptionView;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -74,7 +74,7 @@ public final class PushSubscriptionController {
         return ResponseEntity.noContent().build();
     }
 
-    private static PushSubscriptionResponse response(PushSubscriptionPersistencePort.PushSubscription value) {
+    private static PushSubscriptionResponse response(PushSubscriptionView value) {
         return new PushSubscriptionResponse(value.id(), value.recipientMembershipId(), value.installationId(),
                 value.platform(), value.surface(), value.status(), value.createdAt(), value.updatedAt(), value.version());
     }

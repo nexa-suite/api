@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPage;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferenceView;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
@@ -8,9 +9,9 @@ import com.nexa.api.notifications.application.port.in.NotificationUseCase;
 import com.nexa.api.notifications.application.port.in.PushSubscriptionUseCase;
 import com.nexa.api.notifications.application.publicapi.NotificationPreferenceAccess;
 import com.nexa.api.notifications.application.publicapi.PreflightedNotificationRecipients;
+import com.nexa.api.notifications.application.publicapi.PushSubscriptionView;
 import com.nexa.api.notifications.application.publicapi.TenantNotificationSettingsCommands;
-import com.nexa.api.notifications.application.publicapi.TenantNotificationBusinessBindingsFactory;
-import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
+import com.nexa.api.notifications.tenantdatabase.TenantNotificationBusinessBindingsFactory;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -35,13 +36,20 @@ public final class TenantBoundNotificationCommands implements NotificationUseCas
         TenantNotificationSettingsCommands {
     private final TenantBusinessDatabaseRouter router;
     private final TenantNotificationBusinessBindingsFactory bindings;
+    private final TenantCustomerAccountQueryFactory customerAccounts;
+    private final TenantBusinessTraceabilityBindingsFactory traceabilityBindings;
     private final SecurityAuditPort audit;
     private final Clock clock;
 
     public TenantBoundNotificationCommands(TenantBusinessDatabaseRouter router,
-            TenantNotificationBusinessBindingsFactory bindings, SecurityAuditPort audit, Clock clock) {
+            TenantNotificationBusinessBindingsFactory bindings,
+            TenantCustomerAccountQueryFactory customerAccounts,
+            TenantBusinessTraceabilityBindingsFactory traceabilityBindings,
+            SecurityAuditPort audit, Clock clock) {
         this.router = router;
         this.bindings = bindings;
+        this.customerAccounts = customerAccounts;
+        this.traceabilityBindings = traceabilityBindings;
         this.audit = audit;
         this.clock = clock;
     }
@@ -123,14 +131,14 @@ public final class TenantBoundNotificationCommands implements NotificationUseCas
     }
 
     @Override
-    public PushSubscriptionPersistencePort.PushSubscription register(CurrentAccessContext context, String nativeClient,
+    public PushSubscriptionView register(CurrentAccessContext context, String nativeClient,
             String installationId, String platform, String providerToken, String idempotencyKey) {
         return withBindings(context, owner -> owner.pushSubscriptions().register(context, nativeClient, installationId,
                 platform, providerToken, idempotencyKey));
     }
 
     @Override
-    public PushSubscriptionPersistencePort.PushSubscription disable(CurrentAccessContext context, String nativeClient,
+    public PushSubscriptionView disable(CurrentAccessContext context, String nativeClient,
             UUID subscriptionId, String idempotencyKey, boolean unregister) {
         return withBindings(context, owner -> owner.pushSubscriptions().disable(context, nativeClient, subscriptionId,
                 idempotencyKey, unregister));
@@ -144,7 +152,8 @@ public final class TenantBoundNotificationCommands implements NotificationUseCas
         PreflightedNotificationRecipients recipients = new PreflightedNotificationRecipients(tenantId, workspaceId,
                 Set.of(membershipId));
         return router.inTenantSession(context, session -> session.inTransaction(jdbc -> {
-            var owner = bindings.bindTo(jdbc, session.transactionManager(), recipients);
+            var owner = bindings.bindTo(jdbc, session.transactionManager(), recipients,
+                    customerAccounts.bindTo(jdbc), traceabilityBindings.bindTo(jdbc).canonicalOutbox());
             return operation.apply(owner);
         }));
     }
@@ -156,7 +165,8 @@ public final class TenantBoundNotificationCommands implements NotificationUseCas
         PreflightedNotificationRecipients recipients = new PreflightedNotificationRecipients(tenantId, workspaceId,
                 Set.of(membershipId));
         return router.inTenantSession(context, session -> session.inTransaction(jdbc -> {
-            var owner = bindings.bindTo(jdbc, session.transactionManager(), recipients);
+            var owner = bindings.bindTo(jdbc, session.transactionManager(), recipients,
+                    customerAccounts.bindTo(jdbc), traceabilityBindings.bindTo(jdbc).canonicalOutbox());
             return operation.apply(owner.preferences());
         }));
     }

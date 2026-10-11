@@ -3,6 +3,7 @@ package com.nexa.api.notifications.application;
 import com.nexa.api.notifications.application.port.out.NotificationProjectionSourceEventQuery;
 import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels;
 import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection;
+import com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.PushNotificationCandidate;
 import com.nexa.api.notifications.application.publicapi.PreflightedNotificationRecipients;
 import com.nexa.api.notifications.application.service.TenantNotificationProjectionService;
 import com.nexa.api.notifications.application.service.NotificationService;
@@ -71,6 +72,39 @@ class TenantNotificationProjectionServiceTests {
                 .hasMessageContaining("source event changed");
 
         verify(notifications, never()).project(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void deliversPushOnlyAfterExactTenantSourceAndRecipientChecks() {
+        var recipients = new PreflightedNotificationRecipients(TENANT, WORKSPACE, Set.of(RECIPIENT));
+        var sourceEvents = mock(NotificationProjectionSourceEventQuery.class);
+        var notifications = mock(NotificationService.class);
+        var projection = event(RECIPIENT, NotificationProjectionModels.sourcePayloadSha256(PAYLOAD));
+        var candidate = new PushNotificationCandidate(projection, "ORDER_STATUS", "Delivery complete",
+                "Delivery complete was recorded.", null);
+        when(sourceEvents.find(EVENT, TENANT, WORKSPACE)).thenReturn(Optional.of(sourceEvent()));
+
+        new TenantNotificationProjectionService(recipients, sourceEvents, notifications).deliverPush(candidate);
+
+        verify(notifications).deliverPush(candidate);
+    }
+
+    @Test
+    void rejectsPushRecipientOutsideCurrentPreflight() {
+        var sourceEvents = mock(NotificationProjectionSourceEventQuery.class);
+        var notifications = mock(NotificationService.class);
+        var candidate = new PushNotificationCandidate(
+                event(RECIPIENT, NotificationProjectionModels.sourcePayloadSha256(PAYLOAD)),
+                "ORDER_STATUS", "Delivery complete", "Delivery complete was recorded.", null);
+
+        assertThatThrownBy(() -> new TenantNotificationProjectionService(
+                new PreflightedNotificationRecipients(TENANT, WORKSPACE, Set.of()), sourceEvents, notifications)
+                .deliverPush(candidate))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("central membership/role preflight");
+
+        verify(sourceEvents, never()).find(EVENT, TENANT, WORKSPACE);
+        verify(notifications, never()).deliverPush(org.mockito.ArgumentMatchers.any());
     }
 
     private static NotificationProjection event(UUID recipient, String payloadHash) {

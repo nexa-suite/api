@@ -25,6 +25,18 @@ public final class TenantNotificationProjectionService implements NotificationPr
 
     @Override
     public void project(NotificationProjection event) {
+        verify(event);
+        notifications.project(event);
+    }
+
+    @Override
+    public void deliverPush(PushNotificationCandidate candidate) {
+        Objects.requireNonNull(candidate, "Push notification candidate is required");
+        verify(candidate.projection());
+        notifications.deliverPush(candidate);
+    }
+
+    private void verify(NotificationProjection event) {
         Objects.requireNonNull(event, "Notification projection is required");
         UUID eventId = UUID.fromString(event.eventId());
         UUID tenantId = UUID.fromString(event.tenantId());
@@ -53,11 +65,5 @@ public final class TenantNotificationProjectionService implements NotificationPr
                 || !event.sourcePayloadSha256().equals(NotificationProjectionModels.sourcePayloadSha256(source.payloadText()))) {
             throw new IllegalStateException("Tenant notification source event changed or escaped its verified anchor");
         }
-        notifications.project(event);
-    }
-
-    @Override
-    public void deliverPush(PushNotificationCandidate candidate) {
-        throw new IllegalStateException("Tenant push delivery is OPEN and unavailable");
     }
 }
