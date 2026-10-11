@@ -48,8 +48,9 @@ set -a
 . "$env_file"
 set +a
 
+spring_profile="${NEXA_MODERN_SPRING_PROFILE:-local,minio}"
 compose_profile_args=""
-case ",${NEXA_MODERN_SPRING_PROFILE:-}," in
+case ",${spring_profile}," in
 	*,observability,*) compose_profile_args="--profile observability" ;;
 esac
 
@@ -104,6 +105,25 @@ BEGIN
 END
 $do$;
 SQL
+
+case ",${spring_profile}," in
+	*,minio,*|*,s3,*)
+		docker compose --env-file "$env_file" -f "$compose_file" up -d modern-minio
+		minio_ready=0
+		for _ in $(seq 1 120); do
+			minio_health="$(docker inspect --format '{{.State.Health.Status}}' nexa-modern-minio 2>/dev/null || true)"
+			if [ "$minio_health" = healthy ]; then
+				minio_ready=1
+				break
+			fi
+			sleep 1
+		done
+		if [ "$minio_ready" -ne 1 ]; then
+			printf '%s\n' 'modern-minio did not become healthy within 120 seconds.' >&2
+			exit 1
+		fi
+		;;
+esac
 
 if [ "$requested_mode" = "api-runtime" ]; then
 	# CI needs the API and its declared runtime dependencies, while the UI build

@@ -20,7 +20,7 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - name: Start API Compose runtime and seed scoped Tenant fixtures
+      - name: Start API Compose runtime with local document storage and seed scoped Tenant fixtures
         run: ./ops/scripts/prepare-security-load-compose-fixture.sh
       - name: Run local security and abuse matrix
         run: ./scripts/verify-local-security.sh

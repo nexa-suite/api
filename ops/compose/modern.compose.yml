@@ -148,8 +148,6 @@ services:
         condition: service_healthy
       modern-mailpit:
         condition: service_healthy
-      modern-minio:
-        condition: service_healthy
       modern-clamav:
         condition: service_healthy
       modern-stripe-mock:
