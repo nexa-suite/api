@@ -16,7 +16,7 @@ class LocalTenantBusinessFixtureSeederTests {
 
 		assertThat(address.departmentCode()).isEqualTo("15");
 		assertThat(address.provinceCode()).isEqualTo("1501");
-		assertThat(address.districtCode()).isEqualTo("150122");
-		assertThat(address.line()).isEqualTo("Av. Jose Pardo 610");
+		assertThat(address.districtCode()).isEqualTo("150121");
+		assertThat(address.line()).isEqualTo("Av. Sucre 1992");
 	}
 }

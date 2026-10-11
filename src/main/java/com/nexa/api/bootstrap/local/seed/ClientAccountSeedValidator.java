@@ -5,7 +5,7 @@ import java.util.HashSet;
 import java.util.List;
 
 public final class ClientAccountSeedValidator {
-	public static final String EXPECTED_SHA256 = "4aaa6473ee50d2678270adeb41ed8b0782846745d529a1ff6e63f439eb0ed196";
+	public static final String EXPECTED_SHA256 = "0d051dd6380eb041facd05534b31b858d1c3318981ed6657442b1f9bacd0dbdb";
 	private ClientAccountSeedValidator() { }
 	public static void validate(List<ClientAccountSeedRecord> records, byte[] raw) {
 		if (records == null || records.size() != 4) throw new IllegalStateException("client account seed count mismatch");
