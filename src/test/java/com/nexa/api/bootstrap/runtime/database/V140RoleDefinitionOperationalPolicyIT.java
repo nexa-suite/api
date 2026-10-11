@@ -102,7 +102,7 @@ class V140RoleDefinitionOperationalPolicyIT {
             assertThat(schemaHistoryVersion()).isEqualTo("145");
 
             executeScriptAs(ADMIN_USERNAME, ADMIN_PASSWORD, V146_TENANT_REFERENCE_GRANT);
-            migrateAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, null);
+            migrateAs(MIGRATOR_USERNAME, MIGRATOR_PASSWORD, "146");
             assertThat(schemaHistoryVersion()).isEqualTo("146");
         } finally {
             if (prepared) {

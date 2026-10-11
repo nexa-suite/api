@@ -48,11 +48,11 @@ class ModernPostgresMigrationTests {
 				assertThat(result.getLong(1)).as("Company Owner must not receive operational permissions by default").isZero();
 			}
 			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management", "sales", "integration", "warehouse", "logistics", "catalog_management", "reference_data", "notifications", "audit", "business_documents", "payments");
-			assertThat(tables(connection, "iam")).containsExactlyInAnyOrder("user_account", "password_credential", "refresh_session", "authentication_failure", "password_reset_request", "security_audit_event", "password_reset_throttle_bucket", "security_notification_outbox", "system_operator_throttle_bucket", "workspace_preview_throttle_bucket", "public_contact_request", "public_contact_throttle_bucket", "access_context_selection_ticket");
-			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership", "membership_admin_event", "membership_role_assignment", "organization_registration", "organization_settings", "workspace_settings", "regional_settings", "unit_preferences", "operational_settings", "notification_preference", "tenant_security_settings", "custom_field_definition", "reference_plan_assignment", "organization_invitation", "organization_invitation_role", "organization_invitation_idempotency", "warehouse_access_grant", "workspace_creation_idempotency", "permission_definition", "role_definition", "role_permission", "membership_role_definition", "membership_authorization_state", "organization_registration_draft_idempotency", "tenant_business_database_binding", "wallet_recharge_provider_route");
+			assertThat(tables(connection, "iam")).containsExactlyInAnyOrder("user_account", "password_credential", "refresh_session", "authentication_failure", "password_reset_request", "security_audit_event", "password_reset_throttle_bucket", "security_notification_outbox", "system_operator_throttle_bucket", "workspace_preview_throttle_bucket", "public_contact_request", "public_contact_throttle_bucket", "access_context_selection_ticket", "internal_support_request", "internal_support_audit_event");
+			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership", "membership_admin_event", "membership_role_assignment", "organization_registration", "organization_settings", "workspace_settings", "regional_settings", "unit_preferences", "operational_settings", "notification_preference", "tenant_security_settings", "custom_field_definition", "reference_plan_assignment", "organization_invitation", "organization_invitation_role", "organization_invitation_idempotency", "warehouse_access_grant", "workspace_creation_idempotency", "permission_definition", "role_definition", "role_permission", "membership_role_definition", "membership_authorization_state", "organization_registration_draft_idempotency", "tenant_business_database_binding", "wallet_recharge_provider_route", "tenant_business_database_provisioning_task", "tenant_business_database_workspace_anchor_task", "payment_provider_route");
 			assertThat(columns(connection, "tenant_management", "tenant_business_database_binding")).containsExactlyInAnyOrder(
 				"tenant_id", "database_identity", "credential_secret_reference", "lifecycle_state", "created_at", "updated_at", "version",
-				"verified_schema_manifest_sha256", "wallet_recharge_callback_credential_secret_reference");
+				"verified_schema_manifest_sha256", "wallet_recharge_callback_credential_secret_reference", "payment_callback_credential_secret_reference");
 			assertThat(tables(connection, "sales")).containsExactlyInAnyOrder("client_account", "client_account_membership", "client_account_address", "purchase_request", "purchase_request_line", "purchase_request_event", "idempotency_record", "idempotency_response", "manual_order_idempotency", "sales_order_sequence", "sales_order", "sales_order_line", "sales_order_event", "purchase_request_draft", "purchase_request_draft_line", "purchase_request_draft_destination", "purchase_request_draft_route", "purchase_request_draft_warehouse_selection", "purchase_request_draft_idempotency", "manual_sales_order_draft", "manual_sales_order_draft_line", "manual_sales_order_draft_idempotency", "commercial_commitment", "commercial_commitment_line", "purchase_request_material_change", "field_visit_evidence");
 			assertThat(tables(connection, "integration")).containsExactlyInAnyOrder("change_event", "outbox_event", "inbox_event");
 				assertThat(tables(connection, "warehouse")).containsExactlyInAnyOrder("warehouse", "storage_zone", "inventory_lot", "stock_movement", "inventory_event", "inventory_reservation", "inventory_reservation_line", "inventory_reservation_allocation", "reservation_shortage", "command_idempotency", "warehouse_service_configuration", "selection_snapshot", "inventory_temperature_evaluation", "inventory_lot_disposition", "safety_stock_policy", "inventory_transfer", "inventory_transfer_history", "inventory_backing", "inventory_backing_line", "inventory_backing_position", "physical_allocation", "physical_allocation_line", "physical_allocation_event", "physical_allocation_command_idempotency", "inbound_receiving_discrepancy_case", "inventory_cycle_count_correction", "inventory_transfer_receipt_observation", "physical_allocation_substitution_request", "inventory_cycle_count");
@@ -118,7 +118,7 @@ class ModernPostgresMigrationTests {
 	}
 
 	private static void assertCurrentSchemaRlsInventory(java.sql.Connection connection) throws Exception {
-		var lines = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v146.tsv"));
+		var lines = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v161.tsv"));
 		assertThat(lines.getFirst()).isEqualTo("table\tcategory\ttenant_id\tworkspace_id\trls_enabled\trls_forced\tpolicy");
 		assertThat(lines).isNotEmpty();
 		Map<String, List<String>> expected = new LinkedHashMap<>();
@@ -273,7 +273,7 @@ class ModernPostgresMigrationTests {
 	private static void assertTenantWorkspaceRls(java.sql.Connection connection) throws Exception {
 		Set<String> expectedTables = new java.util.HashSet<>();
 		Set<String> expectedTenantWorkspaceTables = new java.util.HashSet<>();
-		var inventory = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v146.tsv"));
+		var inventory = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v161.tsv"));
 		for (String line : inventory.subList(1, inventory.size())) {
 			String[] fields = line.split("\\t", -1);
 			assertThat(fields).hasSize(7);
@@ -284,22 +284,28 @@ class ModernPostgresMigrationTests {
 				if (fields[2].equals("t") && fields[3].equals("t")) expectedTenantWorkspaceTables.add(fields[0]);
 			}
 		}
-		assertThat(expectedTables).as("V146 classifies stock-temperature exceptions as forced RLS")
+		assertThat(expectedTables).as("V161 classifies stock-temperature exceptions as forced RLS")
 				.contains("logistics.stock_temperature_exception");
 		assertThat(expectedTenantWorkspaceTables)
-				.as("V146 classifies stock-temperature exceptions with direct Tenant/Workspace scope")
+				.as("V161 classifies stock-temperature exceptions with direct Tenant/Workspace scope")
 				.contains("logistics.stock_temperature_exception");
+		Set<String> expectedSinglePolicyTenantWorkspaceTables = new java.util.HashSet<>(expectedTenantWorkspaceTables);
+		expectedSinglePolicyTenantWorkspaceTables.remove("iam.internal_support_audit_event");
 		Set<String> actualTables = new java.util.HashSet<>();
 		Set<String> policyTables = new java.util.HashSet<>();
 		Set<String> scopedPolicyTables = new java.util.HashSet<>();
+		Set<String> supportAuditPolicyNames = new java.util.HashSet<>();
+		Set<String> supportAuditTenantWorkspaceInsertPolicies = new java.util.HashSet<>();
+		Set<String> supportAuditVerifiedOperatorPolicies = new java.util.HashSet<>();
 		try (var statement = connection.createStatement(); var result = statement.executeQuery("select n.nspname || '.' || c.relname, p.policyname, p.qual, p.with_check from pg_class c join pg_namespace n on n.oid=c.relnamespace join pg_policies p on p.schemaname=n.nspname and p.tablename=c.relname where c.relkind='r' and c.relrowsecurity and c.relforcerowsecurity order by 1")) {
 			while (result.next()) {
 				String table = result.getString(1);
+				String policyName = result.getString(2);
+				String using = result.getString(3);
+				String withCheck = result.getString(4);
 				actualTables.add(table);
 				policyTables.add(table);
-				if (expectedTenantWorkspaceTables.contains(table)) {
-					String using = result.getString(3);
-					String withCheck = result.getString(4);
+				if (expectedSinglePolicyTenantWorkspaceTables.contains(table)) {
 					if (using != null && withCheck != null
 							&& using.contains("current_setting('app.current_tenant_id'")
 							&& using.contains("current_setting('app.current_workspace_id'")
@@ -308,14 +314,38 @@ class ModernPostgresMigrationTests {
 						scopedPolicyTables.add(table);
 					}
 				}
+				if ("iam.internal_support_audit_event".equals(table)) {
+					supportAuditPolicyNames.add(policyName);
+					if ("internal_support_audit_owner_insert_scope".equals(policyName)
+							&& using == null && withCheck != null
+							&& withCheck.contains("current_setting('app.current_tenant_id'")
+							&& withCheck.contains("current_setting('app.current_workspace_id'")) {
+						supportAuditTenantWorkspaceInsertPolicies.add(policyName);
+					}
+					if ("internal_support_audit_verified_operator_scope".equals(policyName)
+							&& using != null && withCheck != null
+							&& using.contains("current_setting('app.current_internal_operator_id'")
+							&& withCheck.contains("current_setting('app.current_internal_operator_id'")) {
+						supportAuditVerifiedOperatorPolicies.add(policyName);
+					}
+				}
 			}
 		}
-		assertThat(actualTables).as("forced RLS tables exactly match the V146 direct-scope inventory")
+		assertThat(actualTables).as("forced RLS tables exactly match the V161 direct-scope inventory")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
 		assertThat(policyTables).as("every forced direct-scope table has an explicit policy")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
 		assertThat(scopedPolicyTables).as("every two-key table has USING and WITH CHECK for both Tenant and Workspace")
-				.containsExactlyInAnyOrderElementsOf(expectedTenantWorkspaceTables);
+				.containsExactlyInAnyOrderElementsOf(expectedSinglePolicyTenantWorkspaceTables);
+		assertThat(supportAuditPolicyNames).as("support audit keeps only its owner insert and verified operator policies")
+				.containsExactlyInAnyOrder("internal_support_audit_owner_insert_scope",
+						"internal_support_audit_verified_operator_scope");
+		assertThat(supportAuditTenantWorkspaceInsertPolicies)
+				.as("support audit owner inserts require both Tenant and Workspace keys")
+				.containsExactly("internal_support_audit_owner_insert_scope");
+		assertThat(supportAuditVerifiedOperatorPolicies)
+				.as("support audit operator access requires a verified internal operator scope")
+				.containsExactly("internal_support_audit_verified_operator_scope");
 	}
 
 	private static void assertPurchaseRequestExpiryIndex(java.sql.Connection connection) throws SQLException {

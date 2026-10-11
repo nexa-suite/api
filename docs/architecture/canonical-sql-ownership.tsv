@@ -214,3 +214,11 @@ logistics.fulfillment_dispatch_window_plan	BC06	V138__append_dispatch_fulfillmen
 logistics.operational_exception_coordination_transition	BC06	V141__append_bom_operational_exception_coordination.sql:1 CREATE TABLE; append-only Business Operations Manager coordination; no Delivery outcome or stock authority.
 logistics.delivery_active_attempt	BC06	V110__driver_delivery_active_attempt.sql:4 CREATE TABLE; current attempt marker for an active Driver Delivery execution.
 logistics.stock_temperature_exception	BC06	V142__record_stock_temperature_exceptions_and_partial_holds.sql:21 CREATE TABLE; scoped stock-temperature exception source fact; BC05 retains lot-selection and inventory-disposition authority.
+iam.internal_support_request	BC01	V155__internal_sales_order_support_grants.sql:1 CREATE TABLE; owner-consented and independently approved internal support grant state.
+iam.internal_support_audit_event	BC01	V155__internal_sales_order_support_grants.sql:62 CREATE TABLE; append-only audit evidence for internal support grants.
+nexa_platform.tenant_business_database_identity	SHARED_TECHNICAL	src/main/resources/db/tenant-migration/V1__create_tenant_business_database_identity.sql:3 CREATE TABLE; local database identity metadata for tenant routing, not authorization.
+nexa_platform.tenant_workspace_scope_anchor	SHARED_TECHNICAL	src/main/resources/db/tenant-migration/V2__create_tenant_workspace_scope_anchor.sql:1 CREATE TABLE; provisioned Tenant/Workspace identifiers for local scope validation, not authorization.
+nexa_platform.purchase_request_expiry_policy_snapshot	SHARED_TECHNICAL	src/main/resources/db/tenant-migration/V4__project_central_purchase_request_expiry_policy.sql:1 CREATE TABLE; non-authoritative local snapshot of a centrally verified policy.
+tenant_management.tenant_business_database_provisioning_task	BC01	V154__queue_tenant_business_database_provisioning.sql:2 CREATE TABLE; durable central provisioning work state for Tenant database lifecycle.
+tenant_management.tenant_business_database_workspace_anchor_task	BC01	V154__queue_tenant_business_database_provisioning.sql:82 CREATE TABLE; durable central Workspace anchor provisioning work state.
+tenant_management.payment_provider_route	BC01	V157__register_tenant_payment_provider_routes.sql:23 CREATE TABLE; central opaque callback route metadata; payment facts remain Tenant-local.
