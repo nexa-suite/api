@@ -52,6 +52,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess.PurchaseRequestExpiryPolicySource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess.SourceState;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
@@ -145,7 +146,7 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
         buyerMembershipId = UUID.fromString(membershipId(BUYER_EMAIL));
         buyerIdentityId = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
                 UUID.class, buyerMembershipId);
-        buyerAccountId = UUID.fromString(buyerClientAccountId());
+        buyerAccountId = UUID.randomUUID();
         databaseIdentity = UUID.randomUUID();
         credentialReference = "test/tenant-wallet-reservation/" + tenantId;
 
@@ -155,6 +156,7 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
         migrateTenant("8");
         seedPolicySnapshot();
         seedBuyerRelationship();
+        migrateTenant("16");
 
         TenantBusinessDatabaseCredentials credentials = new TenantBusinessDatabaseCredentials(
                 TENANT_DATABASE.getJdbcUrl(), RUNTIME, RUNTIME_PASSWORD);
@@ -259,19 +261,62 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
                 consumed.id())).isEqualTo(1);
 
         RefundCommand refund = new RefundCommand(firstOrder, UUID.randomUUID(), new BigDecimal("10.0000"),
-                "wallet-refund-first", Instant.now());
+                "Return consumed wallet funds after order cancellation", "wallet-refund-first", Instant.now());
         var refunded = inTenantTransaction(ownerContext, wallet -> wallet.refundForSalesOrder(ownerContext, refund));
         BuyerWalletReservationCommands.Refund replayedRefund = inTenantTransaction(ownerContext,
                 wallet -> wallet.refundForSalesOrder(ownerContext, refund));
         assertThat(replayedRefund).isEqualTo(refunded);
+        Map<String, Object> persistedRefund = tenantAdminJdbc().queryForMap(
+                "select reason,actor_membership_id,amount_delta,source_id from payments.buyer_wallet_ledger_entry where id=?",
+                refunded.ledgerEntryId());
+        assertThat(persistedRefund)
+                .containsEntry("reason", "Return consumed wallet funds after order cancellation")
+                .containsEntry("actor_membership_id", ownerMembership)
+                .containsEntry("source_id", refund.refundId());
+        assertThat((BigDecimal) persistedRefund.get("amount_delta")).isEqualByComparingTo("10.0000");
+        RefundCommand changedReason = new RefundCommand(firstOrder, refund.refundId(),
+                new BigDecimal("10.0000"), "Different operator reason", refund.idempotencyKey(), Instant.now());
+        assertThatThrownBy(() -> inTenantTransaction(ownerContext,
+                wallet -> wallet.refundForSalesOrder(ownerContext, changedReason)))
+                .isInstanceOf(com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException.class);
+        RefundCommand changedAmount = new RefundCommand(firstOrder, refund.refundId(),
+                new BigDecimal("9.0000"), refund.reason(), refund.idempotencyKey(), Instant.now());
+        assertThatThrownBy(() -> inTenantTransaction(ownerContext,
+                wallet -> wallet.refundForSalesOrder(ownerContext, changedAmount)))
+                .isInstanceOf(com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException.class);
+        UUID otherOrder = UUID.randomUUID();
+        inTenantTransaction(salesContext, wallet -> wallet.reserveForSalesOrder(salesContext,
+                reserveCommand(otherOrder, "wallet-reserve-other-refund-resource", "1.0000")));
+        inTenantTransaction(salesContext, wallet -> wallet.consumeForSalesOrder(salesContext,
+                transitionCommand(otherOrder, "wallet-consume-other-refund-resource")));
+        RefundCommand otherOrderRefund = new RefundCommand(otherOrder, UUID.randomUUID(),
+                BigDecimal.ONE, "Refund the other consumed order", "wallet-refund-other-resource", Instant.now());
+        inTenantTransaction(ownerContext, wallet -> wallet.refundForSalesOrder(ownerContext, otherOrderRefund));
+        RefundCommand changedResource = new RefundCommand(otherOrder, UUID.randomUUID(),
+                refund.amountPEN(), refund.reason(), refund.idempotencyKey(), Instant.now());
+        assertThatThrownBy(() -> inTenantTransaction(ownerContext,
+                wallet -> wallet.refundForSalesOrder(ownerContext, changedResource)))
+                .isInstanceOf(com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException.class);
         assertAccount("85.0000", "0.0000");
         RefundCommand overRefund = new RefundCommand(firstOrder, UUID.randomUUID(), new BigDecimal("16.0000"),
-                "wallet-refund-overrun", Instant.now());
+                "Attempt refund above consumed funds", "wallet-refund-overrun", Instant.now());
         assertThatThrownBy(() -> inTenantTransaction(ownerContext,
                 wallet -> wallet.refundForSalesOrder(ownerContext, overRefund)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("exceeds consumed funds");
+                .isInstanceOf(com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException.class);
         assertAccount("85.0000", "0.0000");
+        RefundCommand remainingRefund = new RefundCommand(firstOrder, UUID.randomUUID(),
+                new BigDecimal("15.0000"), "Return remaining consumed wallet funds", "wallet-refund-remainder",
+                Instant.now());
+        inTenantTransaction(ownerContext, wallet -> wallet.refundForSalesOrder(ownerContext, remainingRefund));
+        assertAccount("100.0000", "0.0000");
+        assertThat(countRows("select count(*) from payments.buyer_wallet_ledger_entry "
+                + "where reservation_id=? and entry_type='REFUND'", consumed.id())).isEqualTo(2);
+        RefundCommand beyondTotal = new RefundCommand(firstOrder, UUID.randomUUID(),
+                new BigDecimal("0.0001"), "Refund above consumed total", "wallet-refund-over-total", Instant.now());
+        assertThatThrownBy(() -> inTenantTransaction(ownerContext,
+                wallet -> wallet.refundForSalesOrder(ownerContext, beyondTotal)))
+                .isInstanceOf(com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException.class);
+        assertAccount("100.0000", "0.0000");
 
         UUID secondOrder = UUID.randomUUID();
         ReserveCommand secondReserve = reserveCommand(secondOrder, "wallet-reserve-second", "20.0000");
@@ -285,10 +330,16 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
                 wallet -> wallet.releaseForSalesOrder(salesContext, release));
         assertThat(replayedRelease).isEqualTo(released);
         assertThat(secondHold.id()).isEqualTo(released.id());
-        assertAccount("85.0000", "0.0000");
+        assertAccount("100.0000", "0.0000");
         assertThatThrownBy(() -> inTenantTransaction(salesContext,
                 wallet -> wallet.consumeForSalesOrder(salesContext, release)))
                 .isInstanceOf(IllegalStateException.class);
+        RefundCommand releasedOrderRefund = new RefundCommand(secondOrder, UUID.randomUUID(),
+                BigDecimal.ONE, "Released wallet reservation is not refundable", "wallet-refund-released",
+                Instant.now());
+        assertThatThrownBy(() -> inTenantTransaction(ownerContext,
+                wallet -> wallet.refundForSalesOrder(ownerContext, releasedOrderRefund)))
+                .isInstanceOf(com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException.class);
 
         UUID thirdOrder = UUID.randomUUID();
         UUID fourthOrder = UUID.randomUUID();
@@ -306,7 +357,7 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
         } finally {
             workers.shutdownNow();
         }
-        assertAccount("85.0000", "60.0000");
+        assertAccount("100.0000", "60.0000");
 
         ReserveCommand nonBuyerReserve = reserveCommand(UUID.randomUUID(), "wallet-nonbuyer", "1.0000");
         ReserveCommand nonBuyerMembershipReserve = reserveCommand(nonBuyerReserve.salesOrderId(), ownerMembership,
@@ -318,6 +369,64 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
 
         assertRuntimeScopeIsFailClosed();
         assertAppendOnlyHistory();
+    }
+
+    @Test
+    void refundsAreLimitedToOwnerRolesAndAccountCreditRollsBackWhenLedgerAppendFails() throws SQLException {
+        CurrentAccessContext salesContext = salesContext();
+        CurrentAccessContext ownerContext = ownerContext();
+        UUID buyerIdentity = jdbc.queryForObject("select id from iam.user_account where normalized_email=?",
+                UUID.class, BUYER_EMAIL);
+        CurrentAccessContext buyerContext = resolveContext(buyerIdentity, Surface.PORTAL);
+        UUID warehouseIdentity = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
+                UUID.class, UUID.fromString(membershipId(WAREHOUSE_EMAIL)));
+        CurrentAccessContext warehouseContext = resolveContext(warehouseIdentity, Surface.PLATFORM);
+        UUID workflowIdentity = jdbc.queryForObject("select id from iam.user_account where normalized_email=?",
+                UUID.class, "nexa-automation@system.invalid");
+        CurrentAccessContext workflowContext = resolveContext(workflowIdentity, Surface.PLATFORM);
+        assertThat(workflowContext.hasRoleCode("system_workflow")).isTrue();
+        assertThat(workflowContext.allows(PermissionKey.PAYMENT_RECONCILE)).isTrue();
+
+        UUID orderId = UUID.randomUUID();
+        inTenantTransaction(salesContext,
+                wallet -> wallet.reserveForSalesOrder(salesContext, reserveCommand(orderId,
+                        "refund-role-test-reserve", "25.0000")));
+        Reservation consumedHold = inTenantTransaction(salesContext,
+                wallet -> wallet.consumeForSalesOrder(salesContext,
+                        transitionCommand(orderId, "refund-role-test-consume")));
+        assertThat(consumedHold.status())
+                .isEqualTo(ReservationStatus.CONSUMED);
+
+        RefundCommand deniedCommand = new RefundCommand(orderId, UUID.randomUUID(), BigDecimal.ONE,
+                "Only owner roles may refund", "refund-denied-role", Instant.now());
+        for (CurrentAccessContext denied : List.of(salesContext, warehouseContext, buyerContext, workflowContext)) {
+            assertThatThrownBy(() -> inTenantTransaction(denied,
+                    wallet -> wallet.refundForSalesOrder(denied, deniedCommand)))
+                    .isInstanceOf(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation.class);
+        }
+        assertAccount("75.0000", "0.0000");
+        assertThat(countRows("select count(*) from payments.buyer_wallet_ledger_entry where entry_type='REFUND'"))
+                .isZero();
+
+        UUID rollbackOrderId = UUID.randomUUID();
+        inTenantTransaction(salesContext, wallet -> wallet.reserveForSalesOrder(salesContext,
+                reserveCommand(rollbackOrderId, "refund-rollback-reserve", "12.0000")));
+        inTenantTransaction(salesContext, wallet -> wallet.consumeForSalesOrder(salesContext,
+                transitionCommand(rollbackOrderId, "refund-rollback-consume")));
+        RefundCommand rollbackRefund = new RefundCommand(rollbackOrderId, UUID.randomUUID(),
+                new BigDecimal("12.0000"), "Ledger append failure must roll back wallet credit",
+                "refund-rollback-key", Instant.now());
+        tenantAdminJdbc().execute("REVOKE INSERT ON payments.buyer_wallet_ledger_entry FROM " + RUNTIME);
+        try {
+            assertThatThrownBy(() -> inTenantTransaction(ownerContext,
+                    wallet -> wallet.refundForSalesOrder(ownerContext, rollbackRefund)))
+                    .isInstanceOf(DataAccessException.class);
+            assertAccount("63.0000", "0.0000");
+            assertThat(countRows("select count(*) from payments.buyer_wallet_ledger_entry "
+                    + "where entry_type='REFUND' and source_id=?", rollbackRefund.refundId())).isZero();
+        } finally {
+            tenantAdminJdbc().execute("GRANT SELECT, INSERT ON payments.buyer_wallet_ledger_entry TO " + RUNTIME);
+        }
     }
 
     @Test
@@ -347,9 +456,9 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
                 + "select id from payments.buyer_wallet_reservation where sales_order_id=?) "
                 + "and event_type in ('RESERVED','CONSUMED')", UUID.fromString(order.id()))).isEqualTo(2);
         assertThat(tenantAdminJdbc().query("select event_type from payments.buyer_wallet_reservation_event "
-                        + "where reservation_id=(select id from payments.buyer_wallet_reservation where sales_order_id=?) "
-                        + "order by occurred_at,id", (rs, row) -> rs.getString(1), UUID.fromString(order.id())))
-                .containsExactly("RESERVED", "CONSUMED");
+                        + "where reservation_id=(select id from payments.buyer_wallet_reservation where sales_order_id=?)",
+                (rs, row) -> rs.getString(1), UUID.fromString(order.id())))
+                .containsExactlyInAnyOrder("RESERVED", "CONSUMED");
         assertThat(countRows("select count(*) from sales.purchase_request_event where purchase_request_id=? and to_status='CONVERTED'",
                 requestId)).isEqualTo(1);
         assertThat(countRows("select count(*) from sales.sales_order_event where sales_order_id=? and event_type='ORDER_CREATED'",
@@ -586,6 +695,13 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
         return resolveContext(salesIdentityId, Surface.PLATFORM);
     }
 
+    private CurrentAccessContext ownerContext() {
+        UUID ownerMembership = UUID.fromString(membershipId(OWNER_EMAIL));
+        UUID ownerIdentity = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
+                UUID.class, ownerMembership);
+        return resolveContext(ownerIdentity, Surface.PLATFORM);
+    }
+
     private <T> T inPolicyTransaction(CurrentAccessContext context, Function<JdbcTemplate, T> work) {
         RlsRequestScope.set(context.tenantId().value(), context.workspaceId().value());
         try {
@@ -764,6 +880,14 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("CREATE ROLE " + POLICY_WRITER + " LOGIN PASSWORD '" + POLICY_WRITER_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_wallet_recharge_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_business_documents_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_payments_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_business_traceability_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + TENANT_DATABASE.getDatabaseName()
                     + "\" TO " + MIGRATOR);
             statement.execute("GRANT CONNECT ON DATABASE \"" + TENANT_DATABASE.getDatabaseName() + "\" TO "

@@ -3,10 +3,13 @@ package com.nexa.api.payments.infrastructure.persistence;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands;
+import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
+import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -132,46 +135,48 @@ public class JdbcBuyerWalletReservationCommands implements BuyerWalletReservatio
     public Refund refundForSalesOrder(CurrentAccessContext context, RefundCommand command) {
         Objects.requireNonNull(command, "Refund command is required");
         requireCallerTransaction();
+        requireWalletRefundAuthority(context);
         WalletScope scope = requireCurrentScope(context, PermissionKey.PAYMENT_RECONCILE);
         ReservationRow initial = reservationByOrder(scope.tenantId(), scope.workspaceId(), command.salesOrderId(), false);
-        if (initial == null) throw new IllegalStateException("Buyer wallet reservation was not found");
+        if (initial == null) throw new BuyerWalletRefundConflictException();
         AccountRow account = lockAccount(scope.tenantId(), scope.workspaceId(), initial.buyerIdentityId());
         ReservationRow reservation = reservationById(scope.tenantId(), scope.workspaceId(), initial.id(), true);
         requireSameReservation(initial, reservation);
 
         LedgerRow byKey = ledgerByKey(scope.tenantId(), scope.workspaceId(), reservation.buyerIdentityId(),
                 command.idempotencyKey());
-        if (byKey != null) return replayRefund(byKey, reservation, command);
+        if (byKey != null) return replayRefund(byKey, reservation, command, scope);
         if (eventByKey(scope.tenantId(), scope.workspaceId(), reservation.buyerIdentityId(),
                 command.idempotencyKey()) != null) {
-            throw new IllegalStateException("Buyer wallet idempotency key was used by another operation");
+            throw new PaymentIdempotencyPayloadConflictException();
         }
         LedgerRow byRefund = ledgerBySource(scope.tenantId(), scope.workspaceId(),
                 reservation.buyerIdentityId(), "REFUND", command.refundId());
-        if (byRefund != null) return replayRefund(byRefund, reservation, command);
+        if (byRefund != null) return replayRefund(byRefund, reservation, command, scope);
         if (reservation.status() != ReservationStatus.CONSUMED) {
-            throw new IllegalStateException("Only consumed Buyer wallet funds can be refunded");
+            throw new BuyerWalletRefundConflictException();
         }
 
         BigDecimal consumed = sumLedgerAmount(scope.tenantId(), scope.workspaceId(), reservation.id(),
                 "ORDER_CONSUMPTION").negate();
         BigDecimal alreadyRefunded = sumLedgerAmount(scope.tenantId(), scope.workspaceId(), reservation.id(), "REFUND");
         if (consumed.signum() <= 0 || alreadyRefunded.add(command.amountPEN()).compareTo(consumed) > 0) {
-            throw new IllegalStateException("Buyer wallet refund exceeds consumed funds");
+            throw new BuyerWalletRefundConflictException();
         }
         if (jdbc.update("update payments.buyer_wallet_account set posted_balance=posted_balance+?, "
                         + "version=version+1,updated_at=? where tenant_id=? and workspace_id=? and id=?",
                 command.amountPEN(), timestamp(command.occurredAt()), scope.tenantId(), scope.workspaceId(),
                 account.id()) != 1) {
-            throw new IllegalStateException("Buyer wallet account is unavailable");
+            throw new BuyerWalletRefundConflictException();
         }
         UUID entryId = UUID.randomUUID();
         jdbc.update("insert into payments.buyer_wallet_ledger_entry "
                         + "(id,tenant_id,workspace_id,buyer_identity_id,currency,reservation_id,entry_type,"
-                        + "amount_delta,source_id,idempotency_key,occurred_at) values (?,?,?,?,? ,?,'REFUND',?,?,?,?)",
+                        + "amount_delta,source_id,idempotency_key,reason,actor_membership_id,occurred_at) "
+                        + "values (?,?,?,?,? ,?,'REFUND',?,?,?,?,?,?)",
                 entryId, scope.tenantId(), scope.workspaceId(), reservation.buyerIdentityId(), CURRENCY,
                 reservation.id(), command.amountPEN(), command.refundId(), command.idempotencyKey(),
-                timestamp(command.occurredAt()));
+                command.reason(), scope.membershipId(), timestamp(command.occurredAt()));
         return new Refund(entryId, command.refundId(), command.amountPEN());
     }
 
@@ -264,6 +269,16 @@ public class JdbcBuyerWalletReservationCommands implements BuyerWalletReservatio
         return requireTenantScope(context);
     }
 
+    private static void requireWalletRefundAuthority(CurrentAccessContext context) {
+        Objects.requireNonNull(context, "Verified current access context is required").requireSurface(Surface.PLATFORM);
+        if (!context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER)
+                && !context.hasRole(MembershipRole.COMPANY_OWNER)) {
+            throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation(
+                    "A Business Operations Manager or Company Owner role is required");
+        }
+        context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
+    }
+
     private WalletScope requireCurrentScope(CurrentAccessContext context, PermissionKey permission) {
         Objects.requireNonNull(context, "Verified current access context is required");
         context.requirePermission(permission);
@@ -288,7 +303,7 @@ public class JdbcBuyerWalletReservationCommands implements BuyerWalletReservatio
         if (scope == null || !tenantId.equals(scope.tenantId()) || !workspaceId.equals(scope.workspaceId())) {
             throw new IllegalStateException("Buyer wallet command requires the matching verified Tenant and Workspace scope");
         }
-        return new WalletScope(tenantId, workspaceId);
+        return new WalletScope(tenantId, workspaceId, context.membershipId().value());
     }
 
     private void requireActiveBuyerRelationship(WalletScope scope, UUID membershipId, UUID accountId) {
@@ -360,21 +375,23 @@ public class JdbcBuyerWalletReservationCommands implements BuyerWalletReservatio
     }
 
     private LedgerRow ledgerByKey(UUID tenantId, UUID workspaceId, UUID buyerIdentityId, String key) {
-        return jdbc.query("select id,reservation_id,entry_type,amount_delta,source_id,idempotency_key "
+        return jdbc.query("select id,reservation_id,entry_type,amount_delta,source_id,idempotency_key,reason,actor_membership_id "
                         + "from payments.buyer_wallet_ledger_entry where tenant_id=? and workspace_id=? "
                         + "and buyer_identity_id=? and idempotency_key=?",
                 (rs, ignored) -> ledger(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getString(3),
-                        rs.getBigDecimal(4), rs.getObject(5, UUID.class), rs.getString(6)),
+                        rs.getBigDecimal(4), rs.getObject(5, UUID.class), rs.getString(6), rs.getString(7),
+                        rs.getObject(8, UUID.class)),
                 tenantId, workspaceId, buyerIdentityId, key).stream().findFirst().orElse(null);
     }
 
     private LedgerRow ledgerBySource(UUID tenantId, UUID workspaceId, UUID buyerIdentityId,
                                      String entryType, UUID sourceId) {
-        return jdbc.query("select id,reservation_id,entry_type,amount_delta,source_id,idempotency_key "
+        return jdbc.query("select id,reservation_id,entry_type,amount_delta,source_id,idempotency_key,reason,actor_membership_id "
                         + "from payments.buyer_wallet_ledger_entry where tenant_id=? and workspace_id=? "
                         + "and buyer_identity_id=? and entry_type=? and source_id=?",
                 (rs, ignored) -> ledger(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getString(3),
-                        rs.getBigDecimal(4), rs.getObject(5, UUID.class), rs.getString(6)),
+                        rs.getBigDecimal(4), rs.getObject(5, UUID.class), rs.getString(6), rs.getString(7),
+                        rs.getObject(8, UUID.class)),
                 tenantId, workspaceId, buyerIdentityId, entryType, sourceId).stream().findFirst().orElse(null);
     }
 
@@ -393,12 +410,14 @@ public class JdbcBuyerWalletReservationCommands implements BuyerWalletReservatio
                 key, timestamp(occurredAt));
     }
 
-    private Refund replayRefund(LedgerRow row, ReservationRow reservation, RefundCommand command) {
+    private Refund replayRefund(LedgerRow row, ReservationRow reservation, RefundCommand command, WalletScope scope) {
         if (!"REFUND".equals(row.entryType()) || !row.sourceId().equals(command.refundId())
                 || !Objects.equals(row.reservationId(), reservation.id())
                 || !row.idempotencyKey().equals(command.idempotencyKey())
-                || !sameMoney(row.amountDelta(), command.amountPEN())) {
-            throw new IllegalStateException("Buyer wallet refund idempotency payload conflict");
+                || !sameMoney(row.amountDelta(), command.amountPEN())
+                || !Objects.equals(row.reason(), command.reason())
+                || !Objects.equals(row.actorMembershipId(), scope.membershipId())) {
+            throw new PaymentIdempotencyPayloadConflictException();
         }
         return new Refund(row.id(), command.refundId(), command.amountPEN());
     }
@@ -421,8 +440,9 @@ public class JdbcBuyerWalletReservationCommands implements BuyerWalletReservatio
     }
 
     private static LedgerRow ledger(UUID id, UUID reservationId, String entryType, BigDecimal amountDelta,
-            UUID sourceId, String idempotencyKey) {
-        return new LedgerRow(id, reservationId, entryType, amountDelta, sourceId, idempotencyKey);
+            UUID sourceId, String idempotencyKey, String reason, UUID actorMembershipId) {
+        return new LedgerRow(id, reservationId, entryType, amountDelta, sourceId, idempotencyKey, reason,
+                actorMembershipId);
     }
 
     private static boolean sameMoney(BigDecimal left, BigDecimal right) {
@@ -443,7 +463,7 @@ public class JdbcBuyerWalletReservationCommands implements BuyerWalletReservatio
     private record ReservationEventRow(UUID id, UUID reservationId, String eventType, BigDecimal amount) { }
 
     private record LedgerRow(UUID id, UUID reservationId, String entryType, BigDecimal amountDelta,
-            UUID sourceId, String idempotencyKey) { }
+            UUID sourceId, String idempotencyKey, String reason, UUID actorMembershipId) { }
 
-    private record WalletScope(UUID tenantId, UUID workspaceId) { }
+    private record WalletScope(UUID tenantId, UUID workspaceId, UUID membershipId) { }
 }

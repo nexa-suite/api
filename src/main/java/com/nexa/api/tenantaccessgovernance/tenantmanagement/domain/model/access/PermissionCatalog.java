@@ -117,6 +117,7 @@ public final class PermissionCatalog {
 			case BUSINESS_OPERATIONS_MANAGER -> Set.of(
 					PermissionKey.DELIVERY_EXCEPTION_READ, PermissionKey.DELIVERY_EXCEPTION_COORDINATE,
 					PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE,
+					PermissionKey.PAYMENT_RECONCILE,
 					PermissionKey.NOTIFICATION_READ, PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
 			case BUYER -> Set.of(
 					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PROMOTION_READ,

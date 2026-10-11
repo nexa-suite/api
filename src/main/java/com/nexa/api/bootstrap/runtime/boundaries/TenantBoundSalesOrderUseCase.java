@@ -2,16 +2,19 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
-import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderEventView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderWalletRefundView;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderWalletRefundCandidateView;
+import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesCommitmentCompositionFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.util.List;
+import java.math.BigDecimal;
 import java.util.function.Function;
 
 /** Routes Sales Order reads, transitions, and PR conversion through the Tenant transaction. */
@@ -46,6 +49,14 @@ public final class TenantBoundSalesOrderUseCase implements SalesOrderUseCase {
     @Override public SalesOrderView transition(CurrentAccessContext c, String id, String action,
             String reason, long version, String key) {
         return call(c, useCase -> useCase.transition(c, id, action, reason, version, key));
+    }
+    @Override public SalesOrderWalletRefundView refundBuyerWallet(CurrentAccessContext c, String id,
+            BigDecimal amountPEN, String reason, String key) {
+        return call(c, useCase -> useCase.refundBuyerWallet(c, id, amountPEN, reason, key));
+    }
+    @Override public SalesPage<SalesOrderWalletRefundCandidateView> walletRefundCandidates(CurrentAccessContext c,
+            int page, int size) {
+        return call(c, useCase -> useCase.walletRefundCandidates(c, page, size));
     }
     @Override public List<SalesOrderEventView> events(CurrentAccessContext c, String id) {
         return call(c, useCase -> useCase.events(c, id));

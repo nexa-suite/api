@@ -13,6 +13,7 @@ import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilte
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderLineView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderPersistencePort;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFinancialStateQuery;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderAggregatePersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderConversionPersistencePort;
 import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
@@ -64,7 +65,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Repository
 @Profile("!test")
-public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, SalesOrderAggregatePersistencePort, SalesOrderConversionPersistencePort {
+public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, SalesOrderAggregatePersistencePort,
+		SalesOrderConversionPersistencePort, SalesOrderFinancialStateQuery {
 	private final JdbcTemplate jdbc;
 	private final CanonicalOutboxPort canonicalOutbox;
 	private final ChangeEventPersistencePort changeFeed;
@@ -130,6 +132,31 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 	public Optional<SalesOrder> findForUpdate(String tenantId, String workspaceId, String salesOrderId) {
 		List<Object> args = new ArrayList<>(List.of(uuid(tenantId), uuid(workspaceId), uuid(salesOrderId)));
 		return jdbc.query(orderSql() + " where o.tenant_id=? and o.workspace_id=? and o.id=? for update of o", rs -> rs.next() ? Optional.of(aggregate(detail(rs))) : Optional.empty(), args.toArray());
+	}
+
+	@Override
+	public Optional<SalesOrderFinancialStateQuery.State> findWalletRefundState(UUID tenantId, UUID workspaceId,
+			UUID salesOrderId) {
+		return jdbc.query("select status,payment_option from sales.sales_order "
+				+ "where tenant_id=? and workspace_id=? and id=? for update",
+			(rs, ignored) -> new SalesOrderFinancialStateQuery.State(rs.getString("status"),
+					rs.getString("payment_option")), tenantId, workspaceId, salesOrderId).stream().findFirst();
+	}
+
+	@Override
+	public SalesOrderFinancialStateQuery.CandidatePage findCancelledWalletRefundCandidates(UUID tenantId,
+			UUID workspaceId, int page, int size) {
+		long total = jdbc.queryForObject("select count(*) from sales.sales_order where tenant_id=? and workspace_id=? "
+				+ "and status='CANCELLED' and payment_option='WALLET'", Long.class, tenantId, workspaceId);
+		long offset = (long) Math.max(0, page) * Math.max(1, size);
+		List<SalesOrderFinancialStateQuery.Candidate> items = jdbc.query(
+				"select id,order_number from sales.sales_order where tenant_id=? and workspace_id=? "
+						+ "and status='CANCELLED' and payment_option='WALLET' "
+						+ "order by cancelled_at desc nulls last,order_number desc limit ? offset ?",
+				(rs, ignored) -> new SalesOrderFinancialStateQuery.Candidate(
+						rs.getObject("id", UUID.class), rs.getString("order_number")),
+				tenantId, workspaceId, size, offset);
+		return new SalesOrderFinancialStateQuery.CandidatePage(items, page, size, total);
 	}
 
 	@Override

@@ -47,7 +47,8 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
                 dependencies.financialAdjustments(), dependencies.clock(), dependencies.objectMapper(),
                 dependencies.canonicalOutbox(), dependencies.walletReservations());
         var salesOrders = new SalesOrderService(persistence, dependencies.customerAccounts(), persistence,
-                persistence, new IdempotencyPersistenceAdapter(jdbc), dependencies.objectMapper());
+                persistence, new IdempotencyPersistenceAdapter(jdbc), dependencies.objectMapper(), persistence,
+                dependencies.walletReservations(), dependencies.walletRefundBalances());
         DirectOrderUseCase directOrders = new DirectOrderService(commitmentPort, persistence,
                 dependencies.clock(), new IdempotencyPersistenceAdapter(jdbc), dependencies.objectMapper(),
                 dependencies.sellableSkus());

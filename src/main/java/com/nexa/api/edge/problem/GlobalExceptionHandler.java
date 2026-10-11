@@ -14,6 +14,8 @@ import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
+import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
+import com.nexa.api.payments.application.exception.BuyerWalletRefundUnavailableException;
 import com.nexa.api.businessdocuments.application.exception.BusinessEvidenceIdempotencyConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -329,6 +331,20 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleBuyerWalletStoreUnavailable(BuyerWalletStoreUnavailableException exception, HttpServletRequest request) {
 		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
 				"Buyer wallet capability is unavailable", request);
+	}
+
+	@ExceptionHandler(BuyerWalletRefundUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleBuyerWalletRefundUnavailable(
+			BuyerWalletRefundUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant wallet refund capability is unavailable", request);
+	}
+
+	@ExceptionHandler(BuyerWalletRefundConflictException.class)
+	public ResponseEntity<ProblemDetail> handleBuyerWalletRefundConflict(
+			BuyerWalletRefundConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.BUYER_WALLET_REFUND_CONFLICT,
+				"Buyer wallet refund conflicts with the consumed reservation", request);
 	}
 
 	@ExceptionHandler(WarehouseOperationsStoreUnavailableException.class)

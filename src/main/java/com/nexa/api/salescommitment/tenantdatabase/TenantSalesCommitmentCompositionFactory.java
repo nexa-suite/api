@@ -10,6 +10,7 @@ import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAdd
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryBackingCommands;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands;
+import com.nexa.api.payments.application.publicapi.BuyerWalletRefundBalanceQuery;
 import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
@@ -40,7 +41,21 @@ public interface TenantSalesCommitmentCompositionFactory {
                     FinancialAdjustmentCommands financialAdjustments,
                     CanonicalOutboxPort canonicalOutbox, ChangeEventPersistencePort changeFeed,
                     MapRoutingPort maps, Clock clock, ObjectMapper objectMapper,
-                    boolean walletTenderEnabled) {
+                    boolean walletTenderEnabled, BuyerWalletRefundBalanceQuery walletRefundBalances) {
+        public Bindings(CustomerAccountQuery customerAccounts, CustomerAddressQuery customerAddresses,
+                SellableSkuQuery sellableSkus, CreditExposureQuery creditExposure,
+                CatalogItemSnapshotLookupPort catalogItemSnapshots,
+                CreditReservationCommands creditReservations, WarehouseSelectionQuery warehouses,
+                InventoryBackingCommands inventoryBacking, BuyerWalletReservationCommands walletReservations,
+                PaymentConfirmationQuery paymentConfirmations, ReceivableCommands receivables,
+                FinancialAdjustmentCommands financialAdjustments, CanonicalOutboxPort canonicalOutbox,
+                ChangeEventPersistencePort changeFeed, MapRoutingPort maps, Clock clock, ObjectMapper objectMapper,
+                boolean walletTenderEnabled) {
+            this(customerAccounts, customerAddresses, sellableSkus, creditExposure, catalogItemSnapshots,
+                    creditReservations, warehouses, inventoryBacking, walletReservations, paymentConfirmations,
+                    receivables, financialAdjustments, canonicalOutbox, changeFeed, maps, clock, objectMapper,
+                    walletTenderEnabled, null);
+        }
         public Bindings {
             if (customerAccounts == null || customerAddresses == null || sellableSkus == null
                     || creditExposure == null || catalogItemSnapshots == null || creditReservations == null || warehouses == null

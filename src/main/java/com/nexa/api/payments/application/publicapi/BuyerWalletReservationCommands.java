@@ -84,13 +84,18 @@ public interface BuyerWalletReservationCommands {
         }
     }
 
-    record RefundCommand(UUID salesOrderId, UUID refundId, BigDecimal amountPEN,
+    record RefundCommand(UUID salesOrderId, UUID refundId, BigDecimal amountPEN, String reason,
                          String idempotencyKey, Instant occurredAt) {
         public RefundCommand {
             Objects.requireNonNull(salesOrderId, "Sales Order id is required");
             Objects.requireNonNull(refundId, "Refund id is required");
             requirePositiveMoney(amountPEN);
+            if (reason == null || reason.isBlank() || reason.trim().length() > 500) {
+                throw new IllegalArgumentException("A refund reason of at most 500 characters is required");
+            }
+            reason = reason.trim();
             requireIdempotencyKey(idempotencyKey);
+            idempotencyKey = idempotencyKey.trim();
             Objects.requireNonNull(occurredAt, "Occurrence time is required");
         }
     }

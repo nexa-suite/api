@@ -3,6 +3,7 @@ package com.nexa.api.payments.tenantdatabase;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReadPort;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands;
+import com.nexa.api.payments.application.publicapi.BuyerWalletRefundBalanceQuery;
 import com.nexa.api.payments.application.publicapi.BuyerWalletRechargeTenantCommands;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -12,6 +13,8 @@ public interface BuyerWalletTenantDatabaseAdapterFactory {
 
     BuyerWalletReservationCommands bindReservationCommandsTo(
             JdbcTemplate tenantJdbc, CustomerAccountQuery tenantCustomerAccounts);
+
+    BuyerWalletRefundBalanceQuery bindRefundBalanceQueryTo(JdbcTemplate tenantJdbc);
 
     BuyerWalletRechargeTenantCommands bindRechargeCommandsTo(
             JdbcTemplate tenantJdbc, CustomerAccountQuery tenantCustomerAccounts);

@@ -3,6 +3,7 @@ package com.nexa.api.payments.infrastructure.persistence;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReadPort;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands;
+import com.nexa.api.payments.application.publicapi.BuyerWalletRefundBalanceQuery;
 import com.nexa.api.payments.application.publicapi.BuyerWalletRechargeTenantCommands;
 import com.nexa.api.payments.infrastructure.persistence.JdbcBuyerWalletReservationCommands;
 import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFactory;
@@ -24,6 +25,11 @@ public final class JdbcBuyerWalletTenantDatabaseAdapterFactory implements BuyerW
             JdbcTemplate tenantJdbc, CustomerAccountQuery tenantCustomerAccounts) {
         return new JdbcBuyerWalletReservationCommands(Objects.requireNonNull(tenantJdbc),
                 Objects.requireNonNull(tenantCustomerAccounts));
+    }
+
+    @Override
+    public BuyerWalletRefundBalanceQuery bindRefundBalanceQueryTo(JdbcTemplate tenantJdbc) {
+        return new JdbcBuyerWalletRefundBalanceQuery(Objects.requireNonNull(tenantJdbc));
     }
 
     @Override

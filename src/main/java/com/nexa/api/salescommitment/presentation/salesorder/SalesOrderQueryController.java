@@ -8,6 +8,8 @@ import com.nexa.api.salescommitment.presentation.salesorder.response.Fulfillment
 import com.nexa.api.salescommitment.presentation.salesorder.response.SalesOrderEventResponse;
 import com.nexa.api.salescommitment.presentation.salesorder.response.SalesOrderPageResponse;
 import com.nexa.api.salescommitment.presentation.salesorder.response.SalesOrderResponse;
+import com.nexa.api.salescommitment.presentation.salesorder.response.SalesOrderWalletRefundCandidateResponse;
+import com.nexa.api.salescommitment.presentation.salesorder.response.SalesOrderWalletRefundCandidatePageResponse;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -60,5 +62,17 @@ public final class SalesOrderQueryController {
 			@RequestParam(defaultValue = "0") @Min(0) int page, @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size) {
 		var value = sales.fulfillmentCandidates(context, new SalesOrderFilter("CONFIRMED", page, size, "createdAt,desc"));
 		return new com.nexa.api.salescommitment.presentation.salesorder.response.FulfillmentCandidatePageResponse(value.items().stream().map(mapper::candidate).toList(), value.page(), value.size(), value.total());
+	}
+	@GetMapping("/api/v1/sales-orders/wallet-refund-candidates")
+	@Operation(operationId = "listWalletRefundCandidates")
+	public SalesOrderWalletRefundCandidatePageResponse walletRefundCandidates(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
+			@RequestParam(defaultValue = "0") @Min(0) int page,
+			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int size) {
+		var value = sales.walletRefundCandidates(context, page, size);
+		return new SalesOrderWalletRefundCandidatePageResponse(value.items().stream().map(candidate ->
+				new SalesOrderWalletRefundCandidateResponse(candidate.salesOrderId().toString(), candidate.orderNumber(),
+						candidate.currency(), candidate.consumedPEN(), candidate.refundedPEN(),
+						candidate.refundablePEN())).toList(), value.page(), value.size(), value.total());
 	}
 }

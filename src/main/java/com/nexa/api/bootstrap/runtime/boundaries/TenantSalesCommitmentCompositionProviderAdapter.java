@@ -149,6 +149,9 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
         BuyerWalletReservationCommands tenantWallet = Objects.requireNonNull(
                 walletAdapters.bindReservationCommandsTo(jdbc, tenantAccounts),
                 "Tenant Payments factory returned no wallet reservations");
+        var tenantWalletRefundBalances = Objects.requireNonNull(
+                walletAdapters.bindRefundBalanceQueryTo(jdbc),
+                "Tenant Payments factory returned no wallet refund balance query");
         ChangeEventPersistencePort tenantChangeFeed = Objects.requireNonNull(changeEvents.bindTo(jdbc),
                 "Tenant change-feed factory returned no adapter");
 
@@ -156,7 +159,8 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
                 tenantAccounts, customerAddresses.bindTo(jdbc), tenantSkus, tenantCredit.creditExposure(),
                 tenantSnapshots, tenantCredit.creditReservations(), tenantWarehouses, tenantBacking, tenantWallet,
                 tenantPaymentConfirmations, tenantCredit.receivables(), tenantCredit.financialAdjustments(),
-                traceability.canonicalOutbox(), tenantChangeFeed, maps, clock, objectMapper, walletTenderEnabled);
+                traceability.canonicalOutbox(), tenantChangeFeed, maps, clock, objectMapper, walletTenderEnabled,
+                tenantWalletRefundBalances);
         return salesCommitments.bindTo(jdbc, bindings);
     }
 
