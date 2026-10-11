@@ -2,10 +2,10 @@ package com.nexa.api.bootstrap.runtime.boundaries.payments;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcPaymentProviderRouteRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
-import com.nexa.api.payments.application.model.PaymentModels;
+import com.nexa.api.payments.application.publicapi.model.PaymentModels;
 import com.nexa.api.payments.application.publicapi.TenantPaymentWebhookInboxIntake;
-import com.nexa.api.payments.application.port.StripePaymentProvider;
-import com.nexa.api.payments.infrastructure.persistence.PaymentService;
+import com.nexa.api.payments.application.publicapi.webhooks.PaymentWebhookSignatureVerifier;
+import com.nexa.api.payments.application.publicapi.webhooks.WalletRechargeWebhookIntake;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -20,38 +20,35 @@ import java.util.UUID;
 @Profile("local")
 @ConditionalOnProperty(prefix = "nexa.tenant-business.payments", name = "enabled", havingValue = "true")
 public final class TenantPaymentWebhookIngress {
-    private static final String ROUTE_METADATA = "nexa_payment_route_id";
-    private static final String WALLET_METADATA = "nexa_wallet_recharge_id";
-
-    private final StripePaymentProvider stripe;
+    private final PaymentWebhookSignatureVerifier verifier;
     private final JdbcPaymentProviderRouteRegistry routes;
-    private final PaymentService centralLegacyPayments;
+    private final WalletRechargeWebhookIntake walletRechargeWebhookIntake;
     private final TenantPaymentWebhookInboxIntake webhookInbox;
 
-    public TenantPaymentWebhookIngress(StripePaymentProvider stripe,
-            JdbcPaymentProviderRouteRegistry routes, PaymentService centralLegacyPayments,
+    public TenantPaymentWebhookIngress(PaymentWebhookSignatureVerifier verifier,
+            JdbcPaymentProviderRouteRegistry routes, WalletRechargeWebhookIntake walletRechargeWebhookIntake,
             TenantPaymentWebhookInboxIntake webhookInbox) {
-        this.stripe = Objects.requireNonNull(stripe);
+        this.verifier = Objects.requireNonNull(verifier);
         this.routes = Objects.requireNonNull(routes);
-        this.centralLegacyPayments = Objects.requireNonNull(centralLegacyPayments);
+        this.walletRechargeWebhookIntake = Objects.requireNonNull(walletRechargeWebhookIntake);
         this.webhookInbox = Objects.requireNonNull(webhookInbox);
     }
 
     public PaymentModels.WebhookReceipt receive(String payload, String signature) {
         if (payload == null || payload.isBlank()) throw new IllegalArgumentException("Stripe webhook payload is required");
-        StripePaymentProvider.StripeWebhookEvent event = stripe.verifyWebhook(payload, signature);
+        PaymentWebhookSignatureVerifier.VerifiedEvent event = verifier.verify(payload, signature);
         requireIdentity(event);
 
-        String walletRechargeId = event.metadata().get(WALLET_METADATA);
+        String walletRechargeId = event.walletRechargeReference();
         if (walletRechargeId != null && !walletRechargeId.isBlank()) {
             // Wallet callbacks retain their separately accepted opaque wallet route and worker.
-            return centralLegacyPayments.receiveStripeWebhook(payload, signature);
+            return walletRechargeWebhookIntake.receiveWalletRechargeWebhook(payload, signature);
         }
         if (event.paymentIntentId() == null || !event.eventType().startsWith("payment_intent.")) {
             return new PaymentModels.WebhookReceipt(event.eventId(), "IGNORED");
         }
 
-        UUID routeId = opaqueRouteId(event.metadata().get(ROUTE_METADATA));
+        UUID routeId = opaqueRouteId(event.paymentRouteReference());
         JdbcPaymentProviderRouteRegistry.Route route = routeId == null
                 ? routes.findForVerifiedIntent(event.paymentIntentId()) : routes.findByRouteId(routeId);
         if (route == null) throw unavailable("No READY Tenant payment route matches this verified callback");
@@ -86,7 +83,7 @@ public final class TenantPaymentWebhookIngress {
         return UUID.fromString(value);
     }
 
-    private static void requireIdentity(StripePaymentProvider.StripeWebhookEvent event) {
+    private static void requireIdentity(PaymentWebhookSignatureVerifier.VerifiedEvent event) {
         if (event == null || event.eventId() == null || event.eventId().isBlank() || event.eventId().length() > 160
                 || event.eventType() == null || event.eventType().isBlank() || event.eventType().length() > 160
                 || (event.paymentIntentId() != null && event.paymentIntentId().length() > 160)) {

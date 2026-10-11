@@ -2,9 +2,13 @@ package com.nexa.api.payments.infrastructure.persistence;
 
 import com.nexa.api.payments.application.exception.PaymentOperationInProgressException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
-import com.nexa.api.payments.application.model.PaymentModels;
+import com.nexa.api.payments.application.publicapi.model.PaymentModels;
 import com.nexa.api.payments.application.port.PaymentPersistencePort;
 import com.nexa.api.payments.application.port.StripePaymentProvider;
+import com.nexa.api.payments.application.publicapi.PaymentUseCases;
+import com.nexa.api.payments.application.publicapi.TenantPaymentSession;
+import com.nexa.api.payments.application.publicapi.webhooks.WalletRechargeWebhookIntake;
+import com.nexa.api.payments.application.publicapi.webhooks.PaymentWebhookIntake;
 import com.nexa.api.creditreceivables.application.publicapi.CreditPaymentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableApplicationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
@@ -64,7 +68,8 @@ import javax.crypto.spec.SecretKeySpec;
 /** Persistence adapter for payment use cases. Amounts, scope and final status stay server/webhook authoritative. */
 @Profile("!test")
 @Component
-public class PaymentService implements TenantPaymentSession {
+public class PaymentService implements PaymentPersistencePort, TenantPaymentSession, PaymentWebhookIntake,
+        WalletRechargeWebhookIntake {
     private static final Logger LOGGER = LoggerFactory.getLogger(PaymentService.class);
     private static final int MAX_RECONCILIATION_ATTEMPTS = 10;
     private final JdbcTemplate jdbc;
@@ -447,6 +452,14 @@ public class PaymentService implements TenantPaymentSession {
                 () -> createReceivableInTransaction(context, request));
     }
 
+    @Override
+    public PaymentModels.ReceivableView createReceivable(CurrentAccessContext context,
+            PaymentUseCases.CreateReceivableCommand request) {
+        Objects.requireNonNull(request, "Receivable command is required");
+        return createReceivable(context, new PaymentPersistencePort.ReceivableCommand(request.subjectType(),
+                request.subjectId(), request.dueAt(), request.idempotencyKey()));
+    }
+
     private PaymentModels.ReceivableView createReceivableInTransaction(CurrentAccessContext context,
                                                                          PaymentPersistencePort.ReceivableCommand request) {
         lockIdempotencyKey(context, request.idempotencyKey());
@@ -512,19 +525,21 @@ public class PaymentService implements TenantPaymentSession {
     /** Tenant request phase three. Call only after the PSP call completed outside the Tenant transaction. */
     @Override
     public PaymentModels.PaymentIntentView persistTenantCardPayment(CurrentAccessContext context,
-            TenantPaymentSession.TenantCardPaymentPreparation preparation, StripePaymentProvider.PaymentIntent intent) {
+            TenantPaymentSession.TenantCardPaymentPreparation preparation, TenantPaymentSession.ProviderIntent intent) {
         Objects.requireNonNull(preparation, "Tenant card payment preparation is required");
         Objects.requireNonNull(intent, "Provider PaymentIntent is required");
+        StripePaymentProvider.PaymentIntent providerIntent = new StripePaymentProvider.PaymentIntent(
+                intent.providerId(), intent.clientSecret(), intent.status());
         PaymentRow payment = transactionTemplate.execute(status -> {
             CardPaymentClaim claim = prepareCardPaymentClaim(context, preparation.receivableId(),
                     preparation.idempotencyKey());
             if (!preparation.paymentId().equals(claim.payment().id())) {
                 throw new IllegalStateException("Payment idempotency claim changed during provider request");
             }
-            return persistProviderIntent(context, claim, intent);
+            return persistProviderIntent(context, claim, providerIntent);
         });
         if (payment == null) throw new IllegalStateException("Payment provider result could not be persisted");
-        return paymentIntentView(payment, intent.clientSecret());
+        return paymentIntentView(payment, providerIntent.clientSecret());
     }
 
     /** Stores a PSP failure in the same Tenant-local payment claim when possible. */
@@ -781,11 +796,26 @@ public class PaymentService implements TenantPaymentSession {
         return paymentView(new PaymentRow(payment.id(), payment.receivableId(), "SUCCEEDED", payment.amount(), payment.currency(), null, payment.providerId(), payment.createdAt(), Instant.now(), payment.clientAccountId(), payment.tenantId(), payment.workspaceId()), "BANK_TRANSFER");
     }
 
+    @Override
     @Transactional
     public PaymentModels.WebhookReceipt receiveStripeWebhook(String payload, String signature) {
-        if (payload == null || payload.isBlank()) throw new IllegalArgumentException("Stripe webhook payload is required");
-        StripePaymentProvider.StripeWebhookEvent event = stripe.verifyWebhook(payload, signature);
-        requireWebhookIdentity(event);
+        return recordStripeWebhook(verifyStripeWebhook(payload, signature), signature);
+    }
+
+    @Override
+    @Transactional
+    public PaymentModels.WebhookReceipt receiveWalletRechargeWebhook(String payload, String signature) {
+        StripePaymentProvider.StripeWebhookEvent event = verifyStripeWebhook(payload, signature);
+        UUID walletRechargeId = metadataUuid(event, "nexa_wallet_recharge_id");
+        if (walletRechargeId == null || event.paymentIntentId() == null
+                || event.eventType() == null || !event.eventType().startsWith("payment_intent.")) {
+            throw new IllegalArgumentException("Stripe wallet recharge webhook binding is required");
+        }
+        return recordStripeWebhook(event, signature);
+    }
+
+    private PaymentModels.WebhookReceipt recordStripeWebhook(StripePaymentProvider.StripeWebhookEvent event,
+            String signature) {
         UUID eventTenant = metadataUuid(event, "nexa_tenant_id");
         UUID eventWorkspace = metadataUuid(event, "nexa_workspace_id");
         UUID walletRechargeId = metadataUuid(event, "nexa_wallet_recharge_id");
@@ -805,6 +835,15 @@ public class PaymentService implements TenantPaymentSession {
                 event.currency() == null ? null : event.currency().toUpperCase(Locale.ROOT), eventTenant, eventWorkspace,
                 signatureHash, Timestamp.from(Instant.now()), walletRechargeId);
         return new PaymentModels.WebhookReceipt(event.eventId(), inserted == 0 ? "DUPLICATE" : "ACCEPTED");
+    }
+
+    private StripePaymentProvider.StripeWebhookEvent verifyStripeWebhook(String payload, String signature) {
+        if (payload == null || payload.isBlank()) {
+            throw new IllegalArgumentException("Stripe webhook payload is required");
+        }
+        StripePaymentProvider.StripeWebhookEvent event = stripe.verifyWebhook(payload, signature);
+        requireWebhookIdentity(event);
+        return event;
     }
 
     @Scheduled(fixedDelayString = "${nexa.payments.webhook-worker-delay-ms:1000}")
@@ -975,7 +1014,7 @@ public class PaymentService implements TenantPaymentSession {
     public TenantPaymentSession.TenantReconciliationRefundOutcome recordTenantReconciliationRefund(
             CurrentAccessContext workflowContext,
             TenantPaymentSession.TenantReconciliationRefundPreparation preparation,
-            StripePaymentProvider.Refund refund, RuntimeException providerFailure) {
+            TenantPaymentSession.ProviderRefund refund, RuntimeException providerFailure) {
         requireWorkflowPaymentScope(workflowContext);
         Objects.requireNonNull(preparation, "Claimed Tenant reconciliation refund is required");
         if (!preparation.tenantId().equals(tenant(workflowContext))
@@ -997,7 +1036,10 @@ public class PaymentService implements TenantPaymentSession {
         if (!"succeeded".equals(providerStatus)) {
             boolean pending = "pending".equals(providerStatus);
             try {
-                transactionTemplate.executeWithoutResult(status -> recordProviderRefundOutcome(work, refund, pending));
+                StripePaymentProvider.Refund providerRefund = new StripePaymentProvider.Refund(
+                        refund.providerRefundId(), refund.status());
+                transactionTemplate.executeWithoutResult(status -> recordProviderRefundOutcome(
+                        work, providerRefund, pending));
                 return pending ? TenantPaymentSession.TenantReconciliationRefundOutcome.PENDING
                         : TenantPaymentSession.TenantReconciliationRefundOutcome.FAILED;
             } catch (ReconciliationClaimLostException ignored) {

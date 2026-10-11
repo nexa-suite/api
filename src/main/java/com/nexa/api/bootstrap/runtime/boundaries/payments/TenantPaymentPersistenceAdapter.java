@@ -7,12 +7,13 @@ import com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDataba
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
-import com.nexa.api.payments.application.model.PaymentModels;
-import com.nexa.api.payments.application.port.PaymentPersistencePort;
-import com.nexa.api.payments.application.port.StripePaymentProvider;
+import com.nexa.api.payments.application.publicapi.model.PaymentModels;
+import com.nexa.api.payments.application.publicapi.PaymentUseCases;
 import com.nexa.api.payments.application.publicapi.PaymentWebhookInboxWorker;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentServiceFactory;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentSession;
+import com.nexa.api.payments.application.publicapi.provider.PaymentProviderOperations;
+import com.nexa.api.payments.application.publicapi.webhooks.PaymentWebhookIntake;
+import com.nexa.api.bootstrap.runtime.boundaries.TenantPaymentServiceBindingsFactory;
+import com.nexa.api.payments.application.publicapi.TenantPaymentSession;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -23,7 +24,6 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
@@ -33,24 +33,24 @@ import java.util.function.Function;
 @Primary
 @Profile("local")
 @ConditionalOnProperty(prefix = "nexa.tenant-business.payments", name = "enabled", havingValue = "true")
-public final class TenantPaymentPersistenceAdapter implements PaymentPersistencePort {
+public final class TenantPaymentPersistenceAdapter implements PaymentUseCases, PaymentWebhookIntake {
     private final TenantBusinessDatabaseRouter router;
     private final TenantBusinessDatabaseAuthority authority;
-    private final TenantPaymentServiceFactory services;
+    private final TenantPaymentServiceBindingsFactory services;
     private final JdbcPaymentProviderRouteRegistry providerRoutes;
-    private final StripePaymentProvider stripe;
+    private final PaymentProviderOperations provider;
     private final TenantPaymentWebhookIngress webhookIngress;
     private final PaymentWebhookInboxWorker inboxWorker;
 
     public TenantPaymentPersistenceAdapter(TenantBusinessDatabaseRouter router,
-            TenantBusinessDatabaseAuthority authority, TenantPaymentServiceFactory services,
-            JdbcPaymentProviderRouteRegistry providerRoutes, StripePaymentProvider stripe,
+            TenantBusinessDatabaseAuthority authority, TenantPaymentServiceBindingsFactory services,
+            JdbcPaymentProviderRouteRegistry providerRoutes, PaymentProviderOperations provider,
             TenantPaymentWebhookIngress webhookIngress, PaymentWebhookInboxWorker inboxWorker) {
         this.router = Objects.requireNonNull(router);
         this.authority = Objects.requireNonNull(authority);
         this.services = Objects.requireNonNull(services);
         this.providerRoutes = Objects.requireNonNull(providerRoutes);
-        this.stripe = Objects.requireNonNull(stripe);
+        this.provider = Objects.requireNonNull(provider);
         this.webhookIngress = Objects.requireNonNull(webhookIngress);
         this.inboxWorker = Objects.requireNonNull(inboxWorker);
     }
@@ -89,14 +89,14 @@ public final class TenantPaymentPersistenceAdapter implements PaymentPersistence
     }
 
     @Override public PaymentModels.ReceivableView createReceivable(CurrentAccessContext context,
-            ReceivableCommand request) {
+            PaymentUseCases.CreateReceivableCommand request) {
         return write(context, service -> service.createReceivable(context, request));
     }
 
     @Override public PaymentModels.PaymentIntentView createCardPaymentIntent(CurrentAccessContext context,
             UUID receivableId, String idempotencyKey) {
         requireCurrentScope(context);
-        if (!stripe.supportsPaymentIntentCreation()) {
+        if (!provider.supportsPaymentIntentCreation()) {
             throw unavailable("Tenant card payments require the configured PaymentIntent provider");
         }
         try {
@@ -116,11 +116,11 @@ public final class TenantPaymentPersistenceAdapter implements PaymentPersistence
                         "Stored Stripe intent replay must include its client result");
             }
 
-            StripePaymentProvider.PaymentIntent intent;
+            PaymentProviderOperations.PaymentIntent intent;
             try {
-                intent = stripe.createPaymentIntent(new StripePaymentProvider.PaymentIntentRequest(
+                intent = provider.createPaymentIntent(new PaymentProviderOperations.PaymentIntentRequest(
                         preparation.amountMinor(), preparation.currency(), preparation.providerIdempotencyKey(),
-                        Map.of("nexa_payment_route_id", route.routeId().toString())));
+                        route.routeId(), null, null, null));
                 requireProviderIntent(intent);
             } catch (RuntimeException failure) {
                 try {
@@ -138,7 +138,9 @@ public final class TenantPaymentPersistenceAdapter implements PaymentPersistence
             providerRoutes.bindProviderIntent(route, intent.providerId());
             PaymentModels.PaymentIntentView result = router.inTenantSession(context, session ->
                     services.bindTo(session.jdbcTemplate(), session.transactionManager())
-                            .persistTenantCardPayment(context, preparation, intent));
+                            .persistTenantCardPayment(context, preparation,
+                                    new TenantPaymentSession.ProviderIntent(intent.providerId(), intent.clientSecret(),
+                                            intent.status())));
             providerRoutes.activate(route, intent.providerId());
             return result;
         } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
@@ -196,10 +198,6 @@ public final class TenantPaymentPersistenceAdapter implements PaymentPersistence
         return webhookIngress.receive(payload, signature);
     }
 
-    @Override public void processStripeWebhookInbox() {
-        inboxWorker.processPending();
-    }
-
     private <T> T read(CurrentAccessContext context, Function<TenantPaymentSession, T> operation) {
         try {
             return router.inTenantSession(context, session -> {
@@ -242,7 +240,7 @@ public final class TenantPaymentPersistenceAdapter implements PaymentPersistence
         }
     }
 
-    private static void requireProviderIntent(StripePaymentProvider.PaymentIntent intent) {
+    private static void requireProviderIntent(PaymentProviderOperations.PaymentIntent intent) {
         if (intent == null || intent.providerId() == null || intent.providerId().isBlank()
                 || intent.providerId().length() > 255 || intent.status() == null || intent.status().isBlank()
                 || intent.clientSecret() == null || intent.clientSecret().isBlank()) {

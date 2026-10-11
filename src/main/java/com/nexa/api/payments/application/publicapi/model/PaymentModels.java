@@ -1,4 +1,4 @@
-package com.nexa.api.payments.application.model;
+package com.nexa.api.payments.application.publicapi.model;
 
 import java.math.BigDecimal;
 import java.time.Instant;

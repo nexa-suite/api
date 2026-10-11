@@ -1,6 +1,6 @@
 package com.nexa.api.payments.application.publicapi;
 
-import com.nexa.api.payments.application.model.PaymentModels.WebhookReceipt;
+import com.nexa.api.payments.application.publicapi.model.PaymentModels.WebhookReceipt;
 
 import java.time.Instant;
 import java.util.Objects;

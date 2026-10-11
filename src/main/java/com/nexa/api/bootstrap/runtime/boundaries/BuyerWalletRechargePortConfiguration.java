@@ -15,14 +15,14 @@ public class BuyerWalletRechargePortConfiguration {
     BuyerWalletRechargePort unavailableBuyerWalletRechargePort() {
         return new BuyerWalletRechargePort() {
             @Override
-            public com.nexa.api.payments.application.model.BuyerWalletModels.RechargeIntentView create(
+            public com.nexa.api.payments.application.publicapi.model.BuyerWalletModels.RechargeIntentView create(
                     com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext context,
                     java.math.BigDecimal amountPEN, String idempotencyKey) {
                 throw new BuyerWalletStoreUnavailableException();
             }
 
             @Override
-            public com.nexa.api.payments.application.model.BuyerWalletModels.RechargeView get(
+            public com.nexa.api.payments.application.publicapi.model.BuyerWalletModels.RechargeView get(
                     com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext context,
                     java.util.UUID rechargeId) {
                 throw new BuyerWalletStoreUnavailableException();

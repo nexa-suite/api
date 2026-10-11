@@ -3,9 +3,9 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.Scope;
-import com.nexa.api.payments.application.port.StripePaymentProvider;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentServiceFactory;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentSession;
+import com.nexa.api.payments.application.publicapi.provider.PaymentProviderOperations;
+import com.nexa.api.bootstrap.runtime.boundaries.TenantPaymentServiceBindingsFactory;
+import com.nexa.api.payments.application.publicapi.TenantPaymentSession;
 import com.nexa.api.bootstrap.runtime.events.VerifiedSystemWorkflowAccessContextResolver;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -31,19 +31,19 @@ public final class TenantPaymentReconciliationWorkerScheduler {
 
     private final TenantBusinessDocumentWorkerScopeQuery scopes;
     private final TenantBusinessDatabaseRouter router;
-    private final TenantPaymentServiceFactory paymentServices;
+    private final TenantPaymentServiceBindingsFactory paymentServices;
     private final VerifiedSystemWorkflowAccessContextResolver workflowActors;
-    private final StripePaymentProvider stripe;
+    private final PaymentProviderOperations provider;
     private final AtomicReference<Scope> after = new AtomicReference<>();
 
     public TenantPaymentReconciliationWorkerScheduler(TenantBusinessDocumentWorkerScopeQuery scopes,
-            TenantBusinessDatabaseRouter router, TenantPaymentServiceFactory paymentServices,
-            VerifiedSystemWorkflowAccessContextResolver workflowActors, StripePaymentProvider stripe) {
+            TenantBusinessDatabaseRouter router, TenantPaymentServiceBindingsFactory paymentServices,
+            VerifiedSystemWorkflowAccessContextResolver workflowActors, PaymentProviderOperations provider) {
         this.scopes = Objects.requireNonNull(scopes, "Central READY Tenant scope query is required");
         this.router = Objects.requireNonNull(router, "Tenant database router is required");
         this.paymentServices = Objects.requireNonNull(paymentServices, "Tenant Payment bindings are required");
         this.workflowActors = Objects.requireNonNull(workflowActors, "Persisted SYSTEM_WORKFLOW resolver is required");
-        this.stripe = Objects.requireNonNull(stripe, "Payment provider is required");
+        this.provider = Objects.requireNonNull(provider, "Payment provider is required");
     }
 
     @Scheduled(fixedDelayString = "${nexa.payments.reconciliation-worker-delay-ms:5000}")
@@ -80,13 +80,13 @@ public final class TenantPaymentReconciliationWorkerScheduler {
 
                 if (!scopes.isReadyWorkspace(scope.tenantId(), scope.workspaceId())) return;
                 workflowActors.resolve(scope.tenantId(), scope.workspaceId());
-                StripePaymentProvider.Refund refund = null;
+                PaymentProviderOperations.Refund refund = null;
                 RuntimeException providerFailure = null;
                 try {
                     if (preparation.providerId() == null || preparation.providerId().isBlank()) {
                         throw new IllegalStateException("Captured payment has no provider reference");
                     }
-                    refund = stripe.refundPayment(preparation.providerId(), preparation.amountMinor(),
+                    refund = provider.refundPayment(preparation.providerId(), preparation.amountMinor(),
                             preparation.currency(), preparation.providerIdempotencyKey());
                 } catch (RuntimeException exception) {
                     providerFailure = exception;
@@ -94,7 +94,8 @@ public final class TenantPaymentReconciliationWorkerScheduler {
 
                 if (!scopes.isReadyWorkspace(scope.tenantId(), scope.workspaceId())) return;
                 CurrentAccessContext resultActor = workflowActors.resolve(scope.tenantId(), scope.workspaceId());
-                StripePaymentProvider.Refund finalRefund = refund;
+                TenantPaymentSession.ProviderRefund finalRefund = refund == null ? null
+                        : new TenantPaymentSession.ProviderRefund(refund.providerRefundId(), refund.status());
                 RuntimeException finalProviderFailure = providerFailure;
                 router.inTenantSession(resultActor, session -> paymentServices.bindTo(session.jdbcTemplate(),
                         session.transactionManager()).recordTenantReconciliationRefund(resultActor, preparation,

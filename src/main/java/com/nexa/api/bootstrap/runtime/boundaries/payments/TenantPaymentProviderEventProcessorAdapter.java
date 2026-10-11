@@ -4,8 +4,8 @@ import com.nexa.api.bootstrap.runtime.database.tenant.JdbcPaymentProviderRouteRe
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePaymentCallbackRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.payments.application.publicapi.TenantPaymentProviderEventProcessor;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentServiceFactory;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentSession;
+import com.nexa.api.bootstrap.runtime.boundaries.TenantPaymentServiceBindingsFactory;
+import com.nexa.api.payments.application.publicapi.TenantPaymentSession;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -20,10 +20,10 @@ import java.util.Objects;
 public final class TenantPaymentProviderEventProcessorAdapter implements TenantPaymentProviderEventProcessor {
     private final JdbcPaymentProviderRouteRegistry routes;
     private final TenantBusinessDatabasePaymentCallbackRouter callbackRouter;
-    private final TenantPaymentServiceFactory services;
+    private final TenantPaymentServiceBindingsFactory services;
 
     public TenantPaymentProviderEventProcessorAdapter(JdbcPaymentProviderRouteRegistry routes,
-            TenantBusinessDatabasePaymentCallbackRouter callbackRouter, TenantPaymentServiceFactory services) {
+            TenantBusinessDatabasePaymentCallbackRouter callbackRouter, TenantPaymentServiceBindingsFactory services) {
         this.routes = Objects.requireNonNull(routes);
         this.callbackRouter = Objects.requireNonNull(callbackRouter);
         this.services = Objects.requireNonNull(services);

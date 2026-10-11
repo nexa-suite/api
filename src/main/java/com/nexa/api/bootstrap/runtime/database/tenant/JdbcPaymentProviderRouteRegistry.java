@@ -3,6 +3,7 @@ package com.nexa.api.bootstrap.runtime.database.tenant;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -12,6 +13,7 @@ import java.util.UUID;
 
 /** Central BC-01 opaque index for routing verified card-payment callbacks into one Tenant database. */
 @Component
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public final class JdbcPaymentProviderRouteRegistry {
     private final JdbcTemplate centralJdbc;
 

@@ -9,11 +9,11 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSche
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
-import com.nexa.api.payments.application.model.BuyerWalletModels;
-import com.nexa.api.payments.application.port.StripePaymentProvider;
+import com.nexa.api.payments.application.publicapi.model.BuyerWalletModels;
 import com.nexa.api.payments.application.publicapi.BuyerWalletRechargePort;
 import com.nexa.api.payments.application.publicapi.BuyerWalletRechargeTenantCommands;
 import com.nexa.api.payments.application.publicapi.BuyerWalletStoreUnavailableException;
+import com.nexa.api.payments.application.publicapi.provider.PaymentProviderOperations;
 import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFactory;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -25,7 +25,6 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -39,18 +38,18 @@ public final class TenantBoundBuyerWalletRechargePort implements BuyerWalletRech
     private final TenantCustomerAccountQueryFactory customerAccounts;
     private final BuyerWalletTenantDatabaseAdapterFactory walletAdapters;
     private final JdbcWalletRechargeProviderRouteRegistry providerRoutes;
-    private final StripePaymentProvider stripe;
+    private final PaymentProviderOperations provider;
 
     public TenantBoundBuyerWalletRechargePort(TenantBusinessDatabaseRouter router,
             TenantBusinessDatabaseAuthority authority, TenantCustomerAccountQueryFactory customerAccounts,
             BuyerWalletTenantDatabaseAdapterFactory walletAdapters,
-            JdbcWalletRechargeProviderRouteRegistry providerRoutes, StripePaymentProvider stripe) {
+            JdbcWalletRechargeProviderRouteRegistry providerRoutes, PaymentProviderOperations provider) {
         this.router = Objects.requireNonNull(router);
         this.authority = Objects.requireNonNull(authority);
         this.customerAccounts = Objects.requireNonNull(customerAccounts);
         this.walletAdapters = Objects.requireNonNull(walletAdapters);
         this.providerRoutes = Objects.requireNonNull(providerRoutes);
-        this.stripe = Objects.requireNonNull(stripe);
+        this.provider = Objects.requireNonNull(provider);
     }
 
     @Override
@@ -58,7 +57,7 @@ public final class TenantBoundBuyerWalletRechargePort implements BuyerWalletRech
             String idempotencyKey) {
         requireBuyer(context, PermissionKey.PAYMENT_CREATE);
         requireCentralScope(context);
-        if (!stripe.supportsPaymentIntentCreation()) throw new BuyerWalletStoreUnavailableException();
+        if (!provider.supportsPaymentIntentCreation()) throw new BuyerWalletStoreUnavailableException();
 
         try {
             TenantBusinessDatabaseBinding binding = authority.requireReadyBinding(context);
@@ -79,12 +78,10 @@ public final class TenantBoundBuyerWalletRechargePort implements BuyerWalletRech
 
             JdbcWalletRechargeProviderRouteRegistry.Route route = providerRoutes.registerPreparing(
                     binding, context.workspaceId(), claim.rechargeId(), claim.amountMinor(), claim.currency());
-            StripePaymentProvider.PaymentIntent intent = stripe.createPaymentIntent(
-                    new StripePaymentProvider.PaymentIntentRequest(claim.amountMinor(), claim.currency(),
-                            providerIdempotencyKey(claim.rechargeId()), Map.of(
-                                    "nexa_tenant_id", context.tenantId().value().toString(),
-                                    "nexa_workspace_id", context.workspaceId().value().toString(),
-                                    "nexa_wallet_recharge_id", claim.rechargeId().toString())));
+            PaymentProviderOperations.PaymentIntent intent = provider.createPaymentIntent(
+                    new PaymentProviderOperations.PaymentIntentRequest(claim.amountMinor(), claim.currency(),
+                            providerIdempotencyKey(claim.rechargeId()), null, claim.rechargeId(),
+                            context.tenantId().value(), context.workspaceId().value()));
             requireProviderIntent(intent);
 
             BuyerWalletRechargeTenantCommands.Claim bound = router.inTransaction(context, tenantJdbc ->
@@ -125,7 +122,7 @@ public final class TenantBoundBuyerWalletRechargePort implements BuyerWalletRech
                 || status == BuyerWalletModels.RechargeStatus.REJECTED;
     }
 
-    private static void requireProviderIntent(StripePaymentProvider.PaymentIntent intent) {
+    private static void requireProviderIntent(PaymentProviderOperations.PaymentIntent intent) {
         if (intent == null || intent.providerId() == null || intent.providerId().isBlank()
                 || intent.providerId().length() > 255 || intent.status() == null || intent.status().isBlank()
                 || intent.clientSecret() == null || intent.clientSecret().isBlank()) {

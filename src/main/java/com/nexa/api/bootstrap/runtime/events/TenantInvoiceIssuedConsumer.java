@@ -1,7 +1,7 @@
 package com.nexa.api.bootstrap.runtime.events;
 
-import com.nexa.api.payments.application.port.PaymentPersistencePort;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentServiceFactory;
+import com.nexa.api.payments.application.publicapi.PaymentUseCases;
+import com.nexa.api.bootstrap.runtime.boundaries.TenantPaymentServiceBindingsFactory;
 import com.nexa.api.shared.events.TenantOutboxEvent;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -25,11 +25,11 @@ public final class TenantInvoiceIssuedConsumer implements TenantOutboxEventConsu
     private static final String EVENT_TYPE = "INVOICE_ISSUED";
     private static final String CONSUMER = "payments-invoice-issued-receivable-v1";
 
-    private final TenantPaymentServiceFactory payments;
+    private final TenantPaymentServiceBindingsFactory payments;
     private final VerifiedSystemWorkflowAccessContextResolver workflowActors;
     private final ObjectMapper mapper;
 
-    public TenantInvoiceIssuedConsumer(TenantPaymentServiceFactory payments,
+    public TenantInvoiceIssuedConsumer(TenantPaymentServiceBindingsFactory payments,
             VerifiedSystemWorkflowAccessContextResolver workflowActors, ObjectMapper mapper) {
         this.payments = Objects.requireNonNull(payments, "Tenant Payment service factory is required");
         this.workflowActors = Objects.requireNonNull(workflowActors, "Verified workflow actor resolver is required");
@@ -62,7 +62,7 @@ public final class TenantInvoiceIssuedConsumer implements TenantOutboxEventConsu
                     throw new IllegalStateException("Tenant invoice consumer requires the router-owned Tenant transaction");
                 }
                 payments.bindTo(jdbc, transactionManager).createReceivable(actor,
-                        new PaymentPersistencePort.ReceivableCommand("SALES_ORDER", salesOrderId, null,
+                        new PaymentUseCases.CreateReceivableCommand("SALES_ORDER", salesOrderId, null,
                                 "outbox-receivable-" + current.eventId()));
             };
         };

@@ -63,6 +63,7 @@ public final class DeterministicLocalStripePaymentProvider implements StripePaym
         putIfPresent(metadata, "nexa_tenant_id", first(payload, "nexa_tenant_id", null));
         putIfPresent(metadata, "nexa_workspace_id", first(payload, "nexa_workspace_id", null));
         putIfPresent(metadata, "nexa_wallet_recharge_id", first(payload, "nexa_wallet_recharge_id", null));
+        putIfPresent(metadata, "nexa_payment_route_id", first(payload, "nexa_payment_route_id", null));
         return new StripeWebhookEvent(first(payload, "id", null), first(payload, "type", null), first(payload, "payment_intent_id", first(payload, "object_id", null)), first(payload, "status", null), number(payload, "amount"), optionalUpper(first(payload, "currency", null)), metadata);
     }
 

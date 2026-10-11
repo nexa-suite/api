@@ -1,6 +1,4 @@
-package com.nexa.api.payments.application.model;
-
-import org.springframework.modulith.NamedInterface;
+package com.nexa.api.payments.application.publicapi.model;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -45,7 +43,6 @@ public final class BuyerWalletModels {
         public Page { items = List.copyOf(items); }
     }
 
-    @NamedInterface("payments-public")
     public record Snapshot(WalletStatus status, BigDecimal postedBalance, BigDecimal reservedBalance,
                            List<MovementView> movements, long totalMovements) {
         public Snapshot { movements = List.copyOf(movements); }

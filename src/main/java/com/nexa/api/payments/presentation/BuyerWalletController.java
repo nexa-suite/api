@@ -1,6 +1,6 @@
 package com.nexa.api.payments.presentation;
 
-import com.nexa.api.payments.application.model.BuyerWalletModels;
+import com.nexa.api.payments.application.publicapi.model.BuyerWalletModels;
 import com.nexa.api.payments.application.service.BuyerWalletReadService;
 import com.nexa.api.payments.application.service.BuyerWalletRechargeService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;

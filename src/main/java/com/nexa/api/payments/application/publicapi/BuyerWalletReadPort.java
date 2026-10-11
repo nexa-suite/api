@@ -1,6 +1,6 @@
 package com.nexa.api.payments.application.publicapi;
 
-import com.nexa.api.payments.application.model.BuyerWalletModels;
+import com.nexa.api.payments.application.publicapi.model.BuyerWalletModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.util.UUID;

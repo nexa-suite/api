@@ -10,18 +10,15 @@ import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAcc
 import com.nexa.api.creditreceivables.tenantdatabase.TenantCreditAccountAdapterFactory;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
-import com.nexa.api.payments.application.port.StripePaymentProvider;
 import com.nexa.api.payments.application.publicapi.PaymentConfirmationQuery;
 import com.nexa.api.payments.application.publicapi.PaymentSalesSource;
-import com.nexa.api.payments.infrastructure.persistence.PaymentService;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentServiceFactory;
-import com.nexa.api.payments.infrastructure.persistence.TenantPaymentSession;
+import com.nexa.api.payments.application.publicapi.TenantPaymentSession;
+import com.nexa.api.payments.tenantdatabase.TenantPaymentSessionFactory;
 import com.nexa.api.payments.tenantdatabase.TenantPaymentConfirmationQueryFactory;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -33,10 +30,8 @@ import java.util.UUID;
 /** Binds Payments plus BC-02/04/07/09 collaborators to one router-owned Tenant JDBC session. */
 @Component
 @Profile("local")
-public final class TenantPaymentServiceBindingsFactory implements TenantPaymentServiceFactory {
-    private final StripePaymentProvider stripe;
-    private final String publishableKey;
-    private final String webhookSecret;
+public final class TenantPaymentServiceBindingsFactory {
+    private final TenantPaymentSessionFactory paymentSessions;
     private final TenantCustomerAccountQueryFactory customerAccounts;
     private final TenantCreditAccountAdapterFactory creditAdapters;
     private final TenantSalesOrderFulfillmentQueryFactory salesOrders;
@@ -45,9 +40,7 @@ public final class TenantPaymentServiceBindingsFactory implements TenantPaymentS
     private final TenantBusinessDocumentServiceFactory documents;
     private final TenantBusinessEvidenceQueryFactory evidence;
 
-    public TenantPaymentServiceBindingsFactory(StripePaymentProvider stripe,
-            @Value("${nexa.payments.publishable-key:}") String publishableKey,
-            @Value("${nexa.payments.webhook-secret:}") String webhookSecret,
+    public TenantPaymentServiceBindingsFactory(TenantPaymentSessionFactory paymentSessions,
             TenantCustomerAccountQueryFactory customerAccounts,
             TenantCreditAccountAdapterFactory creditAdapters,
             TenantSalesOrderFulfillmentQueryFactory salesOrders,
@@ -55,9 +48,7 @@ public final class TenantPaymentServiceBindingsFactory implements TenantPaymentS
             TenantBusinessTraceabilityBindingsFactory traceability,
             TenantBusinessDocumentServiceFactory documents,
             TenantBusinessEvidenceQueryFactory evidence) {
-        this.stripe = Objects.requireNonNull(stripe);
-        this.publishableKey = publishableKey == null ? "" : publishableKey;
-        this.webhookSecret = webhookSecret == null ? "" : webhookSecret;
+        this.paymentSessions = Objects.requireNonNull(paymentSessions);
         this.customerAccounts = Objects.requireNonNull(customerAccounts);
         this.creditAdapters = Objects.requireNonNull(creditAdapters);
         this.salesOrders = Objects.requireNonNull(salesOrders);
@@ -67,7 +58,6 @@ public final class TenantPaymentServiceBindingsFactory implements TenantPaymentS
         this.evidence = Objects.requireNonNull(evidence);
     }
 
-    @Override
     public TenantPaymentSession bindTo(JdbcTemplate tenantJdbc, PlatformTransactionManager tenantTransactionManager) {
         JdbcTemplate jdbc = Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required");
         PlatformTransactionManager transactionManager = Objects.requireNonNull(tenantTransactionManager,
@@ -87,11 +77,9 @@ public final class TenantPaymentServiceBindingsFactory implements TenantPaymentS
         BusinessDocumentCommands tenantDocuments = Objects.requireNonNull(
                 documents.bindCommandsTo(jdbc, tenantOutbox));
         BusinessEvidenceQuery tenantEvidence = Objects.requireNonNull(evidence.bindTo(jdbc));
-        return new PaymentService(jdbc, stripe, publishableKey, webhookSecret,
-                transactionManager, null,
+        return paymentSessions.bindTo(jdbc, transactionManager, new TenantPaymentSessionFactory.Dependencies(
                 credit.receivableApplications(), credit.creditPayments(), credit.receivables(), tenantDocuments,
-                tenantEvidence, tenantAccounts, paymentSalesSource(tenantSales), tenantOutbox,
-                tenantReceivables);
+                tenantEvidence, tenantAccounts, paymentSalesSource(tenantSales), tenantOutbox, tenantReceivables));
     }
 
     private static FinancialAdjustmentSource adjustmentSource(SalesOrderFulfillmentQuery sales,

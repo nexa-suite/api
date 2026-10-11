@@ -2,7 +2,7 @@ package com.nexa.api.payments.infrastructure.persistence;
 
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
-import com.nexa.api.payments.application.model.BuyerWalletModels;
+import com.nexa.api.payments.application.publicapi.model.BuyerWalletModels;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import com.nexa.api.payments.application.publicapi.BuyerWalletRechargeProviderEventProcessor;
 import com.nexa.api.payments.application.publicapi.BuyerWalletRechargeTenantCommands;

@@ -1,6 +1,6 @@
 package com.nexa.api.payments.application.port;
 
-import com.nexa.api.payments.application.model.BuyerWalletModels;
+import com.nexa.api.payments.application.publicapi.model.BuyerWalletModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 /** Current-Buyer-only wallet query. No Buyer or Tenant selector is accepted. */

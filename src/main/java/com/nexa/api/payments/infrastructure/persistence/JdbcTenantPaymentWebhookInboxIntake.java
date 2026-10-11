@@ -1,6 +1,6 @@
 package com.nexa.api.payments.infrastructure.persistence;
 
-import com.nexa.api.payments.application.model.PaymentModels.WebhookReceipt;
+import com.nexa.api.payments.application.publicapi.model.PaymentModels.WebhookReceipt;
 import com.nexa.api.payments.application.publicapi.TenantPaymentWebhookInboxIntake;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;

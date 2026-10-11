@@ -10,7 +10,7 @@ import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAcc
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.payments.application.publicapi.BuyerWalletStoreUnavailableException;
-import com.nexa.api.payments.application.model.BuyerWalletModels;
+import com.nexa.api.payments.application.publicapi.model.BuyerWalletModels;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReadPort;
 import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFactory;
 import com.nexa.api.shared.context.RlsRequestScope;

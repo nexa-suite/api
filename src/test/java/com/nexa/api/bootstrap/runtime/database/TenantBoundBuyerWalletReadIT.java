@@ -8,7 +8,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseData
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.customerbuyerrelationships.infrastructure.persistence.ClientAccountPersistenceAdapter;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
-import com.nexa.api.payments.application.model.BuyerWalletModels;
+import com.nexa.api.payments.application.publicapi.model.BuyerWalletModels;
 import com.nexa.api.payments.application.service.BuyerWalletReadService;
 import com.nexa.api.payments.infrastructure.persistence.JdbcBuyerWalletTenantDatabaseAdapterFactory;
 import com.nexa.api.shared.context.RlsRequestScope;

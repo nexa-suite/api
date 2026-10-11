@@ -3,6 +3,7 @@ package com.nexa.api.bootstrap.runtime.database.tenant;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +12,7 @@ import java.util.UUID;
 
 /** Minimal central BC-01 routing metadata for Stripe wallet callbacks; no balance or ledger facts. */
 @Component
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public final class JdbcWalletRechargeProviderRouteRegistry {
     private final JdbcTemplate centralJdbc;
 
