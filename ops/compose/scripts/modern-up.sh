@@ -37,7 +37,7 @@ if [ ! -d "$tenant_database_root" ]; then
 fi
 private_mode() {
 	local actual
-	actual="$(stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null)" || return 1
+	actual="$(stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null)" || return 1
 	[ "$actual" = 700 ]
 }
 private_mode "$tenant_state_root" && private_mode "$tenant_database_root" || {
