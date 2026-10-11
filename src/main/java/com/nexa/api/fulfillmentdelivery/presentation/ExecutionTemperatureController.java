@@ -1,7 +1,8 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels.*;
-import com.nexa.api.fulfillmentdelivery.application.service.ExecutionTemperatureService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import org.springframework.web.bind.annotation.*;
@@ -14,20 +15,22 @@ import java.util.UUID;
 @RequestMapping("/api/v1")
 public class ExecutionTemperatureController {
     private static final String ACCESS="com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final ExecutionTemperatureService service;
-    public ExecutionTemperatureController(ExecutionTemperatureService service) { this.service=service; }
+    private final FulfillmentDeliveryRequestRunner runner;
+    public ExecutionTemperatureController(FulfillmentDeliveryRequestRunner runner) { this.runner=runner; }
     @GetMapping("/driver/deliveries/{deliveryId}/execution-temperature-readings")
     public ResponseEntity<Snapshot> driverRead(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID deliveryId) {
-        Snapshot result=service.read(c,deliveryId,true); return ResponseEntity.ok().eTag(tag(result.deliveryVersion())).body(result);
+        Snapshot result=runner.execute(c,Requirements.none(),x->x.executionTemperatures().read(c,deliveryId,true));
+        return ResponseEntity.ok().eTag(tag(result.deliveryVersion())).body(result);
     }
     @GetMapping("/deliveries/{deliveryId}/execution-temperature-readings")
     public ResponseEntity<Snapshot> dispositionRead(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID deliveryId) {
-        Snapshot result=service.read(c,deliveryId,false); return ResponseEntity.ok().eTag(tag(result.deliveryVersion())).body(result);
+        Snapshot result=runner.execute(c,Requirements.warehouse(),x->x.executionTemperatures().read(c,deliveryId,false));
+        return ResponseEntity.ok().eTag(tag(result.deliveryVersion())).body(result);
     }
     @PostMapping("/driver/deliveries/{deliveryId}/execution-temperature-readings")
     public ResponseEntity<Reading> record(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID deliveryId,
             @RequestHeader(value="If-Match",required=false)String version,@RequestHeader("Idempotency-Key")String key,@RequestBody ReadingCommand command) {
-        Reading result=service.record(c,deliveryId,version(version),key,command);
+        Reading result=runner.execute(c,Requirements.none(),x->x.executionTemperatures().record(c,deliveryId,version(version),key,command));
         return ResponseEntity.status(result.replayed()?200:201).eTag(tag(result.deliveryVersion())).body(result);
     }
     @PostMapping("/deliveries/{deliveryId}/execution-holds/{holdId}/dispositions")
@@ -35,7 +38,7 @@ public class ExecutionTemperatureController {
             @PathVariable UUID holdId,@RequestHeader(value="If-Match",required=false)String version,@RequestHeader("Idempotency-Key")String key,
             @RequestBody DispositionCommand command) {
         if(command==null) throw new FulfillmentOperationException("INVALID_REQUEST",false);
-        DispositionResult result=service.dispose(c,deliveryId,holdId,version(version),key,command.disposition(),command.reason());
+        DispositionResult result=runner.execute(c,Requirements.warehouse(),x->x.executionTemperatures().dispose(c,deliveryId,holdId,version(version),key,command.disposition(),command.reason()));
         return ResponseEntity.status(result.replayed()?200:201).eTag(tag(result.deliveryVersion())).body(result);
     }
     public record DispositionCommand(Disposition disposition,String reason) { }

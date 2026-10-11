@@ -1,7 +1,7 @@
 package com.nexa.api.businessdocuments.tenantdatabase;
 
-import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentCommands;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.businessdocuments.application.publicapi.DocumentProjectionLookupPort;
 import com.nexa.api.businessdocuments.application.publicapi.DocumentSubjectLookupPort;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
@@ -10,7 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Creates request-local BC-09 adapters over exactly one router-owned Tenant session. */
 public interface TenantBusinessDocumentServiceFactory {
-    Bindings bindTo(JdbcTemplate tenantJdbc, DocumentSubjectLookupPort tenantSubjects,
+    BusinessDocumentUseCase bindTo(JdbcTemplate tenantJdbc, DocumentSubjectLookupPort tenantSubjects,
                     DocumentProjectionLookupPort tenantProjections, CustomerAccountQuery tenantCustomerAccounts,
                     CanonicalOutboxPort tenantCanonicalOutbox);
 
@@ -20,13 +20,4 @@ public interface TenantBusinessDocumentServiceFactory {
     TenantBusinessDocumentWorkerPort bindWorkerTo(JdbcTemplate tenantJdbc,
                     DocumentProjectionLookupPort tenantProjections, CustomerAccountQuery tenantCustomerAccounts,
                     CanonicalOutboxPort tenantCanonicalOutbox);
-
-    record Bindings(BusinessDocumentPort documents, BusinessDocumentCommands commands,
-                    TenantBusinessDocumentWorkerPort worker) {
-        public Bindings {
-            if (documents == null || commands == null || worker == null) {
-                throw new IllegalArgumentException("Tenant Business Document bindings are required");
-            }
-        }
-    }
 }

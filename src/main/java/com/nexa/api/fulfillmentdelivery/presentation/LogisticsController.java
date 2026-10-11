@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
+import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
+
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService.LogisticsException;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels;
@@ -33,8 +35,8 @@ public final class LogisticsController {
     }
 
     @GetMapping("/dispatch-orders") public PageResponse<DispatchResponse> dispatches(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required=false) String status, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="25") int size, @RequestParam(defaultValue="updatedAt,desc") String sort) { return page(runLogistics(c, service -> service.list(c,status,page,size,sort))); }
-    @GetMapping("/dispatch-assignees") @Operation(operationId = "listDispatchAssignees") public List<LogisticsOperationsService.AssigneeView> assignees(@RequestAttribute(ACCESS) CurrentAccessContext c) { return runLogistics(c, FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(), service -> service.assignees(c)); }
-    @GetMapping("/dispatch-orders/{id}") public ResponseEntity<DispatchResponse> dispatch(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){LogisticsOperationsService.DispatchView value=runLogistics(c, service -> service.detail(c,id));return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));}
+    @GetMapping("/dispatch-assignees") @Operation(operationId = "listDispatchAssignees") public List<LogisticsOperationsModels.AssigneeView> assignees(@RequestAttribute(ACCESS) CurrentAccessContext c) { return runLogistics(c, FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(), service -> service.assignees(c)); }
+    @GetMapping("/dispatch-orders/{id}") public ResponseEntity<DispatchResponse> dispatch(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){LogisticsOperationsModels.DispatchView value=runLogistics(c, service -> service.detail(c,id));return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));}
     @GetMapping("/dispatch-orders/{id}/events") public List<DispatchEventResponse> events(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return runLogistics(c, service -> service.events(c,id)).stream().map(this::event).toList();}
     @GetMapping("/dispatch-orders/{id}/handoff-notes") public List<HandoffNoteResponse> handoffNotes(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return runLogistics(c, service -> service.handoffNotes(c,id)).stream().map(this::handoffNote).toList();}
     @PostMapping("/inventory-reservations/{reservationId}/dispatch-orders") @Operation(operationId = "createDispatchOrder") public ResponseEntity<DispatchResponse> create(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String reservationId,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key){return created(response(runLogistics(c, service -> service.create(c,reservationId,version(ifMatch),key))));}
@@ -54,8 +56,8 @@ public final class LogisticsController {
     @PostMapping("/dispatch-orders/{id}/delivery-completions") public ResponseEntity<DispatchResponse> complete(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody PodRequest r){return mutation(runLogistics(c, service -> service.complete(c,id,version(ifMatch),key,r.receiverName(),r.completedAt(),r.notes(),r.photoEvidenceDeclared(),r.signatureEvidenceDeclared())));}
     @PostMapping("/dispatch-orders/{id}/handoff-notes") public ResponseEntity<HandoffNoteResponse> appendHandoffNote(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody HandoffNoteRequest r){HandoffNoteResponse value=handoffNote(runLogistics(c, service -> service.appendHandoffNote(c,id,version(ifMatch),key,r.note())));return ResponseEntity.status(201).eTag(etag(value.dispatchVersion())).body(value);}
     @GetMapping("/proof-of-delivery") public PageResponse<PodResponse> proof(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) String status,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="25") int size){return podPage(runLogistics(c, service -> service.proofOfDelivery(c,status,page,size)));}
-    @GetMapping("/logistics/operations-dashboard") public LogisticsOperationsService.DashboardView dashboard(@RequestAttribute(ACCESS) CurrentAccessContext c){return runLogistics(c, service -> service.dashboard(c));}
-    @GetMapping("/logistics/operational-analytics") public LogisticsOperationsService.AnalyticsView analytics(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) Instant from,@RequestParam(required=false) Instant to){return runLogistics(c, service -> service.analytics(c,from,to));}
+    @GetMapping("/logistics/operations-dashboard") public LogisticsOperationsModels.DashboardView dashboard(@RequestAttribute(ACCESS) CurrentAccessContext c){return runLogistics(c, service -> service.dashboard(c));}
+    @GetMapping("/logistics/operational-analytics") public LogisticsOperationsModels.AnalyticsView analytics(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) Instant from,@RequestParam(required=false) Instant to){return runLogistics(c, service -> service.analytics(c,from,to));}
     @GetMapping("/my-deliveries")
     public PageResponse<DispatchResponse> myDeliveries(@RequestAttribute(ACCESS) CurrentAccessContext c,
             @RequestParam(required=false) String status,@RequestParam(defaultValue="0") int page,
@@ -93,7 +95,7 @@ public final class LogisticsController {
     @GetMapping("/my-deliveries/{id}/events")
     public List<DispatchEventResponse> myDeliveryEvents(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                        @PathVariable String id) {
-        List<LogisticsOperationsService.DispatchEventView> values = requests.execute(c,
+        List<LogisticsOperationsModels.DispatchEventView> values = requests.execute(c,
                 new FulfillmentDeliveryRequestRunner.Requirements(true, true, false, Set.of()), composition -> {
                     composition.driverDeliveries().getAssigned(c, deliveryId(id));
                     return composition.logistics().events(c, id);
@@ -115,26 +117,26 @@ public final class LogisticsController {
         catch (IllegalArgumentException exception) { throw new LogisticsException("RESOURCE_NOT_FOUND", true); }
     }
 
-    private PageResponse<DispatchResponse> page(LogisticsOperationsService.Page<LogisticsOperationsService.DispatchView> p){return new PageResponse<>(p.items().stream().map(this::response).toList(),p.page(),p.size(),p.total());}
-    private PageResponse<PodResponse> podPage(LogisticsOperationsService.Page<LogisticsOperationsService.ProofOfDeliveryView> p){return new PageResponse<>(p.items().stream().map(x->new PodResponse(x.podId(),x.dispatchOrderId(),x.dispatchNumber(),x.status(),x.receiverName(),x.completedAt(),x.notes(),x.photoEvidenceDeclared(),x.signatureEvidenceDeclared(),x.updatedAt())).toList(),p.page(),p.size(),p.total());}
-    private DispatchResponse response(LogisticsOperationsService.DispatchView x){LogisticsOperationsService.AssignmentView a=x.assignment();LogisticsOperationsService.DeliveryAttemptView attempt=x.lastAttempt();return new DispatchResponse(x.id(),x.dispatchNumber(),x.reservationId(),x.salesOrderId(),x.salesOrderNumber(),x.clientAccountId(),x.clientCode(),x.clientName(),x.status(),x.destination(),x.deliveryArea(),x.priority(),x.deliveryWindowStart(),x.deliveryWindowEnd(),x.eta(),a==null?null:new AssignmentResponse(a.responsibleMembershipId(),a.responsibleDisplayName(),a.vehicleReference(),a.routeName()),x.temperatureMin(),x.temperatureMax(),x.temperatureUnit(),x.temperatureStatus(),x.podId(),x.podStatus(),x.version(),x.updatedAt(),x.alerts(),attempt==null?null:new DeliveryAttemptResponse(attempt.id(),attempt.attemptNumber(),attempt.status(),attempt.failureReason(),attempt.occurredAt(),attempt.deliveredLines().stream().map(line->new ObligationLineResponse(line.catalogItemId(),line.quantity(),line.unit())).toList()),x.continuationDeliveryId(),x.continuationDeliveryStatus(),x.remainingObligation().stream().map(line->new ObligationLineResponse(line.catalogItemId(),line.quantity(),line.unit())).toList());}
-    private ResponseEntity<DispatchResponse> mutation(LogisticsOperationsService.DispatchView x){return ResponseEntity.ok().eTag(etag(x.version())).body(response(x));}
+    private PageResponse<DispatchResponse> page(LogisticsOperationsModels.Page<LogisticsOperationsModels.DispatchView> p){return new PageResponse<>(p.items().stream().map(this::response).toList(),p.page(),p.size(),p.total());}
+    private PageResponse<PodResponse> podPage(LogisticsOperationsModels.Page<LogisticsOperationsModels.ProofOfDeliveryView> p){return new PageResponse<>(p.items().stream().map(x->new PodResponse(x.podId(),x.dispatchOrderId(),x.dispatchNumber(),x.status(),x.receiverName(),x.completedAt(),x.notes(),x.photoEvidenceDeclared(),x.signatureEvidenceDeclared(),x.updatedAt())).toList(),p.page(),p.size(),p.total());}
+    private DispatchResponse response(LogisticsOperationsModels.DispatchView x){LogisticsOperationsModels.AssignmentView a=x.assignment();LogisticsOperationsModels.DeliveryAttemptView attempt=x.lastAttempt();return new DispatchResponse(x.id(),x.dispatchNumber(),x.reservationId(),x.salesOrderId(),x.salesOrderNumber(),x.clientAccountId(),x.clientCode(),x.clientName(),x.status(),x.destination(),x.deliveryArea(),x.priority(),x.deliveryWindowStart(),x.deliveryWindowEnd(),x.eta(),a==null?null:new AssignmentResponse(a.responsibleMembershipId(),a.responsibleDisplayName(),a.vehicleReference(),a.routeName()),x.temperatureMin(),x.temperatureMax(),x.temperatureUnit(),x.temperatureStatus(),x.podId(),x.podStatus(),x.version(),x.updatedAt(),x.alerts(),attempt==null?null:new DeliveryAttemptResponse(attempt.id(),attempt.attemptNumber(),attempt.status(),attempt.failureReason(),attempt.occurredAt(),attempt.deliveredLines().stream().map(line->new ObligationLineResponse(line.catalogItemId(),line.quantity(),line.unit())).toList()),x.continuationDeliveryId(),x.continuationDeliveryStatus(),x.remainingObligation().stream().map(line->new ObligationLineResponse(line.catalogItemId(),line.quantity(),line.unit())).toList());}
+    private ResponseEntity<DispatchResponse> mutation(LogisticsOperationsModels.DispatchView x){return ResponseEntity.ok().eTag(etag(x.version())).body(response(x));}
     private ResponseEntity<DispatchResponse> failedAttemptMutation(CurrentAccessContext c,String id,String ifMatch,String key,FailedAttemptRequest r){String reason=r==null?null:(r.failureReason()==null?r.reason():r.failureReason());return mutation(runLogistics(c, service -> service.failedAttempt(c,id,version(ifMatch),key,reason,r==null?null:r.occurredAt())));}
     private ResponseEntity<DispatchResponse> partialMutation(CurrentAccessContext c,String id,String ifMatch,String key,PartialDeliveryRequest r){return mutation(runLogistics(c, service -> service.partial(c,id,version(ifMatch),key,r==null?List.of():r.commands(),r==null?null:r.completedAt(),r==null?null:r.notes())));}
     private ResponseEntity<DispatchResponse> created(DispatchResponse x){return ResponseEntity.status(201).eTag(etag(x.version())).body(x);}
     private static String etag(long version){return "\""+version+"\"";}
-    private DispatchEventResponse event(LogisticsOperationsService.DispatchEventView x){return new DispatchEventResponse(x.id(),x.type(),x.fromStatus(),x.toStatus(),x.occurredAt(),x.buyerVisible(),x.summary());}
-    private HandoffNoteResponse handoffNote(LogisticsOperationsService.HandoffNoteView x){return new HandoffNoteResponse(x.id(),x.dispatchOrderId(),x.note(),x.authorMembershipId(),x.occurredAt(),x.dispatchVersion());}
+    private DispatchEventResponse event(LogisticsOperationsModels.DispatchEventView x){return new DispatchEventResponse(x.id(),x.type(),x.fromStatus(),x.toStatus(),x.occurredAt(),x.buyerVisible(),x.summary());}
+    private HandoffNoteResponse handoffNote(LogisticsOperationsModels.HandoffNoteView x){return new HandoffNoteResponse(x.id(),x.dispatchOrderId(),x.note(),x.authorMembershipId(),x.occurredAt(),x.dispatchVersion());}
     private static long version(String value){if(value==null||value.isBlank())throw new LogisticsException("PRECONDITION_REQUIRED",false);try{long parsed=Long.parseLong(value.replace("\"",""));if(parsed<0)throw new NumberFormatException();return parsed;}catch(NumberFormatException e){throw new LogisticsException("PRECONDITION_REQUIRED",false);}}
 
     private <T> T runLogistics(CurrentAccessContext context,
-                               Function<LogisticsOperationsService, T> work) {
+                               Function<com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperations, T> work) {
         return runLogistics(context, FulfillmentDeliveryRequestRunner.Requirements.warehouse(), work);
     }
 
     private <T> T runLogistics(CurrentAccessContext context,
                                FulfillmentDeliveryRequestRunner.Requirements requirements,
-                               Function<LogisticsOperationsService, T> work) {
+                               Function<com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperations, T> work) {
         return requests.execute(context, requirements, composition -> work.apply(composition.logistics()));
     }
 
@@ -159,10 +161,10 @@ public final class LogisticsController {
     public record IncidentRequest(String type,String severity,boolean buyerVisible,String description,Instant occurredAt,String resolution){}
     public record FailedAttemptRequest(String failureReason,String reason,Instant occurredAt){}
     public record PartialDeliveryRequest(List<DeliveryLineRequest> lines,String catalogItemId,BigDecimal deliveredQuantity,String unit,Instant completedAt,String notes){
-        List<LogisticsOperationsService.DeliveryLineCommand> commands(){
-            if (lines != null && !lines.isEmpty()) return lines.stream().map(line -> new LogisticsOperationsService.DeliveryLineCommand(line.catalogItemId(),line.quantity(),line.unit())).toList();
+        List<LogisticsOperationsModels.DeliveryLineCommand> commands(){
+            if (lines != null && !lines.isEmpty()) return lines.stream().map(line -> new LogisticsOperationsModels.DeliveryLineCommand(line.catalogItemId(),line.quantity(),line.unit())).toList();
             if (catalogItemId == null && deliveredQuantity == null && unit == null) return List.of();
-            return List.of(new LogisticsOperationsService.DeliveryLineCommand(catalogItemId,deliveredQuantity,unit));
+            return List.of(new LogisticsOperationsModels.DeliveryLineCommand(catalogItemId,deliveredQuantity,unit));
         }
     }
     public record DeliveryLineRequest(String catalogItemId,BigDecimal quantity,String unit){}

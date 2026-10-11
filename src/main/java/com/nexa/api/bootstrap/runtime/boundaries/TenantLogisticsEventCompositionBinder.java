@@ -1,10 +1,11 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
-import com.nexa.api.fulfillmentdelivery.application.FulfillmentDeliveryComposition;
-import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentDeliveryCompositionFactory;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.DispatchWorkflowCommands;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -16,11 +17,15 @@ import java.util.UUID;
 
 /** Captures central BC-01 logistics authority before a Tenant event is applied. */
 @Component
+@Profile("local")
+@ConditionalOnProperty(name = "nexa.tenant-business.business-traceability.enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "nexa.tenant-business.fulfillment-delivery", name = "enabled",
+        havingValue = "true")
 public final class TenantLogisticsEventCompositionBinder {
-    private final TenantFulfillmentDeliveryCompositionFactory compositions;
+    private final TenantFulfillmentDeliveryCompositionProviderAdapter compositions;
     private final WarehouseObjectAccess warehouseAccess;
 
-    public TenantLogisticsEventCompositionBinder(TenantFulfillmentDeliveryCompositionFactory compositions,
+    public TenantLogisticsEventCompositionBinder(TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
             WarehouseObjectAccess warehouseAccess) {
         this.compositions = Objects.requireNonNull(compositions, "Tenant BC-06 composition factory is required");
         this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Central Warehouse access is required");
@@ -33,11 +38,12 @@ public final class TenantLogisticsEventCompositionBinder {
     }
 
     /** Call inside the event's fresh Tenant router callback. */
-    public FulfillmentDeliveryComposition bindTo(JdbcTemplate tenantJdbc, Preflight preflight) {
+    public DispatchWorkflowCommands bindTo(JdbcTemplate tenantJdbc, Preflight preflight) {
         Objects.requireNonNull(preflight, "Central logistics preflight is required");
         return Objects.requireNonNull(compositions.bindTo(Objects.requireNonNull(tenantJdbc),
                 TenantWarehouseRequestBindings.warehouseAccessSnapshot(preflight.actor(), preflight.warehouseIds()),
-                WORKFORCE_SNAPSHOT), "Tenant BC-06 composition factory returned no composition");
+                WORKFORCE_SNAPSHOT), "Tenant BC-06 composition factory returned no composition")
+                .dispatchWorkflowCommands();
     }
 
     public record Preflight(CurrentAccessContext actor, Set<UUID> warehouseIds) {

@@ -2,7 +2,8 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.ExceptionSetView;
 import com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.MutationResult;
-import com.nexa.api.fulfillmentdelivery.application.service.OperationalExceptionService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -28,10 +29,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class OperationalExceptionController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final OperationalExceptionService service;
+    private final FulfillmentDeliveryRequestRunner runner;
 
-    public OperationalExceptionController(OperationalExceptionService service) {
-        this.service = service;
+    public OperationalExceptionController(FulfillmentDeliveryRequestRunner runner) {
+        this.runner = runner;
     }
 
     @GetMapping("/driver/deliveries/{deliveryId}/operational-exceptions")
@@ -39,7 +40,8 @@ public final class OperationalExceptionController {
     public ResponseEntity<ExceptionSetView> getForDriver(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID deliveryId) {
-        ExceptionSetView value = service.getForDriver(context, deliveryId);
+        ExceptionSetView value = runner.execute(context, Requirements.none(),
+                composition -> composition.operationalExceptions().getForDriver(context, deliveryId));
         return ResponseEntity.ok().eTag(etag(value.deliveryVersion())).body(value);
     }
 
@@ -51,7 +53,8 @@ public final class OperationalExceptionController {
             @PathVariable UUID exceptionId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
-        MutationResult value = service.claim(context, deliveryId, exceptionId, version(ifMatch), idempotencyKey);
+        MutationResult value = runner.execute(context, Requirements.none(), composition ->
+                composition.operationalExceptions().claim(context, deliveryId, exceptionId, version(ifMatch), idempotencyKey));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
@@ -64,7 +67,8 @@ public final class OperationalExceptionController {
             @PathVariable UUID exceptionId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
-        MutationResult value = service.review(context, deliveryId, exceptionId, version(ifMatch), idempotencyKey);
+        MutationResult value = runner.execute(context, Requirements.none(), composition ->
+                composition.operationalExceptions().review(context, deliveryId, exceptionId, version(ifMatch), idempotencyKey));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
@@ -78,8 +82,9 @@ public final class OperationalExceptionController {
             @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @RequestBody WarningResolutionBody request) {
-        MutationResult value = service.completeWarning(context, deliveryId, exceptionId, version(ifMatch), key,
-                request.resolution(), false);
+        MutationResult value = runner.execute(context, Requirements.none(), composition ->
+                composition.operationalExceptions().completeWarning(context, deliveryId, exceptionId, version(ifMatch), key,
+                        request.resolution(), false));
         return ResponseEntity.status(value.replayed() ? 200 : 201).eTag(etag(value.deliveryVersion())).body(value);
     }
 
@@ -89,7 +94,9 @@ public final class OperationalExceptionController {
             @RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID deliveryId,
             @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key) {
-        MutationResult value = service.completeWarning(context, deliveryId, exceptionId, version(ifMatch), key, null, true);
+        MutationResult value = runner.execute(context, Requirements.none(), composition ->
+                composition.operationalExceptions().completeWarning(context, deliveryId, exceptionId,
+                        version(ifMatch), key, null, true));
         return ResponseEntity.status(value.replayed() ? 200 : 201).eTag(etag(value.deliveryVersion())).body(value);
     }
 

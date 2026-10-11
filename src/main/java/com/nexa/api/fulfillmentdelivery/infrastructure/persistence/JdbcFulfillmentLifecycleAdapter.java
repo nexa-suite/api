@@ -417,7 +417,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
             }
         }
         boolean commerciallyResolved = Boolean.TRUE.equals(jdbc.queryForObject(
-                "select not exists (select 1 from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? and remaining_quantity>0)",
+                "select not exists (select 1 from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? and greatest(ordered_quantity-unfulfilled_quantity-delivered_quantity-rejected_quantity-cancelled_quantity,0)>0)",
                 Boolean.class, request.tenantId(), request.workspaceId(), request.fulfillmentId()));
         String nextStatus = commerciallyResolved ? "COMPLETED" : "PICKED";
         String update = commerciallyResolved
@@ -846,7 +846,7 @@ public class JdbcFulfillmentLifecycleAdapter implements FulfillmentPersistencePo
                         rs.getObject("delivery_id", UUID.class), rs.getString("delivery_status"),
                         number(rs, "delivery_version")), tenantId, workspaceId, fulfillmentId)
                 .stream().findFirst().orElseThrow(() -> error("FULFILLMENT_NOT_FOUND"));
-        List<LineView> lines = jdbc.query("select id,sku_id,catalog_item_id,ordered_quantity,backed_quantity,allocated_quantity,picked_quantity,packed_quantity,staged_quantity,dispatched_quantity,delivered_quantity,rejected_quantity,cancelled_quantity,unfulfilled_quantity,remaining_quantity,unit from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? order by id",
+        List<LineView> lines = jdbc.query("select id,sku_id,catalog_item_id,ordered_quantity,backed_quantity,allocated_quantity,picked_quantity,packed_quantity,staged_quantity,dispatched_quantity,delivered_quantity,rejected_quantity,cancelled_quantity,unfulfilled_quantity,greatest(ordered_quantity-unfulfilled_quantity-delivered_quantity-rejected_quantity-cancelled_quantity,0) remaining_quantity,unit from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? order by id",
                 (rs, row) -> new LineView(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class), rs.getString("catalog_item_id"),
                         rs.getBigDecimal("ordered_quantity"), rs.getBigDecimal("backed_quantity"), rs.getBigDecimal("allocated_quantity"),
                         rs.getBigDecimal("picked_quantity"), rs.getBigDecimal("packed_quantity"), rs.getBigDecimal("staged_quantity"),

@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Binds BC-06 fulfillment inventory reads to the routed Tenant JDBC session. */
 @FunctionalInterface
+@org.springframework.modulith.NamedInterface(value = "fulfillment-tenant-composition", propagate = false)
 public interface TenantFulfillmentInventoryQueryFactory {
     FulfillmentInventoryQuery bindTo(JdbcTemplate tenantJdbc);
 }

@@ -3,7 +3,8 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryLoadModels;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryLoadModels.LoadView;
-import com.nexa.api.fulfillmentdelivery.application.service.DeliveryLoadService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -31,16 +32,17 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class DeliveryLoadController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final DeliveryLoadService service;
+    private final FulfillmentDeliveryRequestRunner runner;
 
-    public DeliveryLoadController(DeliveryLoadService service) {
-        this.service = service;
+    public DeliveryLoadController(FulfillmentDeliveryRequestRunner runner) {
+        this.runner = runner;
     }
 
     @GetMapping("/dispatch/loads")
     @Operation(operationId = "listDispatchDeliveryLoads")
     public ResponseEntity<List<LoadView>> listDispatch(@RequestAttribute(ACCESS) CurrentAccessContext context) {
-        return ResponseEntity.ok().body(service.dispatchLoads(context));
+        return ResponseEntity.ok().body(runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryLoads().dispatchLoads(context)));
     }
 
     @PostMapping("/dispatch/loads")
@@ -48,7 +50,8 @@ public final class DeliveryLoadController {
     public ResponseEntity<LoadView> create(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                            @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                            @RequestBody DeliveryLoadModels.CreateLoadRequest request) {
-        LoadView value = service.create(context, request, key);
+        LoadView value = runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryLoads().create(context, request, key));
         return ResponseEntity.status(201).eTag(etag(value.version())).body(value);
     }
 
@@ -56,7 +59,8 @@ public final class DeliveryLoadController {
     @Operation(operationId = "getDispatchDeliveryLoad")
     public ResponseEntity<LoadView> get(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                         @PathVariable UUID loadId) {
-        LoadView value = service.getDispatchLoad(context, loadId);
+        LoadView value = runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryLoads().getDispatchLoad(context, loadId));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -67,7 +71,8 @@ public final class DeliveryLoadController {
                                             @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                             @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                             @RequestBody DeliveryLoadModels.ReorderStopsRequest request) {
-        return mutation(service.reorder(context, loadId, version(ifMatch), request, key));
+        return mutation(runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryLoads().reorder(context, loadId, version(ifMatch), request, key)));
     }
 
     @PostMapping("/dispatch/loads/{loadId}/assignments")
@@ -77,7 +82,8 @@ public final class DeliveryLoadController {
                                            @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                            @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                            @RequestBody DeliveryLoadModels.AssignDriverRequest request) {
-        return mutation(service.assign(context, loadId, version(ifMatch), request, key));
+        return mutation(runner.execute(context, Requirements.warehouseAssignees(),
+                composition -> composition.deliveryLoads().assign(context, loadId, version(ifMatch), request, key)));
     }
 
     @PostMapping("/dispatch/loads/{loadId}/offers")
@@ -86,7 +92,8 @@ public final class DeliveryLoadController {
                                           @PathVariable UUID loadId,
                                           @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                           @RequestHeader(name = "Idempotency-Key", required = false) String key) {
-        return mutation(service.offer(context, loadId, version(ifMatch), key));
+        return mutation(runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryLoads().offer(context, loadId, version(ifMatch), key)));
     }
 
     @PostMapping("/dispatch/loads/{loadId}/handoff-confirmations")
@@ -95,13 +102,15 @@ public final class DeliveryLoadController {
                                                     @PathVariable UUID loadId,
                                                     @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                     @RequestHeader(name = "Idempotency-Key", required = false) String key) {
-        return mutation(service.confirmHandoff(context, loadId, version(ifMatch), key));
+        return mutation(runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryLoads().confirmHandoff(context, loadId, version(ifMatch), key)));
     }
 
     @GetMapping("/driver/loads")
     @Operation(operationId = "listCurrentDriverDeliveryLoads")
     public ResponseEntity<List<LoadView>> listDriver(@RequestAttribute(ACCESS) CurrentAccessContext context) {
-        return ResponseEntity.ok().body(service.driverLoads(context));
+        return ResponseEntity.ok().body(runner.execute(context, Requirements.none(),
+                composition -> composition.deliveryLoads().driverLoads(context)));
     }
 
     @PostMapping("/driver/loads/{loadId}/acceptances")
@@ -110,7 +119,8 @@ public final class DeliveryLoadController {
                                            @PathVariable UUID loadId,
                                            @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                            @RequestHeader(name = "Idempotency-Key", required = false) String key) {
-        return mutation(service.accept(context, loadId, version(ifMatch), key));
+        return mutation(runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryLoads().accept(context, loadId, version(ifMatch), key)));
     }
 
     private static ResponseEntity<LoadView> mutation(LoadView value) {

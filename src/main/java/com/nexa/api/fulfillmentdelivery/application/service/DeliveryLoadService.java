@@ -8,6 +8,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.DeliveryLoadPersistence
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryLoadPersistencePort.CreateLoadCommand;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryLoadPersistencePort.LoadActionCommand;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryLoadPersistencePort.ReorderStopsCommand;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.DeliveryLoadOperations;
 import com.nexa.api.fulfillmentdelivery.domain.load.DeliveryLoadStatus;
 import com.nexa.api.fulfillmentdelivery.domain.load.LoadCompatibilityAttestation;
 import com.nexa.api.fulfillmentdelivery.domain.load.LoadCompatibilityEvaluator;
@@ -46,7 +47,7 @@ import java.util.function.Consumer;
 /** Dispatch-authorized commands and assigned-Driver whole-load acceptance. */
 @Service
 @Profile("!test")
-public class DeliveryLoadService {
+public class DeliveryLoadService implements DeliveryLoadOperations {
     private static final int MAX_LOAD_DELIVERIES = 20;
     private static final String CREATE_OPERATION = "DELIVERY_LOAD_CREATE";
     private static final String REORDER_OPERATION = "DELIVERY_LOAD_REORDER";
@@ -83,6 +84,7 @@ public class DeliveryLoadService {
     }
 
     @Transactional(readOnly = true)
+    @Override
     public List<LoadView> dispatchLoads(CurrentAccessContext context) {
         authorize(context, PermissionKey.DISPATCH_READ);
         Set<UUID> warehouses = warehouseAccess.activeWarehouseIds(context);
@@ -91,6 +93,7 @@ public class DeliveryLoadService {
     }
 
     @Transactional(readOnly = true)
+    @Override
     public List<LoadView> driverLoads(CurrentAccessContext context) {
         authorize(context, PermissionKey.DISPATCH_READ);
         return persistence.listForDriver(context.tenantId().value(), context.workspaceId().value(),
@@ -98,6 +101,7 @@ public class DeliveryLoadService {
     }
 
     @Transactional(readOnly = true)
+    @Override
     public LoadView getDispatchLoad(CurrentAccessContext context, UUID loadId) {
         authorize(context, PermissionKey.DISPATCH_READ);
         LoadView load = find(context, loadId);
@@ -106,6 +110,7 @@ public class DeliveryLoadService {
     }
 
     @Transactional
+    @Override
     public LoadView create(CurrentAccessContext context, DeliveryLoadModels.CreateLoadRequest request,
                            String idempotencyKey) {
         authorize(context, PermissionKey.DISPATCH_SCHEDULE);
@@ -177,6 +182,7 @@ public class DeliveryLoadService {
     }
 
     @Transactional
+    @Override
     public LoadView reorder(CurrentAccessContext context, UUID loadId, long expectedVersion,
                             DeliveryLoadModels.ReorderStopsRequest request, String idempotencyKey) {
         authorize(context, PermissionKey.DISPATCH_SCHEDULE);
@@ -199,6 +205,7 @@ public class DeliveryLoadService {
     }
 
     @Transactional
+    @Override
     public LoadView assign(CurrentAccessContext context, UUID loadId, long expectedVersion,
                            DeliveryLoadModels.AssignDriverRequest request, String idempotencyKey) {
         authorize(context, PermissionKey.DISPATCH_ASSIGN);
@@ -235,12 +242,14 @@ public class DeliveryLoadService {
     }
 
     @Transactional
+    @Override
     public LoadView offer(CurrentAccessContext context, UUID loadId, long expectedVersion, String idempotencyKey) {
         return dispatchAction(context, loadId, expectedVersion, idempotencyKey, PermissionKey.DISPATCH_SCHEDULE,
                 "load-offer-v1", OFFER_OPERATION, persistence::offer, null);
     }
 
     @Transactional
+    @Override
     public LoadView confirmHandoff(CurrentAccessContext context, UUID loadId, long expectedVersion,
                                    String idempotencyKey) {
         return dispatchAction(context, loadId, expectedVersion, idempotencyKey, PermissionKey.DISPATCH_SCHEDULE,
@@ -249,6 +258,7 @@ public class DeliveryLoadService {
     }
 
     @Transactional
+    @Override
     public LoadView accept(CurrentAccessContext context, UUID loadId, long expectedVersion, String idempotencyKey) {
         authorize(context, PermissionKey.DISPATCH_START_ROUTE);
         requireKey(idempotencyKey);

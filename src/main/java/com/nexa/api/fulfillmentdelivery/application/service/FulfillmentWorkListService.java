@@ -24,7 +24,7 @@ import java.util.UUID;
 /** Builds a picking work page only after current warehouse grants are applied. */
 @Service
 @Profile("!test")
-public class FulfillmentWorkListService {
+public class FulfillmentWorkListService implements com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentWorkListQueries {
     private static final Set<String> WAREHOUSE_WORK_STATES =
             Set.of("ALLOCATED", "PICKING", "READY_FOR_DISPATCH");
     private static final String ALLOCATED = "ALLOCATED";

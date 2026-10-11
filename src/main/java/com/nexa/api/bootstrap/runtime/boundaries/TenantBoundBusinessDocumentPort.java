@@ -1,7 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.businessdocuments.application.model.BusinessDocumentModels;
-import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
@@ -28,7 +28,7 @@ import java.util.function.Function;
 @Primary
 @Profile("local")
 @ConditionalOnProperty(name = "nexa.tenant-business.business-documents.enabled", havingValue = "true")
-public final class TenantBoundBusinessDocumentPort implements BusinessDocumentPort {
+public final class TenantBoundBusinessDocumentPort implements BusinessDocumentUseCase {
     private final TenantBusinessDatabaseRouter router;
     private final TenantBusinessDocumentBindingsFactory bindings;
     private final WarehouseObjectAccess warehouseAccess;
@@ -125,13 +125,7 @@ public final class TenantBoundBusinessDocumentPort implements BusinessDocumentPo
         });
     }
 
-    /** The legacy unscoped scheduler is deliberately not a valid Tenant operation. */
-    @Override
-    public void processPendingGenerationRequests() {
-        throw new IllegalStateException("Tenant document generation requires an explicit verified worker scope");
-    }
-
-    private <T> T execute(CurrentAccessContext context, Function<BusinessDocumentPort, T> action) {
+    private <T> T execute(CurrentAccessContext context, Function<BusinessDocumentUseCase, T> action) {
         Objects.requireNonNull(context, "Verified Tenant access context is required");
         Set<UUID> activeWarehouseIds = Set.copyOf(warehouseAccess.activeWarehouseIds(context));
         try {
@@ -144,9 +138,9 @@ public final class TenantBoundBusinessDocumentPort implements BusinessDocumentPo
     }
 
     private <T> T invoke(JdbcTemplate tenantJdbc, CurrentAccessContext context, Set<UUID> activeWarehouseIds,
-            Function<BusinessDocumentPort, T> action) {
-        var serviceBindings = bindings.bindRequest(tenantJdbc, context, activeWarehouseIds);
+            Function<BusinessDocumentUseCase, T> action) {
+        BusinessDocumentUseCase documents = bindings.bindRequest(tenantJdbc, context, activeWarehouseIds);
         // Download streams are backed by private storage; no JDBC object is returned past this boundary.
-        return action.apply(serviceBindings.documents());
+        return action.apply(documents);
     }
 }

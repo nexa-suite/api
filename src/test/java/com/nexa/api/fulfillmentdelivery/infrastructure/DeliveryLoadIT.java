@@ -4,6 +4,7 @@ import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Instant;
@@ -19,6 +20,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** PostgreSQL and HTTP coverage for grouped load planning and transfer. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.buyer-wallet-read.enabled=true",
+        "nexa.tenant-business.buyer-wallet-recharge.enabled=true",
+        "nexa.tenant-business.purchase-request.enabled=true",
+        "nexa.tenant-business.catalog-detail-read.enabled=true",
+        "nexa.tenant-business.catalog-management.enabled=true",
+        "nexa.tenant-business.payments.enabled=true",
+        "nexa.tenant-business.fulfillment-delivery.enabled=true",
+        "nexa.tenant-business.warehouse-operations.enabled=true",
+        "nexa.tenant-business.local-fixtures.enabled=true",
+        "nexa.tenant-business.support-sales-order-read.enabled=true",
+        "nexa.tenant-business.business-documents.enabled=true",
+        "nexa.tenant-business.business-traceability.enabled=true",
+        "nexa.tenant-business.notifications.enabled=true",
+        "nexa.business-traceability.worker-delay-ms=3600000",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
 
     @Override
@@ -77,7 +95,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
 
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
         String logisticsMembershipId = membershipId(LOGISTICS_EMAIL);
-        long movementsBeforePlan = jdbc.queryForObject("select count(*) from warehouse.stock_movement", Long.class);
+        long movementsBeforePlan = tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement", Long.class);
         String createKey = "delivery-load-create-" + uuid();
         String createBody = createBody(first, second);
         MvcResult created = mockMvc.perform(post("/api/v1/dispatch/loads")
@@ -90,11 +108,11 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
         assertThat(load.get("stops")).hasSize(2);
         UUID firstDeliveryId = UUID.fromString(load.get("stops").get(0).get("deliveryId").asText());
         UUID secondDeliveryId = UUID.fromString(load.get("stops").get(1).get("deliveryId").asText());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery where tenant_id=? and workspace_id=? "
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery where tenant_id=? and workspace_id=? "
                         + "and fulfillment_id in (?,?) and status='PLANNED'", Integer.class,
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()), first.fulfillmentId(), second.fulfillmentId()))
                 .isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement", Long.class))
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement", Long.class))
                 .isEqualTo(movementsBeforePlan);
 
         MvcResult replay = mockMvc.perform(post("/api/v1/dispatch/loads")
@@ -102,8 +120,10 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(createBody))
                 .andExpect(status().isCreated()).andReturn();
         assertThat(json(replay).get("id").asText()).isEqualTo(loadId.toString());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_load where id=?", Integer.class, loadId))
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_load where id=?", Integer.class, loadId))
                 .isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_load where id=?", Integer.class, loadId))
+                .isZero();
 
         mockMvc.perform(put("/api/v1/dispatch/loads/" + loadId + "/stops")
                         .header("Authorization", bearer(logistics)).header("If-Match", "\"99\"")
@@ -153,7 +173,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
         for (int index = 0; index < fixtures.length; index++) {
             UUID handedOver = handOver(fixtures[index]);
             assertThat(handedOver).isEqualTo(plannedDeliveryIds[index]);
-            assertThat(jdbc.queryForObject("select count(*) from logistics.delivery where tenant_id=? and workspace_id=? "
+            assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery where tenant_id=? and workspace_id=? "
                             + "and fulfillment_id=?", Integer.class, UUID.fromString(tenantId()),
                     UUID.fromString(workspaceId()), fixtures[index].fulfillmentId())).isEqualTo(1);
         }
@@ -177,7 +197,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
         ReadyFulfillment second = createReadyFulfillment(Instant.now().plusSeconds(18000),
                 Instant.now().plusSeconds(21600));
         assertThat(first.warehouseId()).isEqualTo(second.warehouseId());
-        int loadsBefore = jdbc.queryForObject("select count(*) from logistics.delivery_load where tenant_id=? and workspace_id=?",
+        int loadsBefore = tenantJdbc().queryForObject("select count(*) from logistics.delivery_load where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
         mockMvc.perform(post("/api/v1/dispatch/loads")
@@ -185,8 +205,55 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "delivery-load-window-conflict-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON).content(createBody(first, second)))
                 .andExpect(status().isConflict());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_load where tenant_id=? and workspace_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_load where tenant_id=? and workspace_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()))).isEqualTo(loadsBefore);
+    }
+
+    @Test
+    void acceptsDispatchConfirmedLoadWhenAssignedDriverHasWarehouseGrant() throws Exception {
+        ensureCommercialInventory();
+        ReadyFulfillment first = createReadyFulfillment(Instant.now().plusSeconds(7200),
+                Instant.now().plusSeconds(18000));
+        ReadyFulfillment second = createReadyFulfillment(Instant.now().plusSeconds(10800),
+                Instant.now().plusSeconds(21600));
+        assertThat(first.warehouseId()).isEqualTo(second.warehouseId());
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String driverMembershipId = membershipId(LOGISTICS_EMAIL);
+        ensureWarehouseGrant(first.warehouseId(), driverMembershipId);
+
+        MvcResult created = mockMvc.perform(post("/api/v1/dispatch/loads")
+                        .header("Authorization", bearer(logistics))
+                        .header("Idempotency-Key", "delivery-load-dispatch-first-create-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(createBody(first, second)))
+                .andExpect(status().isCreated()).andReturn();
+        UUID loadId = UUID.fromString(json(created).get("id").asText());
+        String loadPath = "/api/v1/dispatch/loads/" + loadId;
+        MvcResult assigned = mockMvc.perform(post(loadPath + "/assignments")
+                        .header("Authorization", bearer(logistics))
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "delivery-load-dispatch-first-assign-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"driverMembershipId\":\"" + driverMembershipId
+                                + "\",\"vehicleReference\":\"TRUCK-DISPATCH-FIRST\"}"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult offered = mockMvc.perform(post(loadPath + "/offers")
+                        .header("Authorization", bearer(logistics))
+                        .header("If-Match", assigned.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "delivery-load-dispatch-first-offer-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult confirmed = mockMvc.perform(post(loadPath + "/handoff-confirmations")
+                        .header("Authorization", bearer(logistics))
+                        .header("If-Match", offered.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "delivery-load-dispatch-first-confirm-" + uuid()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("HANDOFF_CONFIRMED"))
+                .andReturn();
+
+        mockMvc.perform(post("/api/v1/driver/loads/" + loadId + "/acceptances")
+                        .header("Authorization", bearer(logistics))
+                        .header("If-Match", confirmed.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "delivery-load-dispatch-first-accept-" + uuid()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("RESPONSIBILITY_TRANSFERRED"));
     }
 
     @Test
@@ -250,7 +317,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "delivery-load-stale-driver-confirm-" + uuid()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("FULFILLMENT_DRIVER_ASSIGNMENT_STALE"));
-        assertThat(jdbc.queryForObject("select status from logistics.delivery_load where id=?", String.class, loadId))
+        assertThat(tenantJdbc().queryForObject("select status from logistics.delivery_load where id=?", String.class, loadId))
                 .isEqualTo("OFFERED");
     }
 
@@ -271,7 +338,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                                 + "\"lines\":[{\"catalogItemId\":\"CAT-0004\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
                 .andExpect(status().isCreated()).andReturn();
         UUID salesOrderId = UUID.fromString(json(order).get("id").asText());
-        var backingWarehouses = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+        var backingWarehouses = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id "
                         + "and l.workspace_id=b.workspace_id and l.backing_id=b.id "
@@ -423,6 +490,7 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition where membership_id=?",
                 membership, tenant, workspace, sourceMembership);
+        provisionTenantBusinessDatabase(tenant, workspace);
         return workspaceSlug;
     }
 

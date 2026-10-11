@@ -64,7 +64,7 @@ public final class TenantBusinessDocumentWorkerScheduler {
     private void process(Scope scope) {
         try {
             router.inTransaction(scope.tenantId(), scope.workspaceId(), tenantJdbc -> {
-                TenantBusinessDocumentWorkerPort worker = bindings.bindEvidenceWorker(tenantJdbc).worker();
+                TenantBusinessDocumentWorkerPort worker = bindings.bindEvidenceWorker(tenantJdbc);
                 worker.processPendingEvidenceScans(scope.tenantId(), scope.workspaceId());
                 return Boolean.TRUE;
             });
@@ -77,7 +77,7 @@ public final class TenantBusinessDocumentWorkerScheduler {
             var snapshot = organizationSnapshots.find(scope.tenantId(), scope.workspaceId());
             if (snapshot.isEmpty()) return;
             router.inTransaction(scope.tenantId(), scope.workspaceId(), tenantJdbc -> {
-                var worker = bindings.bindWorker(tenantJdbc, scope.tenantId(), scope.workspaceId(), snapshot.get()).worker();
+                var worker = bindings.bindWorker(tenantJdbc, scope.tenantId(), scope.workspaceId(), snapshot.get());
                 worker.processPendingGenerationRequests(scope.tenantId(), scope.workspaceId());
                 return Boolean.TRUE;
             });

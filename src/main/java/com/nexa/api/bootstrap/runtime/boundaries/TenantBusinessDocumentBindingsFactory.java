@@ -2,6 +2,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.businessdocuments.application.publicapi.DocumentProjectionLookupPort;
 import com.nexa.api.businessdocuments.application.publicapi.DocumentSubjectLookupPort;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentServiceFactory;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerPort;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessEvidenceQueryFactory;
@@ -74,7 +75,7 @@ public final class TenantBusinessDocumentBindingsFactory {
         this.traceability = Objects.requireNonNull(traceability);
     }
 
-    public TenantBusinessDocumentServiceFactory.Bindings bindRequest(JdbcTemplate tenantJdbc,
+    public BusinessDocumentUseCase bindRequest(JdbcTemplate tenantJdbc,
             CurrentAccessContext accessContext, Set<UUID> activeWarehouseIds) {
         Objects.requireNonNull(accessContext, "Verified access context is required");
         UUID tenantId = accessContext.tenantId().value();
@@ -97,7 +98,11 @@ public final class TenantBusinessDocumentBindingsFactory {
         return required(documents.bindTo(tenantJdbc, subjects, projections, tenantAccounts, outbox));
     }
 
-    public WorkerBindings bindWorker(JdbcTemplate tenantJdbc, UUID tenantId,
+    public FulfillmentDocumentSourceQuery bindFulfillmentSource(JdbcTemplate tenantJdbc) {
+        return required(fulfillment.bindTo(Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required")));
+    }
+
+    public TenantBusinessDocumentWorkerPort bindWorker(JdbcTemplate tenantJdbc, UUID tenantId,
             UUID workspaceId, OrganizationDocumentSourceQuery.Snapshot organizationSnapshot) {
         Objects.requireNonNull(organizationSnapshot, "Organization document snapshot is required");
         CustomerAccountQuery tenantAccounts = required(customerAccounts.bindTo(tenantJdbc));
@@ -109,17 +114,16 @@ public final class TenantBusinessDocumentBindingsFactory {
                 tenantSales, tenantAccounts, tenantReceivables, tenantPayments, tenantFulfillment,
                 Optional.of(organizationSnapshot));
         CanonicalOutboxPort outbox = traceability.bindTo(tenantJdbc).canonicalOutbox();
-        return new WorkerBindings(required(documents.bindWorkerTo(tenantJdbc, projections, tenantAccounts, outbox)));
+        return required(documents.bindWorkerTo(tenantJdbc, projections, tenantAccounts, outbox));
     }
 
-    public WorkerBindings bindEvidenceWorker(JdbcTemplate tenantJdbc) {
+    public TenantBusinessDocumentWorkerPort bindEvidenceWorker(JdbcTemplate tenantJdbc) {
         CustomerAccountQuery tenantAccounts = required(customerAccounts.bindTo(tenantJdbc));
         CanonicalOutboxPort outbox = traceability.bindTo(tenantJdbc).canonicalOutbox();
         DocumentProjectionLookupPort unavailableProjection = (tenantId, workspaceId, subject, type) -> {
             throw new IllegalStateException("Document generation requires a preflighted organization snapshot");
         };
-        return new WorkerBindings(required(documents.bindWorkerTo(tenantJdbc, unavailableProjection,
-                tenantAccounts, outbox)));
+        return required(documents.bindWorkerTo(tenantJdbc, unavailableProjection, tenantAccounts, outbox));
     }
 
     private DocumentProjectionLookupPort projections(UUID tenantId, UUID workspaceId, JdbcTemplate tenantJdbc,
@@ -140,9 +144,4 @@ public final class TenantBusinessDocumentBindingsFactory {
         return Objects.requireNonNull(value, "Tenant business-document composition returned no binding");
     }
 
-    public record WorkerBindings(TenantBusinessDocumentWorkerPort worker) {
-        public WorkerBindings {
-            Objects.requireNonNull(worker, "Tenant document worker is required");
-        }
-    }
 }

@@ -3,6 +3,7 @@ package com.nexa.api.businessdocuments.infrastructure.persistence;
 import com.nexa.api.businessdocuments.application.publicapi.DocumentProjectionLookupPort;
 import com.nexa.api.businessdocuments.application.publicapi.DocumentSubjectLookupPort;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentCommands;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.businessdocuments.application.port.ContentScannerPort;
 import com.nexa.api.businessdocuments.application.port.DocumentRendererPort;
 import com.nexa.api.businessdocuments.application.port.ObjectStoragePort;
@@ -32,7 +33,7 @@ public final class JdbcTenantBusinessDocumentServiceFactory implements TenantBus
     }
 
     @Override
-    public Bindings bindTo(JdbcTemplate tenantJdbc, DocumentSubjectLookupPort tenantSubjects,
+    public BusinessDocumentUseCase bindTo(JdbcTemplate tenantJdbc, DocumentSubjectLookupPort tenantSubjects,
                            DocumentProjectionLookupPort tenantProjections,
                            CustomerAccountQuery tenantCustomerAccounts,
                            CanonicalOutboxPort tenantCanonicalOutbox) {
@@ -42,7 +43,7 @@ public final class JdbcTenantBusinessDocumentServiceFactory implements TenantBus
                 Objects.requireNonNull(tenantProjections, "Tenant document projection query is required"),
                 Objects.requireNonNull(tenantCustomerAccounts, "Tenant customer account query is required"),
                 null, null, Objects.requireNonNull(tenantCanonicalOutbox, "Tenant canonical outbox is required"));
-        return new Bindings(service, service, service);
+        return service;
     }
 
     @Override

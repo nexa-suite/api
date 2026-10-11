@@ -1,21 +1,17 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure;
 
-import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
+import com.nexa.api.support.TenantPhysicalAllocationFixtureConfiguration;
+import com.nexa.api.support.TenantPhysicalAllocationFixtureConfiguration.TenantPhysicalAllocationFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.context.annotation.Import;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.HexFormat;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,12 +22,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@Import(TenantPhysicalAllocationFixtureConfiguration.class)
 class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
     @Autowired
-    private PhysicalAllocationCommands physicalAllocations;
-
-    @Autowired
-    private PlatformTransactionManager transactionManager;
+    private TenantPhysicalAllocationFixture physicalAllocationFixture;
 
     @Test
     void currentReadyProjectionIncludesPhysicalPickingAndCurrentVersionsThenTracksHandover() throws Exception {
@@ -246,7 +240,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(handoverReplay).get("deliveryId").asText()).isEqualTo(deliveryId);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment_handoff_evidence where fulfillment_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.fulfillment_handoff_evidence where fulfillment_id=?",
                 Integer.class, fixture.fulfillmentId())).isEqualTo(1);
         var handoffEvidence = json(mockMvc.perform(get("/api/v1/fulfillments/" + fixture.fulfillmentId()
                         + "/handoff-evidence/current").header("Authorization", "Bearer " + fixture.coordinatorToken()))
@@ -258,11 +252,11 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .isEqualTo(membershipId(LOGISTICS_EMAIL));
         assertThat(handoffEvidence.get("driverAssignmentId").asText()).isEqualTo(assignmentId);
         assertThat(handoffEvidence.get("driverMembershipId").asText()).isEqualTo(membershipId);
-        assertThat(jdbc.queryForObject("select actor_membership_id from logistics.fulfillment_event "
+        assertThat(tenantJdbc().queryForObject("select actor_membership_id from logistics.fulfillment_event "
                         + "where tenant_id=? and workspace_id=? and fulfillment_id=? and event_type='HAND_OVER'",
                 UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.fulfillmentId()))
                 .isEqualTo(UUID.fromString(membershipId(LOGISTICS_EMAIL)));
-        assertThat(jdbc.queryForObject("select actor_membership_id from logistics.fulfillment_outgoing_goods_check where id=?",
+        assertThat(tenantJdbc().queryForObject("select actor_membership_id from logistics.fulfillment_outgoing_goods_check where id=?",
                 UUID.class, UUID.fromString(json(check).get("id").asText())))
                 .isEqualTo(UUID.fromString(membershipId(WAREHOUSE_EMAIL)));
         assertThat(handoffEvidence.get("outgoingGoodsCheckId").asText()).isEqualTo(json(check).get("id").asText());
@@ -274,7 +268,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn());
         assertThat(transferred.get("id").asText()).isEqualTo(assignmentId);
         assertThat(transferred.get("deliveryId").asText()).isEqualTo(deliveryId);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_assignment "
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_assignment "
                         + "where tenant_id=? and workspace_id=? and fulfillment_driver_assignment_id=? and delivery_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
                 UUID.fromString(assignmentId), UUID.fromString(deliveryId))).isEqualTo(1);
@@ -414,7 +408,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(resolutionReplay).get("id").asText()).isEqualTo(resolution.get("id").asText());
         assertThat(json(resolutionReplay).get("replayed").asBoolean()).isTrue();
-        assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment_outgoing_goods_check "
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.fulfillment_outgoing_goods_check "
                         + "where tenant_id=? and workspace_id=? and id=? and matches=false",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
                 UUID.fromString(json(recorded).get("id").asText()))).isEqualTo(1);
@@ -452,14 +446,8 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
 
     @Test
     void incompletePhysicalAllocationIsVisibleAsNotReady() throws Exception {
+        physicalAllocationFixture.releaseNextAllocation();
         Fixture fixture = createFulfillment();
-        String idempotencyKey = "readiness-release-" + uuid();
-        String requestHash = sha256("release|" + fixture.fulfillmentId() + "|" + idempotencyKey);
-        new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> physicalAllocations.release(
-                new PhysicalAllocationCommands.ReleaseRequest(
-                        UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.fulfillmentId(),
-                        UUID.fromString(membershipId(WAREHOUSE_EMAIL)), idempotencyKey, requestHash,
-                        fixture.allocationVersion(), "Readiness integration fixture release", Instant.now())));
 
         var readiness = json(readiness(fixture, fixture.coordinatorToken()).andExpect(status().isOk()).andReturn());
         assertThat(readiness.get("physicalAllocationStatus").asText()).isEqualTo("RELEASED");
@@ -548,7 +536,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isCreated()).andReturn();
         String orderId = json(order).get("id").asText();
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
-        var backingWarehouses = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+        var backingWarehouses = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
                         + "join warehouse.inventory_backing_position p on p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.backing_line_id=l.id "
@@ -709,6 +697,7 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
                         + "where membership_id=?",
                 membership, tenant, workspace, sourceMembership);
+        provisionTenantBusinessDatabase(tenant, workspace);
         return workspaceSlug;
     }
 
@@ -740,15 +729,6 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
 
     private static long etagVersion(String etag) {
         return Long.parseLong(etag.replace("\"", ""));
-    }
-
-    private static String sha256(String value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
-        }
     }
 
     private record Fixture(UUID fulfillmentId, UUID fulfillmentLineId, UUID skuId,

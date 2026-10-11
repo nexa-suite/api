@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 /** Compares checked goods with the current allocation without mutating inventory. */
 @Service
 @Profile("!test")
-public class OutgoingGoodsCheckService {
+public class OutgoingGoodsCheckService implements com.nexa.api.fulfillmentdelivery.application.publicapi.OutgoingGoodsCheckOperations {
     private static final String READY_FOR_DISPATCH = "READY_FOR_DISPATCH";
 
     private final DispatchReadinessService readiness;

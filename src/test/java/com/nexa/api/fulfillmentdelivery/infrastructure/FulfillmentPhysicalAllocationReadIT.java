@@ -21,6 +21,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport {
     @Test
+    void fulfillmentDetailDerivesRemainingQuantityFromCurrentBusinessQuantities() throws Exception {
+        Fixture fixture = createFulfillment("10");
+        UUID fulfillmentLineId = UUID.fromString(json(fixture.fulfillment()).get("lines").get(0).get("id").asText());
+        assertThat(tenantJdbc().update("""
+                update logistics.fulfillment_line
+                set backed_quantity=10, allocated_quantity=10, picked_quantity=7, packed_quantity=7,
+                    staged_quantity=7, dispatched_quantity=7, delivered_quantity=2, rejected_quantity=2,
+                    cancelled_quantity=1, unfulfilled_quantity=3
+                where tenant_id=? and workspace_id=? and id=?
+                """, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fulfillmentLineId)).isEqualTo(1);
+
+        MvcResult detail = mockMvc.perform(get("/api/v1/fulfillments/" + fixture.fulfillmentId())
+                        .header("Authorization", "Bearer " + fixture.warehouseToken()))
+                .andExpect(status().isOk()).andReturn();
+
+        assertThat(json(detail).get("lines").get(0).get("remainingQuantity").decimalValue())
+                .isEqualByComparingTo(new BigDecimal("2"));
+    }
+
+    @Test
     void pickingWorkListReturnsOnlyCurrentAllocatedWorkForFulfillmentReaders() throws Exception {
         Fixture fixture = createFulfillment();
         MvcResult listed = mockMvc.perform(get("/api/v1/fulfillments")
@@ -69,7 +89,7 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
         assertThat(line.get("consumedQuantity").decimalValue()).isZero();
         assertThat(line.get("remainingQuantity").decimalValue()).isEqualByComparingTo(BigDecimal.ONE);
         assertThat(line.get("unit").asText()).isEqualTo("UNIT");
-        String sourceExpiration = jdbc.queryForObject(
+        String sourceExpiration = tenantJdbc().queryForObject(
                 "select expiration_date::text from warehouse.physical_allocation_line where tenant_id=? and workspace_id=? and id=?",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
                 UUID.fromString(line.get("physicalAllocationLineId").asText()));
@@ -209,6 +229,10 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
     }
 
     private Fixture createFulfillment() throws Exception {
+        return createFulfillment("1");
+    }
+
+    private Fixture createFulfillment(String quantity) throws Exception {
         ensureCommercialInventory();
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
@@ -219,11 +243,11 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
                         .content("{\"clientAccountId\":\"" + buyerClientAccountId()
                                 + "\",\"priority\":\"NORMAL\",\"requestedDeliveryDate\":\"2099-12-31\","
                                 + "\"deliveryProfileSnapshot\":\"Physical allocation read\",\"paymentOption\":\"IMMEDIATE\","
-                                + "\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
+                                + "\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":" + quantity + ",\"unit\":\"UNIT\"}]}") )
                 .andExpect(status().isCreated()).andReturn();
         String orderId = json(order).get("id").asText();
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
-        List<UUID> backingWarehouses = jdbc.query(
+        List<UUID> backingWarehouses = tenantJdbc().query(
                 "select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
@@ -243,7 +267,7 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
                 .andExpect(status().isCreated()).andReturn();
         var body = json(fulfillment);
         String allocationId = body.get("physicalAllocationId").asText();
-        String warehouseId = jdbc.queryForObject(
+        String warehouseId = tenantJdbc().queryForObject(
                 "select warehouse_id::text from warehouse.physical_allocation_line where tenant_id=? and workspace_id=? and physical_allocation_id=? limit 1",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(allocationId));
         return new Fixture(body.get("id").asText(), accessToken(WAREHOUSE_EMAIL, "PLATFORM"), warehouseId,
@@ -294,6 +318,7 @@ class FulfillmentPhysicalAllocationReadIT extends NexaWorkflowIntegrationSupport
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
                         + "where membership_id=?",
                 membership, tenant, workspace, sourceMembership);
+        provisionTenantBusinessDatabase(tenant, workspace);
         return slug;
     }
 

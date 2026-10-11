@@ -11,6 +11,15 @@ import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentDriverAss
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentLifecycleService;
 import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentWorkListService;
 import com.nexa.api.fulfillmentdelivery.application.service.OutgoingGoodsCheckService;
+import com.nexa.api.fulfillmentdelivery.application.service.MobileDeliveryContractService;
+import com.nexa.api.fulfillmentdelivery.application.service.DispatchWindowPlanService;
+import com.nexa.api.fulfillmentdelivery.application.service.DeliveryLoadService;
+import com.nexa.api.fulfillmentdelivery.application.service.DeliveryInstructionService;
+import com.nexa.api.fulfillmentdelivery.application.service.ExecutionTemperatureService;
+import com.nexa.api.fulfillmentdelivery.application.service.DriverDeliveryIncidentService;
+import com.nexa.api.fulfillmentdelivery.application.service.OperationalExceptionService;
+import com.nexa.api.fulfillmentdelivery.application.service.BomOperationalExceptionService;
+import com.nexa.api.fulfillmentdelivery.application.service.CustomerInstructionService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.util.Objects;
@@ -28,9 +37,22 @@ public final class LocalFulfillmentDeliveryRequestRunner implements FulfillmentD
                                                  BuyerDeliveryTrackingService buyerTracking,
                                                  LogisticsOperationsService logistics,
                                                  DispatchReadinessService dispatchReadiness,
-                                                 FulfillmentDriverAssignmentService driverAssignments) {
+                                                 FulfillmentDriverAssignmentService driverAssignments,
+                                                 MobileDeliveryContractService mobileDeliveryContracts,
+                                                 DispatchWindowPlanService dispatchWindowPlans,
+                                                 DeliveryLoadService deliveryLoads,
+                                                 DeliveryInstructionService deliveryInstructions,
+                                                 ExecutionTemperatureService executionTemperatures,
+                                                 DriverDeliveryIncidentService driverDeliveryIncidents,
+                                                 OperationalExceptionService operationalExceptions,
+                                                 BomOperationalExceptionService bomOperationalExceptions,
+                                                 CustomerInstructionService customerInstructions) {
         this.composition = new FulfillmentDeliveryComposition(fulfillment, workList, outgoingGoodsChecks,
-                driverDeliveries, driverTracking, buyerTracking, logistics, dispatchReadiness, driverAssignments);
+                driverDeliveries, driverTracking, buyerTracking, logistics, dispatchReadiness, driverAssignments,
+                (context, reservationId, version, key) -> logistics.create(context, reservationId, version, key),
+                mobileDeliveryContracts, dispatchWindowPlans, deliveryLoads, deliveryInstructions,
+                executionTemperatures, driverDeliveryIncidents, operationalExceptions,
+                bomOperationalExceptions, customerInstructions);
     }
 
     @Override

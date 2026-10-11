@@ -9,6 +9,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.D
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofEvidenceKind;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentLifecycleModels;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -28,7 +29,7 @@ import java.util.UUID;
 /** Application boundary for assigned-driver delivery execution. */
 @Service
 @Profile("!test")
-public class DriverDeliveryService {
+public class DriverDeliveryService implements com.nexa.api.fulfillmentdelivery.application.publicapi.DriverDeliveryOperations {
     private final DriverDeliveryPersistencePort persistence;
     private final FulfillmentLifecycleService lifecycle;
     private final Clock clock;
@@ -68,7 +69,7 @@ public class DriverDeliveryService {
     @Transactional
     public FulfillmentModels.DeliveryOutcomeResult recordOutcome(
             CurrentAccessContext context, UUID deliveryId, UUID attemptId, long expectedVersion,
-            String idempotencyKey, FulfillmentLifecycleService.AttemptCommand command) {
+            String idempotencyKey, FulfillmentLifecycleModels.AttemptCommand command) {
         context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
         if (deliveryId == null || attemptId == null) {
             throw new FulfillmentOperationException("DELIVERY_ATTEMPT_NOT_FOUND", true);
@@ -105,7 +106,7 @@ public class DriverDeliveryService {
     @Transactional
     public ProofOfDeliveryView createProofOfDelivery(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
                                                       long expectedVersion, String idempotencyKey,
-                                                      FulfillmentLifecycleService.DriverProofCommand command) {
+                                                      FulfillmentLifecycleModels.DriverProofCommand command) {
         context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
         validateProofCommand(deliveryId, attemptId, expectedVersion, idempotencyKey);
         persistence.requireAssignedTerminalAttempt(tenant(context), workspace(context), actor(context), deliveryId, attemptId);

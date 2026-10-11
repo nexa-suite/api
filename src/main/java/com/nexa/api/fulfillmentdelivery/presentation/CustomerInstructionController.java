@@ -1,7 +1,8 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.CustomerInstructionModels.Snapshot;
-import com.nexa.api.fulfillmentdelivery.application.service.CustomerInstructionService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.domain.instruction.DeliveryInstructionKind;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -24,29 +25,29 @@ import java.util.UUID;
 @SecurityRequirement(name="bearerAuth")
 public class CustomerInstructionController {
     private static final String ACCESS="com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final CustomerInstructionService service;
-    public CustomerInstructionController(CustomerInstructionService service) { this.service=service; }
+    private final FulfillmentDeliveryRequestRunner runner;
+    public CustomerInstructionController(FulfillmentDeliveryRequestRunner runner) { this.runner=runner; }
     @GetMapping("/sales-orders/{orderId}/customer-delivery-instructions")
     @Operation(operationId="getSalesRecordedCustomerDeliveryInstructions")
     public ResponseEntity<Snapshot> sales(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID orderId) {
-        return response(service.read(c,orderId,false));
+        return response(runner.execute(c,Requirements.none(),x->x.customerInstructions().read(c,orderId,false)));
     }
     @GetMapping("/buyer/sales-orders/{orderId}/customer-delivery-instructions")
     @Operation(operationId="getBuyerCustomerDeliveryInstructions")
     public ResponseEntity<Snapshot> buyer(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID orderId) {
-        return response(service.read(c,orderId,true));
+        return response(runner.execute(c,Requirements.none(),x->x.customerInstructions().read(c,orderId,true)));
     }
     @PostMapping("/sales-orders/{orderId}/customer-delivery-instructions")
     @Operation(operationId="recordSalesReceivedCustomerDeliveryInstruction")
     public ResponseEntity<Snapshot> salesPublish(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID orderId,
             @RequestHeader("If-Match")String version,@RequestHeader("Idempotency-Key")String key,@Valid @RequestBody Publication request) {
-        return response(service.publish(c,orderId,false,version(version),request.instructionId(),request.kind(),request.content(),request.sourceReference(),key));
+        return response(runner.execute(c,Requirements.none(),x->x.customerInstructions().publish(c,orderId,false,version(version),request.instructionId(),request.kind(),request.content(),request.sourceReference(),key)));
     }
     @PostMapping("/buyer/sales-orders/{orderId}/customer-delivery-instructions")
     @Operation(operationId="publishBuyerCustomerDeliveryInstruction")
     public ResponseEntity<Snapshot> buyerPublish(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID orderId,
             @RequestHeader("If-Match")String version,@RequestHeader("Idempotency-Key")String key,@Valid @RequestBody Publication request) {
-        return response(service.publish(c,orderId,true,version(version),request.instructionId(),request.kind(),request.content(),null,key));
+        return response(runner.execute(c,Requirements.none(),x->x.customerInstructions().publish(c,orderId,true,version(version),request.instructionId(),request.kind(),request.content(),null,key)));
     }
     public record Publication(UUID instructionId,@NotNull DeliveryInstructionKind kind,
                               @NotBlank @Size(max=2000)String content,@Size(max=500)String sourceReference) { }

@@ -6,8 +6,10 @@ import com.nexa.api.bootstrap.runtime.events.TenantOutboxEventConsumer;
 import com.nexa.api.businesstraceability.tenantdatabase.TenantBusinessTraceabilityWorkerRouter;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.Scope;
+import com.nexa.api.shared.events.TenantOutboxEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.dao.DataAccessException;
@@ -15,13 +17,17 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.CannotCreateTransactionException;
 
-import java.util.List;
+import java.sql.SQLException;
+import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Bounded keyset scheduler for BC-11's Tenant source-fact projection. */
@@ -78,11 +84,11 @@ public final class TenantBusinessTraceabilityWorkerScheduler {
                 consumePending(scope, consumer);
             } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                      | DataAccessException | CannotCreateTransactionException unavailable) {
-                LOGGER.warn("One Tenant outbox consumer route was unavailable; consumer={} will retry on a later scan",
-                        safeConsumerName(consumer));
+                warnRetryableFailure("Tenant outbox consumer route will retry on a later scan",
+                        "consumer_scan", scope, safeConsumerName(consumer), null, unavailable);
             } catch (RuntimeException retryable) {
-                LOGGER.warn("One Tenant outbox consumer scan failed; consumer={} will retry on a later scan",
-                        safeConsumerName(consumer));
+                warnRetryableFailure("Tenant outbox consumer scan will retry on a later scan",
+                        "consumer_scan", scope, safeConsumerName(consumer), null, retryable);
             }
         }
     }
@@ -91,7 +97,7 @@ public final class TenantBusinessTraceabilityWorkerScheduler {
         ConsumerScope key = new ConsumerScope(scope.tenantId(), scope.workspaceId(), TRACEABILITY_CONSUMER);
         EventCursor cursor = eventCursors.get(key);
         try {
-            List<com.nexa.api.shared.events.TenantOutboxEvent> events = router.inTransaction(scope.tenantId(),
+            List<TenantOutboxEvent> events = router.inTransaction(scope.tenantId(),
                     scope.workspaceId(), (tenantJdbc, ignoredTransactionManager) ->
                             bindings.bindWorker(tenantJdbc).worker().findPendingBusinessFacts(scope.tenantId(),
                                     scope.workspaceId(), EVENT_BATCH_SIZE,
@@ -100,25 +106,27 @@ public final class TenantBusinessTraceabilityWorkerScheduler {
                 eventCursors.remove(key);
                 return;
             }
-            for (com.nexa.api.shared.events.TenantOutboxEvent event : events) {
+            for (TenantOutboxEvent event : events) {
                 try {
                     router.inTransaction(scope.tenantId(), scope.workspaceId(), (tenantJdbc, ignoredTransactionManager) ->
                             bindings.bindWorker(tenantJdbc).worker().projectBusinessFact(event));
                 } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                          | DataAccessException | CannotCreateTransactionException retryable) {
-                    LOGGER.warn("One Tenant business-fact event remains pending after a projection retry; eventId={} eventType={}",
-                            event.eventId(), event.eventType());
+                    warnRetryableFailure("Tenant business-fact event remains pending after projection retry",
+                            "business_fact_projection", scope, TRACEABILITY_CONSUMER, event, retryable);
                 } catch (RuntimeException retryable) {
-                    LOGGER.warn("One Tenant business-fact event remains pending after a projection retry; eventId={} eventType={}",
-                            event.eventId(), event.eventType());
+                    warnRetryableFailure("Tenant business-fact event remains pending after projection retry",
+                            "business_fact_projection", scope, TRACEABILITY_CONSUMER, event, retryable);
                 }
             }
             setCursor(key, events);
         } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                  | DataAccessException | CannotCreateTransactionException unavailable) {
-            LOGGER.warn("One Tenant traceability worker scope was unavailable; it will retry on a later scan");
+            warnRetryableFailure("Tenant traceability worker scope will retry on a later scan",
+                    "business_fact_scan", scope, TRACEABILITY_CONSUMER, null, unavailable);
         } catch (RuntimeException retryable) {
-            LOGGER.warn("One Tenant business-fact projection failed; it will retry on a later scan");
+            warnRetryableFailure("Tenant business-fact scan will retry on a later scan",
+                    "business_fact_scan", scope, TRACEABILITY_CONSUMER, null, retryable);
         }
     }
 
@@ -131,7 +139,7 @@ public final class TenantBusinessTraceabilityWorkerScheduler {
             eventCursors.remove(key);
             return;
         }
-        List<com.nexa.api.shared.events.TenantOutboxEvent> candidates = router.inTransaction(
+        List<TenantOutboxEvent> candidates = router.inTransaction(
                 scope.tenantId(), scope.workspaceId(), (tenantJdbc, ignoredTransactionManager) ->
                         bindings.bindWorker(tenantJdbc).worker().findPendingForConsumer(scope.tenantId(),
                                 scope.workspaceId(), consumerName, eventTypes, EVENT_BATCH_SIZE,
@@ -140,7 +148,7 @@ public final class TenantBusinessTraceabilityWorkerScheduler {
             eventCursors.remove(key);
             return;
         }
-        for (com.nexa.api.shared.events.TenantOutboxEvent event : candidates) {
+        for (TenantOutboxEvent event : candidates) {
             try {
                 var snapshot = router.inTransaction(scope.tenantId(), scope.workspaceId(),
                         (tenantJdbc, ignoredTransactionManager) -> bindings.bindWorker(tenantJdbc).worker()
@@ -156,22 +164,65 @@ public final class TenantBusinessTraceabilityWorkerScheduler {
                                 transactionManager, (jdbc, tx, candidate) -> prepared.consume(jdbc, tx, candidate)));
             } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                      | DataAccessException | CannotCreateTransactionException retryable) {
-                LOGGER.warn("One Tenant outbox event remains pending after an owner callback retry; consumer={} eventId={} eventType={}",
-                        consumerName, event.eventId(), event.eventType());
+                warnRetryableFailure("Tenant outbox event remains pending after owner callback retry",
+                        "owner_callback", scope, consumerName, event, retryable);
             } catch (RuntimeException retryable) {
-                LOGGER.warn("One Tenant outbox event remains pending after an owner callback retry; consumer={} eventId={} eventType={}",
-                        consumerName, event.eventId(), event.eventType());
+                warnRetryableFailure("Tenant outbox event remains pending after owner callback retry",
+                        "owner_callback", scope, consumerName, event, retryable);
             }
         }
         setCursor(key, candidates);
     }
 
-    private void setCursor(ConsumerScope key, List<com.nexa.api.shared.events.TenantOutboxEvent> events) {
+    private static void warnRetryableFailure(String message, String operation, Scope scope, String consumerName,
+            TenantOutboxEvent event, RuntimeException failure) {
+        LoggingEventBuilder log = LOGGER.atWarn()
+                .addKeyValue("operation", operation)
+                .addKeyValue("tenantId", scope.tenantId())
+                .addKeyValue("workspaceId", scope.workspaceId())
+                .addKeyValue("exceptionClass", failure.getClass().getName())
+                .addKeyValue("sqlState", safeSqlState(failure));
+        if (consumerName != null) {
+            log.addKeyValue("consumer", safeLogValue(consumerName));
+        }
+        if (event != null) {
+            log.addKeyValue("eventId", event.eventId())
+                    .addKeyValue("eventType", safeLogValue(event.eventType()));
+        }
+        log.log(message);
+    }
+
+    private static String safeSqlState(Throwable failure) {
+        ArrayDeque<Throwable> pending = new ArrayDeque<>();
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        pending.add(failure);
+        while (!pending.isEmpty()) {
+            Throwable current = pending.removeFirst();
+            if (!visited.add(current)) continue;
+            if (current instanceof SQLException sqlException) {
+                String sqlState = sqlException.getSQLState();
+                if (sqlState != null) {
+                    return sqlState.matches("[0-9A-Z]{5}") ? sqlState : "other";
+                }
+                SQLException next = sqlException.getNextException();
+                if (next != null) pending.addLast(next);
+            }
+            Throwable cause = current.getCause();
+            if (cause != null && cause != current) pending.addLast(cause);
+        }
+        return "none";
+    }
+
+    private static String safeLogValue(String value) {
+        return value != null && value.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,119}") ? value : "invalid";
+    }
+
+    private void setCursor(ConsumerScope key, List<TenantOutboxEvent> events) {
         if (events.size() < EVENT_BATCH_SIZE) {
             eventCursors.remove(key);
             return;
         }
-        com.nexa.api.shared.events.TenantOutboxEvent last = events.getLast();
+        TenantOutboxEvent last = events.getLast();
         eventCursors.put(key, new EventCursor(last.createdAt(), last.eventId()));
     }
 

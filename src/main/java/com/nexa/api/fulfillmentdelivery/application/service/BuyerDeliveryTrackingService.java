@@ -24,7 +24,7 @@ import java.util.UUID;
 /** Buyer-only read boundary for actual BC-06 Delivery records. */
 @Service
 @Profile("!test")
-public class BuyerDeliveryTrackingService {
+public class BuyerDeliveryTrackingService implements com.nexa.api.fulfillmentdelivery.application.publicapi.BuyerDeliveryTrackingQueries {
     private final BuyerDeliveryTrackingQueryPort deliveries;
     private final CustomerAccountQuery customerAccounts;
     private final SalesOrderFulfillmentQuery salesOrders;

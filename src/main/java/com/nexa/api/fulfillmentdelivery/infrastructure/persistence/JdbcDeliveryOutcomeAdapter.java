@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /** SQL adapter for delivery attempts, quantity outcomes, POD and cold-chain evidence. */
@@ -65,6 +66,20 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     @Override
     public DeliveryView find(UUID tenantId, UUID workspaceId, UUID deliveryId) {
         return load(tenantId, workspaceId, deliveryId);
+    }
+
+    @Override
+    public Optional<PodView> findPodByDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId) {
+        return jdbc.query("select p.id,p.delivery_id,p.status,p.receiver_name,p.completed_at,p.sealed_at,"
+                        + "p.photo_evidence_object_id,p.signature_evidence_object_id,d.version delivery_version "
+                        + "from logistics.proof_of_delivery p join logistics.delivery d "
+                        + "on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id and d.id=p.delivery_id "
+                        + "where p.tenant_id=? and p.workspace_id=? and p.delivery_id=?",
+                (rs, row) -> new PodView(rs.getObject("id", UUID.class), rs.getObject("delivery_id", UUID.class),
+                        rs.getString("status"), rs.getString("receiver_name"), instant(rs, "completed_at"),
+                        instant(rs, "sealed_at"), rs.getObject("photo_evidence_object_id", UUID.class),
+                        rs.getObject("signature_evidence_object_id", UUID.class), number(rs, "delivery_version")),
+                tenantId, workspaceId, deliveryId).stream().findFirst();
     }
 
     @Override
@@ -230,11 +245,6 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         }
         insertDeliveryEvent(request.tenantId(), request.workspaceId(), request.deliveryId(), "DELIVERY_ATTEMPT_RECORDED",
                 request.actorMembershipId(), bounded(request.failureReason()), attemptedAt);
-        if ("DELIVERED".equals(targetDeliveryStatus)) {
-            canonicalOutbox.append("DeliveryCompleted.v1", "Delivery", request.deliveryId(), request.tenantId(),
-                    request.workspaceId(), attemptedAt, request.idempotencyKey(), null, "1.0", request.idempotencyKey(),
-                    Map.of("deliveryId", request.deliveryId(), "fulfillmentId", fulfillment.id(), "attemptId", attemptId));
-        }
         if (request.outcome() != DeliveryAttemptOutcome.FAILED && !allPhysicalResolved) {
             createContinuation(request, delivery, fulfillment, remaining, attemptedAt);
         }
@@ -395,7 +405,9 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         IdempotencyRow prior = idempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "POD_SEAL", request.idempotencyKey());
         if (prior != null) {
             ensureHash(prior.requestHash(), request.requestHash());
-            return loadPod(request.tenantId(), request.workspaceId(), prior.resourceId());
+            PodView replay = loadPod(request.tenantId(), request.workspaceId(), prior.resourceId());
+            publishDeliveryCompleted(request, replay);
+            return replay;
         }
         DeliveryRow delivery = lockDelivery(request.tenantId(), request.workspaceId(), request.deliveryId());
         if (delivery.version() != request.expectedVersion()) throw error("CONCURRENCY_CONFLICT");
@@ -414,7 +426,18 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                 request.actorMembershipId(), "Proof of delivery sealed", sealedAt);
         insertIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "POD_SEAL",
                 request.idempotencyKey(), request.requestHash(), pod.id(), sealedAt);
-        return loadPod(request.tenantId(), request.workspaceId(), pod.id());
+        PodView sealed = loadPod(request.tenantId(), request.workspaceId(), pod.id());
+        publishDeliveryCompleted(request, sealed);
+        return sealed;
+    }
+
+    /** The canonical completion fact is owned by immutable POD finalization, not the earlier driver outcome. */
+    private void publishDeliveryCompleted(PodSealRequest request, PodView pod) {
+        if (!"SEALED".equals(pod.status()) || pod.sealedAt() == null || pod.deliveryId() == null) return;
+        String finalizationKey = pod.id().toString();
+        canonicalOutbox.append("DeliveryCompleted.v1", "Delivery", pod.deliveryId(), request.tenantId(),
+                request.workspaceId(), pod.sealedAt(), finalizationKey, null, "1.0", finalizationKey,
+                Map.of("deliveryId", pod.deliveryId(), "podId", pod.id()));
     }
 
     @Override
@@ -652,7 +675,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     }
 
     private List<RemainingLine> commercialRemaining(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
-        return jdbc.query("select id,sku_id,catalog_item_id,remaining_quantity,unit from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? and remaining_quantity>0 order by id",
+        return jdbc.query("select id,sku_id,catalog_item_id,greatest(ordered_quantity-unfulfilled_quantity-delivered_quantity-rejected_quantity-cancelled_quantity,0) remaining_quantity,unit from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? and greatest(ordered_quantity-unfulfilled_quantity-delivered_quantity-rejected_quantity-cancelled_quantity,0)>0 order by id",
                 (rs, row) -> new RemainingLine(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
                         rs.getString("catalog_item_id"), rs.getBigDecimal("remaining_quantity"), rs.getString("unit")),
                 tenantId, workspaceId, fulfillmentId);
@@ -796,7 +819,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
     }
 
     private List<FulfillmentLineRow> lockFulfillmentLines(UUID tenantId, UUID workspaceId, UUID fulfillmentId) {
-        return jdbc.query("select id,sku_id,catalog_item_id,unit,dispatched_quantity,delivered_quantity,rejected_quantity,cancelled_quantity,unfulfilled_quantity,remaining_quantity from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? order by id for update",
+        return jdbc.query("select id,sku_id,catalog_item_id,unit,dispatched_quantity,delivered_quantity,rejected_quantity,cancelled_quantity,unfulfilled_quantity,greatest(ordered_quantity-unfulfilled_quantity-delivered_quantity-rejected_quantity-cancelled_quantity,0) remaining_quantity from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? order by id for update",
                 (rs, row) -> new FulfillmentLineRow(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
                         rs.getString("catalog_item_id"), rs.getString("unit"), rs.getBigDecimal("dispatched_quantity"),
                         rs.getBigDecimal("delivered_quantity"), rs.getBigDecimal("rejected_quantity"),

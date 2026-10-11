@@ -3,8 +3,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.fulfillmentdelivery.application.FulfillmentDeliveryComposition;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
-import com.nexa.api.fulfillmentdelivery.application.service.DriverTrackingService;
-import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentDeliveryCompositionFactory;
+import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseAccessGrantView;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
@@ -23,12 +22,12 @@ import java.util.function.Function;
 /** Performs central authority snapshots before borrowing a Tenant connection, then runs one routed unit of work. */
 public final class TenantBoundFulfillmentDeliveryRequestRunner implements FulfillmentDeliveryRequestRunner {
     private final TenantBusinessDatabaseRouter router;
-    private final TenantFulfillmentDeliveryCompositionFactory compositions;
+    private final TenantFulfillmentDeliveryCompositionProviderAdapter compositions;
     private final WarehouseObjectAccess centralWarehouseAccess;
     private final WorkforceDirectory centralWorkforce;
 
     public TenantBoundFulfillmentDeliveryRequestRunner(TenantBusinessDatabaseRouter router,
-                                                       TenantFulfillmentDeliveryCompositionFactory compositions,
+                                                       TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
                                                        WarehouseObjectAccess centralWarehouseAccess,
                                                        WorkforceDirectory centralWorkforce) {
         this.router = Objects.requireNonNull(router, "Tenant business database router is required");
@@ -48,7 +47,7 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
                 "BC-06 request work is required");
 
         if (needed.storedDriverLocation()) {
-            throw DriverTrackingService.error("DRIVER_LOCATION_UNAVAILABLE", false);
+            throw new FulfillmentOperationException("DRIVER_LOCATION_UNAVAILABLE", false);
         }
 
         Set<UUID> warehouses = needed.warehouseGrants()
@@ -68,10 +67,14 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
         List<WorkforceDirectory.LogisticsAssignee> assignees = needed.logisticsAssignees()
                 ? List.copyOf(centralWorkforce.findLogisticsAssignees(verified.tenantId().value(),
                 verified.workspaceId().value())) : List.of();
+        List<WorkforceDirectory.ExceptionAssignee> exceptionAssignees = needed.exceptionAssignees()
+                ? List.copyOf(Objects.requireNonNull(centralWorkforce.findExceptionAssignees(
+                verified.tenantId().value(), verified.workspaceId().value()),
+                "BC-01 exception-assignee preflight must return a snapshot")) : List.of();
 
         WarehouseObjectAccess warehouseSnapshot = new WarehouseAccessSnapshot(verified, warehouses);
         WorkforceDirectory workforceSnapshot = new WorkforceSnapshot(verified, assignable, assignees,
-                needed.logisticsAssignees());
+                needed.logisticsAssignees(), exceptionAssignees, needed.exceptionAssignees());
         return router.inTransaction(verified, tenantJdbc -> action.apply(
                 compositions.bindTo(tenantJdbc, warehouseSnapshot, workforceSnapshot)));
     }
@@ -142,13 +145,19 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
         private final Map<UUID, String> assignableNames;
         private final List<LogisticsAssignee> assignees;
         private final boolean assigneesLoaded;
+        private final List<ExceptionAssignee> exceptionAssignees;
+        private final boolean exceptionAssigneesLoaded;
 
         private WorkforceSnapshot(CurrentAccessContext scope, Map<UUID, String> assignableNames,
-                                  List<LogisticsAssignee> assignees, boolean assigneesLoaded) {
+                                  List<LogisticsAssignee> assignees, boolean assigneesLoaded,
+                                  List<ExceptionAssignee> exceptionAssignees,
+                                  boolean exceptionAssigneesLoaded) {
             this.scope = scope;
             this.assignableNames = Map.copyOf(assignableNames);
             this.assignees = List.copyOf(assignees);
             this.assigneesLoaded = assigneesLoaded;
+            this.exceptionAssignees = List.copyOf(exceptionAssignees);
+            this.exceptionAssigneesLoaded = exceptionAssigneesLoaded;
         }
 
         @Override
@@ -166,6 +175,12 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
         @Override
         public List<LogisticsAssignee> findLogisticsAssignees(UUID tenantId, UUID workspaceId) {
             return assigneesLoaded && inTenantWorkspace(tenantId, workspaceId) ? assignees : List.of();
+        }
+
+        @Override
+        public List<ExceptionAssignee> findExceptionAssignees(UUID tenantId, UUID workspaceId) {
+            return exceptionAssigneesLoaded && inTenantWorkspace(tenantId, workspaceId)
+                    ? exceptionAssignees : List.of();
         }
 
         @Override

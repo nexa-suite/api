@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 /** Authenticated read boundary for replayable change-feed queries. */
+@org.springframework.modulith.NamedInterface(value = "change-feed-read", propagate = false)
 public interface ChangeFeedReadUseCase {
     long minimumId(CurrentAccessContext context);
 

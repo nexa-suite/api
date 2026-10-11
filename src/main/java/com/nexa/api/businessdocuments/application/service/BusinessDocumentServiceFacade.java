@@ -1,7 +1,7 @@
 package com.nexa.api.businessdocuments.application.service;
 
 import com.nexa.api.businessdocuments.application.model.BusinessDocumentModels;
-import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -13,8 +13,8 @@ import java.util.UUID;
 @Service
 @Profile("!test")
 public class BusinessDocumentServiceFacade {
-    private final BusinessDocumentPort port;
-    public BusinessDocumentServiceFacade(BusinessDocumentPort port) { this.port = port; }
+    private final BusinessDocumentUseCase port;
+    public BusinessDocumentServiceFacade(BusinessDocumentUseCase port) { this.port = port; }
     public BusinessDocumentModels.GenerationRequestView request(CurrentAccessContext c, String subjectType, UUID subjectId, String documentType, String format, String key) { return port.request(c, subjectType, subjectId, documentType, format, key); }
     public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext c, int page, int size, String type, String status) { return port.list(c, page, size, type, status); }
     public BusinessDocumentModels.DocumentView get(CurrentAccessContext c, UUID id) { return port.get(c, id); }

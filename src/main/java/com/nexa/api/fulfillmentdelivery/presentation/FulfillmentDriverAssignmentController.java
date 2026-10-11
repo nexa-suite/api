@@ -1,6 +1,6 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
-import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort.FulfillmentDriverAssignmentView;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentDriverAssignmentModels.AssignmentView;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,7 +46,7 @@ public final class FulfillmentDriverAssignmentController {
     public ResponseEntity<AssignmentResponse> current(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
-        Optional<FulfillmentDriverAssignmentView> current = requests.execute(context,
+        Optional<AssignmentView> current = requests.execute(context,
                 FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
                 composition -> composition.driverAssignments().current(context, fulfillmentId));
         return current.map(value -> ResponseEntity.ok().eTag(etag(value.fulfillmentVersion()))
@@ -62,7 +62,7 @@ public final class FulfillmentDriverAssignmentController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody AssignmentRequest request) {
-        FulfillmentDriverAssignmentView value = requests.execute(context,
+        AssignmentView value = requests.execute(context,
                 FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(),
                 composition -> composition.driverAssignments().assign(context, fulfillmentId, version(ifMatch),
                         request.physicalAllocationId(), request.physicalAllocationVersion(),
@@ -78,7 +78,7 @@ public final class FulfillmentDriverAssignmentController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody PlanChangeRequest request) {
-        FulfillmentDriverAssignmentView value = requests.execute(context,
+        AssignmentView value = requests.execute(context,
                 FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(),
                 composition -> composition.driverAssignments().changePlan(context, fulfillmentId, version(ifMatch),
                         request.expectedAssignmentId(), request.expectedAssignmentVersion(),
@@ -98,7 +98,7 @@ public final class FulfillmentDriverAssignmentController {
                 .map(FulfillmentDriverAssignmentController::response).toList());
     }
 
-    private static AssignmentResponse response(FulfillmentDriverAssignmentView value) {
+    private static AssignmentResponse response(AssignmentView value) {
         return new AssignmentResponse(value.id(), value.fulfillmentId(), value.fulfillmentVersion(),
                 value.physicalAllocationId(), value.physicalAllocationVersion(), value.responsibleMembershipId(),
                 value.responsibleDisplayName(), value.assignedAt(), value.plannedDispatchAt(),

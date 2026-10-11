@@ -1,8 +1,8 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
-import com.nexa.api.fulfillmentdelivery.application.port.MobileDeliveryContractPort;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
-import com.nexa.api.fulfillmentdelivery.application.service.MobileDeliveryContractService;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.MobileDeliveryContractOperations;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -40,10 +40,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class MobileDeliveryController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final MobileDeliveryContractService service;
+    private final FulfillmentDeliveryRequestRunner requests;
 
-    public MobileDeliveryController(MobileDeliveryContractService service) {
-        this.service = service;
+    public MobileDeliveryController(FulfillmentDeliveryRequestRunner requests) {
+        this.requests = requests;
     }
 
     @PostMapping("/deliveries/{deliveryId}/handoff-tokens")
@@ -81,14 +81,19 @@ public final class MobileDeliveryController {
             @Valid @RequestBody IssueHandoffRequest request) {
         if ("DISPATCH_HANDOFF".equals(request.purpose())) {
             if (request.attemptId() != null || request.assignmentId() == null) throw invalidHandoffRequest();
-            MobileDeliveryContractService.IssuedDispatchHandoff result = service.issueDispatchHandoff(
-                    context, deliveryId, request.assignmentId(), idempotencyKey);
+            MobileDeliveryContractOperations.IssuedDispatchHandoff result = requests.execute(context,
+                    FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                    composition -> composition.mobileDeliveryContracts().issueDispatchHandoff(
+                            context, deliveryId, request.assignmentId(), idempotencyKey));
             return ResponseEntity.status(result.token() == null ? 200 : 201)
                     .body(new IssuedDispatchHandoffResponse(result.purpose(), result.handoffId(), result.deliveryId(),
                             result.assignmentId(), result.deliveryVersion(), result.expiresAt(), result.status(), result.token()));
         }
         if (request.purpose() != null || request.assignmentId() != null) throw invalidHandoffRequest();
-        MobileDeliveryContractService.IssuedHandoff result = service.issue(context, deliveryId, request.attemptId(), idempotencyKey);
+        MobileDeliveryContractOperations.IssuedHandoff result = requests.execute(context,
+                FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                composition -> composition.mobileDeliveryContracts().issue(
+                        context, deliveryId, request.attemptId(), idempotencyKey));
         return ResponseEntity.status(result.token() == null ? 200 : 201).body(new IssuedHandoffResponse(
                 result.handoffId(), result.deliveryId(), result.attemptId(), result.expiresAt(), result.status(), result.token()));
     }
@@ -96,7 +101,7 @@ public final class MobileDeliveryController {
     @PostMapping("/delivery-handoff/validations")
     @Operation(operationId = "validateDeliveryBuyerHandoffToken", responses = {
             @ApiResponse(responseCode = "200", description = "Validated handoff identity",
-                    content = @Content(schema = @Schema(oneOf = {MobileDeliveryContractPort.HandoffValidation.class,
+                    content = @Content(schema = @Schema(oneOf = {MobileDeliveryContractOperations.HandoffValidation.class,
                             DispatchHandoffValidationResponse.class}, properties = {
                             @StringToClassMapItem(key = "purpose", value = String.class),
                             @StringToClassMapItem(key = "handoffId", value = UUID.class),
@@ -113,27 +118,33 @@ public final class MobileDeliveryController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @Valid @RequestBody HandoffValidationRequest request) {
         if ("DISPATCH_HANDOFF".equals(request.purpose())) {
-            MobileDeliveryContractPort.DispatchHandoffValidation result = service.validateDispatchHandoff(
-                    context, request.deliveryId(), request.assignmentId(), request.token());
+            MobileDeliveryContractOperations.DispatchHandoffValidation result = requests.execute(context,
+                    FulfillmentDeliveryRequestRunner.Requirements.driver(),
+                    composition -> composition.mobileDeliveryContracts().validateDispatchHandoff(
+                            context, request.deliveryId(), request.assignmentId(), request.token()));
             return new DispatchHandoffValidationResponse("DISPATCH_HANDOFF", result.handoffId(), result.deliveryId(),
                     result.assignmentId(), result.deliveryVersion(), result.expiresAt(), result.status());
         }
         if (request.purpose() != null || request.deliveryId() != null || request.assignmentId() != null) {
             throw invalidHandoffRequest();
         }
-        return service.validate(context, request.token());
+        return requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.none(),
+                composition -> composition.mobileDeliveryContracts().validate(context, request.token()));
     }
 
     @PostMapping("/deliveries/{deliveryId}/buyer-receipts")
     @Operation(operationId = "recordBuyerDeliveryReceipt")
-    public ResponseEntity<MobileDeliveryContractPort.BuyerReceipt> receipt(
+    public ResponseEntity<MobileDeliveryContractOperations.BuyerReceipt> receipt(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID deliveryId,
             @Parameter(name = "Idempotency-Key", required = true, description = "Stable key for retry-safe buyer receipt")
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody BuyerReceiptRequest request) {
-        MobileDeliveryContractPort.BuyerReceipt result = service.recordReceipt(context, deliveryId, request.token(),
-                request.decision(), request.acceptedQuantity(), request.reason(), idempotencyKey);
+        MobileDeliveryContractOperations.BuyerReceipt result = requests.execute(context,
+                FulfillmentDeliveryRequestRunner.Requirements.none(),
+                composition -> composition.mobileDeliveryContracts().recordReceipt(context, deliveryId,
+                        request.token(), request.decision(), request.acceptedQuantity(), request.reason(),
+                        idempotencyKey));
         return ResponseEntity.status(result.replayed() ? 200 : 201).body(result);
     }
 

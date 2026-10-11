@@ -153,7 +153,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     @Transactional(readOnly = true)
     public BusinessDocumentModels.DocumentView get(CurrentAccessContext context, UUID documentId) {
         read(context);
-        return jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().filter(value -> authorizedDocument(context, value.clientAccountId())).findFirst().orElseThrow(() -> new IllegalArgumentException("Business document not found"));
+        return jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().filter(value -> authorizedDocument(context, value.clientAccountId())).findFirst().orElseThrow(() -> new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document"));
     }
 
     @Transactional(readOnly = true)
@@ -596,7 +596,9 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
                 context.membershipId().value().toString(), new DocumentSubjectReference(
                         DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY, caseId.toString()));
-        if (!snapshot.subjectExists()) throw new IllegalArgumentException("Business document not found");
+        if (!snapshot.subjectExists()) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
     }
     private EvidenceScanRow loadEvidenceForWorker(UUID evidenceId) {
         RlsRequestScope.Scope scope = workerScope();

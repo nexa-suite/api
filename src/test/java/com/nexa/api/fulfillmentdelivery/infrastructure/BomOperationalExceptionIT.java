@@ -17,7 +17,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** PostgreSQL/HTTP coverage for Business Operations Manager coordination and authority boundaries. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-@TestPropertySource(properties = "spring.datasource.hikari.minimum-idle=1")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.buyer-wallet-read.enabled=true",
+        "nexa.tenant-business.buyer-wallet-recharge.enabled=true",
+        "nexa.tenant-business.purchase-request.enabled=true",
+        "nexa.tenant-business.catalog-detail-read.enabled=true",
+        "nexa.tenant-business.catalog-management.enabled=true",
+        "nexa.tenant-business.payments.enabled=true",
+        "nexa.tenant-business.fulfillment-delivery.enabled=true",
+        "nexa.tenant-business.warehouse-operations.enabled=true",
+        "nexa.tenant-business.local-fixtures.enabled=true",
+        "nexa.tenant-business.support-sales-order-read.enabled=true",
+        "nexa.tenant-business.business-documents.enabled=true",
+        "nexa.tenant-business.business-traceability.enabled=true",
+        "nexa.tenant-business.notifications.enabled=true",
+        "nexa.business-traceability.worker-delay-ms=3600000",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 class BomOperationalExceptionIT extends NexaWorkflowIntegrationSupport {
 
     @Test
@@ -50,7 +66,11 @@ class BomOperationalExceptionIT extends NexaWorkflowIntegrationSupport {
         MvcResult listed = mockMvc.perform(get(listPath).header("Authorization", bearer(managerToken)))
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(listed).get("exceptions").toString()).contains(exceptionId.toString());
-        long version = jdbc.queryForObject("select version from logistics.delivery where tenant_id=? "
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.operational_exception_case where id=?",
+                Integer.class, exceptionId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.operational_exception_case where id=?",
+                Integer.class, exceptionId)).isZero();
+        long version = tenantJdbc().queryForObject("select version from logistics.delivery where tenant_id=? "
                         + "and workspace_id=? and id=?", Long.class, UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), delivery.deliveryId());
 
@@ -76,7 +96,7 @@ class BomOperationalExceptionIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "bom-block-resolution-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Gate reported to dispatch\"}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXCEPTION_OUTCOME_NOT_AUTHORIZED"));
-        String deliveryStatus = jdbc.queryForObject("select status from logistics.delivery where id=?", String.class,
+        String deliveryStatus = tenantJdbc().queryForObject("select status from logistics.delivery where id=?", String.class,
                 delivery.deliveryId());
         assertThat(deliveryStatus).isEqualTo("IN_TRANSIT");
     }
@@ -89,11 +109,11 @@ class BomOperationalExceptionIT extends NexaWorkflowIntegrationSupport {
         UUID driverMembershipId = UUID.fromString(membershipId(LOGISTICS_EMAIL));
         UUID userId = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
                 UUID.class, driverMembershipId);
-        jdbc.update("update logistics.dispatch_order set status='IN_ROUTE',version=version+1,updated_at=current_timestamp where id=?",
+        tenantJdbc().update("update logistics.dispatch_order set status='IN_ROUTE',version=version+1,updated_at=current_timestamp where id=?",
                 deliveryId);
-        jdbc.update("update logistics.delivery set status='IN_TRANSIT',version=version+1,updated_at=current_timestamp where id=?",
+        tenantJdbc().update("update logistics.delivery set status='IN_TRANSIT',version=version+1,updated_at=current_timestamp where id=?",
                 deliveryId);
-        jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,"
+        tenantJdbc().update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,"
                         + "operator_id,vehicle_reference,route_name,assigned_at,actor_membership_id) values (?,?,?,?,?,?,?,?,current_timestamp,?)",
                 UUID.randomUUID(), tenant, workspace, deliveryId, driverMembershipId, userId, "VAN-TEST", "ROUTE-TEST", driverMembershipId);
         String token = accessToken(LOGISTICS_EMAIL, "PLATFORM");

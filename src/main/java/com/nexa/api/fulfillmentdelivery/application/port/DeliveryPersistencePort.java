@@ -20,6 +20,8 @@ import java.util.UUID;
 public interface DeliveryPersistencePort {
     DeliveryView find(UUID tenantId, UUID workspaceId, UUID deliveryId);
 
+    Optional<PodView> findPodByDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId);
+
     DeliveryView transition(TransitionRequest request);
 
     DeliveryOutcomeResult recordAttempt(AttemptRequest request);

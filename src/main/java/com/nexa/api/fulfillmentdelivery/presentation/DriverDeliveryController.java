@@ -6,7 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.P
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ProofOfDeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
-import com.nexa.api.fulfillmentdelivery.application.service.FulfillmentLifecycleService;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentLifecycleModels;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.fulfillmentdelivery.domain.model.delivery.DeliveryAttemptOutcome;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -87,10 +87,10 @@ public final class DriverDeliveryController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody AttemptOutcomeRequest request) {
-        FulfillmentLifecycleService.AttemptCommand command = new FulfillmentLifecycleService.AttemptCommand(
+        FulfillmentLifecycleModels.AttemptCommand command = new FulfillmentLifecycleModels.AttemptCommand(
                 outcome(request.outcome()), request.failureReason(), request.notes(), request.attemptedAt(),
                 request.lines() == null ? List.of() : request.lines().stream().map(line ->
-                        new FulfillmentLifecycleService.AttemptLineCommand(line.fulfillmentLineId(), line.skuId(),
+                        new FulfillmentLifecycleModels.AttemptLineCommand(line.fulfillmentLineId(), line.skuId(),
                                 line.attemptedQuantity(), line.deliveredQuantity(), line.rejectedQuantity(),
                                 line.cancelledQuantity(), line.unit())).toList());
         FulfillmentModels.DeliveryOutcomeResult value = requests.execute(context,
@@ -126,7 +126,7 @@ public final class DriverDeliveryController {
             @Valid @RequestBody ProofOfDeliveryCreateRequest request) {
         ProofOfDeliveryView value = requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.driver(),
                 composition -> composition.driverDeliveries().createProofOfDelivery(context, deliveryId, attemptId,
-                        version(ifMatch), key, new FulfillmentLifecycleService.DriverProofCommand(
+                        version(ifMatch), key, new FulfillmentLifecycleModels.DriverProofCommand(
                                 request.receiverName(), request.capturedAt(), request.notes())));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);

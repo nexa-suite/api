@@ -6,7 +6,6 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnav
 import com.nexa.api.businesstraceability.application.model.AuditModels.AuditEventView;
 import com.nexa.api.businesstraceability.application.model.AuditModels.AuditPage;
 import com.nexa.api.businesstraceability.application.port.in.AuditViewerUseCase;
-import com.nexa.api.businesstraceability.application.service.AuditViewerService;
 import com.nexa.api.businesstraceability.tenantdatabase.TenantAuditViewerQueryFactory;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -40,8 +39,7 @@ public final class TenantBoundBusinessTraceabilityUseCase implements AuditViewer
             java.util.function.Function<AuditViewerUseCase, T> work) {
         Objects.requireNonNull(context, "Verified Tenant access context is required");
         try {
-            return router.inTransaction(context,
-                    jdbc -> work.apply(new AuditViewerService(queries.bindTo(jdbc))));
+            return router.inTransaction(context, jdbc -> work.apply(queries.bindUseCaseTo(jdbc)));
         } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                  | DataAccessException | CannotCreateTransactionException unavailable) {
             throw new TechnicalFailureException(TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE,

@@ -2,29 +2,52 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.businesstraceability.tenantdatabase.TenantBusinessTraceabilityCommandsFactory;
+import com.nexa.api.businesstraceability.tenantdatabase.TenantBusinessTraceabilityBindingsPort;
 import com.nexa.api.businesstraceability.tenantdatabase.TenantBusinessTraceabilityWorkerFactory;
 import com.nexa.api.bootstrap.runtime.events.JdbcCanonicalOutboxAdapter;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Composes the BC-11 commands and shared outbox against the exact JDBC session supplied by the Tenant router.
  * Call only from that router callback; this has no central-data-source fallback.
  */
 @Component
-public final class TenantBusinessTraceabilityBindingsFactory {
+public final class TenantBusinessTraceabilityBindingsFactory implements TenantBusinessTraceabilityBindingsPort {
     private final TenantBusinessTraceabilityCommandsFactory commandsFactory;
-    private final TenantBusinessTraceabilityWorkerFactory workerFactory;
+    private final Supplier<TenantBusinessTraceabilityWorkerFactory> workerFactory;
+
+    @Autowired
+    public TenantBusinessTraceabilityBindingsFactory(TenantBusinessTraceabilityCommandsFactory commandsFactory,
+            ObjectProvider<TenantBusinessTraceabilityWorkerFactory> workerFactory) {
+        this(commandsFactory, workerFactory::getIfAvailable);
+    }
 
     public TenantBusinessTraceabilityBindingsFactory(TenantBusinessTraceabilityCommandsFactory commandsFactory,
             TenantBusinessTraceabilityWorkerFactory workerFactory) {
-        this.commandsFactory = Objects.requireNonNull(commandsFactory, "Tenant traceability factory is required");
-        this.workerFactory = Objects.requireNonNull(workerFactory, "Tenant traceability worker factory is required");
+        this(commandsFactory, requiredWorkerFactory(workerFactory));
     }
 
+    private static Supplier<TenantBusinessTraceabilityWorkerFactory> requiredWorkerFactory(
+            TenantBusinessTraceabilityWorkerFactory workerFactory) {
+        TenantBusinessTraceabilityWorkerFactory required = Objects.requireNonNull(workerFactory,
+                "Tenant traceability worker factory is required");
+        return () -> required;
+    }
+
+    private TenantBusinessTraceabilityBindingsFactory(TenantBusinessTraceabilityCommandsFactory commandsFactory,
+            Supplier<TenantBusinessTraceabilityWorkerFactory> workerFactory) {
+        this.commandsFactory = Objects.requireNonNull(commandsFactory, "Tenant traceability factory is required");
+        this.workerFactory = Objects.requireNonNull(workerFactory, "Tenant traceability worker provider is required");
+    }
+
+    @Override
     public Bindings bindTo(JdbcTemplate tenantJdbc) {
         JdbcTemplate jdbc = Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required");
         CanonicalOutboxPort tenantOutbox = new JdbcCanonicalOutboxAdapter(jdbc);
@@ -35,10 +58,15 @@ public final class TenantBusinessTraceabilityBindingsFactory {
 
     public WorkerBindings bindWorker(JdbcTemplate tenantJdbc) {
         Bindings owner = bindTo(tenantJdbc);
-        return new WorkerBindings(workerFactory.bindTo(tenantJdbc, owner.commands()));
+        TenantBusinessTraceabilityWorkerFactory worker = workerFactory.get();
+        if (worker == null) {
+            throw new IllegalStateException("Tenant traceability worker is unavailable in this runtime profile");
+        }
+        return new WorkerBindings(worker.bindTo(tenantJdbc, owner.commands()));
     }
 
-    public record Bindings(BusinessTraceabilityCommands commands, CanonicalOutboxPort canonicalOutbox) {
+    public record Bindings(BusinessTraceabilityCommands commands, CanonicalOutboxPort canonicalOutbox)
+            implements TenantBusinessTraceabilityBindingsPort.Bindings {
         public Bindings {
             Objects.requireNonNull(commands, "Tenant traceability commands are required");
             Objects.requireNonNull(canonicalOutbox, "Tenant canonical outbox port is required");

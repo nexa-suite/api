@@ -23,6 +23,8 @@ import java.util.UUID;
 @Component
 @Profile("local")
 @ConditionalOnProperty(name = "nexa.tenant-business.business-traceability.enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "nexa.tenant-business.fulfillment-delivery", name = "enabled",
+        havingValue = "true")
 public final class TenantFulfillmentReadyDispatchConsumer implements TenantOutboxEventConsumer {
     private static final String EVENT_TYPE = "FULFILLMENT_READY";
     private static final String CONSUMER = "fulfillment-ready-dispatch-v1";
@@ -70,7 +72,7 @@ public final class TenantFulfillmentReadyDispatchConsumer implements TenantOutbo
                         .findDispatchByReservation(current.tenantId(), current.workspaceId(), reservationId).isPresent()) {
                     return;
                 }
-                logistics.bindTo(jdbc, access).logistics().create(actor, reservationId.toString(), expectedVersion,
+                logistics.bindTo(jdbc, access).create(actor, reservationId.toString(), expectedVersion,
                         "outbox-dispatch-" + current.eventId());
             };
         };

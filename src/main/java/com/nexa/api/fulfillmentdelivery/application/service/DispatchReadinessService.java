@@ -34,7 +34,7 @@ import java.util.UUID;
 /** Reusable BC-06 current-state evaluation for dispatch-readiness queries and later gates. */
 @Service
 @Profile("!test")
-public class DispatchReadinessService {
+public class DispatchReadinessService implements com.nexa.api.fulfillmentdelivery.application.publicapi.DispatchReadinessQueries {
     private static final String PREPARED_FULFILLMENT = "PREPARED_FULFILLMENT";
     private static final String READY_FOR_DISPATCH = "READY_FOR_DISPATCH";
     private static final String ALLOCATED = "ALLOCATED";

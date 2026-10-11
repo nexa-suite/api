@@ -1,12 +1,14 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure;
 
-import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
+import com.nexa.api.support.TenantFinancialAdjustmentFixtureConfiguration;
+import com.nexa.api.support.TenantFinancialAdjustmentFixtureConfiguration.TenantFinancialAdjustmentFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
@@ -14,9 +16,6 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -24,10 +23,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Controlled transaction failure seam before final financial adjustment. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Import(TenantFinancialAdjustmentFixtureConfiguration.class)
 class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
-
-    @MockitoBean
-    FinancialAdjustmentCommands financialAdjustments;
+    @Autowired
+    TenantFinancialAdjustmentFixture financialAdjustmentFixture;
 
     @Test
     void failureBeforeFinalFinancialAdjustmentRollsBackDeliveryResolutionAndOutbox() throws Exception {
@@ -103,16 +102,15 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
         UUID workspace = UUID.fromString(workspaceId());
         UUID deliveryUuid = UUID.fromString(deliveryId);
         UUID fulfillmentUuid = UUID.fromString(fulfillmentId);
-        int attemptsBefore = jdbc.queryForObject("select count(*) from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
+        int attemptsBefore = tenantJdbc().queryForObject("select count(*) from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, tenant, workspace, deliveryUuid);
-        String deliveryStatusBefore = jdbc.queryForObject("select status from logistics.delivery where id=?", String.class, deliveryUuid);
-        BigDecimal unresolvedBefore = jdbc.queryForObject("select delivered_quantity + rejected_quantity + cancelled_quantity from logistics.fulfillment_line where fulfillment_id=?",
+        String deliveryStatusBefore = tenantJdbc().queryForObject("select status from logistics.delivery where id=?", String.class, deliveryUuid);
+        BigDecimal unresolvedBefore = tenantJdbc().queryForObject("select delivered_quantity + rejected_quantity + cancelled_quantity from logistics.fulfillment_line where fulfillment_id=?",
                 BigDecimal.class, fulfillmentUuid);
-        int outboxBefore = jdbc.queryForObject("select count(*) from integration.outbox_event where tenant_id=? and workspace_id=? and aggregate_id=?",
+        int outboxBefore = tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? and workspace_id=? and aggregate_id=?",
                 Integer.class, tenant, workspace, deliveryUuid);
 
-        doThrow(new IllegalStateException("failure-injection-before-financial-adjustment"))
-                .when(financialAdjustments).postFinalQuantityAdjustment(any(FinancialAdjustmentCommands.Request.class));
+        financialAdjustmentFixture.failNextFinalAdjustment();
 
         mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/attempts")
                         .header("Authorization", "Bearer " + logistics).header("If-Match", deliveryEtag)
@@ -123,14 +121,14 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
                                 + "\",\"attemptedQuantity\":1,\"deliveredQuantity\":0,\"rejectedQuantity\":1,\"cancelledQuantity\":0,\"unit\":\"UNIT\"}]}"))
                 .andExpect(status().isInternalServerError());
 
-        verify(financialAdjustments).postFinalQuantityAdjustment(any(FinancialAdjustmentCommands.Request.class));
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
+        assertThat(financialAdjustmentFixture.failureWasTriggered()).isTrue();
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",
                 Integer.class, tenant, workspace, deliveryUuid)).isEqualTo(attemptsBefore);
-        assertThat(jdbc.queryForObject("select status from logistics.delivery where id=?", String.class, deliveryUuid))
+        assertThat(tenantJdbc().queryForObject("select status from logistics.delivery where id=?", String.class, deliveryUuid))
                 .isEqualTo(deliveryStatusBefore);
-        assertThat(jdbc.queryForObject("select delivered_quantity + rejected_quantity + cancelled_quantity from logistics.fulfillment_line where fulfillment_id=?",
+        assertThat(tenantJdbc().queryForObject("select delivered_quantity + rejected_quantity + cancelled_quantity from logistics.fulfillment_line where fulfillment_id=?",
                 BigDecimal.class, fulfillmentUuid)).isEqualByComparingTo(unresolvedBefore);
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where tenant_id=? and workspace_id=? and aggregate_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? and workspace_id=? and aggregate_id=?",
                 Integer.class, tenant, workspace, deliveryUuid)).isEqualTo(outboxBefore);
     }
 
@@ -186,7 +184,7 @@ class DeliveryFinancialTransactionRollbackIT extends NexaWorkflowIntegrationSupp
     private void ensureBackingWarehouseGrants(String salesOrderId) throws Exception {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        var warehouseIds = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+        var warehouseIds = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
                         + "join warehouse.inventory_backing_position p on p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.backing_line_id=l.id "
