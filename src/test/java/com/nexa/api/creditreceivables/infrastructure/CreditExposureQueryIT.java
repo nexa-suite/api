@@ -25,9 +25,9 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
         ensureCreditAccount(accountId, tenantId, workspaceId, "PEN");
 
         try {
-            jdbc.update("update payments.credit_account set credit_limit=1000.00,credit_exposure=125.00,reserved_exposure=75.00,status='ACTIVE',version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
+            tenantJdbc().update("update payments.credit_account set credit_limit=1000.00,credit_exposure=125.00,reserved_exposure=75.00,status='ACTIVE',version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                     tenantId, workspaceId, accountId);
-            BigDecimal receivables = jdbc.queryForObject("select coalesce(sum(amount+coalesce(adjustment_total,0)-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN' and status in ('OPEN','PARTIALLY_PAID','OVERDUE')",
+            BigDecimal receivables = tenantJdbc().queryForObject("select coalesce(sum(amount+coalesce(adjustment_total,0)-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN' and status in ('OPEN','PARTIALLY_PAID','OVERDUE')",
                     BigDecimal.class, tenantId, workspaceId, accountId);
 
             String sales = accessToken(SALES_EMAIL, "PLATFORM");
@@ -67,7 +67,7 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
     }
 
     private CreditAccountState creditAccount(UUID clientAccountId, UUID tenantId, UUID workspaceId, String currency) {
-        return jdbc.query("select id,credit_limit,credit_exposure,reserved_exposure,status,version,created_at,updated_at from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+        return tenantJdbc().query("select id,credit_limit,credit_exposure,reserved_exposure,status,version,created_at,updated_at from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
                         (rs, ignored) -> new CreditAccountState(rs.getObject("id", UUID.class), rs.getBigDecimal("credit_limit"),
                                 rs.getBigDecimal("credit_exposure"), rs.getBigDecimal("reserved_exposure"), rs.getString("status"),
                                 rs.getLong("version"), rs.getTimestamp("created_at"), rs.getTimestamp("updated_at")),
@@ -76,7 +76,7 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
     }
 
     private void ensureCreditAccount(UUID clientAccountId, UUID tenantId, UUID workspaceId, String currency) {
-        jdbc.update("insert into payments.credit_account (id,tenant_id,workspace_id,client_account_id,currency,credit_limit,status,version,created_at,updated_at) "
+        tenantJdbc().update("insert into payments.credit_account (id,tenant_id,workspace_id,client_account_id,currency,credit_limit,status,version,created_at,updated_at) "
                         + "select md5(c.id::text || ':' || ?)::uuid,c.tenant_id,c.workspace_id,c.id,?,c.credit_limit,'ACTIVE',0,current_timestamp,current_timestamp "
                         + "from sales.client_account c where c.tenant_id=? and c.workspace_id=? and c.id=? "
                         + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
@@ -85,11 +85,11 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
 
     private void restoreCreditAccount(UUID clientAccountId, UUID tenantId, UUID workspaceId, CreditAccountState original) {
         if (original == null) {
-            jdbc.update("delete from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
+            tenantJdbc().update("delete from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                     tenantId, workspaceId, clientAccountId);
             return;
         }
-        jdbc.update("update payments.credit_account set credit_limit=?,credit_exposure=?,reserved_exposure=?,status=?,version=?,created_at=?,updated_at=? where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
+        tenantJdbc().update("update payments.credit_account set credit_limit=?,credit_exposure=?,reserved_exposure=?,status=?,version=?,created_at=?,updated_at=? where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                 original.limit(), original.exposure(), original.reserved(), original.status(), original.version(), original.createdAt(), original.updatedAt(),
                 tenantId, workspaceId, clientAccountId);
     }

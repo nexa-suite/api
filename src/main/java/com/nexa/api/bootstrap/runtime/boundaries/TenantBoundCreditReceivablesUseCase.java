@@ -9,8 +9,6 @@ import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentC
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentSource;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentUseCase;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
-import com.nexa.api.creditreceivables.application.service.CreditExposureApplicationService;
-import com.nexa.api.creditreceivables.application.service.FinancialAdjustmentApplicationService;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantCreditAccountAdapterFactory;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
@@ -67,8 +65,8 @@ public final class TenantBoundCreditReceivablesUseCase
             String currency) {
         requireScope(context);
         context.requirePermission(PermissionKey.CLIENT_READ);
-        return inTenant(context, bindings -> new CreditExposureApplicationService(
-                bindings.customerAccounts(), bindings.creditExposure()).read(context, clientAccountId, currency));
+        return inTenant(context, bindings -> creditAdapters.createCreditExposureUseCase(bindings)
+                .read(context, clientAccountId, currency));
     }
 
     @Override
@@ -76,8 +74,8 @@ public final class TenantBoundCreditReceivablesUseCase
         requireScope(context);
         context.requireSurface(Surface.PORTAL);
         context.requirePermission(PermissionKey.PAYMENT_READ);
-        return inTenant(context, bindings -> new CreditExposureApplicationService(
-                bindings.customerAccounts(), bindings.creditExposure()).readBuyer(context, currency));
+        return inTenant(context, bindings -> creditAdapters.createCreditExposureUseCase(bindings)
+                .readBuyer(context, currency));
     }
 
     @Override
@@ -86,8 +84,8 @@ public final class TenantBoundCreditReceivablesUseCase
             FinancialAdjustmentUseCase.PostPaymentCommand command) {
         requireScope(context);
         context.requirePermission(PermissionKey.CLIENT_CREDIT_MANAGE);
-        return inTenant(context, bindings -> new FinancialAdjustmentApplicationService(
-                bindings.financialAdjustments(), clock).postPostPayment(context, receivableId,
+        return inTenant(context, bindings -> creditAdapters.createFinancialAdjustmentUseCase(bindings, clock)
+                .postPostPayment(context, receivableId,
                 expectedReceivableVersion, idempotencyKey, command));
     }
 
