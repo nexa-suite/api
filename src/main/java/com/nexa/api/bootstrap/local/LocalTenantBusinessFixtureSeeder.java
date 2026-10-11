@@ -4,7 +4,6 @@ import com.nexa.api.bootstrap.local.seed.ClientAccountSeedLoader;
 import com.nexa.api.bootstrap.local.seed.ClientAccountSeedRecord;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogLocalFixtureProjection;
 import com.nexa.api.customerbuyerrelationships.contract.Address;
-import com.nexa.api.customerbuyerrelationships.domain.model.clientaccount.ClientAccountAddress;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -101,7 +100,7 @@ public final class LocalTenantBusinessFixtureSeeder {
 				throw new IllegalStateException("Selected Buyer seed account has no reviewed delivery address");
 			}
 			BuyerAddress persisted = existing.getFirst();
-			rehydrateBuyerAddress(persisted, addressId, tenantId, workspaceId, accountId);
+			validateBuyerAddress(persisted, addressId, tenantId, workspaceId, accountId);
 			return;
 		}
 		Address seedAddress = addressForBuyerSeed(seed);
@@ -149,7 +148,7 @@ public final class LocalTenantBusinessFixtureSeeder {
 			if (existing.size() != 1) throw new IllegalStateException("Repaired buyer address could not be reloaded");
 			row = existing.getFirst();
 		}
-		rehydrateBuyerAddress(row, addressId, tenantId, workspaceId, accountId);
+		validateBuyerAddress(row, addressId, tenantId, workspaceId, accountId);
 	}
 
 	static Address addressForBuyerSeed(ClientAccountSeedRecord seed) {
@@ -202,18 +201,17 @@ public final class LocalTenantBusinessFixtureSeeder {
 				&& "ACTIVE".equalsIgnoreCase(row.status()) && row.version() == 0;
 	}
 
-	private static void rehydrateBuyerAddress(BuyerAddress row, UUID addressId, UUID tenantId, UUID workspaceId,
+	private static void validateBuyerAddress(BuyerAddress row, UUID addressId, UUID tenantId, UUID workspaceId,
 			UUID accountId) {
-		if (!sameScope(row, addressId, tenantId, workspaceId, accountId)) {
+		if (!sameScope(row, addressId, tenantId, workspaceId, accountId)
+				|| row.label() == null || row.label().isBlank() || row.version() < 0) {
 			throw new IllegalStateException("Deterministic buyer address identity conflicts with existing data");
 		}
 		String roadType = row.roadType() == null ? "STREET" : row.roadType();
-		Address address = new Address(roadType, row.addressLine(), row.reference(), "PE", row.departmentCode(),
-				row.provinceCode(), row.districtCode(), row.recipientName(), row.recipientPhone(), roadType,
-				row.streetName(), row.streetNumber(), row.interior(), row.postalCode(), row.receivingInstructions(),
-				row.receivingHours(), row.latitude(), row.longitude(), row.placeId(), row.source());
-		ClientAccountAddress.rehydrate(row.id(), row.tenantId(), row.workspaceId(), row.clientAccountId().toString(),
-				row.label(), address, row.defaultAddress(), "ACTIVE".equalsIgnoreCase(row.status()), row.version());
+		new Address(roadType, row.addressLine(), row.reference(), "PE", row.departmentCode(), row.provinceCode(),
+				row.districtCode(), row.recipientName(), row.recipientPhone(), roadType, row.streetName(),
+				row.streetNumber(), row.interior(), row.postalCode(), row.receivingInstructions(), row.receivingHours(),
+				row.latitude(), row.longitude(), row.placeId(), row.source());
 	}
 
 	private void seedWarehouse(JdbcTemplate jdbc, UUID tenantId, UUID workspaceId, Instant now) {
