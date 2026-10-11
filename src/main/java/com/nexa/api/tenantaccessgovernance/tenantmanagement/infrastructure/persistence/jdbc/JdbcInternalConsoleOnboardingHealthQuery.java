@@ -4,6 +4,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.InternalConsoleOnboardingHealthQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatusQuery;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,7 @@ import java.util.UUID;
 
 /** Central read adapter for a bounded, non-sensitive onboarding health projection. */
 @Component
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public final class JdbcInternalConsoleOnboardingHealthQuery implements InternalConsoleOnboardingHealthQuery {
 	private final JdbcTemplate jdbc;
 	private final TransactionTemplate transactions;

@@ -58,6 +58,10 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	@Timeout(value = 300, unit = TimeUnit.SECONDS)
 	void centralBindingCasCoversReadyFailureRetryAndIdempotentResume(@TempDir Path temporaryDirectory) throws Exception {
 		Files.setPosixFilePermissions(temporaryDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
+		Path resolvedRepositoryRoot = REPOSITORY_ROOT.toRealPath();
+		Path resolvedProvisioner = PROVISIONER.toRealPath();
+		assertThat(resolvedProvisioner).isEqualTo(
+				resolvedRepositoryRoot.resolve("ops/scripts/provision-local-tenant-database.sh"));
 		migrateCentral();
 		Path centralConfig = temporaryDirectory.resolve("central.config");
 		writePrivateFile(centralConfig, "container-id=" + CENTRAL.getContainerId() + "\n");
@@ -75,7 +79,10 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 					readyTenantId, readyWorkspaceId, readyPort, false);
 			assertProvisionSucceeded(initial);
 			Binding ready = readBinding(readyTenantId);
-			assertThat(ready.lifecycleState()).isEqualTo("READY");
+			assertThat(ready.lifecycleState())
+					.as("binding after provisioner exit; script=%s, exit=%s, output tail:\n%s", resolvedProvisioner,
+							initial.exitCode(), redactedProvisionerDiagnostic(initial.output()))
+					.isEqualTo("READY");
 			assertThat(ready.version()).isEqualTo(1);
 			assertThat(ready.databaseIdentity()).isEqualTo(UUID.fromString(readPrivateValue(
 					readyStateDirectory.resolve(readyTenantId.toString()).resolve("state.properties"), "database-identity")));
@@ -129,7 +136,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 					retryWorkspaceId, retryDatabaseIdentity);
 
 			writePrivateFile(retryTenantDirectory.resolve("credentials.properties"), runtimeCredentials(
-					retryPort, retryCredentialReference, RUNTIME_PASSWORD));
+					retryPort, retryTenantId, retryCredentialReference, RUNTIME_PASSWORD));
 			ProcessResult retry = runProvisioner(temporaryDirectory, centralConfig, retryStateDirectory,
 					retryTenantId, retryWorkspaceId, retryPort, true);
 			assertProvisionSucceeded(retry);
@@ -153,12 +160,12 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 
 	private static void migrateCentral() {
 		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
-				.locations("classpath:db/migration").target("152").load().migrate();
+				.locations("classpath:db/migration").target("162").load().migrate();
 		try (Connection connection = centralConnection();			 PreparedStatement statement = connection.prepareStatement(
 					"SELECT max(version::INTEGER) FROM flyway_schema_history WHERE success = TRUE");
 				 ResultSet result = statement.executeQuery()) {
-			if (!result.next() || result.getInt(1) != 152) {
-				throw new IllegalStateException("The disposable central database did not reach V152");
+			if (!result.next() || result.getInt(1) != 162) {
+				throw new IllegalStateException("The disposable central database did not reach V162");
 			}
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not verify disposable central migration version", exception);
@@ -238,9 +245,10 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		writePrivateFile(tenantDirectory.resolve("migrator.properties"), "jdbc-url=" + jdbcUrl(port)
 				+ "\nusername=nexa_migrator\npassword=" + MIGRATOR_PASSWORD + "\n");
 		writePrivateFile(tenantDirectory.resolve("credentials.properties"), runtimeCredentials(
-				port, credentialReference, WRONG_RUNTIME_PASSWORD));
+				port, tenantId, credentialReference, WRONG_RUNTIME_PASSWORD));
 		writePrivateFile(tenantDirectory.resolve("policy-snapshot-writer.properties"),
-				"jdbc-url=" + jdbcUrl(port) + "\nusername=nexa_policy_snapshot_writer\npassword="
+				"jdbc-url=" + jdbcUrl(port) + "\napi-jdbc-url=jdbc:postgresql://tenant-db-" + tenantId
+						+ ":5432/nexa_tenant_business\nusername=nexa_policy_snapshot_writer\npassword="
 						+ POLICY_SNAPSHOT_WRITER_PASSWORD + "\n");
 		writePrivateFile(tenantDirectory.resolve("state.properties"), "tenant-id=" + tenantId
 				+ "\nworkspace-id=" + workspaceId + "\ndatabase-identity=" + databaseIdentity
@@ -251,8 +259,9 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		return tenantDirectory;
 	}
 
-	private static String runtimeCredentials(int port, String reference, String password) {
+	private static String runtimeCredentials(int port, UUID tenantId, String reference, String password) {
 		return "credential-secret-reference=" + reference + "\njdbc-url=" + jdbcUrl(port)
+				+ "\napi-jdbc-url=jdbc:postgresql://tenant-db-" + tenantId + ":5432/nexa_tenant_business"
 				+ "\nusername=nexa_runtime\npassword=" + password + "\n";
 	}
 
@@ -261,7 +270,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		Path tenantDirectory = stateRoot.resolve(tenantId.toString());
 		LocalTenantBusinessDatabaseCredentialsProvider provider =
 				new LocalTenantBusinessDatabaseCredentialsProvider(stateRoot);
-		var credentials = provider.requireCredentials(binding.credentialSecretReference());
+		var credentials = provider.requireHostCredentials(binding.credentialSecretReference());
 		try (Connection connection = DriverManager.getConnection(credentials.jdbcUrl(), credentials.username(),
 				credentials.password());
 				PreparedStatement identity = connection.prepareStatement("""
@@ -293,7 +302,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			Binding binding) throws Exception {
 		LocalTenantBusinessDatabasePolicySnapshotWriterCredentialsProvider provider =
 				new LocalTenantBusinessDatabasePolicySnapshotWriterCredentialsProvider(stateRoot);
-		var credentials = provider.requireWriterCredentials(new TenantId(tenantId), binding.databaseIdentity());
+		var credentials = provider.requireHostWriterCredentials(new TenantId(tenantId), binding.databaseIdentity());
 		try (Connection connection = DriverManager.getConnection(credentials.jdbcUrl(), credentials.username(),
 				credentials.password());
 			 PreparedStatement privileges = connection.prepareStatement("""
@@ -422,6 +431,20 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 				.replace(RUNTIME_PASSWORD, "[redacted]")
 				.replace(POLICY_SNAPSHOT_WRITER_PASSWORD, "[redacted]")
 				.replace(WRONG_RUNTIME_PASSWORD, "[redacted]");
+	}
+
+	private static String redactedProvisionerDiagnostic(String output) {
+		String sanitized = redact(output)
+				.replaceAll("(?i)(password|passwd|secret|token|authorization)(\\s*[:=]\\s*)[^\\s,;]+",
+						"$1$2[redacted]")
+				.replaceAll("(?i)(jdbc:postgresql://[^/@\\s:]+:)[^@/\\s]+@", "$1[redacted]@");
+		if (sanitized.length() > 4_000) {
+			int start = sanitized.length() - 4_000;
+			int nextLine = sanitized.indexOf('\n', start);
+			if (nextLine >= 0) start = nextLine + 1;
+			sanitized = sanitized.substring(start);
+		}
+		return sanitized;
 	}
 
 	private static int availableLoopbackPort() throws IOException {

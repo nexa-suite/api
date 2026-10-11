@@ -9,6 +9,7 @@ import com.nexa.api.tenantaccessgovernance.support.application.publicapi.Support
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportSalesOrderReadQueryFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Service
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public class SupportConsoleService implements SupportConsoleUseCase {
 	private static final Duration MAX_GRANT_DURATION = Duration.ofSeconds(3_600);
 	private static final int MAX_LIST_LIMIT = 100;

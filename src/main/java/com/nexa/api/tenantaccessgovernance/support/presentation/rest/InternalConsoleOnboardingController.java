@@ -3,6 +3,7 @@ package com.nexa.api.tenantaccessgovernance.support.presentation.rest;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.InternalOperatorContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.InternalConsoleOnboardingHealth;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.InternalConsoleOnboardingHealthQuery;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -15,6 +16,7 @@ import java.util.List;
 
 /** Bounded onboarding health for authenticated internal operators; no contact or locator data. */
 @RestController
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 @RequestMapping("/api/v1/internal/console/onboarding")
 @Tag(name = "Internal onboarding console")
 public final class InternalConsoleOnboardingController {

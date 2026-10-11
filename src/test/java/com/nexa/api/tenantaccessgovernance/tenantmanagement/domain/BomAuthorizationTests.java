@@ -13,8 +13,9 @@ class BomAuthorizationTests {
         EffectiveAuthorization authority=EffectiveAuthorization.fixed(Set.of(MembershipRole.BUSINESS_OPERATIONS_MANAGER),3);
         assertThat(authority.permissionCodes()).containsExactlyInAnyOrder(
                 "delivery.exception.read","delivery.exception.coordinate","notification.read","notification.manage_preferences",
-                "client.credit.configuration.manage");
+                "client.credit.configuration.manage", "payment.reconcile");
         assertThat(authority.allows(PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE)).isTrue();
+        assertThat(authority.allows(PermissionKey.PAYMENT_RECONCILE)).isTrue();
         assertThat(authority.allows(PermissionKey.CLIENT_CREDIT_MANAGE)).isFalse();
         assertThat(authority.allows(PermissionKey.DELIVERY_EXECUTION_HOLD_DISPOSE)).isFalse();
         assertThat(authority.allows(PermissionKey.INVENTORY_RELEASE)).isFalse();

@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.pers
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatusQuery;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -14,6 +15,7 @@ import org.springframework.security.access.AccessDeniedException;
 
 /** Central read adapter; the caller must place it behind explicit internal-operator authentication. */
 @Component
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public final class JdbcTenantBusinessDatabaseProvisioningStatusQuery
         implements TenantBusinessDatabaseProvisioningStatusQuery {
     private final JdbcTemplate jdbc;

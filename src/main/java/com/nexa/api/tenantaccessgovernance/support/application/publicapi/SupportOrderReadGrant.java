@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /** Immutable BC01 grant value; BC04 must validate exact persisted scope before and after each read. */
+@org.springframework.modulith.NamedInterface(value = "support-order-read", propagate = false)
 public final class SupportOrderReadGrant {
 	private final UUID grantId;
 	private final UUID requesterOperatorId;

@@ -38,6 +38,17 @@ Generation fails on an external FK outside these explicit mappings. The four
 reference tables are loaded as read-only local projections; their logical
 values and counts are checked against the published central migration state.
 V3 creates schema only and contains no normal-Tenant business seed.
+The construction target for mutable business/master relations in the generated
+BC02–BC11 scope is at least 3NF, using documented candidate keys and dependencies;
+apply BCNF/4NF/5NF decomposition only where those dependencies justify lossless
+reconstruction, and keep immutable evidence snapshots distinct from mutable
+master data. Repeating immutable Tenant and Workspace keys on child rows is a
+narrow scope-consistency exception where needed for PostgreSQL RLS policy
+performance: `USING` and `WITH CHECK` must preserve owner/child agreement. This
+changes neither the eleven Bounded Context ownerships nor Tenant as the maximum
+data-isolation boundary, and does not permit cross-Tenant reads. This guidance
+describes only the opt-in generated baseline, not a global schema-normalization
+certification or production cutover.
 
 V3 preserves V83's `sales.assign_purchase_request_expiry()` definition, whose
 central implementation reads
@@ -52,6 +63,13 @@ scope anchor and is protected by RLS. `nexa_runtime` receives SELECT only. The
 separate `nexa_policy_snapshot_writer` login receives SELECT on the identity,
 anchor and snapshot plus INSERT/UPDATE on the snapshot; its credentials must be
 resolved separately from the runtime secret reference.
+Additive V18 grants the isolated `nexa_business_traceability_worker` SELECT on
+only the snapshot's Tenant/Workspace, source-state/version, policy-days, and
+revision columns. Forced RLS still scopes that read to the verified worker
+Tenant/Workspace; the worker receives no snapshot write privilege. V18 also
+grants the worker only the SELECT predicate columns and UPDATE release fields
+on `warehouse.inventory_backing`, so approved-workflow expiry can release its
+backing within the same Tenant callback.
 
 BC01's public `OperationalSettingsAccess` query validates the central
 Tenant/Workspace pair without creating settings defaults. A present row returns

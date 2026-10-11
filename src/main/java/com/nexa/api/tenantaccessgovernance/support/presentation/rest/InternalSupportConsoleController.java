@@ -4,6 +4,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import com.nexa.api.tenantaccessgovernance.support.application.model.SupportRequestView;
 import com.nexa.api.tenantaccessgovernance.support.application.port.in.SupportConsoleUseCase;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportSalesOrderProjection;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import java.util.UUID;
 
 /** Internal-only console operations, authenticated by the verified operator principal. */
 @RestController
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 @RequestMapping("/api/v1/internal/console/support-requests")
 @Tag(name = "Internal support console")
 public final class InternalSupportConsoleController {

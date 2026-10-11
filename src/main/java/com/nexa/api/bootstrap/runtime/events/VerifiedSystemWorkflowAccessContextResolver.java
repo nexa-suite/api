@@ -8,6 +8,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Sur
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -15,6 +17,8 @@ import java.util.UUID;
 
 /** Resolves the persisted BC-01 SYSTEM_WORKFLOW actor for one exact Tenant/Workspace scope. */
 @Component
+@Profile("!test")
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public final class VerifiedSystemWorkflowAccessContextResolver {
     private final TenantEventContextQueryPort actors;
     private final ResolveCurrentAccessContextUseCase access;

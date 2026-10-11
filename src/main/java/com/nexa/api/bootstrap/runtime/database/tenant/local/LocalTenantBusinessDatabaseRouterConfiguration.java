@@ -14,7 +14,6 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSupp
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSupportSalesOrderReadQueryFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
-import com.nexa.api.tenantaccessgovernance.support.application.port.out.SupportRequestPersistencePort;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrantValidationPort;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportSalesOrderReadQueryFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,7 +25,6 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.file.Path;
-import java.time.Instant;
 
 /** Local-only router activated for explicit Tenant-bound business capabilities. */
 @Configuration(proxyBeanMethods = false)
@@ -81,12 +79,6 @@ public class LocalTenantBusinessDatabaseRouterConfiguration {
         return new TenantBusinessDatabaseRouter(authority,
                 new HikariTenantBusinessDatabaseDataSourceFactory(credentials, maximumPoolSize), maximumCachedPools,
                 requirements.schemaManifestDigest());
-    }
-
-    @Bean
-    SupportOrderReadGrantValidationPort localSupportOrderReadGrantValidationPort(
-            SupportRequestPersistencePort supportRequests) {
-        return grant -> supportRequests.isActive(grant, Instant.now());
     }
 
     @Bean(destroyMethod = "close")

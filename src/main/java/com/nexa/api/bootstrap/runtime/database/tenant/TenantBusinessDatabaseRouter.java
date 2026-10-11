@@ -181,16 +181,18 @@ public final class TenantBusinessDatabaseRouter implements AutoCloseable {
 
 		@Override
 		public void commit(TransactionStatus status) throws TransactionException {
-			boolean transactionOwner = status.isNewTransaction();
+			// Authority is revalidated before each new transaction. Once it has
+			// started, its leased route may finish even if the registry is rebound.
+			// A check after commit cannot prevent a write and would report an
+			// already durable result as a failed command.
 			delegate.commit(status);
-			if (transactionOwner) verifyBinding();
 		}
 
 		@Override
 		public void rollback(TransactionStatus status) throws TransactionException {
-			boolean transactionOwner = status.isNewTransaction();
+			// Preserve the original business failure after rollback; a subsequent
+			// phase performs its own authority check before borrowing the route.
 			delegate.rollback(status);
-			if (transactionOwner) verifyBinding();
 		}
 
 		private void verifyBinding() {

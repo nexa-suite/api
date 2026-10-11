@@ -97,6 +97,10 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
             assertThat(document.get("paths").has(path)).as("current mobile contract: %s", path).isTrue();
         }
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/handoff-tokens")).isTrue();
+        assertThat(document.at("/paths/~1api~1v1~1deliveries~1{deliveryId}~1pod/get/operationId").asText())
+                .isEqualTo("getCurrentDeliveryProofOfDelivery");
+        assertResponseSchemaRef(document, "/api/v1/deliveries/{deliveryId}/pod", "get", "200",
+                "#/components/schemas/PodView");
         assertThat(document.get("paths").has("/api/v1/delivery-handoff/validations")).isTrue();
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/buyer-receipts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions")).isTrue();

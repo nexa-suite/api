@@ -3,6 +3,8 @@ package com.nexa.api.tenantaccessgovernance.support.infrastructure.persistence;
 import com.nexa.api.tenantaccessgovernance.support.application.model.SupportRequestView;
 import com.nexa.api.tenantaccessgovernance.support.application.port.out.SupportRequestPersistencePort;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrant;
+import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrantValidationPort;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -16,7 +18,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort {
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
+public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort, SupportOrderReadGrantValidationPort {
 	private static final String COLUMNS = "id,tenant_id,workspace_id,resource_type,resource_id,"
 		+ "requested_by_operator_id,approved_by_operator_id,status,expires_at,created_at,version";
 	private final JdbcTemplate jdbc;
@@ -164,6 +167,12 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort 
 			""", Boolean.class, grant.grantId(), grant.requesterOperatorId(), grant.tenantId(), grant.workspaceId(),
 			grant.salesOrderId(), grant.expiresAt(), now);
 		return Boolean.TRUE.equals(active);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public boolean isActive(SupportOrderReadGrant grant) {
+		return isActive(grant, Instant.now());
 	}
 
 	private void appendAudit(SupportRequestView request, String action, String actorType, UUID actorId,

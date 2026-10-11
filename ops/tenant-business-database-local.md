@@ -95,11 +95,15 @@ these versions and capabilities:
 - V7 `wallet-purchase-request-tender`; V8 `fulfillment-dispatch-actor`.
 - V9 `buyer-wallet-provider-recharge`; V10 `buyer-wallet-recharge-event-outcomes`.
 - V11 `tenant-multiple-workspace-anchors`; V12 `tenant-business-documents-worker`.
-- V13 `tenant-payments-callback-worker`; V14 `tenant-business-traceability-worker`.
-- V15 `tenant-business-notification-projection`.
+- V13 and V21 `tenant-payments-callback-worker`; V14, V17, V18, V19, V20 and V23
+  `tenant-business-traceability-worker`.
+- V15 and V23 `tenant-business-notification-projection`; V16 `buyer-wallet-refunds`;
+  V22 `tenant-business`.
 
 V6 is intentionally absent. The manifest records the exact SQL asset for each
-required version; missing assets, unapplied versions, or a manifest digest
+required version. Central V162 `bound_tenant_push_delivery_retry_state` is a
+separate migration in the Modern central schema; this manifest applies Tenant
+V23 to the Tenant database. Missing assets, unapplied versions, or a manifest digest
 mismatch keep the Tenant binding out of `READY`. The CLI repeats these
 migration checks during `verify`, before the script can mark the binding
 `READY`. It then seeds and verifies the Tenant database identity and Workspace

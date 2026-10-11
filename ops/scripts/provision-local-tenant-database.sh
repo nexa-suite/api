@@ -66,7 +66,12 @@ SQL
 cleanup() {
 	local status=$?
 	trap - EXIT
-	if [[ "$status" -ne 0 ]]; then binding_failed || true; fi
+	if [[ "$BINDING_ACTIVE" == 1 ]]; then
+		[[ "$status" -ne 0 ]] || status=1
+		binding_failed || true
+	elif [[ "$status" -ne 0 ]]; then
+		binding_failed || true
+	fi
 	if [[ -n "${STAGING_DIRECTORY:-}" && -d "$STAGING_DIRECTORY" ]]; then rm -rf -- "$STAGING_DIRECTORY"; fi
 	if [[ -n "${LOCK_DIRECTORY:-}" && -d "$LOCK_DIRECTORY" ]]; then rmdir -- "$LOCK_DIRECTORY" 2>/dev/null || true; fi
 	exit "$status"
@@ -308,13 +313,22 @@ ensure_api_tenant_network() {
 verify_api_tenant_database_connection() {
 	docker run --rm --network "$TENANT_NETWORK_NAME" --read-only \
 		--mount "type=bind,src=$TENANT_DIRECTORY/runtime-password,dst=/run/secrets/runtime-password,readonly" \
-		--entrypoint /bin/sh postgres:18.4-alpine -ec '
-			export PGPASSWORD="$(cat /run/secrets/runtime-password)"
-			result="$(psql -X -qAt -v ON_ERROR_STOP=1 -h "$1" -U nexa_runtime -d nexa_tenant_business \
-				-c "SELECT 'ready' WHERE (SELECT count(*)=1 AND bool_and(singleton AND tenant_id='$2'::UUID AND database_identity='$3'::UUID) FROM nexa_platform.tenant_business_database_identity) AND EXISTS (SELECT 1 FROM nexa_platform.tenant_workspace_scope_anchor WHERE tenant_id='$2'::UUID AND workspace_id='$4'::UUID)"
-			)"
-			[[ "$result" == ready ]]
-		' sh "tenant-db-$TENANT_ID" "$TENANT_ID" "$DATABASE_IDENTITY" "$WORKSPACE_ID" \
+		--entrypoint /bin/sh postgres:18.4-alpine -ec "
+			export PGPASSWORD=\$(cat /run/secrets/runtime-password)
+			if ! result=\$(psql -X -qAt -v ON_ERROR_STOP=1 -h \"\$1\" -U nexa_runtime -d nexa_tenant_business \
+				-v tenant_id=\"\$2\" -v database_identity=\"\$3\" -v workspace_id=\"\$4\" <<'SQL'
+SELECT 'ready'
+WHERE (SELECT count(*)=1 AND bool_and(singleton AND tenant_id=:'tenant_id'::UUID
+       AND database_identity=:'database_identity'::UUID)
+       FROM nexa_platform.tenant_business_database_identity)
+  AND EXISTS (SELECT 1 FROM nexa_platform.tenant_workspace_scope_anchor
+              WHERE tenant_id=:'tenant_id'::UUID AND workspace_id=:'workspace_id'::UUID);
+SQL
+			); then
+				exit 1
+			fi
+			[[ \"\$result\" == ready ]] || exit 1
+		" sh "tenant-db-$TENANT_ID" "$TENANT_ID" "$DATABASE_IDENTITY" "$WORKSPACE_ID" \
 		>/dev/null 2>&1 || fail 'The UUID-bound Tenant network did not pass least-privilege runtime identity and Workspace readiness.'
 }
 run_cli() {
@@ -348,6 +362,37 @@ read_binding() {
 SELECT database_identity::TEXT || '|' || credential_secret_reference || '|' || lifecycle_state || '|' || version::TEXT
 FROM tenant_management.tenant_business_database_binding WHERE tenant_id=:'tenant_id'::UUID;
 SQL
+}
+read_binding_schema_manifest_digest() {
+	central_psql <<'SQL'
+SELECT coalesce(verified_schema_manifest_sha256, '')
+FROM tenant_management.tenant_business_database_binding WHERE tenant_id=:'tenant_id'::UUID;
+SQL
+}
+verify_ready_binding_unchanged() {
+	local verified
+	verified="$(central_psql <<'SQL'
+SELECT 'verified'
+ WHERE EXISTS (
+       SELECT 1 FROM tenant_management.tenant_business_database_binding binding
+        WHERE binding.tenant_id=:'tenant_id'::UUID
+          AND binding.database_identity=:'database_identity'::UUID
+          AND binding.credential_secret_reference=:'secret_reference'
+          AND binding.lifecycle_state='READY'
+          AND binding.version=:'expected_version'::BIGINT
+          AND binding.verified_schema_manifest_sha256=:'schema_manifest_digest'
+          AND binding.wallet_recharge_callback_credential_secret_reference=:'wallet_recharge_secret_reference'
+          AND binding.payment_callback_credential_secret_reference=:'payment_callback_secret_reference'
+   )
+   AND (:'task_guard'::BOOLEAN = FALSE OR EXISTS (
+       SELECT 1 FROM tenant_management.tenant_business_database_provisioning_task task
+        WHERE task.task_id=:'task_id'::UUID AND task.tenant_id=:'tenant_id'::UUID
+          AND task.workspace_id=:'workspace_id'::UUID AND task.status='LEASED'
+          AND task.claim_token=:'task_claim_token'::UUID AND task.lease_until>current_timestamp
+   ));
+SQL
+	)"
+	[[ "$verified" == verified ]] || fail 'The READY binding changed during idempotent verification.'
 }
 read_wallet_recharge_callback_reference() {
 	central_psql <<'SQL'
@@ -784,6 +829,7 @@ EOF
 
 verify_central_scope
 binding_snapshot="$(read_binding)"
+IDEMPOTENT_READY=0
 if [[ "$WORKSPACE_ANCHOR_ONLY" == 1 ]]; then
 	[[ -n "$binding_snapshot" ]] || fail 'The Tenant has no central database binding; refusing to provision a database from a Workspace anchor task.'
 	load_existing_state
@@ -852,7 +898,14 @@ if [[ -n "$binding_snapshot" ]]; then
 		fail 'The Tenant database volume is missing after creation began; inspect or restore it manually before retrying.'
 	fi
 	if [[ "$binding_state" == READY ]]; then
+		SCHEMA_MANIFEST_DIGEST="$(read_schema_manifest_digest)"
+		registered_manifest_digest="$(read_binding_schema_manifest_digest)"
 		cas_from_state='READY'
+		if [[ "$registered_manifest_digest" == "$SCHEMA_MANIFEST_DIGEST" \
+			&& "$registered_worker_reference" == "$WALLET_RECHARGE_SECRET_REFERENCE" \
+			&& "$registered_payment_worker_reference" == "$PAYMENT_CALLBACK_SECRET_REFERENCE" ]]; then
+			IDEMPOTENT_READY=1
+		fi
 	else
 		[[ "$binding_state" != SUSPENDED ]] || fail 'The central Tenant database binding is SUSPENDED.'
 		if [[ "$binding_state" == FAILED && "$RETRY_FAILED" -ne 1 ]]; then fail 'The binding is FAILED; use --retry-failed for an exact CAS retry.'; fi
@@ -860,7 +913,10 @@ if [[ -n "$binding_snapshot" ]]; then
 		cas_from_state="$binding_state"
 	fi
 	DATABASE_IDENTITY="$bound_identity" SECRET_REFERENCE="$bound_reference" BINDING_VERSION="$binding_version"
-	cas_version="$(central_psql <<SQL
+	if [[ "$IDEMPOTENT_READY" == 1 ]]; then
+		BINDING_ACTIVE=0
+	else
+		cas_version="$(central_psql <<SQL
 WITH changed AS (
   UPDATE tenant_management.tenant_business_database_binding
 		SET lifecycle_state='PROVISIONING', verified_schema_manifest_sha256=NULL,
@@ -878,9 +934,10 @@ WITH changed AS (
 )
 SELECT version FROM changed;
 SQL
- )"
-	[[ -n "$cas_version" ]] || fail 'The central binding changed during its version check; no database was modified.'
-	BINDING_VERSION="$cas_version" BINDING_ACTIVE=1
+		)"
+		[[ -n "$cas_version" ]] || fail 'The central binding changed during its version check; no database was modified.'
+		BINDING_VERSION="$cas_version" BINDING_ACTIVE=1
+	fi
 else
 	if docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1; then fail 'A Tenant volume exists without a central binding; inspect it manually.'; fi
 	if [[ -e "$TENANT_DIRECTORY" ]]; then
@@ -1008,7 +1065,10 @@ run_cli verify
 verify_api_tenant_database_connection
 SCHEMA_MANIFEST_DIGEST="$(read_schema_manifest_digest)"
 
-ready_result="$(central_psql <<'SQL'
+if [[ "$IDEMPOTENT_READY" == 1 ]]; then
+	verify_ready_binding_unchanged
+else
+	ready_result="$(central_psql <<'SQL'
 WITH changed AS (
   UPDATE tenant_management.tenant_business_database_binding
      SET lifecycle_state='READY', verified_schema_manifest_sha256=:'schema_manifest_digest',
@@ -1029,6 +1089,7 @@ WITH changed AS (
 SELECT count(*) FROM changed;
 SQL
  )"
-[[ "$ready_result" == 1 ]] || fail 'Local checks passed, but the central binding READY transition failed its version check.'
+	[[ "$ready_result" == 1 ]] || fail 'Local checks passed, but the central binding READY transition failed its version check.'
+fi
 BINDING_ACTIVE=0
 printf '%s\n' 'Local Tenant database provisioning completed and the central binding is READY. No production routing or cutover was performed.'

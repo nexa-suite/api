@@ -3,6 +3,7 @@ package com.nexa.api.tenantaccessgovernance.support.presentation.rest;
 import com.nexa.api.tenantaccessgovernance.support.application.model.SupportRequestView;
 import com.nexa.api.tenantaccessgovernance.support.application.port.in.SupportConsoleUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,6 +20,7 @@ import java.util.UUID;
 
 /** Consent and revocation must come from a freshly validated Company Owner access-context JWT. */
 @RestController
+@ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 @RequestMapping("/api/v1/tenant/support-consents")
 @Tag(name = "Company Owner support consent")
 @SecurityRequirement(name = "bearerAuth")

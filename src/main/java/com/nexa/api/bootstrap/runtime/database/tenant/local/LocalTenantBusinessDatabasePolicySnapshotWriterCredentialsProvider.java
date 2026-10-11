@@ -17,8 +17,12 @@ import java.util.UUID;
 /** Resolves only the separate local policy-snapshot writer secret for one Tenant database identity. */
 public final class LocalTenantBusinessDatabasePolicySnapshotWriterCredentialsProvider
 		implements TenantBusinessDatabasePolicySnapshotWriterCredentialsProvider {
-	private static final Set<String> STATE_KEYS = Set.of(
+	private static final Set<String> REQUIRED_STATE_KEYS = Set.of(
 			"tenant-id", "workspace-id", "database-identity", "credential-secret-reference", "database-port");
+	private static final Set<String> ALLOWED_STATE_KEYS = Set.of(
+			"tenant-id", "workspace-id", "database-identity", "credential-secret-reference", "database-port",
+			"wallet-recharge-callback-credential-reference", "business-documents-worker-credential-reference",
+			"payment-callback-worker-credential-reference", "business-traceability-worker-credential-reference");
 	private static final Set<String> WRITER_CREDENTIAL_KEYS = Set.of("jdbc-url", "api-jdbc-url", "username", "password");
 	private static final String WRITER_ROLE = "nexa_policy_snapshot_writer";
 
@@ -49,7 +53,8 @@ public final class LocalTenantBusinessDatabasePolicySnapshotWriterCredentialsPro
 			LocalTenantBusinessDatabaseCredentialsProvider.requirePrivateDirectory(tenantDirectory);
 			Map<String, String> state = LocalTenantBusinessDatabaseCredentialsProvider
 					.readPrivateProperties(tenantDirectory.resolve("state.properties"));
-			if (!STATE_KEYS.equals(state.keySet()) || !tenantId.toString().equals(state.get("tenant-id"))
+			if (!state.keySet().containsAll(REQUIRED_STATE_KEYS) || !ALLOWED_STATE_KEYS.containsAll(state.keySet())
+					|| !tenantId.toString().equals(state.get("tenant-id"))
 					|| !databaseIdentity.toString().equals(state.get("database-identity"))) {
 				throw new IllegalStateException("Local policy-snapshot writer state does not match its Tenant database identity");
 			}

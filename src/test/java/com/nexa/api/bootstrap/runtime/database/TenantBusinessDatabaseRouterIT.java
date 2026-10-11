@@ -12,6 +12,7 @@ import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersisten
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceSeedLoader;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceSeedValidator;
 import com.nexa.api.shared.context.RlsRequestScope;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.InaccessibleTenantException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
@@ -70,6 +71,9 @@ class TenantBusinessDatabaseRouterIT {
 	private static final String TENANT_A_RUNTIME_PASSWORD = "tenant-a-runtime-only-test-password";
 	private static final String TENANT_B_RUNTIME_PASSWORD = "tenant-b-runtime-only-test-password";
 	private static final String TENANT_POLICY_SNAPSHOT_WRITER_PASSWORD = "tenant-policy-snapshot-writer-test-password";
+	private static final String DOCUMENTS_WORKER_PASSWORD = "tenant-documents-worker-only-test-password";
+	private static final String PAYMENTS_WORKER_PASSWORD = "tenant-payments-worker-only-test-password";
+	private static final String TRACEABILITY_WORKER_PASSWORD = "tenant-traceability-worker-only-test-password";
 	private static final String RUNTIME_USERNAME = "nexa_runtime";
 
 	@Container
@@ -92,6 +96,8 @@ class TenantBusinessDatabaseRouterIT {
 		configureRuntimeRole(TENANT_B, TENANT_B_RUNTIME_PASSWORD);
 		configurePolicySnapshotWriterRole(TENANT_A);
 		configurePolicySnapshotWriterRole(TENANT_B);
+		configureWorkerRoles(TENANT_A);
+		configureWorkerRoles(TENANT_B);
 
 		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
 				.locations("classpath:db/migration").load().migrate();
@@ -324,8 +330,12 @@ class TenantBusinessDatabaseRouterIT {
 			assertThatThrownBy(() -> router.inTransaction(tenantA, jdbc -> {
 				jdbc.update("INSERT INTO nexa_platform.route_probe (id, tenant_id, workspace_id, marker) VALUES (?, ?, ?, ?)",
 						nestedRollback, tenantA.tenantId().value(), tenantA.workspaceId().value(), "nested-route-rollback");
-				setRequestScope(fixture.tenantB());
-				router.inTransaction(tenantB, ignored -> null);
+				try {
+					setRequestScope(fixture.tenantB());
+					router.inTransaction(tenantB, ignored -> null);
+				} finally {
+					setRequestScope(fixture.tenantA());
+				}
 				return null;
 			})).isInstanceOf(IllegalStateException.class)
 					.hasMessageContaining("cannot begin inside another database transaction");
@@ -377,21 +387,18 @@ class TenantBusinessDatabaseRouterIT {
 	void verifiedAccessContextScopesForcedRlsEvenWhenThreadLocalClaimChangesAndClearsPoolState() throws Exception {
 		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
 		CountingFactory pools = new CountingFactory(credentialsFor(fixture, false));
-		JdbcTenantBusinessDatabaseAuthority delegate = new JdbcTenantBusinessDatabaseAuthority(
-				accessContextUseCase(), new JdbcTenantBusinessDatabaseBindingRegistry(centralRuntime));
-		AtomicBoolean substitutedClaim = new AtomicBoolean();
-		var authority = (com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseAuthority) context -> {
-			var binding = delegate.requireReadyBinding(context);
-			if (substitutedClaim.compareAndSet(false, true)) setRequestScope(fixture.tenantB());
-			return binding;
-		};
 
-		try (TenantBusinessDatabaseRouter router = new TenantBusinessDatabaseRouter(authority, pools, 2)) {
+		try (TenantBusinessDatabaseRouter router = router(pools)) {
 			setRequestScope(fixture.tenantA());
-			insertProbe(router, tenantA, "verified-context-rls");
+			router.inTransaction(tenantA, jdbc -> {
+				setRequestScope(fixture.tenantB());
+				insertProbe(jdbc, tenantA, "verified-context-rls");
+				return null;
+			});
 			setRequestScope(fixture.tenantA());
 			assertThat(probeCount(router, tenantA)).isEqualTo(1);
 			assertThat(countProbe(tenantAAdmin, "verified-context-rls")).isEqualTo(1);
+			assertThat(countProbe(tenantBAdmin, "verified-context-rls")).isZero();
 			try (Connection connection = pools.createdDataSources().getFirst().getConnection();
 					var statement = connection.createStatement();
 					var result = statement.executeQuery("select current_setting('app.current_tenant_id', true), current_setting('app.current_workspace_id', true)")) {
@@ -506,6 +513,53 @@ class TenantBusinessDatabaseRouterIT {
 			assertThat(countProbe(tenantAAdmin, "post-rebind-active")).isEqualTo(1);
 			assertThat(countProbe(tenantAAdmin, "retired-binding-denied")).isZero();
 		}
+	}
+
+	@Test
+	void revokedMembershipBetweenTenantSessionPhasesBlocksNextPhaseBeforeWrite() {
+		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
+		CountingFactory pools = new CountingFactory(credentialsFor(fixture, false));
+
+		try (TenantBusinessDatabaseRouter router = router(pools)) {
+			setRequestScope(fixture.tenantA());
+			router.inTenantSession(tenantA, session -> {
+				session.inTransaction(jdbc -> insertProbe(jdbc, tenantA, "phase-before-revocation"));
+				centralAdmin.update("UPDATE tenant_management.workspace_membership SET status='REVOKED' WHERE id=?",
+						fixture.tenantA().membershipId().value());
+
+				assertThatThrownBy(() -> session.inTransaction(
+						jdbc -> insertProbe(jdbc, tenantA, "phase-after-revocation")))
+						.isInstanceOf(InaccessibleTenantException.class);
+				return null;
+			});
+		}
+
+		assertThat(countProbe(tenantAAdmin, "phase-before-revocation")).isEqualTo(1);
+		assertThat(countProbe(tenantAAdmin, "phase-after-revocation")).isZero();
+		assertThat(centralAdmin.queryForObject("SELECT status FROM tenant_management.workspace_membership WHERE id=?",
+				String.class, fixture.tenantA().membershipId().value())).isEqualTo("REVOKED");
+	}
+
+	@Test
+	void rollbackPreservesOriginalBusinessFailureWhenMembershipIsRevokedDuringCallback() {
+		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
+		CountingFactory pools = new CountingFactory(credentialsFor(fixture, false));
+
+		try (TenantBusinessDatabaseRouter router = router(pools)) {
+			setRequestScope(fixture.tenantA());
+			assertThatThrownBy(() -> router.inTenantSession(tenantA, session -> session.inTransaction(jdbc -> {
+				insertProbe(jdbc, tenantA, "rollback-after-revocation");
+				centralAdmin.update("UPDATE tenant_management.workspace_membership SET status='REVOKED' WHERE id=?",
+						fixture.tenantA().membershipId().value());
+				throw new IllegalArgumentException("original callback failure");
+			})))
+					.isInstanceOf(IllegalArgumentException.class)
+					.hasMessage("original callback failure");
+		}
+
+		assertThat(countProbe(tenantAAdmin, "rollback-after-revocation")).isZero();
+		assertThat(centralAdmin.queryForObject("SELECT status FROM tenant_management.workspace_membership WHERE id=?",
+				String.class, fixture.tenantA().membershipId().value())).isEqualTo("REVOKED");
 	}
 
 	@Test
@@ -796,6 +850,24 @@ class TenantBusinessDatabaseRouterIT {
 			statement.execute("GRANT CONNECT ON DATABASE \"" + container.getDatabaseName() + "\" TO nexa_policy_snapshot_writer");
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not create the dedicated policy-snapshot writer test role", exception);
+		}
+	}
+
+	private static void configureWorkerRoles(PostgreSQLContainer container) {
+		try (Connection connection = DriverManager.getConnection(container.getJdbcUrl(), container.getUsername(), container.getPassword());
+				var statement = connection.createStatement()) {
+			statement.execute("CREATE ROLE nexa_business_documents_worker LOGIN PASSWORD '"
+					+ DOCUMENTS_WORKER_PASSWORD
+					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_payments_worker LOGIN PASSWORD '" + PAYMENTS_WORKER_PASSWORD
+					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_business_traceability_worker LOGIN PASSWORD '"
+					+ TRACEABILITY_WORKER_PASSWORD
+					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("GRANT CONNECT ON DATABASE \"" + container.getDatabaseName()
+					+ "\" TO nexa_business_documents_worker, nexa_payments_worker, nexa_business_traceability_worker");
+		} catch (Exception exception) {
+			throw new IllegalStateException("Could not create Tenant worker roles required by current migrations", exception);
 		}
 	}
 
