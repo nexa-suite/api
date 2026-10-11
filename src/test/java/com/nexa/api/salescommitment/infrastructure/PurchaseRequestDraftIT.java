@@ -20,6 +20,47 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
     @Test
+    void routePreviewRejectsUngeocodedDestinationAsConflictWithoutCreatingRouteSnapshot() throws Exception {
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String clientAccountId = buyerClientAccountId();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID account = UUID.fromString(clientAccountId);
+        String addressId = tenantJdbc().queryForObject("select id::text from sales.client_account_address "
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? and label=? and status='ACTIVE'",
+                String.class, tenant, workspace, account, "Buyer delivery · CLI-001");
+        assertThat(tenantJdbc().queryForObject("select latitude is null and longitude is null "
+                + "from sales.client_account_address where id=?", Boolean.class, UUID.fromString(addressId))).isTrue();
+
+        MvcResult created = mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts")
+                        .header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientAccountId\":\"" + clientAccountId + "\",\"requestedDeliveryDate\":\"2099-12-31\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String draftId = json(created).get("id").asText();
+        MvcResult destination = mockMvc.perform(put("/api/v1/buyer/purchase-request-drafts/" + draftId + "/destination")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressId\":\"" + addressId + "\"}"))
+                .andExpect(status().isOk()).andReturn();
+
+        mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/route-previews")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", destination.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\":\"LOCAL_ESTIMATE\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PURCHASE_REQUEST_DRAFT_DESTINATION_NOT_GEOCODED"))
+                .andExpect(jsonPath("$.detail").value("Delivery destination must have geocoded coordinates before route preview"));
+
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_route where tenant_id=? and workspace_id=? and draft_id=?",
+                Integer.class, tenant, workspace, UUID.fromString(draftId))).isZero();
+        assertThat(tenantJdbc().queryForObject("select version from sales.purchase_request_draft where tenant_id=? and workspace_id=? and id=?",
+                Integer.class, tenant, workspace, UUID.fromString(draftId))).isEqualTo(1);
+    }
+
+    @Test
     void buyerCannotReadOrChangeDraftAfterAccountBecomesInactive() throws Exception {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String accountId = buyerClientAccountId();

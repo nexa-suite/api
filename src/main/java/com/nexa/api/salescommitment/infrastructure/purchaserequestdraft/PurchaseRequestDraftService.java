@@ -10,6 +10,7 @@ import com.nexa.api.customerbuyerrelationships.contract.CustomerAddressReference
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftDestinationNotGeocodedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.salescommitment.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
 import com.nexa.api.customerbuyerrelationships.contract.Address;
@@ -208,7 +209,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         CustomerAddressReference destination = addresses.findBuyerReference(tenant(context).toString(), workspace(context).toString(),
                         context.membershipId().value().toString(), destinationId.toString())
                 .orElseThrow(() -> new IllegalStateException("Destination must remain active before route preview"));
-        if (destination.address().latitude() == null || destination.address().longitude() == null) throw new IllegalStateException("Destination requires geocoded coordinates");
+        if (destination.address().latitude() == null || destination.address().longitude() == null) throw new PurchaseRequestDraftDestinationNotGeocodedException();
         WarehouseRow warehouse = selectWarehouse(context, draftId);
         Instant now = Instant.now();
         DeliveryAddressSnapshot addressSnapshot = new DeliveryAddressSnapshot(destination.id(), "Delivery destination", destination.address(), true);

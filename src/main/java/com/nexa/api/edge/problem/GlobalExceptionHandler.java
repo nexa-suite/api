@@ -49,6 +49,7 @@ import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequired
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestAlreadyConvertedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftDestinationNotGeocodedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftPreconditionRequiredException;
 import com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException;
@@ -523,6 +524,8 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Purchase request draft version is stale", request); }
 	@ExceptionHandler(PurchaseRequestDraftInvariantException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftInvariant(PurchaseRequestDraftInvariantException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Purchase request draft is not ready to submit", request); }
+	@ExceptionHandler(PurchaseRequestDraftDestinationNotGeocodedException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftDestinationNotGeocoded(PurchaseRequestDraftDestinationNotGeocodedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_DRAFT_DESTINATION_NOT_GEOCODED, exception.getMessage(), request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
 	@ExceptionHandler(BusinessEvidenceIdempotencyConflictException.class)
