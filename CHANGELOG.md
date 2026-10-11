@@ -4,7 +4,7 @@
 
 Source checkpoint prerelease; incomplete integration and distribution gates. See [checkpoint notes](docs/releases/v1.1.0-alpha.1.md).
 
-## Unreleased — v1.1.0 candidate
+## [1.1.0] - 2026-10-11
 
 - Introduce explicit Tenant-scoped business database routing and local provisioning while retaining central identity, control and onboarding authority.
 - Extend Buyer wallet recharge and full-order wallet tender with supplier-scoped balances, durable reservations and authoritative provider confirmation.
@@ -12,7 +12,7 @@ Source checkpoint prerelease; incomplete integration and distribution gates. See
 - Add explicit Warehouse access grants for the verified workflow actor and scoped, time-limited read-only support.
 - Compose Tenant-owned notifications, document generation and business traceability through narrow application boundaries.
 
-The source candidate is not released. Full integration verification, migration/runtime evidence, connected client flows and publication remain pending. No cloud database cutover is claimed.
+Source release for local suite review. See [release notes](docs/releases/v1.1.0.md) for the supported review boundary and remaining integration, distribution and production work. Publication requires the signed tag and corresponding GitHub Release; no cloud database cutover is implied.
 
 ## [1.0.0] - 2026-10-05
 
