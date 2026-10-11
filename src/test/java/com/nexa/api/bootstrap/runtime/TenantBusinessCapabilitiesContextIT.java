@@ -109,20 +109,23 @@ class TenantBusinessCapabilitiesContextIT extends NexaWorkflowIntegrationSupport
         UUID otherWorkspace = UUID.randomUUID();
         UUID eventId = UUID.randomUUID();
         UUID aggregateId = UUID.randomUUID();
+        String eventType = "BusinessFactTraced.v1";
         Instant occurredAt = Instant.now();
+        Instant createdAt = occurredAt.plusSeconds(86_400);
         JdbcTemplate tenantTestJdbc = tenantJdbcFor(tenant);
         tenantTestJdbc.update("insert into integration.outbox_event "
                         + "(event_id,event_type,aggregate_type,aggregate_id,tenant_id,workspace_id,occurred_at,"
-                        + "correlation_id,schema_version,payload) values (?,?,?,?,?,?,?,?,?,?::jsonb)",
-                eventId, "BusinessFactTraced.v1", "BusinessTraceabilityRecord", aggregateId, tenant, workspace,
-                Timestamp.from(occurredAt), "tenant-lock-privilege-regression", "1", "{}");
+                        + "correlation_id,schema_version,payload,created_at) values (?,?,?,?,?,?,?,?,?,?::jsonb,?)",
+                eventId, eventType, "BusinessTraceabilityRecord", aggregateId, tenant, workspace,
+                Timestamp.from(occurredAt), "tenant-lock-privilege-regression", "1", "{}",
+                Timestamp.from(createdAt));
 
         try {
             var pendingRows = traceabilityWorkerRouter.inTransaction(tenant, workspace, (tenantJdbc, ignored) -> {
                 var worker = traceabilityBindings.bindWorker(tenantJdbc).worker();
                 var businessFacts = worker.findPendingBusinessFacts(tenant, workspace, 10, null, null);
                 var ownerEvents = worker.findPendingForConsumer(tenant, workspace, "lock-privilege-regression",
-                        Set.of("BusinessFactTraced.v1"), 10, null, null);
+                        Set.of(eventType), 10, createdAt.minusSeconds(1), new UUID(0, 0));
                 var lockedOwnerEventIds = tenantJdbc.queryForList("select event_id from integration.outbox_event "
                                 + "where event_id=? and tenant_id=? and workspace_id=? for update skip locked",
                         UUID.class, eventId, tenant, workspace);
@@ -275,7 +278,7 @@ class TenantBusinessCapabilitiesContextIT extends NexaWorkflowIntegrationSupport
                     .allSatisfy(event -> {
                         assertThat(event.tenantId()).isEqualTo(tenant);
                         assertThat(event.workspaceId()).isEqualTo(workspace);
-                        assertThat(event.eventType()).isEqualTo("BusinessFactTraced.v1");
+                        assertThat(event.eventType()).isEqualTo(eventType);
                     })
                     .extracting(event -> event.eventId())
                     .contains(eventId);
