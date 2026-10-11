@@ -12,8 +12,8 @@ fail() { printf '%s\n' "$1" >&2; exit 1; }
 private_mode() {
 	local path="$1" expected="$2" actual
 	[[ ! -L "$path" ]] || return 1
-	actual="$(stat -f '%Lp' "$path" 2>/dev/null || stat -c '%a' "$path" 2>/dev/null)" || return 1
-	[[ "$actual" == "$expected" ]]
+	actual="$(stat -c '%a' "$path" 2>/dev/null)" || actual="$(stat -f '%Lp' "$path" 2>/dev/null)" || return 1
+	[[ "$actual" =~ ^[0-7]{3,4}$ && "$actual" == "$expected" ]]
 }
 read_value() {
 	awk -F= -v key="$2" '$1 == key { count++; value=substr($0, index($0, "=") + 1) } END { if (count != 1) exit 1; print value }' "$1"
