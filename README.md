@@ -175,6 +175,11 @@ Local health and information endpoints use port `8080`. Swagger/OpenAPI is
 enabled with the local profile. Local execution does not imply a released
 public business API.
 
+With the opt-in local development bootstrap enabled, provide both
+`NEXA_DEV_BOM_EMAIL` and `NEXA_DEV_BOM_PASSWORD` to seed a separate Business
+Operations Manager membership. Both values are optional together; an incomplete
+pair fails startup. Keep credentials in the ignored local environment file.
+
 ## Validation
 
 ```bash

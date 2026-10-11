@@ -75,6 +75,7 @@ public class LocalDevelopmentBootstrap {
 					new UserSeed("NEXA_DEV_LOGISTICS_EMAIL", "NEXA_DEV_LOGISTICS_PASSWORD", Set.of("LOGISTICS")),
 					new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER"))));
 			addOptionalUser(users, "NEXA_DEV_TENANT_ADMIN_EMAIL", "NEXA_DEV_TENANT_ADMIN_PASSWORD", Set.of("TENANT_ADMIN"));
+			addOptionalUser(users, "NEXA_DEV_BOM_EMAIL", "NEXA_DEV_BOM_PASSWORD", Set.of("BUSINESS_OPERATIONS_MANAGER"));
 			UUID buyerUserId = null;
 			for (UserSeed user : users) {
 				UUID userId = user(user, now);
