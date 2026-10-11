@@ -18,9 +18,11 @@ import com.nexa.api.tenantaccessgovernance.support.application.port.out.SupportR
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrantValidationPort;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportSalesOrderReadQueryFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.file.Path;
@@ -98,6 +100,9 @@ public class LocalTenantBusinessDatabaseRouterConfiguration {
     }
 
     @Bean
+    @Primary
+    @ConditionalOnProperty(prefix = "nexa.tenant-business.support-sales-order-read", name = "enabled",
+            havingValue = "true")
     SupportSalesOrderReadQueryFactory localSupportSalesOrderReadQueryFactory(
             TenantBusinessDatabaseSupportOrderReadRouter router) {
         return new TenantBusinessDatabaseSupportSalesOrderReadQueryFactory(router);

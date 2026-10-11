@@ -45,7 +45,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1")
 @Tag(name = "Credit and Receivables")
 @SecurityRequirement(name = "bearerAuth")
-public final class CreditAccountConfigurationController {
+public class CreditAccountConfigurationController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final CreditAccountConfigurationApplicationService service;
 

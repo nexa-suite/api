@@ -98,7 +98,7 @@ public class PaymentService implements TenantPaymentSession {
                           ReceivableApplicationCommands receivableApplications,
                           CreditPaymentCommands creditPayments,
                           ReceivableCommands receivables,
-                          BusinessDocumentCommands documents,
+                          ObjectProvider<BusinessDocumentCommands> documents,
                           BusinessEvidenceQuery businessEvidence,
                           CustomerAccountQuery customerAccounts,
                           PaymentSalesSource salesOrders,
@@ -107,7 +107,8 @@ public class PaymentService implements TenantPaymentSession {
                           ObjectProvider<BuyerWalletRechargeProviderEventProcessor> walletRechargeEvents) {
         this(jdbc, stripe, publishableKey, webhookSecret, transactionManager,
                 metrics == null ? null : metrics.getIfAvailable(), receivableApplications, creditPayments,
-                receivables, documents, businessEvidence, customerAccounts, salesOrders, canonicalOutbox,
+                receivables, documents == null ? null : documents.getIfAvailable(), businessEvidence,
+                customerAccounts, salesOrders, canonicalOutbox,
                 receivableAccess, workspaces, walletRechargeEvents);
     }
 
@@ -120,7 +121,9 @@ public class PaymentService implements TenantPaymentSession {
                           CustomerAccountQuery customerAccounts, PaymentSalesSource salesOrders,
                           CanonicalOutboxPort canonicalOutbox, ReceivablePaymentAccess receivableAccess) {
         this(jdbc, stripe, publishableKey, webhookSecret, transactionManager, metrics, receivableApplications,
-                creditPayments, receivables, documents, businessEvidence, customerAccounts, salesOrders,
+                creditPayments, receivables, Objects.requireNonNull(documents,
+                        "Tenant-bound Business Documents command is required"),
+                businessEvidence, customerAccounts, salesOrders,
                 canonicalOutbox, receivableAccess, null, null);
     }
 
