@@ -27,17 +27,25 @@ verify_login() {
   origin="$5"
   expected="$6"
   body=$(mktemp)
-  trap 'rm -f "$body"' EXIT HUP INT TERM
-  csrf_token=$(curl --fail --silent --show-error --max-time 10 "$csrf_url" | jq --exit-status --raw-output '.token | strings | select(length > 0)')
+  csrf_headers=$(mktemp)
+  trap 'rm -f "$body" "$csrf_headers"' EXIT HUP INT TERM
+  csrf_token=$(curl --fail --silent --show-error --max-time 10 --dump-header "$csrf_headers" \
+    --header "Origin: $origin" "$csrf_url" | jq --exit-status --raw-output '.token | strings | select(length > 0)')
+  csrf_cookie=$(awk 'tolower($1) == "set-cookie:" && $2 ~ /^NEXA_CSRF=/ { value = $2; sub(/;.*/, "", value); sub(/^NEXA_CSRF=/, "", value); gsub(/\r/, "", value); print value; exit }' "$csrf_headers")
+  if [ -z "$csrf_cookie" ]; then
+    printf '%s: FAIL (CSRF cookie missing)\n' "$label" >&2
+    exit 1
+  fi
   status=$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
     --max-time 10 --request POST \
     --header 'Content-Type: application/json' \
     --header "Origin: $origin" \
-    --header "Cookie: NEXA_CSRF=$csrf_token" \
+    --header "Cookie: NEXA_CSRF=$csrf_cookie" \
     --header "X-Nexa-CSRF: $csrf_token" \
     --data "{\"identifier\":\"$email\",\"password\":\"$password\",\"workspaceSlug\":\"$workspace\",\"surface\":\"$surface\"}" \
     "$api_url" || true)
   rm -f "$body"
+  rm -f "$csrf_headers"
   trap - EXIT HUP INT TERM
 
   if [ "$expected" = 'success' ] && [ "$status" != '200' ]; then

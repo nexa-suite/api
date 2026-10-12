@@ -107,6 +107,11 @@ function login(user, label) {
   if (!csrf.token) {
     throw new Error(`${label} CSRF bootstrap did not return a request token`);
   }
+  const csrfCookies = csrfResponse.cookies && csrfResponse.cookies.NEXA_CSRF;
+  const csrfCookie = csrfCookies && csrfCookies.length > 0 ? csrfCookies[0].value : '';
+  if (!csrfCookie) {
+    throw new Error(`${label} CSRF bootstrap did not return its cookie`);
+  }
   const response = http.post(
     url('/api/v1/authentication/sign-in'),
     JSON.stringify({ identifier: user.email, password: user.password, workspaceSlug: workspace, surface: user.surface }),
@@ -114,7 +119,7 @@ function login(user, label) {
       headers: {
         'Content-Type': 'application/json',
         Origin: user.origin,
-        Cookie: `NEXA_CSRF=${csrf.token}`,
+        Cookie: `NEXA_CSRF=${csrfCookie}`,
         'X-Nexa-CSRF': csrf.token,
       },
       tags: { workflow: 'business-foundation' },

@@ -27,6 +27,11 @@ export default function () {
   });
   check(csrfResponse, { 'browser CSRF bootstrap is available': (response) => response.status === 200 });
   const csrfToken = csrfResponse.status === 200 ? csrfResponse.json('token') : '';
+  const csrfCookies = csrfResponse.cookies && csrfResponse.cookies.NEXA_CSRF;
+  const csrfCookie = csrfCookies && csrfCookies.length > 0 ? csrfCookies[0].value : '';
+  if (!csrfToken || !csrfCookie) {
+    throw new Error('browser CSRF bootstrap did not return its request token and cookie');
+  }
   const signIn = http.post(`${baseUrl}/api/v1/authentication/sign-in`, JSON.stringify({
     identifier: email,
     password,
@@ -36,7 +41,7 @@ export default function () {
     headers: {
       'Content-Type': 'application/json',
       Origin: 'http://localhost:4200',
-      Cookie: `NEXA_CSRF=${csrfToken}`,
+      Cookie: `NEXA_CSRF=${csrfCookie}`,
       'X-Nexa-CSRF': csrfToken,
     },
   });
