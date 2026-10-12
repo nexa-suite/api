@@ -20,8 +20,10 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
-      - name: Start API Compose runtime with local document storage and seed scoped Tenant fixtures
+      - name: Start API Compose runtime with MinIO and seed scoped Tenant fixtures
         run: ./ops/scripts/prepare-security-load-compose-fixture.sh
+      - name: Verify S3 object storage against Compose MinIO
+        run: ./mvnw -B -ntp -Dtest=MinioObjectStorageIntegrationTests -Dnexa.minio.integration.enabled=true test
       - name: Run local security and abuse matrix
         run: ./scripts/verify-local-security.sh
       - name: Run authenticated OWASP ZAP role matrix

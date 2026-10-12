@@ -68,7 +68,8 @@ NEXA_MODERN_POSTGRES_PASSWORD=$postgres_password
 NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD=$documents_reader_password
 NEXA_MINIO_ROOT_USER=$minio_root_user
 NEXA_MINIO_ROOT_PASSWORD=$minio_root_password
-NEXA_MODERN_SPRING_PROFILE=local
+NEXA_OBJECT_STORAGE_BUCKET=nexa-private
+NEXA_MODERN_SPRING_PROFILE=local,minio
 NEXA_SECURITY_ISSUER=http://127.0.0.1:8080
 NEXA_SECURITY_AUDIENCE=nexa-local
 NEXA_PASSWORD_RESET_THROTTLE_KEY=$reset_throttle_key
@@ -119,6 +120,7 @@ chmod 600 .env.local
 	printf 'NEXA_DEV_LOGISTICS_PASSWORD=%s\nNEXA_LOAD_LOGISTICS_PASSWORD=%s\n' "$logistics_password" "$logistics_password"
 	printf 'NEXA_DEV_BUYER_EMAIL=buyer@icisa.test\nNEXA_LOAD_BUYER_EMAIL=buyer@icisa.test\n'
 	printf 'NEXA_DEV_BUYER_PASSWORD=%s\nNEXA_LOAD_BUYER_PASSWORD=%s\n' "$buyer_password" "$buyer_password"
+	printf 'NEXA_OBJECT_STORAGE_ENDPOINT=http://127.0.0.1:9000\nNEXA_OBJECT_STORAGE_BUCKET=nexa-private\n'
 } >> "$GITHUB_ENV"
 
 ./ops/compose/scripts/modern-up.sh api-runtime
