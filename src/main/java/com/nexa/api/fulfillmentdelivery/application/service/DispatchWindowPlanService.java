@@ -6,6 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DispatchWindowPlanMode
 import com.nexa.api.fulfillmentdelivery.application.model.DispatchWindowPlanModels.View;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchWindowPlanPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchWindowPlanPersistencePort.RecordCommand;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.DispatchWindowPlanOperations;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -26,7 +27,7 @@ import java.util.UUID;
 /** Dispatch-authorized, one-way planning of a missing Fulfillment delivery window. */
 @Service
 @Profile("!test")
-public class DispatchWindowPlanService {
+public class DispatchWindowPlanService implements DispatchWindowPlanOperations {
     private final DispatchWindowPlanPersistencePort persistence;
     private final DispatchReadinessService readiness;
     private final PhysicalAllocationCommands physicalAllocations;
@@ -43,6 +44,7 @@ public class DispatchWindowPlanService {
     }
 
     @Transactional
+    @Override
     public View plan(CurrentAccessContext context, UUID fulfillmentId, long expectedFulfillmentVersion,
                      Request request, String idempotencyKey) {
         context.requirePermission(PermissionKey.DISPATCH_READ);

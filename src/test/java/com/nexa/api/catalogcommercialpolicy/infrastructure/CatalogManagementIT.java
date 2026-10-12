@@ -38,21 +38,21 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 
 	@AfterEach
 	void removePreviewFixture() {
-		if (buyerCustomerTerms != null) jdbc.update("delete from catalog_management.customer_terms where terms_id=?", buyerCustomerTerms);
-		if (buyerPriceListItem != null) jdbc.update("delete from catalog_management.price_list_item where item_id=?", buyerPriceListItem);
-		if (buyerPriceList != null) jdbc.update("delete from catalog_management.price_list where price_list_id=?", buyerPriceList);
+		if (buyerCustomerTerms != null) tenantJdbc().update("delete from catalog_management.customer_terms where terms_id=?", buyerCustomerTerms);
+		if (buyerPriceListItem != null) tenantJdbc().update("delete from catalog_management.price_list_item where item_id=?", buyerPriceListItem);
+		if (buyerPriceList != null) tenantJdbc().update("delete from catalog_management.price_list where price_list_id=?", buyerPriceList);
 		if (previewPromotion != null) {
-			jdbc.update("delete from catalog_management.promotion_product where promotion_id=?", previewPromotion);
-			jdbc.update("delete from catalog_management.promotion_category where promotion_id=?", previewPromotion);
-			jdbc.update("delete from catalog_management.promotion_client_account where promotion_id=?", previewPromotion);
-			jdbc.update("delete from catalog_management.promotion_rule where promotion_id=?", previewPromotion);
-			jdbc.update("delete from catalog_management.promotion where id=?", previewPromotion);
+			tenantJdbc().update("delete from catalog_management.promotion_product where promotion_id=?", previewPromotion);
+			tenantJdbc().update("delete from catalog_management.promotion_category where promotion_id=?", previewPromotion);
+			tenantJdbc().update("delete from catalog_management.promotion_client_account where promotion_id=?", previewPromotion);
+			tenantJdbc().update("delete from catalog_management.promotion_rule where promotion_id=?", previewPromotion);
+			tenantJdbc().update("delete from catalog_management.promotion where id=?", previewPromotion);
 		}
 		if (previewProduct != null) {
-			jdbc.update("delete from catalog_management.product_price where product_id=?", previewProduct);
-			jdbc.update("delete from catalog_management.product_presentation where product_id=?", previewProduct);
-			jdbc.update("delete from catalog_management.product_visibility where product_id=?", previewProduct);
-			jdbc.update("delete from catalog_management.product where id=?", previewProduct);
+			tenantJdbc().update("delete from catalog_management.product_price where product_id=?", previewProduct);
+			tenantJdbc().update("delete from catalog_management.product_presentation where product_id=?", previewProduct);
+			tenantJdbc().update("delete from catalog_management.product_visibility where product_id=?", previewProduct);
+			tenantJdbc().update("delete from catalog_management.product where id=?", previewProduct);
 		}
 	}
 
@@ -90,7 +90,7 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 		UUID tenant = UUID.fromString(tenantId());
 		UUID workspace = UUID.fromString(workspaceId());
 		UUID account = UUID.fromString(buyerClientAccountId());
-		UUID sku = jdbc.queryForObject("select id from catalog_management.sellable_sku "
+		UUID sku = tenantJdbc().queryForObject("select id from catalog_management.sellable_sku "
 				+ "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0001'",
 				UUID.class, tenant, workspace);
 		buyerPriceList = UUID.randomUUID();
@@ -99,13 +99,13 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 		Timestamp startsAt = Timestamp.from(Instant.parse("2020-01-01T00:00:00Z"));
 		Timestamp endsAt = Timestamp.from(Instant.parse("2099-12-31T00:00:00Z"));
 		Timestamp createdAt = Timestamp.from(Instant.now());
-		jdbc.update("insert into catalog_management.price_list (price_list_id,tenant_id,workspace_id,code,name,currency,status,valid_from,valid_to,created_at,updated_at,version) "
+		tenantJdbc().update("insert into catalog_management.price_list (price_list_id,tenant_id,workspace_id,code,name,currency,status,valid_from,valid_to,created_at,updated_at,version) "
 				+ "values (?,?,?,?,?,'PEN','ACTIVE',?,?,?, ?,0)", buyerPriceList, tenant, workspace,
 				"IT-" + buyerPriceList, "Buyer price list", startsAt, endsAt, createdAt, createdAt);
-		jdbc.update("insert into catalog_management.price_list_item (item_id,tenant_id,workspace_id,price_list_id,sku_id,unit_price,currency,valid_from,valid_to) "
+		tenantJdbc().update("insert into catalog_management.price_list_item (item_id,tenant_id,workspace_id,price_list_id,sku_id,unit_price,currency,valid_from,valid_to) "
 				+ "values (?,?,?,?,?,?,'PEN',?,?)", buyerPriceListItem, tenant, workspace,
 				buyerPriceList, sku, new java.math.BigDecimal("250.00"), startsAt, endsAt);
-		jdbc.update("insert into catalog_management.customer_terms (terms_id,tenant_id,workspace_id,customer_account_id,price_list_id,credit_days,currency,valid_from,valid_to,created_at,version) "
+		tenantJdbc().update("insert into catalog_management.customer_terms (terms_id,tenant_id,workspace_id,customer_account_id,price_list_id,credit_days,currency,valid_from,valid_to,created_at,version) "
 				+ "values (?,?,?,?,?,0,'PEN',?,?,?,0)", buyerCustomerTerms, tenant, workspace, account,
 				buyerPriceList, startsAt, endsAt, createdAt);
 
@@ -124,14 +124,14 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 		UUID workspace = UUID.fromString(workspaceId());
 		UUID account = UUID.fromString(buyerClientAccountId());
 		try {
-			jdbc.update("update sales.client_account set status='INACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+			tenantJdbc().update("update sales.client_account set status='INACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
 					tenant, workspace, account);
 			mockMvc.perform(get("/api/v1/catalog-items").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
 					.andExpect(status().isForbidden());
 			mockMvc.perform(get("/api/v1/catalog-items/CAT-0001").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
 					.andExpect(status().isForbidden());
 		} finally {
-			jdbc.update("update sales.client_account set status='ACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
+			tenantJdbc().update("update sales.client_account set status='ACTIVE',version=version+1 where tenant_id=? and workspace_id=? and id=?",
 					tenant, workspace, account);
 		}
 	}
@@ -216,13 +216,13 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 	void managedCatalogEditsSurviveASeedRestartAndSeedHistoryIsOneShot() {
 		UUID tenant = UUID.fromString(tenantId());
 		UUID workspace = UUID.fromString(workspaceId());
-		UUID productId = jdbc.queryForObject("select id from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id='CAT-0001'",
+		UUID productId = tenantJdbc().queryForObject("select id from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id='CAT-0001'",
 				UUID.class, tenant, workspace);
-		jdbc.update("update catalog_management.product set name='Managed edit survives restart',updated_at=current_timestamp where id=?", productId);
+		tenantJdbc().update("update catalog_management.product set name='Managed edit survives restart',updated_at=current_timestamp where id=?", productId);
 		seed.importDeterministicSeed();
-		assertThat(jdbc.queryForObject("select name from catalog_management.product where id=?", String.class, productId))
+		assertThat(tenantJdbc().queryForObject("select name from catalog_management.product where id=?", String.class, productId))
 				.isEqualTo("Managed edit survives restart");
-		assertThat(jdbc.queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v2'",
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v2'",
 					Integer.class, tenant, workspace)).isEqualTo(1);
 	}
 
@@ -231,23 +231,23 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 		UUID tenant = UUID.fromString(tenantId());
 		UUID workspace = UUID.fromString(workspaceId());
 
-		assertThat(jdbc.queryForObject("select count(*) from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id like 'CAT-%'",
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id like 'CAT-%'",
 				Integer.class, tenant, workspace)).isEqualTo(102);
-		assertThat(jdbc.queryForObject("select count(*) from catalog_management.product_visibility pv "
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product_visibility pv "
 				+ "join catalog_management.product p on p.id=pv.product_id and p.tenant_id=pv.tenant_id and p.workspace_id=pv.workspace_id "
 				+ "where pv.tenant_id=? and pv.workspace_id=? and p.catalog_item_id like 'CAT-%' and pv.buyer_visible=false",
 				Integer.class, tenant, workspace)).isEqualTo(52);
-		assertThat(jdbc.queryForObject("select count(*) from catalog_management.product_price pp "
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product_price pp "
 				+ "join catalog_management.product p on p.id=pp.product_id and p.tenant_id=pp.tenant_id and p.workspace_id=pp.workspace_id "
 				+ "where pp.tenant_id=? and pp.workspace_id=? and p.catalog_item_id like 'CAT-%' and pp.source_code='PROVISIONAL_REFERENCE'",
 				Integer.class, tenant, workspace)).isEqualTo(52);
-		assertThat(jdbc.queryForObject("select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id like 'CAT-%'",
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id like 'CAT-%'",
 				Integer.class, tenant, workspace)).isEqualTo(102);
-		assertThat(jdbc.queryForObject("select pf.family_code from catalog_management.sellable_sku sku "
+		assertThat(tenantJdbc().queryForObject("select pf.family_code from catalog_management.sellable_sku sku "
 				+ "join catalog_management.product_family pf on pf.id=sku.family_id and pf.tenant_id=sku.tenant_id and pf.workspace_id=sku.workspace_id "
 				+ "where sku.tenant_id=? and sku.workspace_id=? and sku.legacy_catalog_item_id='CAT-0014'",
 				String.class, tenant, workspace)).isEqualTo("FAM-GOUDA");
-		assertThat(jdbc.queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v2'",
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.seed_import_history where tenant_id=? and workspace_id=? and seed_version='v2'",
 				Integer.class, tenant, workspace)).isEqualTo(1);
 	}
 
@@ -257,17 +257,17 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 		String buyer = accessToken(BUYER_EMAIL, "PORTAL");
 		UUID tenant = UUID.fromString(tenantId());
 		UUID workspace = UUID.fromString(workspaceId());
-		UUID category = jdbc.queryForObject("select id from catalog_management.category where tenant_id=? and workspace_id=? limit 1", UUID.class, tenant, workspace);
-		UUID brand = jdbc.queryForObject("select id from catalog_management.brand where tenant_id=? and workspace_id=? limit 1", UUID.class, tenant, workspace);
+		UUID category = tenantJdbc().queryForObject("select id from catalog_management.category where tenant_id=? and workspace_id=? limit 1", UUID.class, tenant, workspace);
+		UUID brand = tenantJdbc().queryForObject("select id from catalog_management.brand where tenant_id=? and workspace_id=? limit 1", UUID.class, tenant, workspace);
 		previewProduct = UUID.randomUUID();
 		Instant now = Instant.now();
-		jdbc.update("insert into catalog_management.product (id,tenant_id,workspace_id,catalog_item_id,product_code,slug,name,description,category_id,brand_id,storage_temperature,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
+		tenantJdbc().update("insert into catalog_management.product (id,tenant_id,workspace_id,catalog_item_id,product_code,slug,name,description,category_id,brand_id,storage_temperature,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
 				previewProduct, tenant, workspace, "PREVIEW-" + previewProduct, "PREVIEW-" + previewProduct, "preview-" + previewProduct, "Preview cheese", "Pricing preview fixture", category, brand, "REFRIGERATED", Timestamp.from(now), Timestamp.from(now));
-		jdbc.update("insert into catalog_management.product_presentation (product_id,tenant_id,workspace_id,presentation,unit_of_measure,version,updated_at) values (?,?,?,?,?,0,?)",
+		tenantJdbc().update("insert into catalog_management.product_presentation (product_id,tenant_id,workspace_id,presentation,unit_of_measure,version,updated_at) values (?,?,?,?,?,0,?)",
 				previewProduct, tenant, workspace, "UNIT", "UNIT", Timestamp.from(now));
-		jdbc.update("insert into catalog_management.product_visibility (product_id,tenant_id,workspace_id,buyer_visible,sales_visible,warehouse_visible,logistics_visible,version,updated_at) values (?,?,?,?,?,?,?,0,?)",
+		tenantJdbc().update("insert into catalog_management.product_visibility (product_id,tenant_id,workspace_id,buyer_visible,sales_visible,warehouse_visible,logistics_visible,version,updated_at) values (?,?,?,?,?,?,?,0,?)",
 				previewProduct, tenant, workspace, true, true, true, true, Timestamp.from(now));
-		jdbc.update("insert into catalog_management.product_price (id,tenant_id,workspace_id,product_id,amount,currency,valid_from,source_code,source_description,version,created_at) values (?,?,?,?,?,?,?,?,?,0,?)",
+		tenantJdbc().update("insert into catalog_management.product_price (id,tenant_id,workspace_id,product_id,amount,currency,valid_from,source_code,source_description,version,created_at) values (?,?,?,?,?,?,?,?,?,0,?)",
 				UUID.randomUUID(), tenant, workspace, previewProduct, new java.math.BigDecimal("390.00"), "PEN", Timestamp.valueOf("2020-01-01 00:00:00"), "PREVIEW", "Pricing preview fixture", Timestamp.from(now));
 
 		String createBody = "{\"slug\":\"preview-promotion-" + previewProduct + "\",\"name\":\"Preview ten percent\",\"description\":\"integration\",\"discountType\":\"PERCENTAGE\",\"discountValue\":10,\"currency\":null,\"startsAt\":\"" + now.minusSeconds(60) + "\",\"endsAt\":null,\"minimumQuantity\":5,\"stackingPolicy\":\"EXCLUSIVE\",\"productIds\":[\"" + previewProduct + "\"],\"categoryIds\":[],\"clientAccountIds\":[],\"rules\":[],\"priority\":50}";

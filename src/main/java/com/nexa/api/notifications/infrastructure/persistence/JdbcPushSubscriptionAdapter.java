@@ -88,66 +88,118 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DeliveryClaim claimDelivery(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId,
-                                       String deliveryKey, Instant now) {
-        require(tenantId, workspaceId, subscriptionId, eventId, deliveryKey, now);
+                                       String deliveryKey, int maxAttempts, Instant now, Instant leaseUntil) {
+        require(tenantId, workspaceId, subscriptionId, eventId, deliveryKey, now, leaseUntil);
+        if (maxAttempts < 1 || !leaseUntil.isAfter(now)) {
+            throw new IllegalArgumentException("Push delivery retry bounds are invalid");
+        }
         UUID eventUuid = uuid(eventId);
         UUID claimToken = UUID.randomUUID();
         int inserted = jdbc.update("""
                 insert into notifications.push_delivery_claim
                     (tenant_id,workspace_id,subscription_id,event_id,delivery_key,status,claim_token,lease_until,created_at,updated_at)
-                values (?,?,?,?,?,'CLAIMED',?,current_timestamp + interval '10 minutes',?,?)
+                values (?,?,?,?,?,'CLAIMED',?,?,?,?)
                 on conflict (tenant_id,workspace_id,subscription_id,event_id) do nothing
                 """, tenantId, workspaceId, subscriptionId, eventUuid, deliveryKey, claimToken,
-                Timestamp.from(now), Timestamp.from(now));
-        if (inserted == 1) return new DeliveryClaim(DeliveryClaimStatus.CLAIMED, claimToken);
+                Timestamp.from(leaseUntil), Timestamp.from(now), Timestamp.from(now));
+
+        ClaimState claim = jdbc.query("select status,claim_token,lease_until from notifications.push_delivery_claim "
+                        + "where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? for update",
+                (rs, row) -> new ClaimState(rs.getString("status"), rs.getObject("claim_token", UUID.class),
+                        rs.getTimestamp("lease_until") == null ? null : rs.getTimestamp("lease_until").toInstant()),
+                tenantId, workspaceId, subscriptionId, eventUuid).stream().findFirst()
+                .orElseThrow(() -> new NotificationOperationException("PUSH_DELIVERY_CLAIM_UNAVAILABLE", true));
 
         Boolean sent = jdbc.queryForObject("select exists(select 1 from notifications.push_delivery_attempt where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='SENT')",
                 Boolean.class, tenantId, workspaceId, subscriptionId, eventUuid);
         if (Boolean.TRUE.equals(sent)) {
             jdbc.update("update notifications.push_delivery_claim set status='SENT',claim_token=null,lease_until=null,updated_at=? where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status<>'SENT'",
                     Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid);
-            return new DeliveryClaim(DeliveryClaimStatus.ALREADY_SENT, null);
+            return new DeliveryClaim(DeliveryClaimStatus.ALREADY_SENT, null, 0);
+        }
+        if ("SENT".equals(claim.status())) return new DeliveryClaim(DeliveryClaimStatus.ALREADY_SENT, null, 0);
+        if ("DEAD_LETTER".equals(claim.status())) return new DeliveryClaim(DeliveryClaimStatus.DEAD_LETTER, null, 0);
+
+        Integer attempts = jdbc.queryForObject("select coalesce(max(attempt_number),0) from notifications.push_delivery_attempt "
+                        + "where tenant_id=? and workspace_id=? and subscription_id=? and event_id=?",
+                Integer.class, tenantId, workspaceId, subscriptionId, eventUuid);
+        int nextAttempt = attempts + 1;
+        if (attempts >= maxAttempts) {
+            jdbc.update("update notifications.push_delivery_claim set status='DEAD_LETTER',claim_token=null,lease_until=null,updated_at=? "
+                            + "where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='CLAIMED'",
+                    Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid);
+            return new DeliveryClaim(DeliveryClaimStatus.DEAD_LETTER, null, 0);
+        }
+        if (inserted == 1) return new DeliveryClaim(DeliveryClaimStatus.CLAIMED, claimToken, nextAttempt);
+        if (claim.leaseUntil() != null && claim.leaseUntil().isAfter(now)) {
+            return new DeliveryClaim(DeliveryClaimStatus.BUSY, null, 0);
         }
 
         int reclaimed = jdbc.update("""
                 update notifications.push_delivery_claim
-                   set claim_token=?, lease_until=current_timestamp + interval '10 minutes', updated_at=?
+                   set status='CLAIMED',claim_token=?,lease_until=?,updated_at=?
                  where tenant_id=? and workspace_id=? and subscription_id=? and event_id=?
-                   and status='CLAIMED' and lease_until <= current_timestamp
-                """, claimToken, Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid);
+                   and status='CLAIMED'
+                """, claimToken, Timestamp.from(leaseUntil), Timestamp.from(now),
+                tenantId, workspaceId, subscriptionId, eventUuid);
         return reclaimed == 1
-                ? new DeliveryClaim(DeliveryClaimStatus.CLAIMED, claimToken)
-                : new DeliveryClaim(DeliveryClaimStatus.BUSY, null);
+                ? new DeliveryClaim(DeliveryClaimStatus.CLAIMED, claimToken, nextAttempt)
+                : new DeliveryClaim(DeliveryClaimStatus.BUSY, null, 0);
     }
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void completeDelivery(UUID tenantId, UUID workspaceId, UUID subscriptionId, String eventId,
-                                 UUID claimToken, boolean sent, Instant now) {
-        require(tenantId, workspaceId, subscriptionId, eventId, claimToken, now);
-        UUID eventUuid = uuid(eventId);
-        int changed = sent
-                ? jdbc.update("update notifications.push_delivery_claim set status='SENT',claim_token=null,lease_until=null,updated_at=? where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='CLAIMED' and claim_token=?",
-                Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid, claimToken)
-                : jdbc.update("update notifications.push_delivery_claim set claim_token=null,lease_until=current_timestamp,updated_at=? where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='CLAIMED' and claim_token=?",
-                Timestamp.from(now), tenantId, workspaceId, subscriptionId, eventUuid, claimToken);
-        if (changed == 1) return;
-        if (sent && Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from notifications.push_delivery_claim where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? and status='SENT')",
-                Boolean.class, tenantId, workspaceId, subscriptionId, eventUuid))) return;
-        throw new NotificationOperationException("PUSH_DELIVERY_CLAIM_LOST", true);
-    }
+    public DeliveryCompletion completeDelivery(DeliveryAttempt attempt, UUID claimToken, int attemptNumber,
+            int maxAttempts, boolean retryable, Instant retryAt) {
+        require(attempt.tenantId(), attempt.workspaceId(), attempt.subscriptionId(), attempt.eventId(),
+                attempt.eventType(), attempt.status(), attempt.providerCode(), attempt.now(), claimToken);
+        if (attemptNumber < 1 || maxAttempts < 1 || attemptNumber > maxAttempts
+                || (retryable && (retryAt == null || !retryAt.isAfter(attempt.now())))) {
+            throw new IllegalArgumentException("Push delivery completion is invalid");
+        }
+        UUID eventUuid = uuid(attempt.eventId());
+        lockDeliveryAttempt(attempt.tenantId(), attempt.workspaceId(), attempt.subscriptionId(), eventUuid);
+        ClaimState claim = jdbc.query("select status,claim_token,lease_until from notifications.push_delivery_claim "
+                        + "where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? for update",
+                (rs, row) -> new ClaimState(rs.getString("status"), rs.getObject("claim_token", UUID.class),
+                        rs.getTimestamp("lease_until") == null ? null : rs.getTimestamp("lease_until").toInstant()),
+                attempt.tenantId(), attempt.workspaceId(), attempt.subscriptionId(), eventUuid).stream().findFirst()
+                .orElseThrow(() -> new NotificationOperationException("PUSH_DELIVERY_CLAIM_LOST", true));
+        if ("SENT".equals(claim.status())) return DeliveryCompletion.SENT;
+        if ("DEAD_LETTER".equals(claim.status())) return DeliveryCompletion.DEAD_LETTER;
+        if (!"CLAIMED".equals(claim.status()) || !claimToken.equals(claim.claimToken())
+                || claim.leaseUntil() == null) {
+            throw new NotificationOperationException("PUSH_DELIVERY_CLAIM_LOST", true);
+        }
+        Instant checkedAt = jdbc.queryForObject("select clock_timestamp()", Timestamp.class).toInstant();
+        if (!claim.leaseUntil().isAfter(checkedAt)) {
+            throw new NotificationOperationException("PUSH_DELIVERY_CLAIM_LOST", true);
+        }
 
-    @Override
-    @Transactional
-    public void recordAttempt(DeliveryAttempt request) {
-        require(request.tenantId(), request.workspaceId(), request.subscriptionId(), request.eventId(), request.eventType(),
-                request.status(), request.providerCode(), request.now());
-        lockDeliveryAttempt(request.tenantId(), request.workspaceId(), request.subscriptionId(), uuid(request.eventId()));
-        Integer attemptNumber = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from notifications.push_delivery_attempt where tenant_id=? and workspace_id=? and subscription_id=? and event_id=?",
-                Integer.class, request.tenantId(), request.workspaceId(), request.subscriptionId(), uuid(request.eventId()));
+        Integer completedAttempts = jdbc.queryForObject("select coalesce(max(attempt_number),0) "
+                        + "from notifications.push_delivery_attempt where tenant_id=? and workspace_id=? "
+                        + "and subscription_id=? and event_id=?",
+                Integer.class, attempt.tenantId(), attempt.workspaceId(), attempt.subscriptionId(), eventUuid);
+        if (completedAttempts + 1 != attemptNumber) {
+            throw new NotificationOperationException("PUSH_DELIVERY_ATTEMPT_SEQUENCE_CHANGED", true);
+        }
         jdbc.update("insert into notifications.push_delivery_attempt(id,tenant_id,workspace_id,subscription_id,event_id,event_type,status,provider_code,error,attempt_number,created_at) values (?,?,?,?,?,?,?,?,?,?,?)",
-                UUID.randomUUID(), request.tenantId(), request.workspaceId(), request.subscriptionId(), uuid(request.eventId()),
-                request.eventType(), request.status(), request.providerCode(), request.error(), attemptNumber, Timestamp.from(request.now()));
+                UUID.randomUUID(), attempt.tenantId(), attempt.workspaceId(), attempt.subscriptionId(), eventUuid,
+                attempt.eventType(), attempt.status(), attempt.providerCode(), attempt.error(), attemptNumber,
+                Timestamp.from(attempt.now()));
+
+        boolean sent = "SENT".equals(attempt.status());
+        boolean retryScheduled = !sent && retryable && attemptNumber < maxAttempts;
+        String status = sent ? "SENT" : retryScheduled ? "CLAIMED" : "DEAD_LETTER";
+        Timestamp nextLease = retryScheduled ? Timestamp.from(retryAt) : null;
+        int changed = jdbc.update("update notifications.push_delivery_claim set status=?,claim_token=null,lease_until=?,updated_at=? "
+                        + "where tenant_id=? and workspace_id=? and subscription_id=? and event_id=? "
+                        + "and status='CLAIMED' and claim_token=?",
+                status, nextLease, Timestamp.from(attempt.now()), attempt.tenantId(), attempt.workspaceId(),
+                attempt.subscriptionId(), eventUuid, claimToken);
+        if (changed != 1) throw new NotificationOperationException("PUSH_DELIVERY_CLAIM_LOST", true);
+        return sent ? DeliveryCompletion.SENT : retryScheduled
+                ? DeliveryCompletion.RETRY_SCHEDULED : DeliveryCompletion.DEAD_LETTER;
     }
 
     private PushSubscription load(UUID tenant, UUID workspace, UUID id) {
@@ -187,5 +239,6 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
     private static void ensureHash(String stored, String actual) { if (!Objects.equals(stored, actual)) throw new NotificationOperationException("IDEMPOTENCY_PAYLOAD_CONFLICT", false); }
     private static void require(Object... values) { for (Object value : values) if (value == null) throw new IllegalArgumentException("Push subscription request is incomplete"); }
     private record ExistingSubscription(UUID id, String status) { }
+    private record ClaimState(String status, UUID claimToken, Instant leaseUntil) { }
     private record Idempotency(String hash, UUID subscriptionId) { }
 }

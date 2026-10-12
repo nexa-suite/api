@@ -6,6 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionMo
 import com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.MutationResult;
 import com.nexa.api.fulfillmentdelivery.application.model.OperationalExceptionModels.ReviewRequest;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalExceptionPersistencePort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.OperationalExceptionOperations;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
@@ -23,7 +24,7 @@ import java.util.UUID;
 /** Current-assignment authority for the bounded Driver exception lifecycle. */
 @Service
 @Profile("!test")
-public class OperationalExceptionService {
+public class OperationalExceptionService implements OperationalExceptionOperations {
     private final OperationalExceptionPersistencePort persistence;
     private final Clock clock;
 
@@ -33,6 +34,7 @@ public class OperationalExceptionService {
     }
 
     @Transactional(readOnly = true)
+    @Override
     public ExceptionSetView getForDriver(CurrentAccessContext context, UUID deliveryId) {
         context.requirePermission(PermissionKey.DISPATCH_READ);
         if (deliveryId == null) throw error("DELIVERY_NOT_FOUND", true);
@@ -40,6 +42,7 @@ public class OperationalExceptionService {
     }
 
     @Transactional
+    @Override
     public MutationResult claim(CurrentAccessContext context, UUID deliveryId, UUID exceptionId,
                                 long expectedDeliveryVersion, String idempotencyKey) {
         context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
@@ -51,6 +54,7 @@ public class OperationalExceptionService {
     }
 
     @Transactional
+    @Override
     public MutationResult review(CurrentAccessContext context, UUID deliveryId, UUID exceptionId,
                                  long expectedDeliveryVersion, String idempotencyKey) {
         context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
@@ -62,6 +66,7 @@ public class OperationalExceptionService {
     }
 
     @Transactional
+    @Override
     public MutationResult completeWarning(CurrentAccessContext context, UUID deliveryId, UUID exceptionId,
             long expectedDeliveryVersion, String idempotencyKey, String resolution, boolean close) {
         context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);

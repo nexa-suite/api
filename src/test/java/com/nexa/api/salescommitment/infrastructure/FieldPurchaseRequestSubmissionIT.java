@@ -34,13 +34,18 @@ class FieldPurchaseRequestSubmissionIT extends NexaWorkflowIntegrationSupport {
                 .header("Authorization", "Bearer " + sales).header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON).content(command))
                 .andExpect(status().isCreated()).andReturn();
-        assertThat(json(replay).get("id").asText()).isEqualTo(json(first).get("id").asText());
+        String requestId = json(first).get("id").asText();
+        assertThat(json(replay).get("id").asText()).isEqualTo(requestId);
         assertThat(requestCount()).isEqualTo(before + 1);
+        assertThat(fieldSubmissionIdempotencyCount(key)).isEqualTo(1L);
         mockMvc.perform(post("/api/v1/purchase-requests/field-submissions")
                 .header("Authorization", "Bearer " + sales).header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON).content(command(price, 2)))
                 .andExpect(status().isConflict());
         assertThat(requestCount()).isEqualTo(before + 1);
+        assertThat(fieldSubmissionIdempotencyCount(key)).isEqualTo(1L);
+        assertThat(centralFieldSubmissionRequestCount(requestId)).isZero();
+        assertThat(centralFieldSubmissionIdempotencyCount(key)).isZero();
     }
     @Test
     void stalePriceAndBuyerAuthorityCannotLeavePartialCommitment() throws Exception {
@@ -49,8 +54,9 @@ class FieldPurchaseRequestSubmissionIT extends NexaWorkflowIntegrationSupport {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         BigDecimal price = price(sales);
         long before = requestCount();
+        String staleKey = "stale-" + uuid();
         mockMvc.perform(post("/api/v1/purchase-requests/field-submissions")
-                .header("Authorization", "Bearer " + sales).header("Idempotency-Key", "stale-" + uuid())
+                .header("Authorization", "Bearer " + sales).header("Idempotency-Key", staleKey)
                 .contentType(MediaType.APPLICATION_JSON).content(command(price.add(BigDecimal.ONE), 1)))
                 .andExpect(status().isPreconditionFailed());
         mockMvc.perform(post("/api/v1/purchase-requests/field-submissions")
@@ -58,6 +64,8 @@ class FieldPurchaseRequestSubmissionIT extends NexaWorkflowIntegrationSupport {
                 .contentType(MediaType.APPLICATION_JSON).content(command(price, 1)))
                 .andExpect(status().isForbidden());
         assertThat(requestCount()).isEqualTo(before);
+        assertThat(fieldSubmissionIdempotencyCount(staleKey)).isZero();
+        assertThat(centralFieldSubmissionIdempotencyCount(staleKey)).isZero();
     }
     private BigDecimal price(String sales) throws Exception {
         var response = mockMvc.perform(get("/api/v1/client-accounts/" + buyerClientAccountId() + "/catalog-offers/CAT-0002")
@@ -67,8 +75,24 @@ class FieldPurchaseRequestSubmissionIT extends NexaWorkflowIntegrationSupport {
         return new BigDecimal(json(response).get("unitPrice").get("amount").asText());
     }
     private long requestCount() {
-        return jdbc.queryForObject("select count(*) from sales.purchase_request where tenant_id=? and workspace_id=? and client_account_id=?",
+        return tenantJdbc().queryForObject("select count(*) from sales.purchase_request where tenant_id=? and workspace_id=? and client_account_id=?",
                 Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(buyerClientAccountId()));
+    }
+    private long fieldSubmissionIdempotencyCount(String key) {
+        return tenantJdbc().queryForObject("select count(*) from sales.idempotency_record where tenant_id=? and workspace_id=? "
+                        + "and actor_membership_id=? and operation='purchase-request-field-submission' and idempotency_key=?",
+                Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                UUID.fromString(membershipId(SALES_EMAIL)), key);
+    }
+    private long centralFieldSubmissionRequestCount(String requestId) {
+        return jdbc.queryForObject("select count(*) from sales.purchase_request where tenant_id=? and workspace_id=? and id=?",
+                Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(requestId));
+    }
+    private long centralFieldSubmissionIdempotencyCount(String key) {
+        return jdbc.queryForObject("select count(*) from sales.idempotency_record where tenant_id=? and workspace_id=? "
+                        + "and actor_membership_id=? and operation='purchase-request-field-submission' and idempotency_key=?",
+                Long.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                UUID.fromString(membershipId(SALES_EMAIL)), key);
     }
     private String command(BigDecimal price, int quantity) throws Exception {
         return "{\"clientAccountId\":\"" + buyerClientAccountId() + "\",\"paymentOption\":\"CASH_ON_DELIVERY\",\"requestedDeliveryDate\":\"2099-12-31\","

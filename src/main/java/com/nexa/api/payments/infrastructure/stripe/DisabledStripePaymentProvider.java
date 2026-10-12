@@ -10,6 +10,9 @@ public final class DisabledStripePaymentProvider implements StripePaymentProvide
     private static final String MESSAGE = "Payment provider is disabled; configure NEXA_PAYMENTS_PROVIDER=stripe to enable Stripe";
 
     @Override
+    public boolean supportsPaymentIntentCreation() { return false; }
+
+    @Override
     public PaymentIntent createPaymentIntent(PaymentIntentRequest request) { throw unavailable(); }
 
     @Override

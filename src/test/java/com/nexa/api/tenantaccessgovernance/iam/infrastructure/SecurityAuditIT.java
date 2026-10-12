@@ -73,11 +73,11 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
         Map<String, Long> before = auditCounts();
 
         String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
-        mockMvc.perform(post("/api/v1/authentication/sign-in")
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
                         .header("Origin", ALLOWED_ORIGIN)
                         .header("User-Agent", "audit-login-failed")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identifier\":\"unknown-" + uuid() + "@example.test\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}"))
+                        .content("{\"identifier\":\"unknown-" + uuid() + "@example.test\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}")))
                 .andExpect(status().isUnauthorized());
 
         String throttledIdentifier = "audit-throttled-" + uuid() + "@example.test";
@@ -87,7 +87,7 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
         Instant now = Instant.now();
         jdbc.update("insert into iam.authentication_failure (id,normalized_identifier,client_fingerprint,failure_count,window_started_at,last_failure_at) values (?,?,?,?,?,?)",
                 UUID.randomUUID(), throttledIdentifier, throttleFingerprint, 5, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now));
-        mockMvc.perform(post("/api/v1/authentication/sign-in")
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
                         .header("Origin", ALLOWED_ORIGIN)
                         .header("User-Agent", throttleAgent)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -95,7 +95,7 @@ class SecurityAuditIT extends PostgresIntegrationSupport {
                             request.setRemoteAddr(throttleRemote);
                             return request;
                         })
-                        .content("{\"identifier\":\"" + throttledIdentifier + "\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}"))
+                        .content("{\"identifier\":\"" + throttledIdentifier + "\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}")))
                 .andExpect(status().isTooManyRequests());
 
         mockMvc.perform(post("/api/v1/auth/password-reset-requests")

@@ -39,8 +39,8 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         dispatch = ready(dispatch);
         dispatch = mutate(dispatch, "/route-starts", "{}", "route-start-1");
         assertThat(json(detail(dispatch)).get("status").asText()).isEqualTo("IN_ROUTE");
-        assertThat(jdbc.queryForObject("select status from warehouse.inventory_reservation where id=?", String.class, java.util.UUID.fromString(dispatch.reservationId()))).isEqualTo("CONSUMED");
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where correlation_id=? and movement_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_reservation where id=?", String.class, java.util.UUID.fromString(dispatch.reservationId()))).isEqualTo("CONSUMED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where correlation_id=? and movement_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
         MvcResult pendingPod = mockMvc.perform(get("/api/v1/proof-of-delivery?status=PENDING").header("Authorization", "Bearer " + dispatch.logisticsToken())).andExpect(status().isOk()).andReturn();
         assertThat(json(pendingPod).toString()).contains(dispatch.id());
         MvcResult delivered = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/delivery-completions")
@@ -51,7 +51,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         MvcResult completedPod = mockMvc.perform(get("/api/v1/proof-of-delivery?status=COMPLETED").header("Authorization", "Bearer " + dispatch.logisticsToken())).andExpect(status().isOk()).andReturn();
         assertThat(json(completedPod).toString()).contains(dispatch.id());
         final String deliveredDispatchId = dispatch.id();
-        assertThatThrownBy(() -> jdbc.update("update logistics.proof_of_delivery set notes='tampered' where dispatch_order_id=?", java.util.UUID.fromString(deliveredDispatchId))).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> tenantJdbc().update("update logistics.proof_of_delivery set notes='tampered' where dispatch_order_id=?", java.util.UUID.fromString(deliveredDispatchId))).isInstanceOf(RuntimeException.class);
     }
 
     @Test void failedAttemptRemainsOnTheSameDeliveryAndIsIdempotent() throws Exception {
@@ -81,7 +81,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         assertThat(json(replay).get("lastAttempt").get("id").asText())
                 .isEqualTo(json(first).get("lastAttempt").get("id").asText());
         assertThat(replay.getResponse().getHeader("ETag")).isEqualTo(first.getResponse().getHeader("ETag"));
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?", Integer.class,
                 java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
 
         mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/delivery-attempts")
@@ -116,13 +116,13 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                 .isEqualByComparingTo("0.5");
         assertThat(json(first).get("podId").isNull()).isTrue();
         assertThat(json(replay).get("id").asText()).isEqualTo(dispatch.id());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?", Integer.class,
                 java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select coalesce(sum(received_quantity),0) from logistics.delivery_attempt_line where delivery_attempt_id=(select id from logistics.delivery_attempt where delivery_id=? order by attempt_number desc limit 1)",
+        assertThat(tenantJdbc().queryForObject("select coalesce(sum(received_quantity),0) from logistics.delivery_attempt_line where delivery_attempt_id=(select id from logistics.delivery_attempt where delivery_id=? order by attempt_number desc limit 1)",
                 BigDecimal.class, java.util.UUID.fromString(dispatch.id()))).isEqualByComparingTo("0.5");
-        assertThat(jdbc.queryForObject("select count(*) from logistics.continuation_delivery where source_delivery_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.continuation_delivery where source_delivery_id=?", Integer.class,
                 java.util.UUID.fromString(dispatch.id()))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.proof_of_delivery where dispatch_order_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.proof_of_delivery where dispatch_order_id=?", Integer.class,
                 java.util.UUID.fromString(dispatch.id()))).isEqualTo(0);
         MvcResult pendingPod = mockMvc.perform(get("/api/v1/proof-of-delivery?status=PENDING")
                         .header("Authorization", "Bearer " + dispatch.logisticsToken())).andExpect(status().isOk()).andReturn();
@@ -160,7 +160,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(reading).get("status").asText()).isEqualTo("INCIDENT");
         final String temperatureDispatchId = dispatch.id();
-        assertThatThrownBy(() -> jdbc.update("update logistics.temperature_reading set source='tampered' where dispatch_order_id=?", java.util.UUID.fromString(temperatureDispatchId))).isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> tenantJdbc().update("update logistics.temperature_reading set source='tampered' where dispatch_order_id=?", java.util.UUID.fromString(temperatureDispatchId))).isInstanceOf(RuntimeException.class);
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult events = mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id() + "/events").header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
         assertThat(json(events).toString()).contains("DELIVERY_REVIEW");
@@ -179,8 +179,8 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
             assertThat(secondResult.getResponse().getStatus()).isEqualTo(200);
             assertThat(json(firstResult).get("id").asText()).isEqualTo(json(secondResult).get("id").asText());
             assertThat(json(firstResult).get("status").asText()).isEqualTo("IN_ROUTE");
-            assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where correlation_id=? and movement_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
-            assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where correlation_id=? and event_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
+            assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where correlation_id=? and movement_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
+            assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where correlation_id=? and event_type='OUTBOUND_CONSUMPTION'", Integer.class, dispatch.id())).isEqualTo(1);
             MvcResult competing = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/route-starts")
                             .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", dispatch.etag()).header("Idempotency-Key", "route-concurrent-other")
                             .contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -205,15 +205,15 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
     @Test void cancellationReleasesReservationAndReservedStockAtomically() throws Exception {
         var dispatch = createReservedDispatch();
         java.util.UUID reservationId = java.util.UUID.fromString(dispatch.reservationId());
-        java.math.BigDecimal reservedBefore = jdbc.queryForObject("select coalesce(sum(l.reserved_quantity),0) from warehouse.inventory_lot l where l.id in (select lot_id from warehouse.inventory_reservation_allocation where reservation_line_id in (select id from warehouse.inventory_reservation_line where reservation_id=?))", java.math.BigDecimal.class, reservationId);
-        java.math.BigDecimal allocated = jdbc.queryForObject("select coalesce(sum(quantity),0) from warehouse.inventory_reservation_allocation where reservation_line_id in (select id from warehouse.inventory_reservation_line where reservation_id=?)", java.math.BigDecimal.class, reservationId);
+        java.math.BigDecimal reservedBefore = tenantJdbc().queryForObject("select coalesce(sum(l.reserved_quantity),0) from warehouse.inventory_lot l where l.id in (select lot_id from warehouse.inventory_reservation_allocation where reservation_line_id in (select id from warehouse.inventory_reservation_line where reservation_id=?))", java.math.BigDecimal.class, reservationId);
+        java.math.BigDecimal allocated = tenantJdbc().queryForObject("select coalesce(sum(quantity),0) from warehouse.inventory_reservation_allocation where reservation_line_id in (select id from warehouse.inventory_reservation_line where reservation_id=?)", java.math.BigDecimal.class, reservationId);
         MvcResult cancelled = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/cancellations")
                         .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", dispatch.etag()).header("Idempotency-Key", "cancel-1")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Customer cancelled\"}"))
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(cancelled).get("status").asText()).isEqualTo("CANCELLED");
-        assertThat(jdbc.queryForObject("select status from warehouse.inventory_reservation where id=?", String.class, reservationId)).isEqualTo("RELEASED");
-        java.math.BigDecimal reservedAfter = jdbc.queryForObject("select coalesce(sum(l.reserved_quantity),0) from warehouse.inventory_lot l where l.id in (select lot_id from warehouse.inventory_reservation_allocation where reservation_line_id in (select id from warehouse.inventory_reservation_line where reservation_id=?))", java.math.BigDecimal.class, reservationId);
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_reservation where id=?", String.class, reservationId)).isEqualTo("RELEASED");
+        java.math.BigDecimal reservedAfter = tenantJdbc().queryForObject("select coalesce(sum(l.reserved_quantity),0) from warehouse.inventory_lot l where l.id in (select lot_id from warehouse.inventory_reservation_allocation where reservation_line_id in (select id from warehouse.inventory_reservation_line where reservation_id=?))", java.math.BigDecimal.class, reservationId);
         assertThat(reservedAfter).isEqualByComparingTo(reservedBefore.subtract(allocated));
     }
 

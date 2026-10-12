@@ -5,10 +5,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.modulith.NamedInterface;
 
+@NamedInterface(value = "sales-public", propagate = false)
 public final class ManualSalesOrderDraftModels {
     private ManualSalesOrderDraftModels() { }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record DraftView(
             String id,
             String status,
@@ -32,6 +35,7 @@ public final class ManualSalesOrderDraftModels {
         }
     }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record ClientView(
             String id,
             String code,
@@ -45,6 +49,7 @@ public final class ManualSalesOrderDraftModels {
             BigDecimal currentExposure,
             BigDecimal availableCredit) { }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record LineView(
             String id,
             String skuId,
@@ -62,6 +67,7 @@ public final class ManualSalesOrderDraftModels {
             String availabilityStatus,
             String notes) { }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record DeliveryView(
             String addressId,
             String addressSnapshot,
@@ -71,6 +77,7 @@ public final class ManualSalesOrderDraftModels {
             String routeProvider,
             String deliveryNotes) { }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record ReviewView(
             DraftView draft,
             boolean clientComplete,
@@ -83,6 +90,7 @@ public final class ManualSalesOrderDraftModels {
         }
     }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record ClientCommand(
             UUID clientAccountId,
             LocalDate requestedDeliveryDate,
@@ -91,6 +99,7 @@ public final class ManualSalesOrderDraftModels {
             String currency,
             String notes) { }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record LineCommand(
             UUID skuId,
             String catalogItemId,
@@ -98,5 +107,6 @@ public final class ManualSalesOrderDraftModels {
             String unit,
             String notes) { }
 
+    @NamedInterface(value = "sales-public", propagate = false)
     public record DeliveryCommand(UUID addressId, String deliveryNotes, String routeProvider) { }
 }

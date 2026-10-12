@@ -9,6 +9,7 @@ public enum PaymentOption {
 	CREDIT_LINE,
 	BANK_TRANSFER,
 	CARD_STRIPE,
+	WALLET,
 	CASH,
 	CASH_ON_DELIVERY,
 	PREPAID,

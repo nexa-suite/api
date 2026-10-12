@@ -6,6 +6,8 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -29,11 +31,18 @@ public class CatalogPersistenceBootstrap {
     private final Supplier<List<CatalogPersistenceSeedItemRecord>> seedSupplier;
     private final String seedVersion;
     private final String seedChecksum;
+    private final Environment environment;
 
     @Autowired
     public CatalogPersistenceBootstrap(JdbcTemplate jdbc, CatalogPersistenceSeedLoader seedLoader,
+            com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory,
+            Environment environment) {
+        this(jdbc, seedLoader::load, "v2", CatalogPersistenceSeedValidator.EXPECTED_SHA256, workspaceDirectory, environment);
+    }
+
+    public CatalogPersistenceBootstrap(JdbcTemplate jdbc, CatalogPersistenceSeedLoader seedLoader,
             com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory) {
-        this(jdbc, seedLoader::load, "v2", CatalogPersistenceSeedValidator.EXPECTED_SHA256, workspaceDirectory);
+        this(jdbc, seedLoader::load, "v2", CatalogPersistenceSeedValidator.EXPECTED_SHA256, workspaceDirectory, null);
     }
 
     /**
@@ -43,23 +52,26 @@ public class CatalogPersistenceBootstrap {
     public CatalogPersistenceBootstrap(JdbcTemplate jdbc, CatalogSeedLoader seedLoader,
             com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory) {
         this(jdbc, () -> seedLoader.load().stream().map(CatalogPersistenceBootstrap::adaptLegacySeed).toList(),
-                "v1", CatalogSeedValidator.EXPECTED_SHA256, workspaceDirectory);
+                "v1", CatalogSeedValidator.EXPECTED_SHA256, workspaceDirectory, null);
     }
 
     private CatalogPersistenceBootstrap(JdbcTemplate jdbc, Supplier<List<CatalogPersistenceSeedItemRecord>> seedSupplier,
             String seedVersion, String seedChecksum,
-            com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory) {
+            com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory workspaceDirectory,
+            Environment environment) {
         this.workspaceDirectory = workspaceDirectory;
         this.jdbc = jdbc;
         this.seedSupplier = seedSupplier;
         this.seedVersion = seedVersion;
         this.seedChecksum = seedChecksum;
+        this.environment = environment;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     @Order(Ordered.LOWEST_PRECEDENCE - 20)
     @Transactional
     public void importDeterministicSeed() {
+        if (environment != null && environment.acceptsProfiles(Profiles.of("local-fixtures"))) return;
         List<CatalogPersistenceSeedItemRecord> seeds = null;
         Instant now = Instant.now();
         UUID cursorTenant = null, cursorWorkspace = null;
@@ -71,7 +83,7 @@ public class CatalogPersistenceBootstrap {
                 for (var scope : scopes) {
                     Workspace workspace = new Workspace(scope.tenantId(), scope.workspaceId());
                     setTransactionScope(workspace);
-                    importWorkspace(workspace, seeds, now);
+                    importWorkspace(jdbc, workspace, seeds, now);
                 }
                 var last = scopes.getLast();
                 cursorTenant = last.tenantId(); cursorWorkspace = last.workspaceId();
@@ -82,35 +94,71 @@ public class CatalogPersistenceBootstrap {
         }
     }
 
-    private void importWorkspace(Workspace workspace, List<CatalogPersistenceSeedItemRecord> seeds, Instant now) {
-        int claimed = jdbc.update("insert into catalog_management.seed_import_history (tenant_id,workspace_id,seed_version,seed_checksum,imported_at) values (?,?,?,?,?) on conflict (tenant_id,workspace_id,seed_version) do nothing",
+    public void importExactTenantWorkspace(JdbcTemplate targetJdbc, UUID tenantId, UUID workspaceId) {
+        if (targetJdbc == null || tenantId == null || workspaceId == null) {
+            throw new IllegalArgumentException("Exact Tenant and Workspace scope is required");
+        }
+        List<CatalogPersistenceSeedItemRecord> seeds = seedSupplier.get();
+        List<String> priorChecksums = targetJdbc.query("select seed_checksum from catalog_management.seed_import_history "
+                        + "where tenant_id=? and workspace_id=? and seed_version=?",
+                (rs, row) -> rs.getString(1), tenantId, workspaceId, seedVersion);
+        if (priorChecksums.size() > 1 || (!priorChecksums.isEmpty() && !seedChecksum.equals(priorChecksums.getFirst()))) {
+            throw new IllegalStateException("Existing local catalog seed history conflicts with the reviewed fixture");
+        }
+        List<String> itemIds = seeds.stream().map(CatalogPersistenceSeedItemRecord::catalogItemId).toList();
+        int existingProducts = countProducts(targetJdbc, tenantId, workspaceId, itemIds);
+        if (!priorChecksums.isEmpty()) {
+            if (existingProducts != itemIds.size()) {
+                throw new IllegalStateException("Existing local catalog seed history is incomplete");
+            }
+            return;
+        }
+        if (existingProducts != 0) {
+            throw new IllegalStateException("Existing catalog items conflict with the local fixture; refusing to overwrite them");
+        }
+        importWorkspace(targetJdbc, new Workspace(tenantId, workspaceId), seeds, Instant.now());
+    }
+
+    private static int countProducts(JdbcTemplate targetJdbc, UUID tenantId, UUID workspaceId, List<String> itemIds) {
+        String placeholders = String.join(",", java.util.Collections.nCopies(itemIds.size(), "?"));
+        List<Object> args = new java.util.ArrayList<>();
+        args.add(tenantId);
+        args.add(workspaceId);
+        args.addAll(itemIds);
+        Integer count = targetJdbc.queryForObject("select count(*) from catalog_management.product where tenant_id=? "
+                + "and workspace_id=? and catalog_item_id in (" + placeholders + ")", Integer.class, args.toArray());
+        return count == null ? 0 : count;
+    }
+
+    private void importWorkspace(JdbcTemplate targetJdbc, Workspace workspace, List<CatalogPersistenceSeedItemRecord> seeds, Instant now) {
+        int claimed = targetJdbc.update("insert into catalog_management.seed_import_history (tenant_id,workspace_id,seed_version,seed_checksum,imported_at) values (?,?,?,?,?) on conflict (tenant_id,workspace_id,seed_version) do nothing",
                 workspace.tenantId(), workspace.workspaceId(), seedVersion, seedChecksum, timestamp(now));
         if (claimed == 0) return;
         Map<String, UUID> categories = new HashMap<>();
         Map<String, UUID> brands = new HashMap<>();
         for (CatalogPersistenceSeedItemRecord seed : seeds) {
-            categories.computeIfAbsent(seed.categoryName(), key -> category(workspace, key, now));
-            brands.computeIfAbsent(seed.brandName(), key -> brand(workspace, key, now));
+            categories.computeIfAbsent(seed.categoryName(), key -> category(targetJdbc, workspace, key, now));
+            brands.computeIfAbsent(seed.brandName(), key -> brand(targetJdbc, workspace, key, now));
         }
         for (CatalogPersistenceSeedItemRecord seed : seeds) {
             UUID productId = UUID.nameUUIDFromBytes((workspace.tenantId() + ":" + workspace.workspaceId() + ":product:" + seed.productId()).getBytes(StandardCharsets.UTF_8));
             String slug = slug(seed.itemName()) + "-" + seed.catalogItemId().toLowerCase(java.util.Locale.ROOT);
-            jdbc.update("insert into catalog_management.product (id,tenant_id,workspace_id,catalog_item_id,product_code,slug,name,description,category_id,brand_id,storage_temperature,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?) on conflict (tenant_id,workspace_id,catalog_item_id) do nothing",
+            targetJdbc.update("insert into catalog_management.product (id,tenant_id,workspace_id,catalog_item_id,product_code,slug,name,description,category_id,brand_id,storage_temperature,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?) on conflict (tenant_id,workspace_id,catalog_item_id) do nothing",
                     productId, workspace.tenantId(), workspace.workspaceId(), seed.catalogItemId(), seed.productId(), slug, seed.itemName(), seed.description(),
                     categories.get(seed.categoryName()), brands.get(seed.brandName()), temperature(seed.coldChainRequirement()), timestamp(now), timestamp(now));
-            UUID persistedProduct = jdbc.queryForObject("select id from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id=?", UUID.class,
+            UUID persistedProduct = targetJdbc.queryForObject("select id from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id=?", UUID.class,
                     workspace.tenantId(), workspace.workspaceId(), seed.catalogItemId());
-            jdbc.update("insert into catalog_management.product_presentation (product_id,tenant_id,workspace_id,presentation,unit_of_measure,version,updated_at) values (?,?,?,?,?,0,?) on conflict (product_id) do nothing",
+            targetJdbc.update("insert into catalog_management.product_presentation (product_id,tenant_id,workspace_id,presentation,unit_of_measure,version,updated_at) values (?,?,?,?,?,0,?) on conflict (product_id) do nothing",
                     persistedProduct, workspace.tenantId(), workspace.workspaceId(), seed.presentation(), "UNIT", timestamp(now));
-            jdbc.update("insert into catalog_management.product_visibility (product_id,tenant_id,workspace_id,buyer_visible,sales_visible,warehouse_visible,logistics_visible,version,updated_at) values (?,?,?,?,?,?,?,0,?) on conflict (product_id) do nothing",
+            targetJdbc.update("insert into catalog_management.product_visibility (product_id,tenant_id,workspace_id,buyer_visible,sales_visible,warehouse_visible,logistics_visible,version,updated_at) values (?,?,?,?,?,?,?,0,?) on conflict (product_id) do nothing",
                     persistedProduct, workspace.tenantId(), workspace.workspaceId(), seed.buyerVisible(), true, true, true, timestamp(now));
-            jdbc.update("insert into catalog_management.product_asset_reference (id,tenant_id,workspace_id,product_id,asset_path,file_name,alt_text,sort_order) values (?,?,?,?,?,?,?,0) on conflict (tenant_id,workspace_id,product_id,asset_path) do nothing",
+            targetJdbc.update("insert into catalog_management.product_asset_reference (id,tenant_id,workspace_id,product_id,asset_path,file_name,alt_text,sort_order) values (?,?,?,?,?,?,?,0) on conflict (tenant_id,workspace_id,product_id,asset_path) do nothing",
                     UUID.nameUUIDFromBytes((workspace.tenantId() + ":" + workspace.workspaceId() + ":asset:" + seed.catalogItemId() + ":" + seed.imageFileName()).getBytes(StandardCharsets.UTF_8)),
                     workspace.tenantId(), workspace.workspaceId(), persistedProduct, seed.imageUrl(), seed.imageFileName(), seed.itemName());
-            Integer priceCount = jdbc.queryForObject("select count(*) from catalog_management.product_price where tenant_id=? and workspace_id=? and product_id=? and source_code=? and cancelled_at is null", Integer.class,
+            Integer priceCount = targetJdbc.queryForObject("select count(*) from catalog_management.product_price where tenant_id=? and workspace_id=? and product_id=? and source_code=? and cancelled_at is null", Integer.class,
                     workspace.tenantId(), workspace.workspaceId(), persistedProduct, seed.sourcePriceCode());
             if (priceCount == null || priceCount == 0) {
-                jdbc.update("insert into catalog_management.product_price (id,tenant_id,workspace_id,product_id,amount,currency,valid_from,source_code,source_description,version,created_at) values (?,?,?,?,?,?,?,?,?,0,?)",
+                targetJdbc.update("insert into catalog_management.product_price (id,tenant_id,workspace_id,product_id,amount,currency,valid_from,source_code,source_description,version,created_at) values (?,?,?,?,?,?,?,?,?,0,?)",
                         UUID.nameUUIDFromBytes((workspace.tenantId() + ":" + workspace.workspaceId() + ":price:" + seed.catalogItemId() + ":" + seed.sourcePriceCode()).getBytes(StandardCharsets.UTF_8)),
                         workspace.tenantId(), workspace.workspaceId(), persistedProduct, seed.unitPriceAmount(), seed.unitPriceCurrency(), Timestamp.valueOf("2020-01-01 00:00:00"),
                         seed.sourcePriceCode(), seed.sourcePriceDescription(), timestamp(now));
@@ -118,21 +166,21 @@ public class CatalogPersistenceBootstrap {
         }
     }
 
-    private UUID category(Workspace workspace, String name, Instant now) {
+    private UUID category(JdbcTemplate targetJdbc, Workspace workspace, String name, Instant now) {
         String slug = slug(name);
         UUID id = UUID.nameUUIDFromBytes((workspace.tenantId() + ":" + workspace.workspaceId() + ":category:" + slug).getBytes(StandardCharsets.UTF_8));
-        jdbc.update("insert into catalog_management.category (id,tenant_id,workspace_id,slug,name,status,version,created_at,updated_at) values (?,?,?,?,?,'ACTIVE',0,?,?) on conflict (tenant_id,workspace_id,slug) do nothing",
+        targetJdbc.update("insert into catalog_management.category (id,tenant_id,workspace_id,slug,name,status,version,created_at,updated_at) values (?,?,?,?,?,'ACTIVE',0,?,?) on conflict (tenant_id,workspace_id,slug) do nothing",
                 id, workspace.tenantId(), workspace.workspaceId(), slug, name, timestamp(now), timestamp(now));
-        return jdbc.queryForObject("select id from catalog_management.category where tenant_id=? and workspace_id=? and slug=?", UUID.class,
+        return targetJdbc.queryForObject("select id from catalog_management.category where tenant_id=? and workspace_id=? and slug=?", UUID.class,
                 workspace.tenantId(), workspace.workspaceId(), slug);
     }
 
-    private UUID brand(Workspace workspace, String name, Instant now) {
+    private UUID brand(JdbcTemplate targetJdbc, Workspace workspace, String name, Instant now) {
         String slug = slug(name);
         UUID id = UUID.nameUUIDFromBytes((workspace.tenantId() + ":" + workspace.workspaceId() + ":brand:" + slug).getBytes(StandardCharsets.UTF_8));
-        jdbc.update("insert into catalog_management.brand (id,tenant_id,workspace_id,slug,name,status,version,created_at,updated_at) values (?,?,?,?,?,'ACTIVE',0,?,?) on conflict (tenant_id,workspace_id,slug) do nothing",
+        targetJdbc.update("insert into catalog_management.brand (id,tenant_id,workspace_id,slug,name,status,version,created_at,updated_at) values (?,?,?,?,?,'ACTIVE',0,?,?) on conflict (tenant_id,workspace_id,slug) do nothing",
                 id, workspace.tenantId(), workspace.workspaceId(), slug, name, timestamp(now), timestamp(now));
-        return jdbc.queryForObject("select id from catalog_management.brand where tenant_id=? and workspace_id=? and slug=?", UUID.class,
+        return targetJdbc.queryForObject("select id from catalog_management.brand where tenant_id=? and workspace_id=? and slug=?", UUID.class,
                 workspace.tenantId(), workspace.workspaceId(), slug);
     }
 

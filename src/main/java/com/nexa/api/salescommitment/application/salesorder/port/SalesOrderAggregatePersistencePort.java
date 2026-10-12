@@ -2,6 +2,7 @@ package com.nexa.api.salescommitment.application.salesorder.port;
 
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrder;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
 import java.util.Optional;
 
@@ -12,4 +13,11 @@ public interface SalesOrderAggregatePersistencePort {
     SalesOrderView saveTransition(SalesOrder aggregate, String action, String reason,
                                   String actorMembershipId, String actorIdentityId,
                                   long expectedVersion, long nowEpochMillis);
+
+    default SalesOrderView saveTransition(SalesOrder aggregate, String action, String reason,
+                                  String actorMembershipId, String actorIdentityId,
+                                  long expectedVersion, long nowEpochMillis, CurrentAccessContext actorContext) {
+        return saveTransition(aggregate, action, reason, actorMembershipId, actorIdentityId,
+                expectedVersion, nowEpochMillis);
+    }
 }

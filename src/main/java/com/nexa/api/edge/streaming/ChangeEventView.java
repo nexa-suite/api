@@ -2,6 +2,7 @@ package com.nexa.api.edge.streaming;
 
 import java.time.Instant;
 
+@org.springframework.modulith.NamedInterface(value = "change-feed-read", propagate = false)
 public record ChangeEventView(long sequence, String eventId, String aggregateType, String aggregateId,
 		String eventType, Long aggregateVersion, String publicStatus, Instant occurredAt) {
 	public String dataJson() {

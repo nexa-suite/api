@@ -22,6 +22,7 @@ import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQue
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryBackingQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryTemperatureHoldCommands;
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationException;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentCommands;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
@@ -51,6 +52,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
+import static com.nexa.api.fulfillmentdelivery.application.model.FulfillmentLifecycleModels.*;
+
 /**
  * BC-06 application boundary. It coordinates BC-04, BC-05, BC-07 and BC-09
  * only through their public contracts; lifecycle state and SQL remain owned by
@@ -58,7 +61,7 @@ import java.util.UUID;
  */
 @Service
 @Profile("!test")
-public class FulfillmentLifecycleService {
+public class FulfillmentLifecycleService implements com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentLifecycleOperations {
     private final SalesOrderFulfillmentQuery salesOrders;
     private final SalesOrderFulfillmentCommands salesOrderCommands;
     private final InventoryBackingQuery inventoryBackings;
@@ -370,7 +373,7 @@ public class FulfillmentLifecycleService {
     public FulfillmentModels.FulfillmentView dispatch(CurrentAccessContext context, UUID fulfillmentId,
                                                        long expectedVersion, String idempotencyKey,
                                                        FulfillmentModels.DispatchRequest frozenFacts) {
-        fulfillmentWrite(context);
+        context.requirePermission(PermissionKey.DISPATCH_COMPLETE);
         requireKey(idempotencyKey);
         requireVersion(expectedVersion);
         physicalAllocations.lockForFulfillment(tenant(context), workspace(context), fulfillmentId, actor(context));
@@ -452,6 +455,41 @@ public class FulfillmentLifecycleService {
     public FulfillmentModels.DeliveryView getDelivery(CurrentAccessContext context, UUID deliveryId) {
         context.requirePermission(Permission.LOGISTICS_READ);
         return deliveries.find(tenant(context), workspace(context), deliveryId);
+    }
+
+    @Transactional(readOnly = true)
+    public FulfillmentModels.PodView currentPod(CurrentAccessContext context, UUID deliveryId) {
+        context.requirePermission(PermissionKey.DISPATCH_READ);
+        FulfillmentModels.DeliveryView delivery = deliveries.find(tenant(context), workspace(context), deliveryId);
+        if (delivery == null || delivery.fulfillmentId() == null) {
+            throw notFound("FULFILLMENT_NOT_FOUND");
+        }
+
+        FulfillmentModels.FulfillmentView fulfillment = fulfillments.find(
+                tenant(context), workspace(context), delivery.fulfillmentId());
+        if (fulfillment == null || !deliveryId.equals(fulfillment.deliveryId())
+                || fulfillment.physicalAllocationId() == null) {
+            throw notFound("FULFILLMENT_NOT_FOUND");
+        }
+
+        Set<UUID> grantedWarehouses = warehouseAccess.activeWarehouseIds(context);
+        if (grantedWarehouses.isEmpty()) throw notFound("FULFILLMENT_NOT_FOUND");
+        PhysicalAllocationCommands.AllocationResult allocation;
+        try {
+            allocation = physicalAllocations.getByFulfillment(
+                    tenant(context), workspace(context), fulfillment.id(), actor(context));
+        } catch (WarehouseOperationException exception) {
+            if (exception.notFound()) throw notFound("FULFILLMENT_NOT_FOUND");
+            throw exception;
+        }
+        if (allocation == null || !fulfillment.physicalAllocationId().equals(allocation.allocationId())
+                || allocation.lines().isEmpty()
+                || allocation.lines().stream().anyMatch(line -> line.warehouseId() == null
+                || !grantedWarehouses.contains(line.warehouseId()))) {
+            throw notFound("FULFILLMENT_NOT_FOUND");
+        }
+
+        return deliveries.findPodByDelivery(tenant(context), workspace(context), deliveryId).orElse(null);
     }
 
     @Transactional
@@ -1280,6 +1318,9 @@ public class FulfillmentLifecycleService {
     private static void requireVersion(long version) { if (version < 0) throw invalid("VERSION_INVALID"); }
     private static void fulfillmentWrite(CurrentAccessContext context) { context.requirePermission(PermissionKey.FULFILLMENT_MANAGE); }
     private static void logisticsWrite(CurrentAccessContext context) { context.requirePermission(Permission.LOGISTICS_WRITE); }
+    private static FulfillmentOperationException notFound(String code) {
+        return new FulfillmentOperationException(code, true);
+    }
     private static FulfillmentOperationException invalid(String code) {
         return new FulfillmentOperationException(code, code != null && code.endsWith("_NOT_FOUND"));
     }
@@ -1288,82 +1329,6 @@ public class FulfillmentLifecycleService {
     }
 
     private record LineKey(UUID skuId, String catalogItemId, String unit) { }
-
-    public record PickingCommand(UUID pickerIdentityId, Instant startedAt, Instant completedAt,
-                                 String notes, Long allocationVersion, List<PickingLine> lines) {
-        public PickingCommand(UUID pickerIdentityId, Instant startedAt, Instant completedAt,
-                              String notes, List<PickingLine> lines) {
-            this(pickerIdentityId, startedAt, completedAt, notes, null, lines);
-        }
-        public PickingCommand {
-            lines = List.copyOf(lines == null ? List.of() : lines);
-        }
-    }
-
-    public record PickingLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit,
-                              UUID physicalAllocationLineId, UUID lotId, UUID warehouseId,
-                              boolean fefoOverride, String fefoOverrideReason) {
-        public PickingLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit) {
-            this(fulfillmentLineId, skuId, quantity, unit, null, null, null, false, null);
-        }
-
-        public PickingLine(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit,
-                           UUID physicalAllocationLineId, UUID lotId, UUID warehouseId) {
-            this(fulfillmentLineId, skuId, quantity, unit, physicalAllocationLineId, lotId, warehouseId, false, null);
-        }
-    }
-
-    public record ShortageResolutionCommand(String reason, List<ShortageLineCommand> lines) {
-        public ShortageResolutionCommand {
-            lines = List.copyOf(lines == null ? List.of() : lines);
-        }
-    }
-
-    public record ShortageLineCommand(UUID fulfillmentLineId, UUID skuId, BigDecimal quantity, String unit) { }
-
-    public record AttemptCommand(DeliveryAttemptOutcome outcome, String failureReason, String notes,
-                                 Instant attemptedAt, List<AttemptLineCommand> lines) {
-        public AttemptCommand {
-            lines = List.copyOf(lines == null ? List.of() : lines);
-        }
-    }
-
-    public record AttemptLineCommand(UUID fulfillmentLineId, UUID skuId, BigDecimal attemptedQuantity,
-                                     BigDecimal deliveredQuantity, BigDecimal rejectedQuantity,
-                                     BigDecimal cancelledQuantity, String unit) {
-        public AttemptLineCommand {
-            deliveredQuantity = deliveredQuantity == null ? BigDecimal.ZERO : deliveredQuantity;
-            rejectedQuantity = rejectedQuantity == null ? BigDecimal.ZERO : rejectedQuantity;
-            cancelledQuantity = cancelledQuantity == null ? BigDecimal.ZERO : cancelledQuantity;
-        }
-    }
-
-    public record PodCommand(String receiverName, Instant capturedAt, String notes,
-                             UUID photoEvidenceObjectId, UUID signatureEvidenceObjectId) { }
-
-    public record DriverProofCommand(String receiverName, Instant capturedAt, String notes) { }
-
-    public record TemperatureCommand(UUID lotId, BigDecimal temperatureCelsius, String unit,
-                                     String source, String evidenceMetadata, Instant recordedAt) { }
-
-    public record TemperatureEvidenceCommand(String subjectType, UUID subjectId, BigDecimal value,
-                                             String unit, Instant occurredAt, UUID evidenceObjectId,
-                                             Long expectedLotVersion, BigDecimal affectedQuantity,
-                                             String reason, UUID sourceEvidenceId) {
-        public TemperatureEvidenceCommand(String subjectType, UUID subjectId, BigDecimal value,
-                                          String unit, Instant occurredAt) {
-            this(subjectType, subjectId, value, unit, occurredAt, null, null, null, null, null);
-        }
-    }
-
-    public record FulfillmentTemperatureEvidenceCommand(UUID lotId, BigDecimal value,
-                                                        String unit, Instant occurredAt,
-                                                        Long expectedLotVersion, UUID evidenceObjectId) {
-        public FulfillmentTemperatureEvidenceCommand(UUID lotId, BigDecimal value,
-                                                    String unit, Instant occurredAt) {
-            this(lotId, value, unit, occurredAt, null, null);
-        }
-    }
 
     private record TemperatureTarget(SellableSkuPolicy policy,
                                     ColdChainPolicyQuery.LotTemperatureContext lot) { }

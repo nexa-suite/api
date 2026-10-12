@@ -46,7 +46,7 @@ public class JdbcDispatchReadinessQueryAdapter implements DispatchReadinessPersi
             + "order by p.revision desc limit 1) planned on true "
             + "left join logistics.fulfillment_line l on l.tenant_id=f.tenant_id "
             + "and l.workspace_id=f.workspace_id and l.fulfillment_id=f.id "
-            + "where f.tenant_id=? and f.workspace_id=? and f.status not in ('COMPLETED','CANCELLED')";
+            + "where f.tenant_id=? and f.workspace_id=? and f.status <> 'CANCELLED'";
 
     private final JdbcTemplate jdbc;
 

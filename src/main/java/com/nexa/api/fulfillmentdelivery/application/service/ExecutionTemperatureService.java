@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.application.service;
 
 import com.nexa.api.fulfillmentdelivery.application.model.ExecutionTemperatureModels.*;
 import com.nexa.api.fulfillmentdelivery.application.port.ExecutionTemperaturePort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.ExecutionTemperatureOperations;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.inventoryavailability.application.publicapi.ColdChainPolicyQuery;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuery;
@@ -22,7 +23,7 @@ import java.util.HexFormat;
 
 @Service
 @Profile("!test")
-public class ExecutionTemperatureService {
+public class ExecutionTemperatureService implements ExecutionTemperatureOperations {
     private final ExecutionTemperaturePort persistence;
     private final ColdChainPolicyQuery policy;
     private final BusinessEvidenceQuery evidence;
@@ -33,6 +34,7 @@ public class ExecutionTemperatureService {
         this.persistence=persistence; this.policy=policy; this.evidence=evidence; this.warehouses=warehouses; this.clock=clock;
     }
     @Transactional(readOnly=true)
+    @Override
     public Snapshot read(CurrentAccessContext c, UUID deliveryId, boolean driver) {
         if (driver) c.requirePermission(PermissionKey.DISPATCH_READ);
         else c.requirePermission(PermissionKey.DELIVERY_EXECUTION_HOLD_DISPOSE);
@@ -46,6 +48,7 @@ public class ExecutionTemperatureService {
         return new Snapshot(d.id(),d.version(),d.status(),d.attemptId(),d.warehouseId(),lines,persistence.holds(s));
     }
     @Transactional
+    @Override
     public Reading record(CurrentAccessContext c, UUID deliveryId, long version, String key, ReadingCommand command) {
         c.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
         validate(version,key);
@@ -78,6 +81,7 @@ public class ExecutionTemperatureService {
         return persistence.record(s,d,version,key,hash,command,p.temperatureMin(),p.temperatureMax(),excursion,clock.instant());
     }
     @Transactional
+    @Override
     public DispositionResult dispose(CurrentAccessContext c, UUID deliveryId, UUID holdId, long version, String key,
             Disposition disposition, String reason) {
         c.requirePermission(PermissionKey.DELIVERY_EXECUTION_HOLD_DISPOSE); validate(version,key);

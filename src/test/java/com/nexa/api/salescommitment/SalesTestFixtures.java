@@ -3,7 +3,7 @@ package com.nexa.api.salescommitment;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAddressQuery;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAddressReference;
 import com.nexa.api.salescommitment.application.port.out.ClientAccountCommercialPort;
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.salescommitment.application.port.out.WarehouseReferencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItemSnapshotLookupPort;
 import com.nexa.api.salescommitment.application.reference.port.PeruGeographyPersistencePort;

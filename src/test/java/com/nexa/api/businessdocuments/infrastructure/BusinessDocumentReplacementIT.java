@@ -1,7 +1,9 @@
 package com.nexa.api.businessdocuments.infrastructure;
 
 import com.nexa.api.businessdocuments.application.port.ObjectStoragePort;
-import com.nexa.api.businessdocuments.infrastructure.persistence.BusinessDocumentService;
+import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentOrganizationSnapshotQuery;
+import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerRouter;
+import com.nexa.api.bootstrap.runtime.boundaries.TenantBusinessDocumentBindingsFactory;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -29,7 +31,13 @@ class BusinessDocumentReplacementIT extends NexaWorkflowIntegrationSupport {
     private ObjectStoragePort storage;
 
     @Autowired
-    private BusinessDocumentService documents;
+    private TenantBusinessDocumentOrganizationSnapshotQuery organizationSnapshots;
+
+    @Autowired
+    private TenantBusinessDocumentBindingsFactory documentBindings;
+
+    @Autowired
+    private TenantBusinessDocumentWorkerRouter documentWorkerRouter;
 
     @Test
     void replacementIsLinkedAndIssuedOriginalRemainsDownloadable() throws Exception {
@@ -52,14 +60,22 @@ class BusinessDocumentReplacementIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isAccepted()).andReturn();
         assertThat(json(retry).get("documentId").asText()).isEqualTo(replacementId);
 
-        documents.processPendingGenerationRequests();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        var organizationSnapshot = organizationSnapshots.find(tenant, workspace)
+                .orElseThrow(() -> new IllegalStateException("Verified Tenant organization snapshot is required"));
+        documentWorkerRouter.inTransaction(tenant, workspace, tenantJdbc -> {
+            documentBindings.bindWorker(tenantJdbc, tenant, workspace, organizationSnapshot)
+                    .processPendingGenerationRequests(tenant, workspace);
+            return Boolean.TRUE;
+        });
 
         MvcResult replacement = mockMvc.perform(get("/api/v1/business-documents/" + replacementId)
                         .header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(replacement).get("replacementOfDocumentId").asText()).isEqualTo(originalId.toString());
         assertThat(json(replacement).get("status").asText()).isEqualTo("GENERATED");
-        assertThat(jdbc.queryForObject("select status from business_documents.business_document where tenant_id=? and workspace_id=? and id=?",
+        assertThat(tenantJdbc().queryForObject("select status from business_documents.business_document where tenant_id=? and workspace_id=? and id=?",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), originalId)).isEqualTo("GENERATED");
         mockMvc.perform(get("/api/v1/business-documents/" + originalId + "/downloads")
                         .header("Authorization", "Bearer " + owner))
@@ -123,16 +139,16 @@ class BusinessDocumentReplacementIT extends NexaWorkflowIntegrationSupport {
         UUID originalId = UUID.randomUUID();
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID clientAccount = UUID.fromString(jdbc.queryForObject(
+        UUID clientAccount = UUID.fromString(tenantJdbc().queryForObject(
                 "select client_account_id::text from sales.sales_order where tenant_id=? and workspace_id=? and id=?",
                 String.class, tenant, workspace, UUID.fromString(salesOrderId)));
         Instant now = Instant.now();
         String objectKey = "documents/" + tenant + "/" + UUID.randomUUID() + ".pdf";
         byte[] content = "%PDF-1.7\nNexa issued document".getBytes(StandardCharsets.US_ASCII);
         ObjectStoragePort.StoredObject stored = storage.put(objectKey, new ByteArrayInputStream(content), content.length, "application/pdf");
-        jdbc.update("insert into business_documents.object_storage_object (object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?,?,?)",
+        tenantJdbc().update("insert into business_documents.object_storage_object (object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?,?,?)",
                 stored.objectKey(), tenant, workspace, "nexa-private", stored.checksumSha256(), stored.contentType(), stored.byteSize(), true, Timestamp.from(now));
-        jdbc.update("insert into business_documents.business_document (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,format,storage_object_key,checksum_sha256,content_type,byte_size,generated_at,created_at,updated_at) values (?,?,?,?,? ,? ,?,1,'GENERATED','PDF',?,?,?,?,?,?,?)",
+        tenantJdbc().update("insert into business_documents.business_document (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,format,storage_object_key,checksum_sha256,content_type,byte_size,generated_at,created_at,updated_at) values (?,?,?,?,? ,? ,?,1,'GENERATED','PDF',?,?,?,?,?,?,?)",
                 originalId, tenant, workspace, clientAccount, "SALES_ORDER", UUID.fromString(salesOrderId), "ORDER_SUMMARY",
                 stored.objectKey(), stored.checksumSha256(), stored.contentType(), stored.byteSize(), Timestamp.from(now), Timestamp.from(now), Timestamp.from(now));
         return originalId;

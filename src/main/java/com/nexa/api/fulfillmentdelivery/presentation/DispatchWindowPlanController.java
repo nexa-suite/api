@@ -3,7 +3,8 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.DispatchWindowPlanModels.Request;
 import com.nexa.api.fulfillmentdelivery.application.model.DispatchWindowPlanModels.View;
-import com.nexa.api.fulfillmentdelivery.application.service.DispatchWindowPlanService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -28,10 +29,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class DispatchWindowPlanController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final DispatchWindowPlanService service;
+    private final FulfillmentDeliveryRequestRunner runner;
 
-    public DispatchWindowPlanController(DispatchWindowPlanService service) {
-        this.service = service;
+    public DispatchWindowPlanController(FulfillmentDeliveryRequestRunner runner) {
+        this.runner = runner;
     }
 
     @PostMapping("/{fulfillmentId}/dispatch-window-plans")
@@ -41,7 +42,8 @@ public final class DispatchWindowPlanController {
                                      @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                      @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
                                      @RequestBody Request request) {
-        View value = service.plan(context, fulfillmentId, version(ifMatch), request, idempotencyKey);
+        View value = runner.execute(context, Requirements.warehouse(), composition ->
+                composition.dispatchWindowPlans().plan(context, fulfillmentId, version(ifMatch), request, idempotencyKey));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.fulfillmentVersion())).body(value);
     }

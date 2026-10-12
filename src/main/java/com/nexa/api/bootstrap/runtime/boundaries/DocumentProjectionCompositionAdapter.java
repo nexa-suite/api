@@ -125,14 +125,36 @@ public class DocumentProjectionCompositionAdapter implements DocumentProjectionL
     private BusinessDocumentProjections.DocumentProjection podProjection(UUID tenant, UUID workspace, UUID id) {
         FulfillmentDocumentSourceQuery.ProofOfDelivery pod = fulfillment.findPod(tenant, workspace, id)
                 .orElseThrow(() -> notFound("Proof of delivery"));
-        DispatchData dispatch = loadDispatch(tenant, workspace, pod.dispatchId());
+        OrderData order;
+        String deliveryReference;
+        DeliveryInfo delivery;
+        String temperatureStatus;
+        String temperatureSummary;
+        if (pod.dispatchId() != null) {
+            DispatchData dispatch = loadDispatch(tenant, workspace, pod.dispatchId());
+            order = dispatch.order();
+            deliveryReference = dispatch.number();
+            delivery = dispatch.delivery();
+            temperatureStatus = dispatch.temperatureStatus();
+            temperatureSummary = dispatch.temperatureSummary();
+        } else {
+            if (pod.deliveryId() == null || pod.salesOrderId() == null) {
+                throw notFound("Delivery-backed proof of delivery source");
+            }
+            order = loadOrder(tenant, workspace, pod.salesOrderId());
+            deliveryReference = pod.deliveryId().toString();
+            delivery = new DeliveryInfo(first(pod.destinationSnapshot(), order.delivery().address()),
+                    order.delivery().warehouse(), order.delivery().route(), null, null, null, pod.completedAt());
+            temperatureStatus = pod.temperatureStatus();
+            temperatureSummary = pod.temperatureSummary();
+        }
         String evidence = String.valueOf(businessEvidence.countAvailableForSubject(
                 tenant, workspace, "PROOF_OF_DELIVERY", id));
         return new BusinessDocumentProjections.PodReportProjection(
-                id.toString(), dispatch.order().issuer(), dispatch.order().buyer(), dispatch.number(),
-                dispatch.order().number(), pod.completedAt(), pod.status(), pod.receiverName(),
-                dispatch.temperatureStatus(), dispatch.temperatureSummary(), dispatch.order().lines(),
-                dispatch.order().totals(), dispatch.delivery(), dispatch.order().paymentTerms(), pod.notes(), evidence);
+                id.toString(), order.issuer(), order.buyer(), deliveryReference,
+                order.number(), pod.completedAt(), pod.status(), pod.receiverName(),
+                temperatureStatus, temperatureSummary, order.lines(),
+                order.totals(), delivery, order.paymentTerms(), pod.notes(), evidence);
     }
 
     private BusinessDocumentProjections.DocumentProjection incidentProjection(UUID tenant, UUID workspace, UUID id) {

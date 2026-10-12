@@ -4,9 +4,12 @@ import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCas
 import com.nexa.api.salescommitment.presentation.SalesHttpHeaders;
 import com.nexa.api.salescommitment.presentation.salesorder.mapper.SalesOrderHttpMapper;
 import com.nexa.api.salescommitment.presentation.salesorder.request.ConversionNoteRequest;
+import com.nexa.api.salescommitment.presentation.salesorder.request.RefundBuyerWalletRequest;
 import com.nexa.api.salescommitment.presentation.salesorder.request.RejectSalesOrderRequest;
 import com.nexa.api.salescommitment.presentation.salesorder.response.SalesOrderResponse;
+import com.nexa.api.salescommitment.presentation.salesorder.response.SalesOrderWalletRefundResponse;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -54,6 +57,17 @@ public final class SalesOrderCommandController {
 	public ResponseEntity<SalesOrderResponse> cancel(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
 			@RequestHeader(name = "If-Match", required = false) String ifMatch,
 			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) { return transition(context, id, "cancel", null, ifMatch, idempotencyKey); }
+	@PostMapping("/api/v1/sales-orders/{id}/wallet-refunds")
+	@Operation(operationId = "refundCancelledSalesOrderToBuyerWallet", summary = "Refund consumed Buyer wallet funds for a cancelled Sales Order")
+	@ApiResponse(responseCode = "200", description = "Buyer wallet refund recorded or idempotently replayed")
+	public ResponseEntity<SalesOrderWalletRefundResponse> refundBuyerWallet(
+			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id,
+			@RequestHeader(name = "Idempotency-Key") String idempotencyKey,
+			@Valid @RequestBody RefundBuyerWalletRequest request) {
+		var value = sales.refundBuyerWallet(context, id, request.amountPEN(), request.reason(), idempotencyKey);
+		return ResponseEntity.ok(new SalesOrderWalletRefundResponse(value.salesOrderId(), value.refundId(),
+				value.ledgerEntryId(), value.amountPEN(), value.currency(), value.status()));
+	}
 	private ResponseEntity<SalesOrderResponse> transition(CurrentAccessContext context, String id, String action, String reason, String ifMatch, String idempotencyKey) {
 		var value = sales.transition(context, id, action, reason, SalesHttpHeaders.requireVersion(ifMatch), idempotencyKey);
 		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.response(value));

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
@@ -22,6 +23,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.buyer-wallet-read.enabled=true",
+        "nexa.tenant-business.buyer-wallet-recharge.enabled=true",
+        "nexa.tenant-business.purchase-request.enabled=true",
+        "nexa.tenant-business.catalog-detail-read.enabled=true",
+        "nexa.tenant-business.catalog-management.enabled=true",
+        "nexa.tenant-business.payments.enabled=true",
+        "nexa.tenant-business.fulfillment-delivery.enabled=true",
+        "nexa.tenant-business.warehouse-operations.enabled=true",
+        "nexa.tenant-business.local-fixtures.enabled=true",
+        "nexa.tenant-business.support-sales-order-read.enabled=true",
+        "nexa.tenant-business.business-documents.enabled=true",
+        "nexa.tenant-business.business-traceability.enabled=true",
+        "nexa.tenant-business.notifications.enabled=true",
+        "nexa.business-traceability.worker-delay-ms=3600000",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
     private static final Instant OCCURRED_AT = Instant.parse("2026-09-30T11:22:33Z");
 
@@ -29,15 +47,15 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
     void recordsPartialLotHoldsWarehouseExceptionsAndAuthorizedDispositionWithReplay() throws Exception {
         ensureCommercialInventory();
         TemperatureSubject subject = createTemperatureSubject();
-        BigDecimal stockBefore = jdbc.queryForObject("select stock_quantity from warehouse.inventory_lot where id=?",
+        BigDecimal stockBefore = tenantJdbc().queryForObject("select stock_quantity from warehouse.inventory_lot where id=?",
                 BigDecimal.class, subject.lotId());
-        BigDecimal reservedBefore = jdbc.queryForObject("select reserved_quantity from warehouse.inventory_lot where id=?",
+        BigDecimal reservedBefore = tenantJdbc().queryForObject("select reserved_quantity from warehouse.inventory_lot where id=?",
                 BigDecimal.class, subject.lotId());
-        long versionBefore = jdbc.queryForObject("select version from warehouse.inventory_lot where id=?",
+        long versionBefore = tenantJdbc().queryForObject("select version from warehouse.inventory_lot where id=?",
                 Long.class, subject.lotId());
-        int movementsBefore = jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?",
+        int movementsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=?",
                 Integer.class, subject.lotId());
-        int wasteMovementsBefore = jdbc.queryForObject(
+        int wasteMovementsBefore = tenantJdbc().queryForObject(
                 "select count(*) from warehouse.stock_movement where lot_id=? and movement_type='WASTE'",
                 Integer.class, subject.lotId());
         String evidenceObjectId = uploadWarehousePhoto(subject.warehouseId(), "temperature-lot-photo-" + uuid());
@@ -86,9 +104,9 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andReturn();
         long heldVersion = json(lotSnapshot).get("version").asLong();
         assertThat(heldVersion).isEqualTo(versionBefore + 1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=? and status='OPEN' and source_type='STOCK_EVIDENCE' and affected_quantity=5 and evidence_object_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=? and status='OPEN' and source_type='STOCK_EVIDENCE' and affected_quantity=5 and evidence_object_id=?",
                 Integer.class, subject.lotId(), UUID.fromString(evidenceObjectId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select blocks_committed_execution from warehouse.inventory_temperature_evaluation where id=?",
+        assertThat(tenantJdbc().queryForObject("select blocks_committed_execution from warehouse.inventory_temperature_evaluation where id=?",
                 Boolean.class, UUID.fromString(json(created).get("inventoryTemperatureEvaluationId").asText()))).isFalse();
 
         String dispositionPath = "/api/v1/inventory/lots/" + subject.lotId() + "/dispositions";
@@ -129,10 +147,10 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                         .content(releaseBody.replace("\"affectedQuantity\":2", "\"affectedQuantity\":1")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
-        assertThat(jdbc.queryForObject("select status from warehouse.inventory_temperature_evaluation where id=?",
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_temperature_evaluation where id=?",
                 String.class, UUID.fromString(temperatureEvaluationId)))
                 .isEqualTo("OPEN");
-        assertThat(jdbc.queryForObject("select sum(quantity) from warehouse.inventory_lot_disposition where temperature_evaluation_id=?",
+        assertThat(tenantJdbc().queryForObject("select sum(quantity) from warehouse.inventory_lot_disposition where temperature_evaluation_id=?",
                 BigDecimal.class, UUID.fromString(temperatureEvaluationId)))
                 .isEqualByComparingTo("2");
 
@@ -170,15 +188,15 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.available").value(7))
                 .andExpect(jsonPath("$.onHand").value(8));
         dispositionVersion++;
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot_disposition where temperature_evaluation_id=? and disposition='HOLD' and quantity=1",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot_disposition where temperature_evaluation_id=? and disposition='HOLD' and quantity=1",
                 Integer.class, UUID.fromString(temperatureEvaluationId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='WASTE'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='WASTE'",
                 Integer.class, subject.lotId())).isEqualTo(wasteMovementsBefore + 2);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='WASTE' "
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='WASTE' "
                         + "and actor_membership_id=? and quantity=1 and ((reason='Waste affected quantity' and quantity_before=10 and quantity_after=9) "
                         + "or (reason='Return affected quantity' and quantity_before=9 and quantity_after=8))",
                 Integer.class, subject.lotId(), UUID.fromString(membershipId(WAREHOUSE_EMAIL)))).isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_lot_disposition where temperature_evaluation_id=? and disposition='RETURN_TO_SUPPLIER' and quantity=1",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot_disposition where temperature_evaluation_id=? and disposition='RETURN_TO_SUPPLIER' and quantity=1",
                 Integer.class, UUID.fromString(temperatureEvaluationId))).isEqualTo(1);
         mockMvc.perform(get("/api/v1/temperature-evidence/" + evidenceId)
                         .header("Authorization", "Bearer " + subject.token()))
@@ -191,7 +209,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                                 versionBefore, BigDecimal.ONE, "Stale version must not hold stock", null))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CONCURRENCY_CONFLICT"));
-        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid "
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid "
                         + "and workspace_id=?::uuid and subject_type='LOT' and subject_id=?",
                 Integer.class, tenantId(), workspaceId(), subject.lotId())).isEqualTo(1);
 
@@ -209,9 +227,9 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andReturn();
         UUID warehouseEvidenceId = UUID.fromString(json(warehouseEvidence).get("id").asText());
         UUID exceptionId = UUID.fromString(json(warehouseEvidence).get("exceptionId").asText());
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?",
                 Integer.class, subject.lotId())).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.stock_temperature_exception where id=? and status='OPEN'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.stock_temperature_exception where id=? and status='OPEN'",
                 Integer.class, exceptionId)).isEqualTo(1);
         mockMvc.perform(get("/api/v1/inventory/lots/" + subject.lotId())
                         .header("Authorization", "Bearer " + subject.token()))
@@ -219,7 +237,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.available").value(7))
                 .andExpect(jsonPath("$.version").value(dispositionVersion));
 
-        long currentLotVersion = jdbc.queryForObject("select version from warehouse.inventory_lot where id=?",
+        long currentLotVersion = tenantJdbc().queryForObject("select version from warehouse.inventory_lot where id=?",
                 Long.class, subject.lotId());
         MvcResult selection = record(subject.token(), "temperature-selection-" + uuid(),
                         body("LOT", subject.lotId(), exactValue, "CELSIUS", OCCURRED_AT, null,
@@ -230,14 +248,14 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.remainingHeldQuantity").value(2))
                 .andReturn();
         assertThat(json(selection).get("evidenceObjectId").asText()).isEqualTo(warehousePhoto);
-        assertThat(jdbc.queryForObject("select blocks_committed_execution from warehouse.inventory_temperature_evaluation where id=?",
+        assertThat(tenantJdbc().queryForObject("select blocks_committed_execution from warehouse.inventory_temperature_evaluation where id=?",
                 Boolean.class, UUID.fromString(json(selection).get("inventoryTemperatureEvaluationId").asText()))).isFalse();
         MvcResult selectedLot = mockMvc.perform(get("/api/v1/inventory/lots/" + subject.lotId())
                         .header("Authorization", "Bearer " + subject.token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.available").value(5))
                 .andReturn();
-        assertThat(jdbc.queryForObject("select status from logistics.stock_temperature_exception where id=?",
+        assertThat(tenantJdbc().queryForObject("select status from logistics.stock_temperature_exception where id=?",
                 String.class, exceptionId)).isEqualTo("OPEN");
 
         mockMvc.perform(get("/api/v1/temperature-evidence/" + evidenceId)
@@ -253,21 +271,23 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.selections[0].affectedQuantity").value(2))
                 .andExpect(jsonPath("$.selections[0].remainingHeldQuantity").value(2));
 
-        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where id=?", Integer.class, evidenceId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where id=?", Integer.class, warehouseEvidenceId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_command_idempotency where operation='STOCK_TEMPERATURE_EVIDENCE' and idempotency_key in (?,?)",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.temperature_evidence where id=?", Integer.class, evidenceId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where id=?", Integer.class, evidenceId))
+                .isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.temperature_evidence where id=?", Integer.class, warehouseEvidenceId)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_command_idempotency where operation='STOCK_TEMPERATURE_EVIDENCE' and idempotency_key in (?,?)",
                 Integer.class, key, warehouseKey)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where event_type='TemperatureEvidenceRecorded.v1' and aggregate_id in (?,?)",
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where event_type='TemperatureEvidenceRecorded.v1' and aggregate_id in (?,?)",
                 Integer.class, evidenceId, warehouseEvidenceId)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("select stock_quantity from warehouse.inventory_lot where id=?", BigDecimal.class, subject.lotId()))
+        assertThat(tenantJdbc().queryForObject("select stock_quantity from warehouse.inventory_lot where id=?", BigDecimal.class, subject.lotId()))
                 .isEqualByComparingTo(stockBefore.subtract(new BigDecimal("2")));
-        assertThat(jdbc.queryForObject("select reserved_quantity from warehouse.inventory_lot where id=?", BigDecimal.class, subject.lotId()))
+        assertThat(tenantJdbc().queryForObject("select reserved_quantity from warehouse.inventory_lot where id=?", BigDecimal.class, subject.lotId()))
                 .isEqualByComparingTo(reservedBefore);
-        assertThat(jdbc.queryForObject("select version from warehouse.inventory_lot where id=?", Long.class, subject.lotId()))
+        assertThat(tenantJdbc().queryForObject("select version from warehouse.inventory_lot where id=?", Long.class, subject.lotId()))
                 .isEqualTo(json(selectedLot).get("version").asLong());
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class, subject.lotId()))
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class, subject.lotId()))
                 .isEqualTo(movementsBefore + 2);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?", Integer.class,
                 subject.lotId())).isEqualTo(2);
     }
 
@@ -276,7 +296,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
         ensureCommercialInventory();
         TemperatureSubject subject = createTemperatureSubject();
         String keyPrefix = "temperature-invalid-" + uuid();
-        int before = jdbc.queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid and workspace_id=?::uuid",
+        int before = tenantJdbc().queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid and workspace_id=?::uuid",
                 Integer.class, tenantId(), workspaceId());
 
         record(subject.token(), keyPrefix + "-missing-unit",
@@ -296,7 +316,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         String photo = uploadWarehousePhoto(subject.warehouseId(), keyPrefix + "-precision-photo");
-        long lotVersion = jdbc.queryForObject("select version from warehouse.inventory_lot where id=?",
+        long lotVersion = tenantJdbc().queryForObject("select version from warehouse.inventory_lot where id=?",
                 Long.class, subject.lotId());
         record(subject.token(), keyPrefix + "-quantity-overflow",
                         body("LOT", subject.lotId(), new BigDecimal("10.5"), "CELSIUS", OCCURRED_AT,
@@ -315,9 +335,9 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("WAREHOUSE_NOT_FOUND"));
 
-        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid and workspace_id=?::uuid",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.temperature_evidence where tenant_id=?::uuid and workspace_id=?::uuid",
                 Integer.class, tenantId(), workspaceId())).isEqualTo(before);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_command_idempotency where idempotency_key like ?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_command_idempotency where idempotency_key like ?",
                 Integer.class, keyPrefix + "%")).isZero();
     }
 
@@ -341,7 +361,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .isEqualTo(subject.lotId().toString());
 
         String photo = uploadWarehousePhoto(subject.warehouseId(), "thermal-reserved-photo-" + uuid());
-        long lotVersion = jdbc.queryForObject("select version from warehouse.inventory_lot where id=?",
+        long lotVersion = tenantJdbc().queryForObject("select version from warehouse.inventory_lot where id=?",
                 Long.class, subject.lotId());
         MvcResult evidence = record(warehouseToken, "thermal-reserved-evidence-" + uuid(),
                         body("LOT", subject.lotId(), new BigDecimal("10.5"), "CELSIUS", OCCURRED_AT,
@@ -350,7 +370,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.affectedQuantity").value(10))
                 .andReturn();
         UUID evaluationId = UUID.fromString(json(evidence).get("inventoryTemperatureEvaluationId").asText());
-        assertThat(jdbc.queryForObject("select blocks_committed_execution from warehouse.inventory_temperature_evaluation where id=?",
+        assertThat(tenantJdbc().queryForObject("select blocks_committed_execution from warehouse.inventory_temperature_evaluation where id=?",
                 Boolean.class, evaluationId)).isTrue();
         mockMvc.perform(get("/api/v1/inventory/lots/" + subject.lotId())
                         .header("Authorization", "Bearer " + warehouseToken))
@@ -368,7 +388,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
         record(subject.token(), "temperature-no-grant-" + uuid(),
                         body("WAREHOUSE", ungrantedWarehouse, new BigDecimal("5.5"), "CELSIUS", OCCURRED_AT))
                 .andExpect(status().isForbidden());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.temperature_evidence where subject_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.temperature_evidence where subject_id=?",
                 Integer.class, ungrantedWarehouse)).isZero();
     }
 
@@ -420,7 +440,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                                 + "\",\"catalogItemId\":\"" + catalogItemId + "\",\"batchNumber\":\"" + batch
                                 + "\",\"expirationDate\":\"" + expirationDate + "\",\"quantity\":10,\"unit\":\"UNIT\"}"))
                 .andExpect(status().isCreated());
-        UUID lotId = jdbc.queryForObject("select id from warehouse.inventory_lot where tenant_id=?::uuid and workspace_id=?::uuid and warehouse_id=? and batch_number=?",
+        UUID lotId = tenantJdbc().queryForObject("select id from warehouse.inventory_lot where tenant_id=?::uuid and workspace_id=?::uuid and warehouse_id=? and batch_number=?",
                 UUID.class, tenantId(), workspaceId(), warehouseId, batch);
         return new TemperatureSubject(warehouseId, zoneId, lotId, warehouseToken);
     }
@@ -461,7 +481,8 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                 tenantId, "Foreign temperature tenant", slug, Timestamp.from(now), Timestamp.from(now));
         jdbc.update("insert into tenant_management.workspace(id,tenant_id,name,slug,status,created_at,updated_at) values (?,?,?,?,'ACTIVE',?,?)",
                 workspaceId, tenantId, "Foreign temperature workspace", slug, Timestamp.from(now), Timestamp.from(now));
-        jdbc.update("insert into warehouse.warehouse(id,tenant_id,workspace_id,code,name,address,status,created_at,updated_at) values (?,?,?,?,?,?,'ACTIVE',?,?)",
+        provisionTenantBusinessDatabase(tenantId, workspaceId);
+        tenantJdbcFor(tenantId).update("insert into warehouse.warehouse(id,tenant_id,workspace_id,code,name,address,status,created_at,updated_at) values (?,?,?,?,?,?,'ACTIVE',?,?)",
                 warehouseId, tenantId, workspaceId, "WH-" + slug.substring(slug.length() - 8),
                 "Foreign warehouse", "Lima", Timestamp.from(now), Timestamp.from(now));
         return warehouseId;

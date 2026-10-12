@@ -4,12 +4,15 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogIdempotencyKeyRequiredException;
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogPreconditionRequiredException;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.access.AccessDeniedException;
 
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 
 public final class CatalogHttpSupport {
@@ -31,6 +34,14 @@ public final class CatalogHttpSupport {
                 .map(profile -> new CatalogScope(context.tenantId().value(), context.workspaceId().value(), true,
                         profile.id(), profile.segment(), profile.buyerTier()))
                 .orElseThrow(() -> new AccessDeniedException("Active Buyer relationship is required"));
+    }
+
+    public static <T> T tenantRequest(CurrentAccessContext context,
+            ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests,
+            Supplier<T> legacy, Function<TenantCatalogCommercialPolicyRequestPort.Request, T> tenantWork) {
+        TenantCatalogCommercialPolicyRequestPort tenant = tenantRequests == null
+                ? null : tenantRequests.getIfAvailable();
+        return tenant == null ? legacy.get() : tenant.inRequest(context, tenantWork::apply);
     }
 
     public static long version(String value) {

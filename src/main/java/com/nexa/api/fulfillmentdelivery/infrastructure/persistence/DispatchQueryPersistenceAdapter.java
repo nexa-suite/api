@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
+import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
+
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchQueryPersistencePort;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchStatus;
@@ -35,7 +37,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
 
     @Override
     @Transactional(readOnly = true)
-    public LogisticsOperationsService.Page<LogisticsOperationsService.DispatchView> list(
+    public LogisticsOperationsModels.Page<LogisticsOperationsModels.DispatchView> list(
             String tenantId, String workspaceId, String clientAccountId, String status,
             int page, int size, String sort) {
         pageCheck(page, size);
@@ -60,21 +62,21 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
         List<DispatchRow> selected = jdbc.query(
                 selectSql() + where + " order by " + order + " limit ? offset ?",
                 (rs, row) -> read(rs), pageArgs.toArray());
-        List<LogisticsOperationsService.DispatchView> items = withSalesOrderHeaders(tenant, workspace, selected)
+        List<LogisticsOperationsModels.DispatchView> items = withSalesOrderHeaders(tenant, workspace, selected)
                 .stream().map(row -> view(row, clientAccountId != null)).toList();
-        return new LogisticsOperationsService.Page<>(items, page, size, total);
+        return new LogisticsOperationsModels.Page<>(items, page, size, total);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public LogisticsOperationsService.DispatchView detail(String tenantId, String workspaceId,
+    public LogisticsOperationsModels.DispatchView detail(String tenantId, String workspaceId,
                                                            String clientAccountId, String dispatchId) {
         return detailView(tenantId, workspaceId, clientAccountId, dispatchId);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<LogisticsOperationsService.DispatchEventView> events(String tenantId, String workspaceId,
+    public List<LogisticsOperationsModels.DispatchEventView> events(String tenantId, String workspaceId,
                                                                       String clientAccountId, String dispatchId) {
         UUID tenant = uuid(tenantId);
         UUID workspace = uuid(workspaceId);
@@ -89,7 +91,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
                 (rs, row) -> {
                     String type = rs.getString(2);
                     boolean buyer = clientAccountId != null;
-                    return new LogisticsOperationsService.DispatchEventView(rs.getObject(1).toString(),
+                    return new LogisticsOperationsModels.DispatchEventView(rs.getObject(1).toString(),
                             buyer ? buyerEvent(type) : type, buyer ? null : rs.getString(3),
                             buyer ? null : rs.getString(4), rs.getTimestamp(5).toInstant().toString(),
                             rs.getBoolean(6), buyer ? buyerEvent(type) : rs.getString(4));
@@ -98,7 +100,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
 
     @Override
     @Transactional(readOnly = true)
-    public LogisticsOperationsService.DashboardView dashboard(String tenantId, String workspaceId) {
+    public LogisticsOperationsModels.DashboardView dashboard(String tenantId, String workspaceId) {
         UUID tenant = uuid(tenantId);
         UUID workspace = uuid(workspaceId);
         Long[] values = jdbc.queryForObject(
@@ -120,13 +122,13 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
                     return result;
                 }, tenant, workspace);
         long reservations = warehouseFulfillment.countReadyReservations(tenantId, workspaceId, Instant.now());
-        return new LogisticsOperationsService.DashboardView(values[0], values[1], values[2], values[3], values[4],
+        return new LogisticsOperationsModels.DashboardView(values[0], values[1], values[2], values[3], values[4],
                 values[5], values[6], values[7], values[8], values[9], reservations);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public LogisticsOperationsService.AnalyticsView analytics(String tenantId, String workspaceId,
+    public LogisticsOperationsModels.AnalyticsView analytics(String tenantId, String workspaceId,
                                                                Instant from, Instant to) {
         UUID tenant = uuid(tenantId);
         UUID workspace = uuid(workspaceId);
@@ -146,7 +148,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
         }, tenant, workspace, timestamp(from), timestamp(to), tenant, workspace, timestamp(from), timestamp(to),
                 tenant, workspace, timestamp(from), timestamp(to));
         double onTime = values[1] == 0 ? 0d : (double) values[5] / values[1];
-        return new LogisticsOperationsService.AnalyticsView(from, to, values[0], values[1], values[2], values[3],
+        return new LogisticsOperationsModels.AnalyticsView(from, to, values[0], values[1], values[2], values[3],
                 values[4], onTime, averageMinutes(tenant, workspace, "logistics.dispatch.created",
                 "logistics.dispatch.preparation-started", from, to), averageMinutes(tenant, workspace,
                 "logistics.dispatch.route-started", "logistics.dispatch.delivered", from, to));
@@ -154,7 +156,7 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
 
     @Override
     @Transactional(readOnly = true)
-    public LogisticsOperationsService.Page<LogisticsOperationsService.ProofOfDeliveryView> proofOfDelivery(
+    public LogisticsOperationsModels.Page<LogisticsOperationsModels.ProofOfDeliveryView> proofOfDelivery(
             String tenantId, String workspaceId, String status, int page, int size) {
         pageCheck(page, size);
         UUID tenant = uuid(tenantId);
@@ -181,20 +183,20 @@ public class DispatchQueryPersistenceAdapter extends DispatchJdbcSupport impleme
                 "p.receiver_name,p.completed_at,p.notes,coalesce(p.photo_evidence_declared,false)," +
                 "coalesce(p.signature_evidence_declared,false),d.updated_at" + from + where +
                 " order by d.updated_at desc,d.id desc limit ? offset ?";
-        List<LogisticsOperationsService.ProofOfDeliveryView> items = jdbc.query(sql, (rs, row) ->
-                new LogisticsOperationsService.ProofOfDeliveryView(
+        List<LogisticsOperationsModels.ProofOfDeliveryView> items = jdbc.query(sql, (rs, row) ->
+                new LogisticsOperationsModels.ProofOfDeliveryView(
                         rs.getObject(1) == null ? null : rs.getObject(1).toString(), rs.getObject(2).toString(),
                         rs.getString(3), rs.getString(4), rs.getString(5),
                         rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant(), rs.getString(7),
                         rs.getBoolean(8), rs.getBoolean(9), rs.getTimestamp(10).toInstant()), pageArgs.toArray());
-        return new LogisticsOperationsService.Page<>(items, page, size, total);
+        return new LogisticsOperationsModels.Page<>(items, page, size, total);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<LogisticsOperationsService.AssigneeView> assignees(String tenantId, String workspaceId) {
+    public List<LogisticsOperationsModels.AssigneeView> assignees(String tenantId, String workspaceId) {
         return workforce.findLogisticsAssignees(uuid(tenantId), uuid(workspaceId)).stream()
-                .map(value -> new LogisticsOperationsService.AssigneeView(value.id().toString(), value.email(),
+                .map(value -> new LogisticsOperationsModels.AssigneeView(value.id().toString(), value.email(),
                         value.displayName()))
                 .toList();
     }

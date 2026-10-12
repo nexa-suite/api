@@ -4,6 +4,7 @@ import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidAccessContextTicketException;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
+import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportConsoleOperationException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -129,6 +130,18 @@ class GlobalExceptionHandlerTests {
 				.andExpect(jsonPath("$.code").value("CONTEXT_TICKET_INVALID"));
 	}
 
+	@Test
+	void mapsSupportConsoleOutcomesThroughThePublicContextErrorContract() throws Exception {
+		mockMvc.perform(get("/support-forbidden"))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("FORBIDDEN"))
+				.andExpect(jsonPath("$.detail").value("Support operation is not authorized"));
+		mockMvc.perform(get("/support-conflict"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("INVALID_TRANSITION"))
+				.andExpect(jsonPath("$.detail").value("Support request cannot be changed in its current state"));
+	}
+
 	@RestController
 	public static class TestController {
 		@PostMapping("/test")
@@ -190,6 +203,16 @@ class GlobalExceptionHandlerTests {
 		@GetMapping("/invalid-context-ticket")
 		void invalidContextTicket() {
 			throw new InvalidAccessContextTicketException();
+		}
+
+		@GetMapping("/support-forbidden")
+		void supportForbidden() {
+			throw SupportConsoleOperationException.forbidden("internal authorization details");
+		}
+
+		@GetMapping("/support-conflict")
+		void supportConflict() {
+			throw SupportConsoleOperationException.conflict("internal conflict details");
 		}
 	}
 

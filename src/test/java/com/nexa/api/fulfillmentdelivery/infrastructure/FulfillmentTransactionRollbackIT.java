@@ -1,12 +1,14 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure;
 
-import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
+import com.nexa.api.support.TenantPhysicalAllocationFixtureConfiguration;
+import com.nexa.api.support.TenantPhysicalAllocationFixtureConfiguration.TenantPhysicalAllocationFixture;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
@@ -14,8 +16,6 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -23,10 +23,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Controlled transaction failure seam after physical allocation planning. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Import(TenantPhysicalAllocationFixtureConfiguration.class)
 class FulfillmentTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
-
-    @MockitoBean
-    FulfillmentPersistencePort fulfillments;
+    @Autowired
+    TenantPhysicalAllocationFixture physicalAllocationFixture;
 
     @Test
     void failureAfterPhysicalAllocationRollsBackAllocationBackingLotReservationAndOutbox() throws Exception {
@@ -36,22 +36,21 @@ class FulfillmentTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
         UUID workspace = UUID.fromString(workspaceId());
         ensureBackingWarehouseGrants(orderId);
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
-        UUID backingId = jdbc.queryForObject(
+        UUID backingId = tenantJdbc().queryForObject(
                 "select b.id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "where b.tenant_id=? and b.workspace_id=? and c.sales_order_id=?",
                 UUID.class, tenant, workspace, orderId);
-        String backingStatus = jdbc.queryForObject("select status from warehouse.inventory_backing where id=?", String.class, backingId);
-        long backingVersion = jdbc.queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId);
-        BigDecimal reservedBefore = jdbc.queryForObject(
+        String backingStatus = tenantJdbc().queryForObject("select status from warehouse.inventory_backing where id=?", String.class, backingId);
+        long backingVersion = tenantJdbc().queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId);
+        BigDecimal reservedBefore = tenantJdbc().queryForObject(
                 "select coalesce(sum(reserved_quantity),0) from warehouse.inventory_lot where tenant_id=? and workspace_id=?",
                 BigDecimal.class, tenant, workspace);
-        int outboxBefore = jdbc.queryForObject(
+        int outboxBefore = tenantJdbc().queryForObject(
                 "select count(*) from integration.outbox_event where tenant_id=? and workspace_id=? and event_type='PhysicalAllocationCreated.v1'",
                 Integer.class, tenant, workspace);
 
-        doThrow(new IllegalStateException("failure-injection-after-physical-allocation"))
-                .when(fulfillments).createAllocated(any(FulfillmentPersistencePort.CreateRequest.class));
+        physicalAllocationFixture.failAfterNextAllocation();
 
         MvcResult failed = mockMvc.perform(post("/api/v1/sales-orders/" + order.id() + "/fulfillments")
                         .header("Authorization", "Bearer " + warehouse)
@@ -62,17 +61,18 @@ class FulfillmentTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
                 .andReturn();
 
         assertThat(failed.getResponse().getStatus()).isEqualTo(500);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.physical_allocation where tenant_id=? and workspace_id=? and sales_order_id=?",
+        assertThat(physicalAllocationFixture.failureWasTriggered()).isTrue();
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.physical_allocation where tenant_id=? and workspace_id=? and sales_order_id=?",
                 Integer.class, tenant, workspace, orderId)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment where tenant_id=? and workspace_id=? and sales_order_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.fulfillment where tenant_id=? and workspace_id=? and sales_order_id=?",
                 Integer.class, tenant, workspace, orderId)).isZero();
-        assertThat(jdbc.queryForObject("select status from warehouse.inventory_backing where id=?", String.class, backingId))
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_backing where id=?", String.class, backingId))
                 .isEqualTo(backingStatus);
-        assertThat(jdbc.queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId))
+        assertThat(tenantJdbc().queryForObject("select version from warehouse.inventory_backing where id=?", Long.class, backingId))
                 .isEqualTo(backingVersion);
-        assertThat(jdbc.queryForObject("select coalesce(sum(reserved_quantity),0) from warehouse.inventory_lot where tenant_id=? and workspace_id=?",
+        assertThat(tenantJdbc().queryForObject("select coalesce(sum(reserved_quantity),0) from warehouse.inventory_lot where tenant_id=? and workspace_id=?",
                 BigDecimal.class, tenant, workspace)).isEqualByComparingTo(reservedBefore);
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where tenant_id=? and workspace_id=? and event_type='PhysicalAllocationCreated.v1'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? and workspace_id=? and event_type='PhysicalAllocationCreated.v1'",
                 Integer.class, tenant, workspace)).isEqualTo(outboxBefore);
     }
 
@@ -92,7 +92,7 @@ class FulfillmentTransactionRollbackIT extends NexaWorkflowIntegrationSupport {
     }
 
     private void ensureBackingWarehouseGrants(UUID salesOrderId) throws Exception {
-        var warehouseIds = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+        var warehouseIds = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
                         + "join warehouse.inventory_backing_position p on p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.backing_line_id=l.id "

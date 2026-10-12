@@ -2,7 +2,7 @@ package com.nexa.api.creditreceivables.application.publicapi;
 
 import java.math.BigDecimal;
 
-/** Read-only Credit & Receivables exposure owned by Payments. */
+/** Read-only Credit & Receivables exposure projection. */
 public interface CreditExposureQuery {
     CreditExposureSnapshot find(String tenantId, String workspaceId, String customerAccountId, String currency);
 

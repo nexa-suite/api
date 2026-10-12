@@ -16,8 +16,11 @@ class AuthenticationThrottleConcurrencyIT extends PostgresIntegrationSupport {
         try (var executor = Executors.newFixedThreadPool(8)) {
             var tasks = java.util.stream.IntStream.range(0, 8).mapToObj(index -> executor.submit(() -> {
                 try {
-                    return mockMvc.perform(post("/api/v1/authentication/sign-in").header("Origin", ALLOWED_ORIGIN).header("User-Agent", "throttle-it")
-                                    .contentType(MediaType.APPLICATION_JSON).content("{\"identifier\":\"throttle@icisa-test.local\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}"))
+                    return mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
+                                    .header("Origin", ALLOWED_ORIGIN)
+                                    .header("User-Agent", "throttle-it")
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .content("{\"identifier\":\"throttle@icisa-test.local\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}")))
                             .andReturn().getResponse().getStatus();
                 } catch (Exception exception) { throw new AssertionError(exception); }
             })).toList();

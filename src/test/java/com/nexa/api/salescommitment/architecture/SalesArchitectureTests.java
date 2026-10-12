@@ -37,4 +37,11 @@ class SalesArchitectureTests {
 			}
 		}
 	}
+
+	@Test void bootstrapRoutesSupportReadsThroughSalesOwnedProjectionContract() throws Exception {
+		Path bootstrapReader = Path.of("src/main/java/com/nexa/api/bootstrap/runtime/database/tenant/TenantBusinessDatabaseSupportSalesOrderReadQueryFactory.java");
+		Path salesReader = SALES_SOURCE.resolve("infrastructure/persistence/JdbcTenantSalesOrderSupportProjectionQueryFactory.java");
+		assertThat(Files.readString(bootstrapReader)).doesNotContain("sales.sales_order", "org.springframework.jdbc");
+		assertThat(Files.readString(salesReader)).contains("sales.sales_order", "tenant_id=?", "workspace_id=?");
+	}
 }

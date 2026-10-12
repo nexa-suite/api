@@ -3,6 +3,7 @@ package com.nexa.api.edge.streaming;
 import java.util.List;
 import java.util.Set;
 
+@org.springframework.modulith.NamedInterface(value = "change-feed-read", propagate = false)
 public interface ChangeFeedQueryPort {
 	/**
 	 * Returns the oldest retained sequence in the stream scope, independent of

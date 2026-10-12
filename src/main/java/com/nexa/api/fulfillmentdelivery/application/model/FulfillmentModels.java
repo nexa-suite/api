@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.application.model;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -35,9 +37,18 @@ public final class FulfillmentModels {
         }
     }
 
-    /** Immutable evidence that the Warehouse actor transferred prepared goods to the assigned driver. */
+    /**
+     * Immutable record of a dispatch handoff. The dispatch actor is the authenticated actor that performed
+     * the handoff command. The Warehouse actor field is retained for historical rows only; a matching
+     * outgoing-goods check does not establish who physically transferred the goods.
+     */
+    @Schema(name = "HandoffEvidence")
     public record HandoffEvidence(UUID id, UUID fulfillmentId, long fulfillmentVersion,
-                                  UUID deliveryId, UUID warehouseActorMembershipId,
+                                  UUID deliveryId,
+                                  @Schema(description = "Legacy Warehouse actor value retained for historical rows; null for new handoffs unless independently verified physical-transfer evidence exists.", nullable = true, requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                                  UUID warehouseActorMembershipId,
+                                  @Schema(description = "Authenticated Dispatch actor that performed the handoff command; null for historical rows without explicit actor evidence.", nullable = true, requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                                  UUID dispatchActorMembershipId,
                                   UUID driverAssignmentId, UUID driverMembershipId,
                                   UUID physicalAllocationId, long physicalAllocationVersion,
                                   UUID outgoingGoodsCheckId, Instant occurredAt, boolean current) { }

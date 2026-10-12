@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
+import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
+
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchRouteStartPort;
 import com.nexa.api.fulfillmentdelivery.domain.dispatchorder.DispatchOrder;
@@ -29,7 +31,7 @@ public class DispatchRouteStartPersistenceAdapter extends DispatchJdbcSupport im
 
     @Override
     @Transactional
-    public Optional<LogisticsOperationsService.DispatchView> replayRouteStart(String tenantId, String workspaceId,
+    public Optional<LogisticsOperationsModels.DispatchView> replayRouteStart(String tenantId, String workspaceId,
                                                                                String idempotencyKey, String requestHash) {
         return Optional.ofNullable(replay(uuid(tenantId), uuid(workspaceId), "dispatch-route-start",
                 idempotencyKey, requestHash));
@@ -44,7 +46,7 @@ public class DispatchRouteStartPersistenceAdapter extends DispatchJdbcSupport im
 
     @Override
     @Transactional
-    public LogisticsOperationsService.DispatchView commitRouteStart(String tenantId, String workspaceId,
+    public LogisticsOperationsModels.DispatchView commitRouteStart(String tenantId, String workspaceId,
                                                                      DispatchOrder aggregate, DispatchStatus expectedStatus,
                                                                      long expectedVersion, String actorMembershipId,
                                                                      String idempotencyKey, String requestHash,

@@ -18,10 +18,10 @@ class PurchaseRequestMaterialChangeRlsIT extends PostgresIntegrationSupport {
                 from pg_class c join pg_namespace n on n.oid=c.relnamespace
                 where n.nspname='sales' and c.relname='purchase_request_material_change'
                 """, Boolean.class)).isTrue();
-        assertThat(jdbc.queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','SELECT')", Boolean.class)).isTrue();
-        assertThat(jdbc.queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','INSERT')", Boolean.class)).isTrue();
-        assertThat(jdbc.queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','UPDATE')", Boolean.class)).isTrue();
-        assertThat(jdbc.queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','DELETE')", Boolean.class)).isFalse();
+        assertThat(tenantJdbc().queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','SELECT')", Boolean.class)).isTrue();
+        assertThat(tenantJdbc().queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','INSERT')", Boolean.class)).isTrue();
+        assertThat(tenantJdbc().queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','UPDATE')", Boolean.class)).isTrue();
+        assertThat(tenantJdbc().queryForObject("select has_table_privilege('nexa_runtime','sales.purchase_request_material_change','DELETE')", Boolean.class)).isFalse();
 
         try (var connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), RUNTIME_USERNAME, RUNTIME_PASSWORD);
              var statement = connection.prepareStatement("select set_config('app.current_tenant_id', ?, false), set_config('app.current_workspace_id', ?, false)")) {
@@ -34,19 +34,19 @@ class PurchaseRequestMaterialChangeRlsIT extends PostgresIntegrationSupport {
             }
         }
 
-        String requestStatusConstraint = jdbc.queryForObject("""
+        String requestStatusConstraint = tenantJdbc().queryForObject("""
                 select pg_get_constraintdef(oid)
                 from pg_constraint
                 where conrelid='sales.purchase_request'::regclass and conname='ck_purchase_request_status_v3'
         """, String.class);
         assertThat(requestStatusConstraint).contains("CANCELLED");
-        String buyerIdentityConstraint = jdbc.queryForObject("""
+        String buyerIdentityConstraint = tenantJdbc().queryForObject("""
                 select pg_get_constraintdef(oid)
                 from pg_constraint
                 where conrelid='sales.sales_order'::regclass and conname='ck_sales_order_buyer_required_unless_manual'
                 """, String.class);
         assertThat(buyerIdentityConstraint).contains("MANUAL", "buyer_membership_id IS NOT NULL");
-        String proposalStatusConstraint = jdbc.queryForObject("""
+        String proposalStatusConstraint = tenantJdbc().queryForObject("""
                 select pg_get_constraintdef(oid)
                 from pg_constraint
                 where conrelid='sales.purchase_request_material_change'::regclass and conname='ck_pr_material_change_status'

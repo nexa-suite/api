@@ -12,7 +12,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @EnabledIfSystemProperty(named="nexa.integration.enabled",matches="true")
-@TestPropertySource(properties="spring.datasource.hikari.minimum-idle=1")
+@TestPropertySource(properties={"spring.datasource.hikari.minimum-idle=1",
+        "nexa.tenant-business.fulfillment-delivery.enabled=false"})
+/** Exercises the retained central stored-location adapter, outside Tenant delivery capability. */
 class DriverTrackingIT extends NexaWorkflowIntegrationSupport {
     @Test void workdayClosureAndPermissionLossStopCoordinatesAndScopeRemainsPrivate() throws Exception {
         String token = accessToken(LOGISTICS_EMAIL,"PLATFORM");

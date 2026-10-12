@@ -3,6 +3,7 @@ package com.nexa.api.businesstraceability.application.model;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import org.springframework.modulith.NamedInterface;
 
 public final class AuditModels {
 	private AuditModels() { }
@@ -15,6 +16,7 @@ public final class AuditModels {
 		}
 	}
 
+	@NamedInterface(value = "traceability-public", propagate = false)
 	public record AuditEventView(String id, String tenantId, String workspaceId, String actorMembershipId,
 			String actorWorkArea, String eventType, String subjectType, String subjectId, String correlationId,
 			Instant occurredAt, Map<String, Object> metadata) {
@@ -23,6 +25,7 @@ public final class AuditModels {
 		}
 	}
 
+	@NamedInterface(value = "traceability-public", propagate = false)
 	public record AuditPage(List<AuditEventView> items, int limit) {
 		public AuditPage { items = List.copyOf(items); }
 	}

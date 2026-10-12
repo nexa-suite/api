@@ -24,9 +24,9 @@ class SalesSnapshotQueryBudgetIT extends PostgresIntegrationSupport {
 
     @Test
     void catalogAndSkuSnapshotLookupsRemainBatchBoundedForOneTenAndFiftyLines() {
-        List<String> catalogIds = jdbc.query("select catalog_item_id from catalog_management.product where tenant_id=? and workspace_id=? order by catalog_item_id limit 50",
+        List<String> catalogIds = tenantJdbc().query("select catalog_item_id from catalog_management.product where tenant_id=? and workspace_id=? order by catalog_item_id limit 50",
                 (rs, row) -> rs.getString(1), UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
-        List<UUID> skuIds = jdbc.query("select id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and status='ACTIVE' and visible=true order by id limit 50",
+        List<UUID> skuIds = tenantJdbc().query("select id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and status='ACTIVE' and visible=true order by id limit 50",
                 (rs, row) -> rs.getObject(1, UUID.class), UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
         assertThat(catalogIds).hasSizeGreaterThanOrEqualTo(50);
         assertThat(skuIds).hasSizeGreaterThanOrEqualTo(50);

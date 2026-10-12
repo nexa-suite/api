@@ -3,6 +3,7 @@ package com.nexa.api.inventoryavailability.application.service;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuery;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.publicapi.InboundReceivingDiscrepancyCases;
+import com.nexa.api.inventoryavailability.application.publicapi.InboundReceivingDiscrepancyUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.context.annotation.Profile;
@@ -23,7 +24,7 @@ import java.util.UUID;
 /** Records an inbound physical observation without accepting or mutating stock. */
 @Service
 @Profile("!test")
-public class InboundReceivingDiscrepancyService {
+public class InboundReceivingDiscrepancyService implements InboundReceivingDiscrepancyUseCase {
     public static final String EVIDENCE_SUBJECT_TYPE = "INBOUND_RECEIVING_DISCREPANCY";
 
     private final InboundReceivingDiscrepancyCases cases;

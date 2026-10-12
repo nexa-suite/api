@@ -55,13 +55,15 @@ jobs:
           docker logs nexa-ci-stripe-mock
       - name: Verify API with real PostgreSQL integrations
         env:
-          NEXA_DATABASE_POOL_MAX: "32"
+          NEXA_DATABASE_POOL_MAX: "4"
           NEXA_CLAMAV_MODE: network
           NEXA_CLAMAV_HOST: 127.0.0.1
           NEXA_CLAMAV_PORT: "3310"
         run: >-
           ./mvnw clean verify -Dnexa.integration.enabled=true
-          -Dspring.datasource.hikari.maximum-pool-size=32
+          -Dnexa.scheduling.enabled=false
+          -Dspring.modulith.moments.enabled=false
+          -Dspring.datasource.hikari.maximum-pool-size=4
       - name: Verify OpenAPI compatibility against base snapshot
         if: ${{ github.event_name == 'pull_request' }}
         env:

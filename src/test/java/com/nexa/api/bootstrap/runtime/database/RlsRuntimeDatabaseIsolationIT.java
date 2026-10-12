@@ -1001,7 +1001,13 @@ class RlsRuntimeDatabaseIsolationIT {
                         execute(connection, "delete from iam.password_credential where user_id=?", founderUserId);
                         execute(connection, "delete from iam.user_account where id=?", founderUserId);
                     }
-                    if (activatedWorkspaceId != null) execute(connection, "delete from tenant_management.workspace where id=?", activatedWorkspaceId);
+                    if (activatedWorkspaceId != null) {
+                        execute(connection, "delete from tenant_management.tenant_business_database_workspace_anchor_task where workspace_id=?",
+                                activatedWorkspaceId);
+                        execute(connection, "delete from tenant_management.tenant_business_database_provisioning_task where workspace_id=?",
+                                activatedWorkspaceId);
+                        execute(connection, "delete from tenant_management.workspace where id=?", activatedWorkspaceId);
+                    }
                     if (activatedTenantId != null) execute(connection, "delete from tenant_management.tenant where id=?", activatedTenantId);
                     connection.commit();
                 } catch (SQLException exception) {
@@ -1233,7 +1239,13 @@ class RlsRuntimeDatabaseIsolationIT {
                         "catalog_management.brand", "catalog_management.category", "catalog_management.command_idempotency", "catalog_management.customer_terms", "catalog_management.price_list", "catalog_management.price_list_item", "catalog_management.product", "catalog_management.product_asset_reference", "catalog_management.product_family", "catalog_management.product_presentation", "catalog_management.product_price", "catalog_management.product_variant", "catalog_management.product_visibility", "catalog_management.promotion", "catalog_management.promotion_category", "catalog_management.promotion_client_account", "catalog_management.promotion_product", "catalog_management.promotion_rule", "catalog_management.promotion_sku", "catalog_management.seed_import_history", "catalog_management.sellable_sku", "catalog_management.sku_price",
                         "sales.manual_order_idempotency", "sales.sales_order_sequence",
                         "tenant_management.custom_field_definition", "tenant_management.membership_admin_event", "tenant_management.membership_authorization_state", "tenant_management.membership_role_assignment", "tenant_management.membership_role_definition", "tenant_management.organization_invitation", "tenant_management.organization_registration", "tenant_management.role_definition", "tenant_management.workspace_creation_idempotency",
-                        "tenant_management.organization_invitation_idempotency", "tenant_management.organization_settings", "tenant_management.reference_plan_assignment", "tenant_management.regional_settings", "tenant_management.tenant_security_settings", "tenant_management.unit_preferences", "tenant_management.tenant", "tenant_management.workspace");
+                        "tenant_management.organization_invitation_idempotency", "tenant_management.organization_settings", "tenant_management.reference_plan_assignment", "tenant_management.regional_settings", "tenant_management.tenant_business_database_binding", "tenant_management.tenant_security_settings", "tenant_management.unit_preferences", "tenant_management.tenant", "tenant_management.workspace",
+                        "iam.internal_support_audit_event", "iam.internal_support_request",
+                        "payments.buyer_wallet_account", "payments.buyer_wallet_ledger_entry",
+                        "payments.buyer_wallet_reservation", "payments.buyer_wallet_reservation_event",
+                        "tenant_management.tenant_business_database_provisioning_task",
+                        "tenant_management.tenant_business_database_workspace_anchor_task",
+                        "tenant_management.wallet_recharge_provider_route");
     }
 
     private static void assertVisibleRows(Connection connection, ScopedRow expected, List<ScopedRow> allRows) throws SQLException {

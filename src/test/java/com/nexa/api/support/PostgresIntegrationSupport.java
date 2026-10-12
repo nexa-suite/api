@@ -1,9 +1,14 @@
 package com.nexa.api.support;
 
+import com.nexa.api.bootstrap.local.LocalTenantBusinessFixtureSeeder;
+import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceBootstrap;
+import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogSkuPersistenceBootstrap;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -13,6 +18,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.sql.Connection;
@@ -21,18 +27,46 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * Shared base for real PostgreSQL integration tests: Testcontainers database, real
  * Flyway migrations, real security filters, real runtime adapters and the seeded
- * local workspace (owner/sales/warehouse/logistics/buyer at icisa-test).
+ * local workspace (owner/sales/warehouse/logistics/buyer at icisa-test). Identity
+ * and access assertions use the central database; business workflows use each
+ * Tenant's provisioned physical database. Tests may override individual
+ * capabilities explicitly when exercising unavailable-capability behavior.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
-@TestPropertySource(properties = "spring.autoconfigure.exclude=")
+@TestPropertySource(properties = {
+		"spring.autoconfigure.exclude=",
+		"spring.jpa.open-in-view=false",
+		"spring.datasource.hikari.maximum-pool-size=4",
+		"spring.datasource.hikari.minimum-idle=1",
+		"nexa.tenant-business.router.maximum-cached-pools=2",
+		"nexa.tenant-business.router.maximum-pool-size=2",
+		"nexa.tenant-business.buyer-wallet-read.enabled=true",
+		"nexa.tenant-business.buyer-wallet-recharge.enabled=true",
+		"nexa.tenant-business.purchase-request.enabled=true",
+		"nexa.tenant-business.catalog-detail-read.enabled=true",
+		"nexa.tenant-business.catalog-management.enabled=true",
+		"nexa.tenant-business.payments.enabled=true",
+		"nexa.tenant-business.fulfillment-delivery.enabled=true",
+		"nexa.tenant-business.warehouse-operations.enabled=true",
+		"nexa.tenant-business.local-fixtures.enabled=true",
+		"nexa.tenant-business.support-sales-order-read.enabled=true",
+		"nexa.tenant-business.business-documents.enabled=true",
+		"nexa.tenant-business.business-traceability.enabled=true",
+		"nexa.tenant-business.notifications.enabled=true",
+		"nexa.business-traceability.worker-delay-ms=3600000",
+		"nexa.scheduling.enabled=false",
+		"spring.modulith.moments.enabled=false"
+})
+@Import(TenantBusinessIntegrationTestConfiguration.class)
 public abstract class PostgresIntegrationSupport {
 	protected static final String TEST_PASSWORD = "integration-test-password";
 	protected static final String MIGRATOR_USERNAME = "nexa";
@@ -41,6 +75,7 @@ public abstract class PostgresIntegrationSupport {
 	protected static final String RUNTIME_PASSWORD = "test-only-runtime-password";
 	protected static final String TEST_DATABASE_USERNAME = "nexa_test";
 	protected static final String TEST_DATABASE_PASSWORD = "test-only-test-password";
+	protected static final String BUSINESS_DOCUMENT_SCOPE_READER_PASSWORD = "test-only-business-document-scope-reader-password";
 	protected static final String WORKSPACE_SLUG = "icisa-test";
 	protected static final String ALLOWED_ORIGIN = "http://localhost:4200";
 	protected static final String OWNER_EMAIL = "owner@icisa-test.local";
@@ -59,6 +94,7 @@ public abstract class PostgresIntegrationSupport {
 			POSTGRES.start();
 			createRuntimeRole();
 			createTestRole();
+			createBusinessDocumentScopeReaderRole();
 		}
 	}
 
@@ -67,6 +103,18 @@ public abstract class PostgresIntegrationSupport {
 
 	@Autowired
 	protected JdbcTemplate jdbc;
+
+	@Autowired
+	private Environment environment;
+
+	@Autowired(required = false)
+	private CatalogPersistenceBootstrap catalogPersistenceBootstrap;
+
+	@Autowired(required = false)
+	private CatalogSkuPersistenceBootstrap catalogSkuPersistenceBootstrap;
+
+	@Autowired
+	private LocalTenantBusinessFixtureSeeder tenantBusinessFixtureSeeder;
 
 	@DynamicPropertySource
 	static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -77,6 +125,8 @@ public abstract class PostgresIntegrationSupport {
 		registry.add("NEXA_DATABASE_RUNTIME_PASSWORD", () -> TEST_DATABASE_PASSWORD);
 		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", POSTGRES::getUsername);
 		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", POSTGRES::getPassword);
+		registry.add("NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD", () -> BUSINESS_DOCUMENT_SCOPE_READER_PASSWORD);
+		registry.add("nexa.tenant-business.local-credentials-directory", TenantBusinessIntegrationFixture::credentialDirectory);
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", () -> TEST_DATABASE_USERNAME);
 		registry.add("spring.datasource.password", () -> TEST_DATABASE_PASSWORD);
@@ -110,19 +160,79 @@ public abstract class PostgresIntegrationSupport {
 	void resetThrottleState() {
 		ensureTestRolePrivileges();
 		jdbc.update("delete from iam.authentication_failure");
+		if (tenantBusinessRoutingEnabled()) {
+			UUID tenant = UUID.fromString(tenantId());
+			UUID workspace = UUID.fromString(workspaceId());
+			provisionTenantBusinessDatabase(tenant, workspace);
+			seedTenantBusinessFixture(tenant, workspace);
+		}
+	}
+
+	private void seedTenantBusinessFixture(UUID tenantId, UUID workspaceId) {
+		seedTenantCatalogFixture(tenantId, workspaceId);
+		tenantBusinessFixtureSeeder.seed(tenantJdbcFor(tenantId), tenantId, workspaceId,
+				UUID.fromString(membershipId(BUYER_EMAIL)), "CLI-001");
+	}
+
+	protected void seedTenantCatalogFixture(UUID tenantId, UUID workspaceId) {
+		if (catalogPersistenceBootstrap == null || catalogSkuPersistenceBootstrap == null) {
+			throw new IllegalStateException("Reviewed Tenant catalog fixture seeders are not available");
+		}
+		JdbcTemplate tenantJdbc = tenantJdbcFor(tenantId);
+		catalogPersistenceBootstrap.importExactTenantWorkspace(tenantJdbc, tenantId, workspaceId);
+		catalogSkuPersistenceBootstrap.reconcileExactTenantWorkspace(tenantJdbc, tenantId, workspaceId);
+	}
+
+	/** Direct test-only SQL handle for assertions/seeding against the actual routed Tenant database. */
+	protected JdbcTemplate tenantJdbc() {
+		return tenantJdbcFor(UUID.fromString(tenantId()));
+	}
+
+	/** Direct test-only SQL handle for an explicitly provisioned Tenant database. */
+	protected JdbcTemplate tenantJdbcFor(UUID tenantId) {
+		return TenantBusinessIntegrationFixture.jdbcFor(tenantId);
+	}
+
+	/** Provisions the physical Tenant database and central READY binding for an existing exact Workspace. */
+	protected void provisionTenantBusinessDatabase(UUID tenantId, UUID workspaceId) {
+		TenantBusinessIntegrationFixture.provision(jdbc, tenantId, workspaceId);
 	}
 
 	/** Signs in through the real HTTP stack and returns the access token. */
 	protected String accessToken(String email, String surface) throws Exception {
-		MvcResult result = mockMvc.perform(post("/api/v1/authentication/sign-in")
+		return accessTokenForWorkspace(email, surface, WORKSPACE_SLUG);
+	}
+
+	/** Signs into an explicitly selected Workspace through the real browser CSRF flow. */
+	protected String accessTokenForWorkspace(String email, String workspaceSlug) throws Exception {
+		return accessTokenForWorkspace(email, "PLATFORM", workspaceSlug);
+	}
+
+	protected String accessTokenForWorkspace(String email, String surface, String workspaceSlug) throws Exception {
+		MvcResult result = mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
 						.header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"identifier\":\"" + email + "\",\"password\":\"" + TEST_PASSWORD
-								+ "\",\"workspaceSlug\":\"" + WORKSPACE_SLUG + "\",\"surface\":\"" + surface + "\"}"))
+								+ "\",\"workspaceSlug\":\"" + workspaceSlug + "\",\"surface\":\"" + surface + "\"}")))
 				.andExpect(status().isOk())
 				.andReturn();
-		String body = result.getResponse().getContentAsString();
-		return tools.jackson.databind.json.JsonMapper.shared().readTree(body).get("accessToken").asText();
+		return tools.jackson.databind.json.JsonMapper.shared()
+				.readTree(result.getResponse().getContentAsString()).get("accessToken").asText();
+	}
+
+	/** Adds the cookie and request token from the browser CSRF bootstrap to a browser-session POST. */
+	protected MockHttpServletRequestBuilder withBrowserCsrf(MockHttpServletRequestBuilder request) throws Exception {
+		MvcResult csrfBootstrap = mockMvc.perform(get("/api/v1/authentication/csrf")
+						.header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
+				.andExpect(status().isOk())
+				.andReturn();
+		String csrfToken = tools.jackson.databind.json.JsonMapper.shared()
+				.readTree(csrfBootstrap.getResponse().getContentAsString()).path("token").asText();
+		var csrfCookie = csrfBootstrap.getResponse().getCookie("NEXA_CSRF");
+		if (csrfToken.isBlank() || csrfCookie == null) {
+			throw new IllegalStateException("Browser CSRF bootstrap must return its request token and cookie");
+		}
+		return request.cookie(csrfCookie).header("X-Nexa-CSRF", csrfToken);
 	}
 
 	protected String membershipId(String email) {
@@ -142,14 +252,23 @@ public abstract class PostgresIntegrationSupport {
 	}
 
 	protected String buyerClientAccountId() {
-		return jdbc.queryForObject("select cam.client_account_id::text from sales.client_account_membership cam "
-				+ "join tenant_management.workspace_membership m on m.id = cam.workspace_membership_id "
-				+ "join iam.user_account u on u.id = m.user_id where u.normalized_email = ? limit 1",
-				String.class, BUYER_EMAIL);
+		UUID buyerMembership = UUID.fromString(membershipId(BUYER_EMAIL));
+		JdbcTemplate businessJdbc = tenantBusinessRoutingEnabled() ? tenantJdbc() : jdbc;
+		return businessJdbc.queryForObject("select client_account_id::text from sales.client_account_membership "
+				+ "where tenant_id=? and workspace_id=? and workspace_membership_id=?",
+				String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), buyerMembership);
 	}
 
 	protected static String uuid() {
 		return UUID.randomUUID().toString();
+	}
+
+	private boolean tenantBusinessRoutingEnabled() {
+		return java.util.Arrays.stream(new String[]{"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request", "catalog-detail-read",
+				"catalog-management", "payments", "fulfillment-delivery", "warehouse-operations", "local-fixtures",
+				"support-sales-order-read", "business-documents", "business-traceability", "notifications"})
+				.anyMatch(capability -> environment.getProperty(
+						"nexa.tenant-business." + capability + ".enabled", Boolean.class, false));
 	}
 
 	public static Connection openRuntimeConnection() throws SQLException {
@@ -215,6 +334,20 @@ public abstract class PostgresIntegrationSupport {
 			statement.execute("ALTER DEFAULT PRIVILEGES FOR ROLE nexa GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO nexa_test");
 			statement.execute("ALTER DEFAULT PRIVILEGES FOR ROLE nexa GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO nexa_test");
 			statement.execute("ALTER DEFAULT PRIVILEGES FOR ROLE nexa GRANT EXECUTE ON FUNCTIONS TO nexa_test");
+		} catch (SQLException exception) {
+			throw new ExceptionInInitializerError(exception);
+		}
+	}
+
+	private static void createBusinessDocumentScopeReaderRole() {
+		try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), MIGRATOR_USERNAME, MIGRATOR_PASSWORD);
+			 Statement statement = connection.createStatement()) {
+			statement.execute("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_business_documents_scope_reader') "
+					+ "THEN EXECUTE 'CREATE ROLE nexa_business_documents_scope_reader LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+					+ "NOREPLICATION NOBYPASSRLS PASSWORD ''" + BUSINESS_DOCUMENT_SCOPE_READER_PASSWORD
+					+ "'''; END IF; END $$");
+			statement.execute("ALTER ROLE nexa_business_documents_scope_reader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB "
+					+ "NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '" + BUSINESS_DOCUMENT_SCOPE_READER_PASSWORD + "'");
 		} catch (SQLException exception) {
 			throw new ExceptionInInitializerError(exception);
 		}

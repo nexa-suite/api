@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.application.service;
 
+import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
+
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchRouteStartPort;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
@@ -26,7 +28,7 @@ public final class StartDispatchRouteService {
     }
 
     @Transactional
-    public LogisticsOperationsService.DispatchView execute(
+    public LogisticsOperationsModels.DispatchView execute(
             String tenantId, String workspaceId, String dispatchId, long version,
             String actorMembershipId, String idempotencyKey, long now) {
         String requestHash = requestHash(dispatchId, version);

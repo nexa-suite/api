@@ -32,8 +32,8 @@ class BankTransferReviewIT extends PaymentIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
 
         assertThat(json(approved).get("status").asText()).isEqualTo("SUCCEEDED");
-        assertThat(jdbc.queryForObject("select bank_transfer_proof_evidence_id from payments.payment where id=?", UUID.class, UUID.fromString(paymentId))).isNull();
-        assertThat(jdbc.queryForObject("select amount_paid from payments.receivable where id=?", BigDecimal.class, receivable.id()))
+        assertThat(tenantJdbc().queryForObject("select bank_transfer_proof_evidence_id from payments.payment where id=?", UUID.class, UUID.fromString(paymentId))).isNull();
+        assertThat(tenantJdbc().queryForObject("select amount_paid from payments.receivable where id=?", BigDecimal.class, receivable.id()))
                 .isEqualByComparingTo(receivable.amount());
     }
 
@@ -83,9 +83,9 @@ class BankTransferReviewIT extends PaymentIntegrationSupport {
 
         assertThat(json(approved).get("status").asText()).isEqualTo("SUCCEEDED");
         assertThat(json(replay).get("status").asText()).isEqualTo("SUCCEEDED");
-        assertThat(jdbc.queryForObject("select amount_paid from payments.receivable where id=?", java.math.BigDecimal.class, receivable.id()))
+        assertThat(tenantJdbc().queryForObject("select amount_paid from payments.receivable where id=?", java.math.BigDecimal.class, receivable.id()))
                 .isEqualByComparingTo(receivable.amount());
-        assertThat(jdbc.queryForObject("select count(*) from payments.receivable_allocation where payment_id=?", Integer.class, UUID.fromString(paymentId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.receivable_allocation where payment_id=?", Integer.class, UUID.fromString(paymentId))).isEqualTo(1);
     }
 
     @Test
@@ -107,9 +107,9 @@ class BankTransferReviewIT extends PaymentIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
 
         assertThat(json(rejected).get("status").asText()).isEqualTo("FAILED");
-        assertThat(jdbc.queryForObject("select amount_paid from payments.receivable where id=?", java.math.BigDecimal.class, receivable.id()))
+        assertThat(tenantJdbc().queryForObject("select amount_paid from payments.receivable where id=?", java.math.BigDecimal.class, receivable.id()))
                 .isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(jdbc.queryForObject("select review_reason from payments.payment where id=?", String.class, UUID.fromString(paymentId)))
+        assertThat(tenantJdbc().queryForObject("select review_reason from payments.payment where id=?", String.class, UUID.fromString(paymentId)))
                 .isEqualTo("Reference could not be reconciled");
     }
 

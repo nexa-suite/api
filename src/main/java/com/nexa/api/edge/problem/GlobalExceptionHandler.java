@@ -14,7 +14,10 @@ import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
+import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
+import com.nexa.api.payments.application.exception.BuyerWalletRefundUnavailableException;
 import com.nexa.api.businessdocuments.application.exception.BusinessEvidenceIdempotencyConflictException;
+import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportConsoleOperationException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -47,11 +50,13 @@ import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequired
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestAlreadyConvertedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftDestinationNotGeocodedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftPreconditionRequiredException;
 import com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipConflictException;
 import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipPreconditionRequiredException;
+import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipsStoreUnavailableException;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerRelationshipInvariantViolation;
 import com.nexa.api.salescommitment.application.exception.SalesIdempotencyPayloadConflictException;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
@@ -63,9 +68,13 @@ import com.nexa.api.salescommitment.application.exception.SalesOrderRejectionRea
 import com.nexa.api.salescommitment.application.exception.SalesOrderTransitionException;
 import com.nexa.api.edge.streaming.ChangeFeedCapacityException;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationException;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationsStoreUnavailableException;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperationException;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
+import com.nexa.api.creditreceivables.application.exception.CreditAccountConfigurationUnavailableException;
+import com.nexa.api.creditreceivables.application.exception.CreditReceivablesUnavailableException;
+import com.nexa.api.payments.application.publicapi.BuyerWalletStoreUnavailableException;
 import com.nexa.api.fulfillmentdelivery.domain.publicapi.DispatchTransitionViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -320,6 +329,54 @@ public final class GlobalExceptionHandler {
 		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.ROLE_DEFINITION_STORAGE_UNAVAILABLE, "Role definition persistence is unavailable", request);
 	}
 
+	@ExceptionHandler(BuyerWalletStoreUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleBuyerWalletStoreUnavailable(BuyerWalletStoreUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Buyer wallet capability is unavailable", request);
+	}
+
+	@ExceptionHandler(BuyerWalletRefundUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleBuyerWalletRefundUnavailable(
+			BuyerWalletRefundUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant wallet refund capability is unavailable", request);
+	}
+
+	@ExceptionHandler(BuyerWalletRefundConflictException.class)
+	public ResponseEntity<ProblemDetail> handleBuyerWalletRefundConflict(
+			BuyerWalletRefundConflictException exception, HttpServletRequest request) {
+		return response(HttpStatus.CONFLICT, ApiErrorCode.BUYER_WALLET_REFUND_CONFLICT,
+				"Buyer wallet refund conflicts with the consumed reservation", request);
+	}
+
+	@ExceptionHandler(WarehouseOperationsStoreUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleWarehouseOperationsStoreUnavailable(
+			WarehouseOperationsStoreUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Warehouse operations capability is unavailable", request);
+	}
+
+	@ExceptionHandler(CreditAccountConfigurationUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleCreditAccountConfigurationUnavailable(
+			CreditAccountConfigurationUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant credit configuration is unavailable", request);
+	}
+
+	@ExceptionHandler(CreditReceivablesUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleCreditReceivablesUnavailable(
+			CreditReceivablesUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant Credit and Receivables are unavailable", request);
+	}
+
+	@ExceptionHandler(CustomerRelationshipsStoreUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleCustomerRelationshipsStoreUnavailable(
+			CustomerRelationshipsStoreUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant Customer Relationships are unavailable", request);
+	}
+
 	@ExceptionHandler(SalesResourceNotFoundException.class)
 	public ResponseEntity<ProblemDetail> handleSalesNotFound(SalesResourceNotFoundException exception, HttpServletRequest request) {
 		ApiErrorCode code = switch (exception.getMessage()) {
@@ -371,13 +428,17 @@ public final class GlobalExceptionHandler {
 		if ("PRECONDITION_REQUIRED".equals(exception.code())) {
 			return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
 		}
+		if ("PRECONDITION_FAILED".equals(exception.code())) {
+			return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED,
+					"Credit account changed by another request", request);
+		}
 		if ("CONCURRENCY_CONFLICT".equals(exception.code())) {
 			return staleOrConflict(ApiErrorCode.CONCURRENCY_CONFLICT, "Credit or receivable resource changed by another request", request);
 		}
 		HttpStatus status = switch (exception.code()) {
-			case "CREDIT_ACCOUNT_NOT_FOUND", "RECEIVABLE_NOT_FOUND", "ADJUSTMENT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+			case "CREDIT_ACCOUNT_NOT_FOUND", "CLIENT_ACCOUNT_NOT_FOUND", "RECEIVABLE_NOT_FOUND", "ADJUSTMENT_NOT_FOUND" -> HttpStatus.NOT_FOUND;
 			case "IDEMPOTENCY_PAYLOAD_CONFLICT", "RECEIVABLE_APPLICATION_CONFLICT",
-					"DATA_INTEGRITY_CONFLICT" -> HttpStatus.CONFLICT;
+					"DATA_INTEGRITY_CONFLICT", "CREDIT_LIMIT_BELOW_USED", "CREDIT_ACCOUNT_CLOSED" -> HttpStatus.CONFLICT;
 			case "INSUFFICIENT_CREDIT" -> HttpStatus.BAD_REQUEST;
 			default -> HttpStatus.BAD_REQUEST;
 		};
@@ -464,6 +525,8 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Purchase request draft version is stale", request); }
 	@ExceptionHandler(PurchaseRequestDraftInvariantException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftInvariant(PurchaseRequestDraftInvariantException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Purchase request draft is not ready to submit", request); }
+	@ExceptionHandler(PurchaseRequestDraftDestinationNotGeocodedException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftDestinationNotGeocoded(PurchaseRequestDraftDestinationNotGeocodedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_DRAFT_DESTINATION_NOT_GEOCODED, exception.getMessage(), request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
 	public ResponseEntity<ProblemDetail> handleSalesIdempotencyPayload(SalesIdempotencyPayloadConflictException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT, "Idempotency key was reused with a different payload", request); }
 	@ExceptionHandler(BusinessEvidenceIdempotencyConflictException.class)
@@ -601,6 +664,16 @@ public final class GlobalExceptionHandler {
 			default -> ApiErrorCode.RESOURCE_NOT_FOUND;
 		};
 		return response(HttpStatus.NOT_FOUND, code, "Resource not found", request);
+	}
+
+	@ExceptionHandler(SupportConsoleOperationException.class)
+	public ResponseEntity<ProblemDetail> handleSupportConsoleOperation(SupportConsoleOperationException exception,
+			HttpServletRequest request) {
+		if (exception.isForbidden()) {
+			return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Support operation is not authorized", request);
+		}
+		return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION,
+				"Support request cannot be changed in its current state", request);
 	}
 
 	@ExceptionHandler(com.nexa.api.payments.application.exception.PaymentOperationInProgressException.class)

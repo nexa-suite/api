@@ -8,6 +8,8 @@ ZAP_IMAGE="${ZAP_IMAGE:-zaproxy/zap-stable:2.16.1}"
 
 mkdir -p "$REPORT_DIR"
 report_dir_abs=$(cd "$REPORT_DIR" && pwd)
+csrf_tmp_dir=$(mktemp -d)
+trap 'rm -rf "$csrf_tmp_dir"' EXIT HUP INT TERM
 
 required_env=(
   NEXA_DEV_OWNER_EMAIL NEXA_DEV_OWNER_PASSWORD
@@ -50,9 +52,20 @@ for definition in "${roles[@]}"; do
   [[ "$surface" == "PORTAL" ]] && origin_port=4300
   login_body=$(jq -nc --arg identifier "$email" --arg secret "$password" --arg workspace "$WORKSPACE" --arg surface "$surface" \
     '{identifier:$identifier,password:$secret,workspaceSlug:$workspace,surface:$surface}')
+  csrf_headers="$csrf_tmp_dir/$role.headers"
+  csrf_token=$(curl --fail --silent --show-error --dump-header "$csrf_headers" \
+    -H "Origin: http://localhost:$origin_port" "$BASE_URL/api/v1/authentication/csrf" \
+    | jq --exit-status --raw-output '.token | strings | select(length > 0)')
+  csrf_cookie=$(awk 'tolower($1) == "set-cookie:" && $2 ~ /^NEXA_CSRF=/ { value = $2; sub(/;.*/, "", value); sub(/^NEXA_CSRF=/, "", value); gsub(/\r/, "", value); print value; exit }' "$csrf_headers")
+  if [[ -z "$csrf_cookie" ]]; then
+    echo "role=$role login_status=not-run csrf_cookie_present=false" >&2
+    failure=1
+    continue
+  fi
   login_file="$REPORT_DIR/$role-login.json"
   login_code=$(curl --silent --show-error --output "$login_file" --write-out '%{http_code}' \
     -H 'Content-Type: application/json' -H "Origin: http://localhost:$origin_port" \
+    -H "Cookie: NEXA_CSRF=$csrf_cookie" -H "X-Nexa-CSRF: $csrf_token" \
     --data "$login_body" "$BASE_URL/api/v1/authentication/sign-in")
   token=$(jq -r '.accessToken // empty' "$login_file")
   if [[ "$login_code" != "200" || -z "$token" ]]; then

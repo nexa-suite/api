@@ -13,14 +13,8 @@ import com.nexa.api.salescommitment.application.publicapi.SalesWorkflowCommands;
 import com.nexa.api.shared.events.PaymentEventContextQueryPort;
 import com.nexa.api.shared.application.port.out.TechnicalMetricsPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantEventContextQueryPort;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import com.nexa.api.shared.context.RlsRequestScope;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryReservationCommands;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseEventContextQueryPort;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -60,12 +54,13 @@ public final class CanonicalOutboxEventProcessor {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final NotificationProjectionPort notifications;
+    private final boolean tenantNotificationsEnabled;
     private final TenantEventContextQueryPort tenantContext;
     private final SalesEventContextQueryPort salesContext;
     private final WarehouseEventContextQueryPort warehouseContext;
     private final LogisticsEventContextQueryPort logisticsContext;
     private final PaymentEventContextQueryPort paymentContext;
-    private final ResolveCurrentAccessContextUseCase access;
+    private final VerifiedSystemWorkflowAccessContextResolver workflowActors;
     private final SalesWorkflowCommands salesOrders;
     private final InventoryReservationCommands warehouse;
     private final DispatchWorkflowCommands logistics;
@@ -77,13 +72,13 @@ public final class CanonicalOutboxEventProcessor {
     private final int outboxRetentionBatchSize;
 
     public CanonicalOutboxEventProcessor(JdbcTemplate jdbc, ObjectMapper mapper,
-                                         @Qualifier("notificationProjectionPort") NotificationProjectionPort notifications,
+                                         @Qualifier("notificationProjectionPort") ObjectProvider<NotificationProjectionPort> notifications,
                                          TenantEventContextQueryPort tenantContext,
                                          SalesEventContextQueryPort salesContext,
                                          WarehouseEventContextQueryPort warehouseContext,
                                          LogisticsEventContextQueryPort logisticsContext,
                                          PaymentEventContextQueryPort paymentContext,
-                                         ResolveCurrentAccessContextUseCase access,
+                                         VerifiedSystemWorkflowAccessContextResolver workflowActors,
                                          SalesWorkflowCommands salesOrders,
                                          InventoryReservationCommands warehouse,
                                          DispatchWorkflowCommands logistics,
@@ -91,17 +86,19 @@ public final class CanonicalOutboxEventProcessor {
                                          PaymentWorkflowCommands payments,
                                          ObjectProvider<TechnicalMetricsPort> metrics,
                                          PlatformTransactionManager transactionManager,
+                                         @Value("${nexa.tenant-business.notifications.enabled:false}") boolean tenantNotificationsEnabled,
                                          @Value("${nexa.integration.outbox-retention-days:90}") int outboxRetentionDays,
                                          @Value("${nexa.integration.outbox-retention-batch-size:500}") int outboxRetentionBatchSize) {
         this.jdbc = jdbc;
         this.mapper = mapper;
-        this.notifications = notifications;
+        this.notifications = notifications == null ? null : notifications.getIfAvailable();
+        this.tenantNotificationsEnabled = tenantNotificationsEnabled;
         this.tenantContext = tenantContext;
         this.salesContext = salesContext;
         this.warehouseContext = warehouseContext;
         this.logisticsContext = logisticsContext;
         this.paymentContext = paymentContext;
-        this.access = access;
+        this.workflowActors = workflowActors;
         this.salesOrders = salesOrders;
         this.warehouse = warehouse;
         this.logistics = logistics;
@@ -215,6 +212,9 @@ public final class CanonicalOutboxEventProcessor {
 
     private void processPushDelivery(EventRow event, UUID claimToken) {
         assertClaimOwner(event.eventId(), claimToken);
+        if (notifications == null) {
+            throw new IllegalStateException("Central notification projection is disabled for Tenant-backed BC-10");
+        }
         Map<String, Object> payload = payload(event.payload());
         NotificationProjection projection = new NotificationProjection(
                 string(payload.get("sourceEventId")),
@@ -344,6 +344,8 @@ public final class CanonicalOutboxEventProcessor {
     }
 
     private void projectNotification(EventRow event, Map<String, Object> payload) {
+        if (tenantNotificationsEnabled) return;
+        if (notifications == null) throw new IllegalStateException("Notification projection port is unavailable");
         String clientAccountId = clientAccount(event, payload);
         Set<String> recipientIds = new HashSet<>();
         recipientIds.addAll(tenantContext.findActiveMembershipIdsByRoleCodes(event.tenantId(), event.workspaceId(),
@@ -378,15 +380,7 @@ public final class CanonicalOutboxEventProcessor {
     }
 
     private CurrentAccessContext actor(EventRow event) {
-        TenantEventContextQueryPort.WorkflowActor principal = tenantContext.findSystemWorkflowActor(event.tenantId(), event.workspaceId());
-        CurrentAccessContext context = access.resolve(new CurrentAccessRequest(new UserId(principal.userId()),
-                new TenantId(event.tenantId()), new WorkspaceId(event.workspaceId()), Surface.PLATFORM));
-        if (!principal.membershipId().equals(context.membershipId().value())
-                || !principal.userId().equals(context.userId().value())
-                || !context.hasRoleCode(TenantEventContextQueryPort.SYSTEM_WORKFLOW_ROLE_CODE)) {
-            throw new IllegalStateException("Resolved workflow actor is not the explicit SYSTEM_WORKFLOW/NEXA_AUTOMATION principal");
-        }
-        return context;
+        return workflowActors.resolve(event.tenantId(), event.workspaceId());
     }
 
     @SuppressWarnings("unchecked")

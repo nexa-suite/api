@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
+import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
+
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchCommandPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffNotificationPort;
@@ -67,7 +69,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView create(String tenantId, String workspaceId, String reservationId,
+    public LogisticsOperationsModels.DispatchView create(String tenantId, String workspaceId, String reservationId,
                                                            long reservationVersion, String actorMembershipId,
                                                            String key, long now) {
         UUID tenant = uuid(tenantId);
@@ -75,7 +77,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID reservation = uuid(reservationId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-create", reservationId, reservationVersion);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-create", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-create", key, requestHash);
         if (replay != null) return replay;
 
         // Canonical fulfillment and legacy dispatch both mutate stock and can
@@ -127,14 +129,14 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView prepare(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView prepare(String tenantId, String workspaceId, String dispatchId,
                                                             long version, String actorMembershipId, String key, long now) {
         return statusCommand(tenantId, workspaceId, dispatchId, version, actorMembershipId, key,
                 "dispatch-preparation", "logistics.dispatch.preparation-started", now, "PREPARE", null);
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView assign(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView assign(String tenantId, String workspaceId, String dispatchId,
                                                            long version, String actorMembershipId, String key,
                                                            String responsibleMembershipId, String vehicleReference,
                                                            String routeName, long now) {
@@ -145,7 +147,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID membership = uuid(responsibleMembershipId);
         String requestHash = hash("dispatch-assignment", dispatchId, version, responsibleMembershipId,
                 vehicleReference, routeName);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-assignment", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-assignment", key, requestHash);
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
@@ -161,7 +163,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView schedule(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView schedule(String tenantId, String workspaceId, String dispatchId,
                                                              long version, String actorMembershipId, String key,
                                                              Instant startsAt, Instant endsAt, Instant eta, long now) {
         UUID tenant = uuid(tenantId);
@@ -169,7 +171,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID id = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-schedule", dispatchId, version, startsAt, endsAt, eta);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-schedule", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-schedule", key, requestHash);
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
@@ -182,14 +184,14 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView ready(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView ready(String tenantId, String workspaceId, String dispatchId,
                                                           long version, String actorMembershipId, String key, long now) {
         return statusCommand(tenantId, workspaceId, dispatchId, version, actorMembershipId, key,
                 "dispatch-ready", "logistics.dispatch.ready", now, "READY", null);
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView temperature(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView temperature(String tenantId, String workspaceId, String dispatchId,
                                                                 long version, String actorMembershipId, String key,
                                                                 BigDecimal value, String unit, Instant recordedAt,
                                                                 String source, long now) {
@@ -198,7 +200,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID id = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-temperature", dispatchId, version, value, unit, recordedAt, source);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-temperature", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-temperature", key, requestHash);
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
@@ -238,7 +240,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView incident(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView incident(String tenantId, String workspaceId, String dispatchId,
                                                              long version, String actorMembershipId, String key,
                                                              String type, String severity, boolean buyerVisible,
                                                              String description, Instant occurredAt, String resolution,
@@ -249,7 +251,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-incident", dispatchId, version, type, severity, buyerVisible,
                 description, occurredAt, resolution);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-incident", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-incident", key, requestHash);
         if (replay != null) return replay;
         IncidentType incidentType = IncidentType.valueOf(enumValue(type, "incidentType", IncidentType.values()));
         IncidentSeverity incidentSeverity = IncidentSeverity.valueOf(enumValue(severity, "severity", IncidentSeverity.values()));
@@ -276,7 +278,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView reprogram(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView reprogram(String tenantId, String workspaceId, String dispatchId,
                                                               long version, String actorMembershipId, String key,
                                                               Instant startsAt, Instant endsAt, Instant eta, String reason,
                                                               long now) {
@@ -285,7 +287,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID id = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-reprogram", dispatchId, version, startsAt, endsAt, eta, reason);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-reprogram", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-reprogram", key, requestHash);
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
@@ -298,7 +300,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView cancel(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView cancel(String tenantId, String workspaceId, String dispatchId,
                                                            long version, String actorMembershipId, String key,
                                                            String reason, long now) {
         UUID tenant = uuid(tenantId);
@@ -306,7 +308,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID id = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-cancel", dispatchId, version, reason);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-cancel", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-cancel", key, requestHash);
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
@@ -323,7 +325,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView failedAttempt(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView failedAttempt(String tenantId, String workspaceId, String dispatchId,
                                                                   long version, String actorMembershipId, String key,
                                                                   String failureReason, Instant occurredAt, long now) {
         UUID tenant = uuid(tenantId);
@@ -331,7 +333,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID id = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("delivery-attempt-failed", dispatchId, version, failureReason, occurredAt);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "delivery-attempt-failed", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "delivery-attempt-failed", key, requestHash);
         if (replay != null) return replay;
         Instant effectiveOccurredAt = occurredAt == null ? Instant.now() : occurredAt;
         DispatchRow row = locked(tenant, workspace, id, null);
@@ -352,24 +354,24 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView partial(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView partial(String tenantId, String workspaceId, String dispatchId,
                                                              long version, String actorMembershipId, String key,
-                                                             List<LogisticsOperationsService.DeliveryLineCommand> deliveredLines,
+                                                             List<LogisticsOperationsModels.DeliveryLineCommand> deliveredLines,
                                                              Instant completedAt, String notes, long now) {
         UUID tenant = uuid(tenantId);
         UUID workspace = uuid(workspaceId);
         UUID id = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
-        List<LogisticsOperationsService.DeliveryLineCommand> normalized = normalizeLines(deliveredLines);
+        List<LogisticsOperationsModels.DeliveryLineCommand> normalized = normalizeLines(deliveredLines);
         String requestHash = hash("delivery-partial", dispatchId, version, canonicalLines(normalized), completedAt, notes);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "delivery-partial", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "delivery-partial", key, requestHash);
         if (replay != null) return replay;
         Instant effectiveCompletedAt = completedAt == null ? Instant.now() : completedAt;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);
         List<ObligationLine> obligations = obligations(tenant, workspace, row.salesOrderId());
         Map<String, BigDecimal> alreadyDelivered = deliveredQuantities(tenant, workspace, id);
-        List<LogisticsOperationsService.DeliveryLineCommand> remaining = remainingAfter(obligations, alreadyDelivered, normalized);
+        List<LogisticsOperationsModels.DeliveryLineCommand> remaining = remainingAfter(obligations, alreadyDelivered, normalized);
         if (remaining.isEmpty()) throw error("INVALID_REQUEST", false);
         DispatchOrder aggregate = aggregate(row);
         aggregate.deliverPartially();
@@ -380,7 +382,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID continuationId = UUID.randomUUID();
         jdbc.update("insert into logistics.continuation_delivery(id,tenant_id,workspace_id,source_delivery_id,sales_order_id,client_account_id,status,created_at,updated_at,version) values (?,?,?,?,?,?,'OPEN'::varchar,?,?,0)",
                 continuationId, tenant, workspace, id, row.salesOrderId(), row.clientAccountId(), timestamp(now), timestamp(now));
-        for (LogisticsOperationsService.DeliveryLineCommand line : remaining) {
+        for (LogisticsOperationsModels.DeliveryLineCommand line : remaining) {
             jdbc.update("insert into logistics.continuation_delivery_line(id,tenant_id,workspace_id,continuation_delivery_id,catalog_item_id,quantity,unit,created_at) values (?,?,?,?,?,?,?,?)",
                     UUID.randomUUID(), tenant, workspace, continuationId, line.catalogItemId(), line.quantity(), line.unit(), timestamp(now));
         }
@@ -401,7 +403,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
     }
 
     @Override
-    public LogisticsOperationsService.DispatchView complete(String tenantId, String workspaceId, String dispatchId,
+    public LogisticsOperationsModels.DispatchView complete(String tenantId, String workspaceId, String dispatchId,
                                                              long version, String actorMembershipId, String key,
                                                              String receiverName, Instant completedAt, String notes,
                                                              boolean photoDeclared, boolean signatureDeclared, long now) {
@@ -411,7 +413,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-delivery", dispatchId, version, receiverName, completedAt, notes,
                 photoDeclared, signatureDeclared);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, "dispatch-delivery", key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, "dispatch-delivery", key, requestHash);
         if (replay != null) return replay;
         Instant effectiveCompletedAt = completedAt == null ? Instant.now() : completedAt;
         DispatchRow row = locked(tenant, workspace, id, null);
@@ -424,7 +426,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         }
         requireVersion(row, version);
         List<ObligationLine> obligations = obligations(tenant, workspace, row.salesOrderId());
-        List<LogisticsOperationsService.DeliveryLineCommand> finalLines = remainingAfter(obligations,
+        List<LogisticsOperationsModels.DeliveryLineCommand> finalLines = remainingAfter(obligations,
                 deliveredQuantities(tenant, workspace, id), List.of());
         if (finalLines.isEmpty()) throw error("INVALID_REQUEST", false);
         DispatchOrder aggregate = aggregate(row);
@@ -480,16 +482,16 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         return value == null ? 1 : value;
     }
 
-    private List<LogisticsOperationsService.DeliveryLineCommand> normalizeLines(List<LogisticsOperationsService.DeliveryLineCommand> values) {
+    private List<LogisticsOperationsModels.DeliveryLineCommand> normalizeLines(List<LogisticsOperationsModels.DeliveryLineCommand> values) {
         if (values == null || values.isEmpty() || values.size() > 100) throw error("INVALID_REQUEST", false);
-        Map<String, LogisticsOperationsService.DeliveryLineCommand> normalized = new LinkedHashMap<>();
-        for (LogisticsOperationsService.DeliveryLineCommand value : values) {
+        Map<String, LogisticsOperationsModels.DeliveryLineCommand> normalized = new LinkedHashMap<>();
+        for (LogisticsOperationsModels.DeliveryLineCommand value : values) {
             if (value == null || value.catalogItemId() == null || value.catalogItemId().isBlank()
                     || value.quantity() == null || value.quantity().signum() <= 0 || value.unit() == null || value.unit().isBlank()
                     || value.catalogItemId().trim().length() > 64 || value.unit().trim().length() > 32
                     || value.quantity().stripTrailingZeros().scale() > 4) throw error("INVALID_REQUEST", false);
             String catalogItemId = value.catalogItemId().trim();
-            if (normalized.put(catalogItemId, new LogisticsOperationsService.DeliveryLineCommand(catalogItemId,
+            if (normalized.put(catalogItemId, new LogisticsOperationsModels.DeliveryLineCommand(catalogItemId,
                     value.quantity(), value.unit().trim().toUpperCase(Locale.ROOT))) != null) {
                 throw error("INVALID_REQUEST", false);
             }
@@ -497,7 +499,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         return List.copyOf(normalized.values());
     }
 
-    private String canonicalLines(List<LogisticsOperationsService.DeliveryLineCommand> values) {
+    private String canonicalLines(List<LogisticsOperationsModels.DeliveryLineCommand> values) {
         return values.stream().map(value -> value.catalogItemId() + ":" + value.quantity().stripTrailingZeros().toPlainString() + ":" + value.unit()).toList().toString();
     }
 
@@ -517,9 +519,9 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         return values;
     }
 
-    private List<LogisticsOperationsService.DeliveryLineCommand> remainingAfter(List<ObligationLine> obligations,
+    private List<LogisticsOperationsModels.DeliveryLineCommand> remainingAfter(List<ObligationLine> obligations,
                                                                                   Map<String, BigDecimal> alreadyDelivered,
-                                                                                  List<LogisticsOperationsService.DeliveryLineCommand> additional) {
+                                                                                  List<LogisticsOperationsModels.DeliveryLineCommand> additional) {
         Map<String, BigDecimal> remaining = new LinkedHashMap<>();
         Map<String, String> units = new LinkedHashMap<>();
         for (ObligationLine obligation : obligations) {
@@ -528,20 +530,20 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
             remaining.put(obligation.catalogItemId(), obligation.quantity().subtract(prior));
             units.put(obligation.catalogItemId(), obligation.unit());
         }
-        for (LogisticsOperationsService.DeliveryLineCommand line : additional) {
+        for (LogisticsOperationsModels.DeliveryLineCommand line : additional) {
             if (!remaining.containsKey(line.catalogItemId()) || !units.get(line.catalogItemId()).equalsIgnoreCase(line.unit())
                     || line.quantity().compareTo(remaining.get(line.catalogItemId())) > 0) throw error("INVALID_REQUEST", false);
             remaining.put(line.catalogItemId(), remaining.get(line.catalogItemId()).subtract(line.quantity()));
         }
-        List<LogisticsOperationsService.DeliveryLineCommand> result = new ArrayList<>();
+        List<LogisticsOperationsModels.DeliveryLineCommand> result = new ArrayList<>();
         for (ObligationLine obligation : obligations) {
             BigDecimal value = remaining.get(obligation.catalogItemId());
-            if (value.signum() > 0) result.add(new LogisticsOperationsService.DeliveryLineCommand(obligation.catalogItemId(), value, obligation.unit()));
+            if (value.signum() > 0) result.add(new LogisticsOperationsModels.DeliveryLineCommand(obligation.catalogItemId(), value, obligation.unit()));
         }
         return result;
     }
 
-    private LogisticsOperationsService.DispatchView statusCommand(String tenantId, String workspaceId,
+    private LogisticsOperationsModels.DispatchView statusCommand(String tenantId, String workspaceId,
                                                                    String dispatchId, long version,
                                                                    String actorMembershipId, String key,
                                                                    String operation, String eventType, long now,
@@ -551,7 +553,7 @@ public class DispatchCommandPersistenceAdapter extends DispatchJdbcSupport imple
         UUID id = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash(operation, dispatchId, version, reason);
-        LogisticsOperationsService.DispatchView replay = replay(tenant, workspace, operation, key, requestHash);
+        LogisticsOperationsModels.DispatchView replay = replay(tenant, workspace, operation, key, requestHash);
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, id, null);
         requireVersion(row, version);

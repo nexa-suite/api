@@ -82,7 +82,7 @@ class FulfillmentDispatchPlanIntegrationTests extends NexaWorkflowIntegrationSup
             assertThat(history.get(1).get("id").asText()).isEqualTo(changedAssignmentId.toString());
             assertThat(history.get(2).get("id").asText()).isEqualTo(latest.get("id").asText());
             assertThat(history.get(2).get("current").asBoolean()).isTrue();
-            assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment_driver_assignment "
+            assertThat(tenantJdbc().queryForObject("select count(*) from logistics.fulfillment_driver_assignment "
                             + "where tenant_id=? and workspace_id=? and fulfillment_id=?",
                     Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.fulfillmentId()))
                     .isEqualTo(3);
@@ -95,7 +95,7 @@ class FulfillmentDispatchPlanIntegrationTests extends NexaWorkflowIntegrationSup
                     .andExpect(status().isOk()).andReturn();
             assertThat(json(replay).get("id").asText()).isEqualTo(changedAssignmentId.toString());
             assertThat(json(replay).get("current").asBoolean()).isFalse();
-            assertThat(jdbc.queryForObject("select count(*) from logistics.fulfillment_driver_assignment "
+            assertThat(tenantJdbc().queryForObject("select count(*) from logistics.fulfillment_driver_assignment "
                             + "where tenant_id=? and workspace_id=? and fulfillment_id=?",
                     Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.fulfillmentId()))
                     .isEqualTo(3);
@@ -126,7 +126,7 @@ class FulfillmentDispatchPlanIntegrationTests extends NexaWorkflowIntegrationSup
                 .andExpect(status().isCreated()).andReturn();
         String orderId = json(order).get("id").asText();
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
-        var backingWarehouses = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+        var backingWarehouses = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id "
                         + "and l.workspace_id=b.workspace_id and l.backing_id=b.id "

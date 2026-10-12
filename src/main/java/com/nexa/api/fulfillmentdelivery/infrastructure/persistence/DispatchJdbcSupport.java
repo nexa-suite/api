@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
+import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
+
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService.LogisticsException;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffNotificationPort;
@@ -86,7 +88,7 @@ abstract class DispatchJdbcSupport {
         return withSalesOrderHeaders(tenant, workspace, List.of(row)).getFirst();
     }
 
-    protected LogisticsOperationsService.DispatchView detailView(String tenantId, String workspaceId,
+    protected LogisticsOperationsModels.DispatchView detailView(String tenantId, String workspaceId,
                                                                   String clientAccountId, String dispatchId) {
         DispatchRow row = load(uuid(tenantId), uuid(workspaceId), uuid(dispatchId),
                 clientAccountId == null ? null : uuid(clientAccountId), false);
@@ -139,9 +141,9 @@ abstract class DispatchJdbcSupport {
                 rs.getString(34), rs.getObject(35, UUID.class), rs.getObject(36, UUID.class));
     }
 
-    protected LogisticsOperationsService.DispatchView view(DispatchRow row, boolean buyer) {
-        LogisticsOperationsService.AssignmentView assignment = row.responsibleMembershipId() == null ? null :
-                new LogisticsOperationsService.AssignmentView(
+    protected LogisticsOperationsModels.DispatchView view(DispatchRow row, boolean buyer) {
+        LogisticsOperationsModels.AssignmentView assignment = row.responsibleMembershipId() == null ? null :
+                new LogisticsOperationsModels.AssignmentView(
                         buyer ? null : row.responsibleMembershipId().toString(),
                         buyer ? null : row.responsibleDisplayName(),
                         buyer ? null : row.vehicleReference(),
@@ -150,11 +152,11 @@ abstract class DispatchJdbcSupport {
         if ("OUT_OF_RANGE".equals(row.temperatureStatus())) alerts.add("TEMPERATURE_ALERT");
         if ("IN_ROUTE".equals(row.status()) && row.podStatus() == null) alerts.add("POD_PENDING");
         if (row.continuationDeliveryId() != null) alerts.add("CONTINUATION_REQUIRED");
-        LogisticsOperationsService.DeliveryAttemptView lastAttempt = row.lastAttemptId() == null ? null :
-                new LogisticsOperationsService.DeliveryAttemptView(row.lastAttemptId(), row.lastAttemptNumber(),
+        LogisticsOperationsModels.DeliveryAttemptView lastAttempt = row.lastAttemptId() == null ? null :
+                new LogisticsOperationsModels.DeliveryAttemptView(row.lastAttemptId(), row.lastAttemptNumber(),
                         row.lastAttemptStatus(), row.lastAttemptFailureReason(), row.lastAttemptOccurredAt(),
                         attemptLines(row));
-        LogisticsOperationsService.DispatchView value = new LogisticsOperationsService.DispatchView(
+        LogisticsOperationsModels.DispatchView value = new LogisticsOperationsModels.DispatchView(
                 row.id().toString(), row.dispatchNumber(), row.reservationId().toString(), row.salesOrderId().toString(),
                 row.salesOrderNumber(), row.clientAccountId().toString(), row.clientCode(), row.clientName(), row.status(),
                 row.destination(), row.deliveryArea(), row.priority(), row.windowStart(), row.windowEnd(), row.eta(),
@@ -164,20 +166,20 @@ abstract class DispatchJdbcSupport {
         return buyer ? value.buyerSafe() : value;
     }
 
-    private List<LogisticsOperationsService.ObligationLineView> attemptLines(DispatchRow row) {
+    private List<LogisticsOperationsModels.ObligationLineView> attemptLines(DispatchRow row) {
         if (row.lastAttemptId() == null) return List.of();
         return jdbc.query("select catalog_item_id,quantity,unit from logistics.delivery_attempt_line " +
                         "where tenant_id=? and workspace_id=? and delivery_attempt_id=? order by catalog_item_id",
-                (rs, index) -> new LogisticsOperationsService.ObligationLineView(
+                (rs, index) -> new LogisticsOperationsModels.ObligationLineView(
                         rs.getString(1), rs.getBigDecimal(2), rs.getString(3)),
                 row.tenantId(), row.workspaceId(), UUID.fromString(row.lastAttemptId()));
     }
 
-    private List<LogisticsOperationsService.ObligationLineView> continuationLines(DispatchRow row) {
+    private List<LogisticsOperationsModels.ObligationLineView> continuationLines(DispatchRow row) {
         if (row.continuationDeliveryId() == null) return List.of();
         return jdbc.query("select catalog_item_id,quantity,unit from logistics.continuation_delivery_line " +
                         "where tenant_id=? and workspace_id=? and continuation_delivery_id=? order by catalog_item_id",
-                (rs, index) -> new LogisticsOperationsService.ObligationLineView(
+                (rs, index) -> new LogisticsOperationsModels.ObligationLineView(
                         rs.getString(1), rs.getBigDecimal(2), rs.getString(3)),
                 row.tenantId(), row.workspaceId(), UUID.fromString(row.continuationDeliveryId()));
     }
@@ -203,7 +205,7 @@ abstract class DispatchJdbcSupport {
                 "dispatch_order", id.toString(), eventType, publicStatus, now, buyerVisible);
     }
 
-    protected LogisticsOperationsService.DispatchView replay(UUID tenant, UUID workspace, String operation,
+    protected LogisticsOperationsModels.DispatchView replay(UUID tenant, UUID workspace, String operation,
                                                               String key, String hash) {
         lockIdempotency(tenant, workspace, operation, key);
         Idem value = jdbc.query("select response_json,request_hash from logistics.command_idempotency " +
@@ -215,7 +217,7 @@ abstract class DispatchJdbcSupport {
         return detailView(tenant.toString(), workspace.toString(), null, value.resource());
     }
 
-    protected LogisticsOperationsService.HandoffNoteView replayHandoff(UUID tenant, UUID workspace,
+    protected LogisticsOperationsModels.HandoffNoteView replayHandoff(UUID tenant, UUID workspace,
                                                                         String key, String hash) {
         lockIdempotency(tenant, workspace, "dispatch-handoff-note", key);
         Idem value = jdbc.query("select response_json,request_hash from logistics.command_idempotency " +
@@ -226,22 +228,22 @@ abstract class DispatchJdbcSupport {
         return handoffNoteById(tenant, workspace, uuid(value.resource()));
     }
 
-    protected LogisticsOperationsService.HandoffNoteView handoffNoteById(UUID tenant, UUID workspace, UUID id) {
+    protected LogisticsOperationsModels.HandoffNoteView handoffNoteById(UUID tenant, UUID workspace, UUID id) {
         return jdbc.query("select e.id,e.dispatch_order_id,e.reason,e.actor_membership_id,e.occurred_at,d.version " +
                         "from logistics.dispatch_event e join logistics.dispatch_order d " +
                         "on d.tenant_id=e.tenant_id and d.workspace_id=e.workspace_id and d.id=e.dispatch_order_id " +
                         "where e.tenant_id=? and e.workspace_id=? and e.id=? " +
                         "and e.event_type='warehouse.logistics.handoff-note'",
-                (rs, row) -> new LogisticsOperationsService.HandoffNoteView(rs.getObject("id").toString(),
+                (rs, row) -> new LogisticsOperationsModels.HandoffNoteView(rs.getObject("id").toString(),
                         rs.getObject("dispatch_order_id").toString(), rs.getString("reason"),
                         rs.getObject("actor_membership_id").toString(), rs.getTimestamp("occurred_at").toInstant(),
                         rs.getLong("version")), tenant, workspace, id).stream().findFirst()
                 .orElseThrow(() -> error("RESOURCE_NOT_FOUND", true));
     }
 
-    protected static LogisticsOperationsService.HandoffNoteView valueView(
+    protected static LogisticsOperationsModels.HandoffNoteView valueView(
             com.nexa.api.fulfillmentdelivery.domain.handoff.OperationalHandoffNote value) {
-        return new LogisticsOperationsService.HandoffNoteView(value.id().toString(), value.dispatchOrderId().toString(),
+        return new LogisticsOperationsModels.HandoffNoteView(value.id().toString(), value.dispatchOrderId().toString(),
                 value.note(), value.authorMembershipId().toString(), value.occurredAt(), value.dispatchVersion());
     }
 

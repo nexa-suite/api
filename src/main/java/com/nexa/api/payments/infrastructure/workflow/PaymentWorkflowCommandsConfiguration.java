@@ -1,7 +1,7 @@
 package com.nexa.api.payments.infrastructure.workflow;
 
 import com.nexa.api.payments.application.publicapi.PaymentWorkflowCommands;
-import com.nexa.api.payments.application.port.PaymentPort;
+import com.nexa.api.payments.application.publicapi.PaymentUseCases;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -11,7 +11,8 @@ import org.springframework.context.annotation.Profile;
 @Profile("!test")
 class PaymentWorkflowCommandsConfiguration {
     @Bean
-    PaymentWorkflowCommands paymentWorkflowCommands(PaymentPort payments) {
-        return (context, subjectType, subjectId, key) -> { payments.createReceivable(context, new PaymentPort.ReceivableCommand(subjectType, subjectId, null, key)); };
+    PaymentWorkflowCommands paymentWorkflowCommands(PaymentUseCases payments) {
+        return (context, subjectType, subjectId, key) -> { payments.createReceivable(context,
+                new PaymentUseCases.CreateReceivableCommand(subjectType, subjectId, null, key)); };
     }
 }

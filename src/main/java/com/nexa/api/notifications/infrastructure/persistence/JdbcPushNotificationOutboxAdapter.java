@@ -21,7 +21,8 @@ import java.util.UUID;
 public class JdbcPushNotificationOutboxAdapter implements PushNotificationOutboxPort {
     private static final Set<String> SUPPORTED_EVENTS = Set.of(
             "PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED", "SALES_ORDER_CONFIRMED",
-            "DISPATCH_DELIVERED", "DELIVERY_COMPLETED", "POD_COMPLETED", "PAYMENT_SUCCEEDED");
+            "DISPATCH_DELIVERED", "DeliveryCompleted.v1", "DELIVERY_COMPLETED", "POD_COMPLETED",
+            "PAYMENT_SUCCEEDED");
 
     private final CanonicalOutboxPort outbox;
 
@@ -38,6 +39,7 @@ public class JdbcPushNotificationOutboxAdapter implements PushNotificationOutbox
                 .getBytes(StandardCharsets.UTF_8));
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("sourceEventId", projection.eventId());
+        payload.put("sourcePayloadSha256", projection.sourcePayloadSha256());
         payload.put("tenantId", projection.tenantId());
         payload.put("workspaceId", projection.workspaceId());
         payload.put("clientAccountId", projection.clientAccountId());

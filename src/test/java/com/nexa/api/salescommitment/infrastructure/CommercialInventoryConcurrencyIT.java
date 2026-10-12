@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** PostgreSQL races for the v0.14 scarce-resource transaction boundary. */
@@ -42,16 +43,16 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
             assertThat(json(firstResult).get("id").asText()).isEqualTo(json(secondResult).get("id").asText());
         }
 
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from sales.idempotency_record where tenant_id=?::uuid and workspace_id=?::uuid "
                         + "and operation='direct-order' and idempotency_key=?",
                 Integer.class, tenantId(), workspaceId(), key)).isEqualTo(1);
-        UUID orderId = UUID.fromString(jdbc.queryForObject(
+        UUID orderId = UUID.fromString(tenantJdbc().queryForObject(
                 "select resource_id from sales.idempotency_record where tenant_id=?::uuid and workspace_id=?::uuid "
                         + "and operation='direct-order' and idempotency_key=?",
                 String.class, tenantId(), workspaceId(), key));
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where id=?", Integer.class, orderId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from integration.outbox_event where aggregate_id=? and event_type='SALES_ORDER_CONFIRMED'", Integer.class, orderId)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where id=?", Integer.class, orderId)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where aggregate_id=? and event_type='SALES_ORDER_CONFIRMED'", Integer.class, orderId)).isEqualTo(1);
     }
 
     @Test
@@ -78,14 +79,15 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
     void competingCreditLineDirectOrdersCannotExceedCreditAvailability() throws Exception {
         ensureCommercialInventory();
         UUID client = isolatedClientAccount();
-        BigDecimal unitPrice = jdbc.queryForObject(
+        BigDecimal unitPrice = tenantJdbc().queryForObject(
                 "select p.amount from catalog_management.sku_price p join catalog_management.sellable_sku s "
                         + "on s.tenant_id=p.tenant_id and s.workspace_id=p.workspace_id and s.id=p.sku_id "
                         + "where p.tenant_id=?::uuid and p.workspace_id=?::uuid and s.legacy_catalog_item_id='CAT-0002' "
                         + "and p.cancelled_at is null and p.valid_from <= current_timestamp and (p.valid_until is null or p.valid_until > current_timestamp) order by p.valid_from desc limit 1",
                 BigDecimal.class, tenantId(), workspaceId());
-        jdbc.update("update sales.client_account set credit_limit=?,current_commercial_exposure=0,available_credit=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
+        tenantJdbc().update("update sales.client_account set credit_limit=?,current_commercial_exposure=0,available_credit=?,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=?",
                 unitPrice, unitPrice, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), client);
+        configureCreditAccount(client, unitPrice);
 
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
@@ -97,7 +99,7 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
             assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 409).count()).isEqualTo(1);
         }
 
-        assertThat(jdbc.queryForObject("select credit_exposure + reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
+        assertThat(tenantJdbc().queryForObject("select credit_exposure + reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                 BigDecimal.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), client)).isLessThanOrEqualTo(unitPrice);
     }
 
@@ -106,26 +108,26 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
         ensureCommercialInventory();
         seedInventory("CAT-0001", 10);
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
-        int commitmentsBefore = jdbc.queryForObject(
+        int commitmentsBefore = tenantJdbc().queryForObject(
                 "select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'",
                 Integer.class, tenantId(), workspaceId());
-        int ordersBefore = jdbc.queryForObject(
+        int ordersBefore = tenantJdbc().queryForObject(
                 "select count(*) from sales.sales_order where tenant_id=?::uuid and workspace_id=?::uuid and order_source='DIRECT_ORDER'",
                 Integer.class, tenantId(), workspaceId());
-        int backingBefore = jdbc.queryForObject(
+        int backingBefore = tenantJdbc().queryForObject(
                 "select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid",
                 Integer.class, tenantId(), workspaceId());
 
         MvcResult rejected = directOrder(sales, "direct-multi-sku-" + uuid(), multiSkuBody());
         assertThat(rejected.getResponse().getStatus()).isEqualTo(409);
 
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from sales.commercial_commitment where tenant_id=?::uuid and workspace_id=?::uuid and origin_type='DIRECT_ORDER'",
                 Integer.class, tenantId(), workspaceId())).isEqualTo(commitmentsBefore);
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from sales.sales_order where tenant_id=?::uuid and workspace_id=?::uuid and order_source='DIRECT_ORDER'",
                 Integer.class, tenantId(), workspaceId())).isEqualTo(ordersBefore);
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from warehouse.inventory_backing where tenant_id=?::uuid and workspace_id=?::uuid",
                 Integer.class, tenantId(), workspaceId())).isEqualTo(backingBefore);
     }
@@ -156,10 +158,10 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
             assertThat(statuses.stream().filter(value -> value == 409 || value == 412).count()).isEqualTo(1);
         }
 
-        String terminalStatus = jdbc.queryForObject("select status from sales.sales_order where tenant_id=? and workspace_id=? and id=?",
+        String terminalStatus = tenantJdbc().queryForObject("select status from sales.sales_order where tenant_id=? and workspace_id=? and id=?",
                 String.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), orderId);
         assertThat(terminalStatus).isIn("CONFIRMED", "CANCELLED");
-        String commitmentStatus = jdbc.queryForObject("select c.status from sales.commercial_commitment c join sales.sales_order o on o.commercial_commitment_id=c.id where o.id=?",
+        String commitmentStatus = tenantJdbc().queryForObject("select c.status from sales.commercial_commitment c join sales.sales_order o on o.commercial_commitment_id=c.id where o.id=?",
                 String.class, orderId);
         assertThat(commitmentStatus).isIn("CONVERTED", "RELEASED");
     }
@@ -214,14 +216,14 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
     private BigDecimal sellableCapacity(String catalogItemId, String unit) {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID sku = jdbc.queryForObject("select id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id=?",
+        UUID sku = tenantJdbc().queryForObject("select id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id=?",
                 UUID.class, tenant, workspace, catalogItemId);
-        List<WarehouseCapacity> warehouses = jdbc.query("select l.warehouse_id,coalesce(sum(l.stock_quantity-l.reserved_quantity),0) from warehouse.inventory_lot l join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id where l.tenant_id=? and l.workspace_id=? and l.status='AVAILABLE' and l.expiration_date>current_date and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' and l.catalog_item_id=? and l.unit=? and l.stock_quantity>l.reserved_quantity group by l.warehouse_id",
+        List<WarehouseCapacity> warehouses = tenantJdbc().query("select l.warehouse_id,coalesce(sum(l.stock_quantity-l.reserved_quantity),0) from warehouse.inventory_lot l join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.warehouse_id=l.warehouse_id and z.id=l.zone_id where l.tenant_id=? and l.workspace_id=? and l.status='AVAILABLE' and l.expiration_date>current_date and w.status='ACTIVE' and z.status='ACTIVE' and z.zone_type<>'QUARANTINE' and l.catalog_item_id=? and l.unit=? and l.stock_quantity>l.reserved_quantity group by l.warehouse_id",
                 (rs, row) -> new WarehouseCapacity(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant, workspace, catalogItemId, unit);
         return warehouses.stream().map(warehouse -> warehouse.stock()
-                .subtract(jdbc.queryForObject("select coalesce(sum(quantity),0) from warehouse.safety_stock_policy where tenant_id=? and workspace_id=? and warehouse_id=? and sku_id=?",
+                .subtract(tenantJdbc().queryForObject("select coalesce(sum(quantity),0) from warehouse.safety_stock_policy where tenant_id=? and workspace_id=? and warehouse_id=? and sku_id=?",
                         BigDecimal.class, tenant, workspace, warehouse.id(), sku))
-                .subtract(jdbc.queryForObject("select coalesce(sum(p.quantity),0) from warehouse.inventory_backing_position p join warehouse.inventory_backing_line l on l.tenant_id=p.tenant_id and l.workspace_id=p.workspace_id and l.id=p.backing_line_id join warehouse.inventory_backing b on b.tenant_id=l.tenant_id and b.workspace_id=l.workspace_id and b.id=l.backing_id where p.tenant_id=? and p.workspace_id=? and p.warehouse_id=? and l.sku_id=? and b.status='BACKED'",
+                .subtract(tenantJdbc().queryForObject("select coalesce(sum(p.quantity),0) from warehouse.inventory_backing_position p join warehouse.inventory_backing_line l on l.tenant_id=p.tenant_id and l.workspace_id=p.workspace_id and l.id=p.backing_line_id join warehouse.inventory_backing b on b.tenant_id=l.tenant_id and b.workspace_id=l.workspace_id and b.id=l.backing_id where p.tenant_id=? and p.workspace_id=? and p.warehouse_id=? and l.sku_id=? and b.status='BACKED'",
                         BigDecimal.class, tenant, workspace, warehouse.id(), sku)).max(BigDecimal.ZERO))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
@@ -229,9 +231,24 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
     private UUID isolatedClientAccount() {
         UUID id = UUID.randomUUID();
         Instant now = Instant.now();
-        jdbc.update("insert into sales.client_account(id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
+        tenantJdbc().update("insert into sales.client_account(id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 id, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), "RACE-" + id.toString().substring(0, 8), "Race Client", "Race Client", "PE", "RUC", "20" + id.toString().replace("-", "").substring(0, 11), "STANDARD", "Race Contact", "race-" + id + "@example.invalid", "000000000", "Lima", "NET30", Timestamp.from(now), Timestamp.from(now));
         return id;
+    }
+
+    private void configureCreditAccount(UUID accountId, BigDecimal creditLimit) throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        MvcResult configured = mockMvc.perform(put("/api/v1/client-accounts/" + accountId + "/credit-account")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-None-Match", "*")
+                        .header("Idempotency-Key", "race-credit-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currency\":\"PEN\",\"creditLimit\":" + creditLimit.toPlainString()
+                                + ",\"active\":true}"))
+                .andExpect(status().isCreated()).andReturn();
+
+        assertThat(json(configured).get("status").asText()).isEqualTo("ACTIVE");
+        assertThat(json(configured).get("creditLimit").decimalValue()).isEqualByComparingTo(creditLimit);
     }
 
     private UUID createPrepaidConfirmationEvidence(UUID orderId) throws Exception {
@@ -243,13 +260,13 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
                         .content("{\"subjectType\":\"SALES_ORDER\",\"subjectId\":\"" + orderId + "\"}"))
                 .andExpect(status().isCreated()).andReturn();
         UUID receivable = UUID.fromString(json(created).get("id").asText());
-        BigDecimal amount = jdbc.queryForObject("select amount from payments.receivable where id=?", BigDecimal.class, receivable);
+        BigDecimal amount = tenantJdbc().queryForObject("select amount from payments.receivable where id=?", BigDecimal.class, receivable);
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         Instant now = Instant.now();
-        jdbc.update("update payments.receivable set amount_paid=?,status='PAID',updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=?",
+        tenantJdbc().update("update payments.receivable set amount_paid=?,status='PAID',updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=?",
                 amount, Timestamp.from(now), tenant, workspace, receivable);
-        jdbc.update("insert into payments.payment(id,tenant_id,workspace_id,client_account_id,receivable_id,created_by_membership_id,method,status,amount,currency,provider,idempotency_key,metadata,created_at,updated_at,completed_at) select ?,tenant_id,workspace_id,client_account_id,?,?,'CARD_STRIPE','SUCCEEDED',amount,currency,'TEST',?,'{}'::jsonb,?,?,? from payments.receivable where id=?",
+        tenantJdbc().update("insert into payments.payment(id,tenant_id,workspace_id,client_account_id,receivable_id,created_by_membership_id,method,status,amount,currency,provider,idempotency_key,metadata,created_at,updated_at,completed_at) select ?,tenant_id,workspace_id,client_account_id,?,?,'CARD_STRIPE','SUCCEEDED',amount,currency,'TEST',?,'{}'::jsonb,?,?,? from payments.receivable where id=?",
                 UUID.randomUUID(), receivable, UUID.fromString(membershipId(SALES_EMAIL)), "prepaid-success-" + uuid(), Timestamp.from(now), Timestamp.from(now), Timestamp.from(now), receivable);
         return receivable;
     }

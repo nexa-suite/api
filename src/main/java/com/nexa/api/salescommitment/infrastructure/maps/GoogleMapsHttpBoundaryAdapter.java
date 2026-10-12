@@ -1,7 +1,7 @@
 package com.nexa.api.salescommitment.infrastructure.maps;
 
 import com.nexa.api.salescommitment.application.port.out.GoogleMapsBoundaryPort;
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;

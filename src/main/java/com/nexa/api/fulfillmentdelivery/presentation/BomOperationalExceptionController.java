@@ -3,7 +3,8 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 import com.nexa.api.fulfillmentdelivery.application.model.BomOperationalExceptionModels.Assignee;
 import com.nexa.api.fulfillmentdelivery.application.model.BomOperationalExceptionModels.MutationResult;
 import com.nexa.api.fulfillmentdelivery.application.model.BomOperationalExceptionModels.Snapshot;
-import com.nexa.api.fulfillmentdelivery.application.service.BomOperationalExceptionService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -34,21 +35,22 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class BomOperationalExceptionController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final BomOperationalExceptionService service;
+    private final FulfillmentDeliveryRequestRunner runner;
 
-    public BomOperationalExceptionController(BomOperationalExceptionService service) { this.service = service; }
+    public BomOperationalExceptionController(FulfillmentDeliveryRequestRunner runner) { this.runner = runner; }
 
     @GetMapping
     @Operation(operationId = "listOperationalExceptionsForCoordination")
     public Snapshot list(@RequestAttribute(ACCESS) CurrentAccessContext context) {
-        return service.list(context);
+        return runner.execute(context, Requirements.none(), composition -> composition.bomOperationalExceptions().list(context));
     }
 
     @GetMapping("/{exceptionId}/assignees")
     @Operation(operationId = "listOperationalExceptionAssignees")
     public List<Assignee> assignees(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                     @PathVariable UUID exceptionId) {
-        return service.assignees(context, exceptionId);
+        return runner.execute(context, Requirements.exceptionAssigneeSnapshot(),
+                composition -> composition.bomOperationalExceptions().assignees(context, exceptionId));
     }
 
     @Schema(name = "OperationalExceptionReasonRequest")
@@ -63,8 +65,9 @@ public final class BomOperationalExceptionController {
             @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody ReasonRequest request) {
-        return mutation(service.mutate(context, exceptionId, "CLAIM", null, version(ifMatch), key,
-                request.reason(), null));
+        return mutation(runner.execute(context, Requirements.none(), composition ->
+                composition.bomOperationalExceptions().mutate(context, exceptionId, "CLAIM", null,
+                        version(ifMatch), key, request.reason(), null)));
     }
 
     @PostMapping("/{exceptionId}/assignments")
@@ -73,8 +76,9 @@ public final class BomOperationalExceptionController {
             @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody AssignmentRequest request) {
-        return mutation(service.mutate(context, exceptionId, "ASSIGN", request.responsibleMembershipId(),
-                version(ifMatch), key, request.reason(), null));
+        return mutation(runner.execute(context, Requirements.exceptionAssigneeSnapshot(), composition ->
+                composition.bomOperationalExceptions().mutate(context, exceptionId, "ASSIGN",
+                        request.responsibleMembershipId(), version(ifMatch), key, request.reason(), null)));
     }
 
     @PostMapping("/{exceptionId}/follow-ups")
@@ -83,8 +87,9 @@ public final class BomOperationalExceptionController {
             @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody FollowUpRequest request) {
-        return mutation(service.mutate(context, exceptionId, "FOLLOW_UP", null, version(ifMatch), key,
-                request.reason(), request.note()));
+        return mutation(runner.execute(context, Requirements.none(), composition ->
+                composition.bomOperationalExceptions().mutate(context, exceptionId, "FOLLOW_UP", null,
+                        version(ifMatch), key, request.reason(), request.note())));
     }
 
     @PostMapping("/{exceptionId}/resolutions")
@@ -93,8 +98,9 @@ public final class BomOperationalExceptionController {
             @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody ReasonRequest request) {
-        return mutation(service.mutate(context, exceptionId, "RESOLVE", null, version(ifMatch), key,
-                request.reason(), null));
+        return mutation(runner.execute(context, Requirements.none(), composition ->
+                composition.bomOperationalExceptions().mutate(context, exceptionId, "RESOLVE", null,
+                        version(ifMatch), key, request.reason(), null)));
     }
 
     @PostMapping("/{exceptionId}/closures")
@@ -103,8 +109,9 @@ public final class BomOperationalExceptionController {
             @PathVariable UUID exceptionId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody ReasonRequest request) {
-        return mutation(service.mutate(context, exceptionId, "CLOSE", null, version(ifMatch), key,
-                request.reason(), null));
+        return mutation(runner.execute(context, Requirements.none(), composition ->
+                composition.bomOperationalExceptions().mutate(context, exceptionId, "CLOSE", null,
+                        version(ifMatch), key, request.reason(), null)));
     }
 
     private static ResponseEntity<MutationResult> mutation(MutationResult value) {

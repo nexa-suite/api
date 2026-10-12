@@ -3,6 +3,8 @@ package com.nexa.api.businessdocuments.application.model;
 import java.time.Instant;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Supplier;
 
 public final class BusinessDocumentModels {
     private BusinessDocumentModels() { }
@@ -18,5 +20,20 @@ public final class BusinessDocumentModels {
     public record EvidenceView(String id, String subjectType, String subjectId, String lifecycleStatus, String declaredContentType,
             String detectedContentType, String originalFilename, String checksumSha256, long byteSize, Instant createdAt, Instant scannedAt,
             String failureCode, Instant updatedAt) { }
-    public record Download(String filename, String contentType, InputStream content, long byteSize, String checksumSha256) { }
+    public record Download(String filename, String contentType, Supplier<InputStream> contentSource,
+                           long byteSize, String checksumSha256) {
+        public Download {
+            Objects.requireNonNull(contentSource, "Download content source is required");
+        }
+
+        public Download(String filename, String contentType, InputStream content, long byteSize,
+                        String checksumSha256) {
+            this(filename, contentType, () -> Objects.requireNonNull(content,
+                    "Download content is required"), byteSize, checksumSha256);
+        }
+
+        public InputStream content() {
+            return Objects.requireNonNull(contentSource.get(), "Download content source returned no stream");
+        }
+    }
 }

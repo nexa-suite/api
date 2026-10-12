@@ -1,8 +1,9 @@
 package com.nexa.api.payments.application.service;
 
-import com.nexa.api.payments.application.model.PaymentModels;
+import com.nexa.api.payments.application.publicapi.model.PaymentModels;
 import com.nexa.api.payments.application.port.PaymentPersistencePort;
 import com.nexa.api.payments.application.port.PaymentPort;
+import com.nexa.api.payments.application.publicapi.PaymentUseCases;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -12,7 +13,7 @@ import java.util.UUID;
 /** Application use-case boundary. Financial persistence stays behind the outbound port. */
 @Profile("!test")
 @Service
-public class PaymentApplicationService implements PaymentPort {
+public class PaymentApplicationService implements PaymentPort, PaymentUseCases {
     private final PaymentPersistencePort persistence;
 
     public PaymentApplicationService(PaymentPersistencePort persistence) {
@@ -57,6 +58,13 @@ public class PaymentApplicationService implements PaymentPort {
     @Override
     public PaymentModels.ReceivableView createReceivable(CurrentAccessContext context, PaymentPersistencePort.ReceivableCommand request) {
         return persistence.createReceivable(context, request);
+    }
+
+    @Override
+    public PaymentModels.ReceivableView createReceivable(CurrentAccessContext context,
+            PaymentUseCases.CreateReceivableCommand request) {
+        return persistence.createReceivable(context, new PaymentPersistencePort.ReceivableCommand(
+                request.subjectType(), request.subjectId(), request.dueAt(), request.idempotencyKey()));
     }
 
     @Override

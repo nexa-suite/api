@@ -3,7 +3,8 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryInstructionModels.AcknowledgementResult;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryInstructionModels.InstructionSetView;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryInstructionModels.PublishedInstruction;
-import com.nexa.api.fulfillmentdelivery.application.service.DeliveryInstructionService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.fulfillmentdelivery.domain.instruction.DeliveryInstructionKind;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,10 +37,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class DeliveryInstructionController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final DeliveryInstructionService service;
+    private final FulfillmentDeliveryRequestRunner runner;
 
-    public DeliveryInstructionController(DeliveryInstructionService service) {
-        this.service = service;
+    public DeliveryInstructionController(FulfillmentDeliveryRequestRunner runner) {
+        this.runner = runner;
     }
 
     @GetMapping("/driver/deliveries/{deliveryId}/instructions")
@@ -47,7 +48,8 @@ public final class DeliveryInstructionController {
     public ResponseEntity<InstructionSetView> getForDriver(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID deliveryId) {
-        InstructionSetView value = service.getForDriver(context, deliveryId);
+        InstructionSetView value = runner.execute(context, Requirements.none(),
+                composition -> composition.deliveryInstructions().getForDriver(context, deliveryId));
         return ResponseEntity.ok().eTag(etag(value.instructionSetVersion())).body(value);
     }
 
@@ -56,7 +58,8 @@ public final class DeliveryInstructionController {
     public ResponseEntity<InstructionSetView> getForDispatch(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID deliveryId) {
-        InstructionSetView value = service.getForDispatch(context, deliveryId);
+        InstructionSetView value = runner.execute(context, Requirements.warehouse(),
+                composition -> composition.deliveryInstructions().getForDispatch(context, deliveryId));
         return ResponseEntity.ok().eTag(etag(value.deliveryVersion())).body(value);
     }
 
@@ -68,8 +71,9 @@ public final class DeliveryInstructionController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody AcknowledgeInstructionsRequest request) {
-        AcknowledgementResult value = service.acknowledge(context, deliveryId, version(ifMatch),
-                request.instructionIds(), key);
+        AcknowledgementResult value = runner.execute(context, Requirements.none(), composition ->
+                composition.deliveryInstructions().acknowledge(context, deliveryId, version(ifMatch),
+                        request.instructionIds(), key));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.instructionSetVersion())).body(value);
     }
@@ -82,8 +86,9 @@ public final class DeliveryInstructionController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody PublishInstructionRequest request) {
-        PublishedInstruction value = service.publish(context, deliveryId, version(ifMatch),
-                request.instructionId(), request.kind(), request.content(), key);
+        PublishedInstruction value = runner.execute(context, Requirements.warehouse(), composition ->
+                composition.deliveryInstructions().publish(context, deliveryId, version(ifMatch),
+                        request.instructionId(), request.kind(), request.content(), key));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }

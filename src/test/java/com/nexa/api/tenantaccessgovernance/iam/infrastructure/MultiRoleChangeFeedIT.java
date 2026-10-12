@@ -3,7 +3,8 @@ package com.nexa.api.tenantaccessgovernance.iam.infrastructure;
 import com.nexa.api.edge.streaming.ChangeEventAudience;
 import com.nexa.api.edge.streaming.ChangeEventView;
 import com.nexa.api.edge.streaming.ChangeFeedQueryPort;
-import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeFeedQueryFactory;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,8 +24,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
-    @Autowired ChangeEventPersistencePort events;
-    @Autowired ChangeFeedQueryPort feed;
+    @Autowired TenantChangeEventPersistenceFactory tenantEvents;
+    @Autowired TenantChangeFeedQueryFactory tenantFeedQueries;
 
     @BeforeEach
     void ensureSeedOwnerHasBothRoles() {
@@ -69,7 +70,10 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
 
         String tenant = tenantId();
         String workspace = workspaceId();
-        long cursor = jdbc.queryForObject("select coalesce(max(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=?",
+        var tenantDatabase = tenantJdbc();
+        ChangeFeedQueryPort feed = tenantFeedQueries.bindTo(tenantDatabase);
+        var events = tenantEvents.bindTo(tenantDatabase);
+        long cursor = tenantDatabase.queryForObject("select coalesce(max(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=?",
                 Long.class, java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace));
         String ownerAggregate = uuid();
         String salesAggregate = uuid();
@@ -78,10 +82,10 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
         events.append(tenant, workspace, null, "purchase_request", salesAggregate, "sales.purchase-request.created", "CREATED",
                 System.currentTimeMillis(), false);
 
-        assertThat(jdbc.queryForObject("select audiences::text from integration.change_event where tenant_id=? and workspace_id=? and aggregate_id=?",
+        assertThat(tenantDatabase.queryForObject("select audiences::text from integration.change_event where tenant_id=? and workspace_id=? and aggregate_id=?",
                 String.class, java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace), java.util.UUID.fromString(ownerAggregate)))
                 .isEqualTo("{OWNER}");
-        assertThat(jdbc.queryForObject("select audiences::text from integration.change_event where tenant_id=? and workspace_id=? and aggregate_id=?",
+        assertThat(tenantDatabase.queryForObject("select audiences::text from integration.change_event where tenant_id=? and workspace_id=? and aggregate_id=?",
                 String.class, java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace), java.util.UUID.fromString(salesAggregate)))
                 .isEqualTo("{SALES}");
 
@@ -98,7 +102,7 @@ class MultiRoleChangeFeedIT extends NexaWorkflowIntegrationSupport {
 
         String initialStream = streamBody(initialToken, cursor);
         long scopeMinimum = feed.minimumId(tenant, workspace, null);
-        long scopeMaximum = jdbc.queryForObject("select coalesce(max(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=?",
+        long scopeMaximum = tenantDatabase.queryForObject("select coalesce(max(\"sequence\"),0) from integration.change_event where tenant_id=? and workspace_id=?",
                 Long.class, java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace));
         assertThat(occurrences(initialStream, "organization.membership.role-changed"))
                 .withFailMessage("Change-feed replay mismatch: cursor=%d, scopeMinimum=%d, scopeMaximum=%d, stream=%s",

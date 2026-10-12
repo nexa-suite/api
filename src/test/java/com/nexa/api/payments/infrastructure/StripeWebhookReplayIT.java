@@ -1,6 +1,6 @@
 package com.nexa.api.payments.infrastructure;
 
-import com.nexa.api.payments.application.port.PaymentPort;
+import com.nexa.api.payments.application.publicapi.PaymentWebhookInboxWorker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,7 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class StripeWebhookReplayIT extends PaymentIntegrationSupport {
     @Autowired
-    private PaymentPort paymentPort;
+    private PaymentWebhookInboxWorker inboxWorker;
 
     @Test
     void sameSignedStripeEventIsAcceptedOnce() throws Exception {
@@ -37,22 +37,31 @@ class StripeWebhookReplayIT extends PaymentIntegrationSupport {
         assertThat(first).contains("ACCEPTED");
         assertThat(second).contains("DUPLICATE");
         assertThat(jdbc.queryForObject("select count(*) from payments.stripe_event_inbox where event_id=?", Integer.class, eventId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select payment_route_id is not null and tenant_id is null "
+                + "and workspace_id is null from payments.stripe_event_inbox where event_id=?",
+                Boolean.class, eventId)).isTrue();
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.stripe_event_inbox where event_id=?",
+                Integer.class, eventId)).isZero();
     }
 
     @Test
-    void staleStripeEventAtRetryLimitIsDeadLettered() {
+    void staleStripeEventAtRetryLimitIsDeadLettered() throws Exception {
+        PaymentIntentFixture fixture = createCardPayment();
+        UUID routeId = jdbc.queryForObject("select route_id from tenant_management.payment_provider_route "
+                + "where provider_payment_intent_id=?", UUID.class, fixture.providerPaymentIntentId());
         String eventId = "evt-dead-letter-" + uuid();
         Instant expired = Instant.now().minusSeconds(60);
         UUID claimToken = UUID.randomUUID();
         try {
             jdbc.update("insert into payments.stripe_event_inbox "
-                            + "(event_id,event_type,payment_intent_id,payment_status,amount_minor,currency,tenant_id,workspace_id,signature_sha256,status,attempt_count,received_at,next_attempt_at,processing_started_at,lease_until,claim_token) "
-                            + "values (?,?,?,?,?,?,?,?,?,'PROCESSING',10,?,?,?,?,?)",
-                    eventId, "payment_intent.processing", "pi-dead-letter-" + uuid(), "processing", 100L, "PEN",
-                    tenantUuid(), workspaceUuid(), "a".repeat(64), Timestamp.from(expired), Timestamp.from(expired),
+                            + "(event_id,event_type,payment_intent_id,payment_status,amount_minor,currency,payment_route_id,signature_sha256,status,attempt_count,received_at,next_attempt_at,processing_started_at,lease_until,claim_token) "
+                            + "values (?,?,?,?,?,?,?,?,'PROCESSING',10,?,?,?,?,?)",
+                    eventId, "payment_intent.processing", fixture.providerPaymentIntentId(), "processing",
+                    fixture.receivable().amount().movePointRight(2).longValueExact(), fixture.receivable().currency(),
+                    routeId, "a".repeat(64), Timestamp.from(expired), Timestamp.from(expired),
                     Timestamp.from(expired), Timestamp.from(expired), claimToken);
 
-            paymentPort.processStripeWebhookInbox();
+            inboxWorker.processPending();
 
             assertThat(jdbc.queryForObject("select status from payments.stripe_event_inbox where event_id=?", String.class, eventId))
                     .isEqualTo("DEAD_LETTER");

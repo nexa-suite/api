@@ -10,6 +10,8 @@ public interface FulfillmentDocumentSourceQuery {
 
     Optional<ProofOfDelivery> findPod(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId);
 
+    Optional<ProofOfDelivery> findSealedPodForDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId);
+
     Optional<Incident> findIncident(UUID tenantId, UUID workspaceId, UUID incidentId);
 
     /** Minimal customer-scoped projection used only to bind BC-09 incident evidence to its subject. */
@@ -24,7 +26,9 @@ public interface FulfillmentDocumentSourceQuery {
     record ProofOfDelivery(UUID id, UUID customerAccountId, String receiverName,
                            Instant completedAt, String notes, String status,
                            boolean photoEvidenceDeclared, boolean signatureEvidenceDeclared,
-                           UUID dispatchId) { }
+                           UUID dispatchId, UUID deliveryId, UUID salesOrderId,
+                           String destinationSnapshot, String temperatureStatus,
+                           String temperatureSummary) { }
 
     record Incident(UUID id, UUID customerAccountId, String incidentType, String severity,
                     String description, Instant occurredAt, String resolution,

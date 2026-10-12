@@ -3,6 +3,8 @@ package com.nexa.api.inventoryavailability.presentation;
 import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
+import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -31,25 +33,34 @@ import java.util.function.Function;
 @SecurityRequirement(name = "bearerAuth")
 public final class WarehouseController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final WarehouseOperationsService service;
+    private final WarehouseOperationsRequestRunner operations;
+    private final WarehouseOperationalSettingsCommands operationalSettings;
 
-    public WarehouseController(WarehouseOperationsService service) { this.service = service; }
+    public WarehouseController(WarehouseOperationsRequestRunner operations,
+                               WarehouseOperationalSettingsCommands operationalSettings) {
+        this.operations = operations;
+        this.operationalSettings = operationalSettings;
+    }
+
+    private <T> T execute(CurrentAccessContext context, Function<WarehouseOperationsService, T> operation) {
+        return operations.execute(context, operation);
+    }
 
     @GetMapping("/warehouses")
     public PageResponse<WarehouseResponse> warehouses(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "code,asc") String sort) {
-        return page(service.warehouses(c, page, size, sort), this::toWarehouse);
+        return execute(c, service -> page(service.warehouses(c, page, size, sort), this::toWarehouse));
     }
 
     @GetMapping("/warehouses/{id}")
     public ResponseEntity<WarehouseResponse> warehouse(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        WarehouseResponse value = toWarehouse(service.warehouse(c, id));
+        WarehouseResponse value = execute(c, service -> toWarehouse(service.warehouse(c, id)));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
     @GetMapping("/warehouses/{id}/location")
     @Operation(operationId = "getWarehouseLocation")
     public ResponseEntity<LocationResponse> location(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        OperationalProfileResponse value = operational(service.operationalProfile(c, id));
+        OperationalProfileResponse value = execute(c, service -> operational(service.operationalProfile(c, id)));
         return ResponseEntity.ok().eTag(etag(value.version()))
                 .body(new LocationResponse(value.id(), value.address(), value.latitude(), value.longitude(), value.version()));
     }
@@ -63,7 +74,7 @@ public final class WarehouseController {
     @GetMapping("/warehouses/{id}/profile")
     @Operation(operationId = "getWarehouseOperationalProfile")
     public ResponseEntity<OperationalProfileResponse> operationalProfile(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        OperationalProfileResponse value = operational(service.operationalProfile(c, id));
+        OperationalProfileResponse value = execute(c, service -> operational(service.operationalProfile(c, id)));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -74,30 +85,37 @@ public final class WarehouseController {
     }
 
     @GetMapping("/warehouses/{id}/hours")
+    @Operation(description = "Returns Tenant warehouse version and centrally owned settingsVersion. This endpoint's ETag carries settingsVersion.")
     public ResponseEntity<OperationalProfileResponse> hours(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        OperationalProfileResponse value = operational(service.operationalProfile(c, id));
-        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+        OperationalProfileResponse value = execute(c, service -> operational(service.operationalProfile(c, id)));
+        return ResponseEntity.ok().eTag(etag(value.settingsVersion())).body(value);
     }
 
     @GetMapping("/warehouses/{id}/serviceability")
     public ResponseEntity<OperationalProfileResponse> serviceability(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        OperationalProfileResponse value = operational(service.operationalProfile(c, id));
+        OperationalProfileResponse value = execute(c, service -> operational(service.operationalProfile(c, id)));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
     @GetMapping("/warehouses/{id}/selection-policy")
+    @Operation(description = "Returns Tenant warehouse version and centrally owned settingsVersion. This endpoint's ETag carries settingsVersion.")
     public ResponseEntity<OperationalProfileResponse> selectionPolicy(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        OperationalProfileResponse value = operational(service.operationalProfile(c, id));
-        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+        OperationalProfileResponse value = execute(c, service -> operational(service.operationalProfile(c, id)));
+        return ResponseEntity.ok().eTag(etag(value.settingsVersion())).body(value);
     }
 
     @PatchMapping("/warehouses/{id}/profile")
-    @Operation(operationId = "updateWarehouseOperationalProfile")
+    @Operation(operationId = "updateWarehouseOperationalProfile",
+            description = "Updates Tenant-owned physical profile fields. Selection policy and operating hours must be saved through their dedicated configuration endpoints.")
     public ResponseEntity<OperationalProfileResponse> updateOperationalProfile(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                                  @PathVariable String id,
                                                                                  @RequestHeader(name = "If-Match", required = false) String ifMatch,
-                                                                                 @RequestBody OperationalPatchRequest request) {
-        OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, request.toPatch(), version(ifMatch)));
+                                                                                 @Valid @RequestBody OperationalPatchRequest request) {
+        if (request == null || request.changesCentralSettings()) {
+            throw new WarehouseOperationsService.WarehouseException("INVALID_REQUEST", false);
+        }
+        OperationalProfileResponse value = execute(c, service -> operational(
+                service.updateOperationalProfile(c, id, request.toPatch(), version(ifMatch))));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -106,19 +124,26 @@ public final class WarehouseController {
     public ResponseEntity<OperationalProfileResponse> updateOperationalProfileAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                                       @PathVariable String id,
                                                                                       @RequestHeader(name = "If-Match", required = false) String ifMatch,
-                                                                                      @RequestBody OperationalPatchRequest request) {
+                                                                                      @Valid @RequestBody OperationalPatchRequest request) {
         return updateOperationalProfile(c, id, ifMatch, request);
     }
 
     @PatchMapping("/warehouses/{id}/hours")
+    @Operation(description = "Updates centrally owned workspace hours. If-Match carries settingsVersion; the response also includes the Tenant warehouse version.")
     public ResponseEntity<OperationalProfileResponse> updateHours(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                   @PathVariable String id,
                                                                   @RequestHeader(name = "If-Match", required = false) String ifMatch,
-                                                                  @RequestBody HoursPatchRequest request) {
-        OperationalPatchRequest patch = new OperationalPatchRequest(null, null, null, null,
-                request.operatingHoursStart(), request.operatingHoursEnd(), null);
-        OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch)));
-        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+                                                                  @RequestBody HoursPatchRequest request,
+                                                                  @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        if (request == null || (request.operatingHoursStart() == null && request.operatingHoursEnd() == null)) {
+            throw new WarehouseOperationsService.WarehouseException("INVALID_REQUEST", false);
+        }
+        WarehouseOperationsService.OperationalProfile physical = execute(c, service ->
+                service.operationalProfile(c, id));
+        WarehouseOperationalSettingsCommands.Snapshot settings = operationalSettings.replaceHours(c,
+                request.operatingHoursStart(), request.operatingHoursEnd(), version(ifMatch), String.valueOf(correlation));
+        OperationalProfileResponse value = operational(physical, settings);
+        return ResponseEntity.ok().eTag(etag(settings.version())).body(value);
     }
 
     @PatchMapping("/warehouses/{id}/serviceability")
@@ -127,37 +152,46 @@ public final class WarehouseController {
                                                                             @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                                             @RequestBody ServiceabilityPatchRequest request) {
         OperationalPatchRequest patch = new OperationalPatchRequest(null, null, null, null, null, null, request.serviceable());
-        OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch)));
+        OperationalProfileResponse value = execute(c, service -> operational(
+                service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch))));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
     @PatchMapping("/warehouses/{id}/selection-policy")
+    @Operation(description = "Updates the centrally owned workspace selection policy. If-Match carries settingsVersion; the response also includes the Tenant warehouse version.")
     public ResponseEntity<OperationalProfileResponse> updateSelectionPolicy(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                              @PathVariable String id,
                                                                              @RequestHeader(name = "If-Match", required = false) String ifMatch,
-                                                                             @RequestBody SelectionPolicyPatchRequest request) {
-        OperationalPatchRequest patch = new OperationalPatchRequest(null, null, null, request.selectionPolicy(), null, null, null);
-        OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch)));
-        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+                                                                             @RequestBody SelectionPolicyPatchRequest request,
+                                                                             @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
+        if (request == null || request.selectionPolicy() == null || request.selectionPolicy().isBlank()) {
+            throw new WarehouseOperationsService.WarehouseException("INVALID_REQUEST", false);
+        }
+        WarehouseOperationsService.OperationalProfile physical = execute(c, service ->
+                service.operationalProfile(c, id));
+        WarehouseOperationalSettingsCommands.Snapshot settings = operationalSettings.replaceSelectionPolicy(c,
+                request.selectionPolicy(), version(ifMatch), String.valueOf(correlation));
+        OperationalProfileResponse value = operational(physical, settings);
+        return ResponseEntity.ok().eTag(etag(settings.version())).body(value);
     }
 
     @GetMapping("/buyer/warehouses")
     public List<BuyerWarehouseResponse> buyerWarehouses(@RequestAttribute(ACCESS) CurrentAccessContext c) {
-        return service.buyerWarehouses(c).stream()
+        return execute(c, service -> service.buyerWarehouses(c).stream()
                 .map(value -> new BuyerWarehouseResponse(value.code(), value.name(), value.address(),
                         value.operatingHoursStart(), value.operatingHoursEnd(), value.serviceable()))
-                .toList();
+                .toList());
     }
 
     @PostMapping("/warehouses")
     public ResponseEntity<WarehouseResponse> createWarehouse(@RequestAttribute(ACCESS) CurrentAccessContext c, @Valid @RequestBody WarehouseRequest r) {
-        var result = toWarehouse(service.createWarehouse(c, r.code(), r.name(), r.address()));
+        var result = execute(c, service -> toWarehouse(service.createWarehouse(c, r.code(), r.name(), r.address())));
         return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
     }
 
     @PatchMapping("/warehouses/{id}")
     public ResponseEntity<WarehouseResponse> updateWarehouse(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestBody WarehousePatch r) {
-        var result = toWarehouse(service.updateWarehouse(c, id, r.name(), r.address(), r.status(), version(ifMatch)));
+        var result = execute(c, service -> toWarehouse(service.updateWarehouse(c, id, r.name(), r.address(), r.status(), version(ifMatch))));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
@@ -169,7 +203,8 @@ public final class WarehouseController {
                                                             @RequestBody LocationPatchRequest request) {
         OperationalPatchRequest patch = new OperationalPatchRequest(null, request.address(), null, null, null, null, null,
                 request.latitude(), request.longitude());
-        OperationalProfileResponse value = operational(service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch)));
+        OperationalProfileResponse value = execute(c, service -> operational(
+                service.updateOperationalProfile(c, id, patch.toPatch(), version(ifMatch))));
         return ResponseEntity.ok().eTag(etag(value.version()))
                 .body(new LocationResponse(value.id(), value.address(), value.latitude(), value.longitude(), value.version()));
     }
@@ -185,25 +220,25 @@ public final class WarehouseController {
 
     @GetMapping("/warehouses/{warehouseId}/zones")
     public PageResponse<ZoneResponse> zones(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String warehouseId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size) {
-        return page(service.zones(c, warehouseId, page, size), this::zone);
+        return execute(c, service -> page(service.zones(c, warehouseId, page, size), this::zone));
     }
 
     @PostMapping("/warehouses/{warehouseId}/zones")
     public ResponseEntity<ZoneResponse> createZone(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String warehouseId, @RequestBody ZoneRequest r) {
-        var result = zone(service.createZone(c, warehouseId, r.code(), r.name(), r.type(), r.temperatureMin(), r.temperatureMax()));
+        var result = execute(c, service -> zone(service.createZone(c, warehouseId, r.code(), r.name(), r.type(), r.temperatureMin(), r.temperatureMax())));
         return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
     }
 
     @PatchMapping("/warehouses/{warehouseId}/zones/{zoneId}")
     public ResponseEntity<ZoneResponse> updateZone(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String warehouseId, @PathVariable String zoneId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestBody ZonePatch r) {
-        var result = zone(service.updateZone(c, warehouseId, zoneId, r.name(), r.temperatureMin(), r.temperatureMax(), r.status(), version(ifMatch)));
+        var result = execute(c, service -> zone(service.updateZone(c, warehouseId, zoneId, r.name(), r.temperatureMin(), r.temperatureMax(), r.status(), version(ifMatch))));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
     @GetMapping("/inventory")
     @Operation(operationId = "listInventory")
     public PageResponse<LotResponse> inventory(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) String warehouseId, @RequestParam(required = false) String zoneId, @RequestParam(required = false) String status, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "expirationDate,asc") String sort) {
-        return page(service.lots(c, catalogItemId, warehouseId, zoneId, status, page, size, sort), this::lot);
+        return execute(c, service -> page(service.lots(c, catalogItemId, warehouseId, zoneId, status, page, size, sort), this::lot));
     }
 
     @GetMapping("/inventory/lots")
@@ -213,16 +248,18 @@ public final class WarehouseController {
     }
 
     @GetMapping("/inventory/lots/{lotId}")
-    public LotResponse lot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId) { return lot(service.lot(c, lotId)); }
+    public LotResponse lot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId) {
+        return execute(c, service -> lot(service.lot(c, lotId)));
+    }
 
     @GetMapping("/inventory/movements")
     public PageResponse<MovementResponse> movements(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String lotId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "occurredAt,desc") String sort) {
-        return page(service.movements(c, lotId, page, size, sort), this::movement);
+        return execute(c, service -> page(service.movements(c, lotId, page, size, sort), this::movement));
     }
 
     @PostMapping("/inventory/inbound-receipts")
     public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId(), r.temperatureEvidenceObjectId()), key, String.valueOf(correlation)));
+        var result = execute(c, service -> lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId(), r.temperatureEvidenceObjectId()), key, String.valueOf(correlation))));
         return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
     }
 
@@ -232,13 +269,13 @@ public final class WarehouseController {
         if (!direction.equalsIgnoreCase("IN") && !direction.equalsIgnoreCase("OUT")) {
             throw new WarehouseOperationsService.WarehouseException("INVALID_REQUEST", false);
         }
-        var result = lot(service.adjust(c, r.lotId(), r.quantity(), direction.equalsIgnoreCase("IN"), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
+        var result = execute(c, service -> lot(service.adjust(c, r.lotId(), r.quantity(), direction.equalsIgnoreCase("IN"), r.reason(), version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
     @PostMapping("/inventory/waste-movements")
     public ResponseEntity<LotResponse> waste(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody QuantityRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = lot(service.waste(c, r.lotId(), r.quantity(), r.reason(), version(ifMatch), key, String.valueOf(correlation)));
+        var result = execute(c, service -> lot(service.waste(c, r.lotId(), r.quantity(), r.reason(), version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
@@ -252,8 +289,8 @@ public final class WarehouseController {
             @Valid @RequestBody CycleCountRequest request,
             @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var command = new WarehouseOperationsService.CycleCountCommand(request.observedQuantity(), request.unit());
-        var value = cycleCount(service.recordCycleCount(c, lotId, command, version(ifMatch), key,
-                String.valueOf(correlation)));
+        var value = execute(c, service -> cycleCount(service.recordCycleCount(c, lotId, command, version(ifMatch), key,
+                String.valueOf(correlation))));
         return ResponseEntity.status(201).eTag(etag(value.lotVersion())).body(value);
     }
 
@@ -265,24 +302,24 @@ public final class WarehouseController {
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String key,
             @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var value = cycleCountCorrection(service.applyCycleCountCorrection(c, countId, version(ifMatch), key,
-                String.valueOf(correlation)));
+        var value = execute(c, service -> cycleCountCorrection(service.applyCycleCountCorrection(c, countId, version(ifMatch), key,
+                String.valueOf(correlation))));
         return ResponseEntity.ok().eTag(etag(value.lotVersionAfter())).body(value);
     }
 
     @PostMapping("/inventory/lots/{lotId}/blocks")
     public ResponseEntity<LotResponse> blockLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        return mutation(service.blockLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+        return execute(c, service -> mutation(service.blockLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation))));
     }
 
     @PostMapping("/inventory/lots/{lotId}/quarantines")
     public ResponseEntity<LotResponse> quarantineLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        return mutation(service.quarantineLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+        return execute(c, service -> mutation(service.quarantineLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation))));
     }
 
     @PostMapping("/inventory/lots/{lotId}/availability-restorations")
     public ResponseEntity<LotResponse> restoreLot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        return mutation(service.restoreLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+        return execute(c, service -> mutation(service.restoreLot(c, lotId, version(ifMatch), r.reason(), key, String.valueOf(correlation))));
     }
 
     @PostMapping("/inventory/lots/{lotId}/dispositions")
@@ -293,15 +330,15 @@ public final class WarehouseController {
                                                    @RequestBody DispositionRequest r,
                                                    @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         if (r.affectedQuantity() != null || r.temperatureEvaluationId() != null) {
-            return mutation(service.disposeTemperatureQuantity(c, lotId, r.disposition(), r.affectedQuantity(),
-                    r.temperatureEvaluationId(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+            return execute(c, service -> mutation(service.disposeTemperatureQuantity(c, lotId, r.disposition(), r.affectedQuantity(),
+                    r.temperatureEvaluationId(), version(ifMatch), r.reason(), key, String.valueOf(correlation))));
         }
-        return mutation(service.disposeLot(c, lotId, r.disposition(), version(ifMatch), r.reason(), key, String.valueOf(correlation)));
+        return execute(c, service -> mutation(service.disposeLot(c, lotId, r.disposition(), version(ifMatch), r.reason(), key, String.valueOf(correlation))));
     }
 
     @GetMapping("/inventory-availability")
     public List<AvailabilityResponse> availability(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) List<String> catalogItemIds) {
-        return service.availability(c, catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : List.of(catalogItemId)).stream().map(this::availability).toList();
+        return execute(c, service -> service.availability(c, catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : List.of(catalogItemId)).stream().map(this::availability).toList());
     }
 
     @GetMapping("/warehouses/{warehouseId}/inventory-availability")
@@ -309,9 +346,9 @@ public final class WarehouseController {
     public List<AvailabilityResponse> warehouseAvailability(@RequestAttribute(ACCESS) CurrentAccessContext c,
             @PathVariable String warehouseId, @RequestParam(required = false) String catalogItemId,
             @RequestParam(required = false) List<String> catalogItemIds) {
-        return service.warehouseAvailability(c, warehouseId,
+        return execute(c, service -> service.warehouseAvailability(c, warehouseId,
                 catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : java.util.Collections.singletonList(catalogItemId))
-                .stream().map(this::availability).toList();
+                .stream().map(this::availability).toList());
     }
 
     @GetMapping("/inventory/safety-stocks")
@@ -321,14 +358,14 @@ public final class WarehouseController {
                                                            @RequestParam(required = false) String skuId,
                                                            @RequestParam(defaultValue = "0") int page,
                                                            @RequestParam(defaultValue = "25") int size) {
-        return page(service.safetyStocks(c, warehouseId, skuId, page, size), this::safetyStock);
+        return execute(c, service -> page(service.safetyStocks(c, warehouseId, skuId, page, size), this::safetyStock));
     }
 
     @GetMapping("/inventory/safety-stocks/{id}")
     @Operation(operationId = "getInventorySafetyStock")
     public ResponseEntity<SafetyStockResponse> safetyStock(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                             @PathVariable String id) {
-        SafetyStockResponse value = safetyStock(service.safetyStock(c, id));
+        SafetyStockResponse value = execute(c, service -> safetyStock(service.safetyStock(c, id)));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -341,7 +378,7 @@ public final class WarehouseController {
                                                                   @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         WarehouseOperationsService.SafetyStockCommand command = new WarehouseOperationsService.SafetyStockCommand(
                 request.warehouseId(), request.skuId(), request.catalogItemId(), request.quantity(), request.unit());
-        SafetyStockResponse value = safetyStock(service.upsertSafetyStock(c, command, version(ifMatch), key, String.valueOf(correlation)));
+        SafetyStockResponse value = execute(c, service -> safetyStock(service.upsertSafetyStock(c, command, version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -352,14 +389,14 @@ public final class WarehouseController {
                                                     @RequestParam(required = false) String destinationWarehouseId,
                                                     @RequestParam(defaultValue = "0") int page,
                                                     @RequestParam(defaultValue = "25") int size) {
-        return page(service.transfers(c, sourceWarehouseId, destinationWarehouseId, page, size), this::transfer);
+        return execute(c, service -> page(service.transfers(c, sourceWarehouseId, destinationWarehouseId, page, size), this::transfer));
     }
 
     @GetMapping("/inventory/transfers/{id}")
     @Operation(operationId = "getInventoryTransfer")
     public ResponseEntity<TransferResponse> transfer(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                       @PathVariable String id) {
-        TransferResponse value = transfer(service.transfer(c, id));
+        TransferResponse value = execute(c, service -> transfer(service.transfer(c, id)));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -374,7 +411,7 @@ public final class WarehouseController {
                 request.sourceLotId(), request.sourceWarehouseId(), request.sourceZoneId(),
                 request.destinationWarehouseId(), request.destinationZoneId(), request.skuId(),
                 request.catalogItemId(), request.quantity(), request.unit(), request.reason());
-        TransferResponse value = transfer(service.transfer(c, command, version(ifMatch), key, String.valueOf(correlation)));
+        TransferResponse value = execute(c, service -> transfer(service.transfer(c, command, version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.status(201).eTag(etag(value.version())).body(value);
     }
 
@@ -385,7 +422,7 @@ public final class WarehouseController {
                                                               @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                               @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                               @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        TransferResponse value = transfer(service.dispatchTransfer(c, id, version(ifMatch), key, String.valueOf(correlation)));
+        TransferResponse value = execute(c, service -> transfer(service.dispatchTransfer(c, id, version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -396,7 +433,7 @@ public final class WarehouseController {
                                                              @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                              @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                              @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        TransferResponse value = transfer(service.receiveTransfer(c, id, version(ifMatch), key, String.valueOf(correlation)));
+        TransferResponse value = execute(c, service -> transfer(service.receiveTransfer(c, id, version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -411,41 +448,41 @@ public final class WarehouseController {
             @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
         var command = new WarehouseOperationsService.TransferReceiptObservationCommand(
                 request.observedBatchNumber(), request.observedExpirationDate(), request.observedQuantity(), request.unit());
-        var value = transferReceiptObservation(service.observeTransferReceiptDiscrepancy(
-                c, id, command, version(ifMatch), key, String.valueOf(correlation)));
+        var value = execute(c, service -> transferReceiptObservation(service.observeTransferReceiptDiscrepancy(
+                c, id, command, version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.status(201).eTag(etag(value.transferVersion())).body(value);
     }
 
     @GetMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservation-preview")
     @Operation(operationId = "previewFulfillmentCandidateInventoryReservation")
-    public ReservationPreviewResponse preview(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId) { return preview(service.preview(c, salesOrderId)); }
+    public ReservationPreviewResponse preview(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId) { return execute(c, service -> preview(service.preview(c, salesOrderId))); }
 
     @PostMapping("/fulfillment-candidates/{salesOrderId}/inventory-reservations")
     public ResponseEntity<ReservationDetailResponse> reserve(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String salesOrderId, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = reservation(service.reserve(c, salesOrderId, version(ifMatch), key, String.valueOf(correlation)));
+        var result = execute(c, service -> reservation(service.reserve(c, salesOrderId, version(ifMatch), key, String.valueOf(correlation))));
         return ResponseEntity.status("RESERVED".equals(result.status()) ? 201 : 409).eTag(etag(result.version())).body(result);
     }
 
     @GetMapping("/inventory-reservations")
     public PageResponse<ReservationSummaryResponse> reservations(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String status, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size) {
-        return page(service.reservations(c, status, page, size), this::reservationSummary);
+        return execute(c, service -> page(service.reservations(c, status, page, size), this::reservationSummary));
     }
 
     @GetMapping("/inventory-reservations/{id}")
-    public ReservationDetailResponse reservation(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) { return reservation(service.reservation(c, id)); }
+    public ReservationDetailResponse reservation(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) { return execute(c, service -> reservation(service.reservation(c, id))); }
 
     @PostMapping("/inventory-reservations/{id}/releases")
     public ResponseEntity<ReservationDetailResponse> release(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id, @RequestHeader(name = "If-Match", required = false) String ifMatch, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReasonRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = reservation(service.release(c, id, version(ifMatch), key, r.reason(), String.valueOf(correlation), false));
+        var result = execute(c, service -> reservation(service.release(c, id, version(ifMatch), key, r.reason(), String.valueOf(correlation), false)));
         return ResponseEntity.ok().eTag(etag(result.version())).body(result);
     }
 
     @GetMapping("/dispatch-readiness-candidates")
-    public List<ReadinessCandidateResponse> readiness(@RequestAttribute(ACCESS) CurrentAccessContext c) { return service.readiness(c).stream().map(this::readiness).toList(); }
+    public List<ReadinessCandidateResponse> readiness(@RequestAttribute(ACCESS) CurrentAccessContext c) { return execute(c, service -> service.readiness(c).stream().map(this::readiness).toList()); }
 
     @GetMapping("/dispatch-readiness-candidates/{id}")
     public ReadinessCandidateResponse readinessOne(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        return service.readiness(c).stream().filter(x -> x.reservationId().equals(id)).map(this::readiness).findFirst().orElseThrow(() -> new WarehouseOperationsService.WarehouseException("DISPATCH_READINESS_CANDIDATE_NOT_FOUND", true));
+        return execute(c, service -> service.readiness(c).stream().filter(x -> x.reservationId().equals(id)).map(this::readiness).findFirst().orElseThrow(() -> new WarehouseOperationsService.WarehouseException("DISPATCH_READINESS_CANDIDATE_NOT_FOUND", true)));
     }
 
     private ResponseEntity<LotResponse> mutation(WarehouseOperationsService.LotSummary value) { LotResponse result = lot(value); return ResponseEntity.ok().eTag(etag(result.version())).body(result); }
@@ -457,6 +494,13 @@ public final class WarehouseController {
         return new OperationalProfileResponse(x.id(), x.code(), x.name(), x.address(), x.status(), x.operatingHoursStart(),
                 x.operatingHoursEnd(), x.serviceable(), x.selectionPolicy(), x.version(), x.settingsVersion(),
                 x.latitude(), x.longitude());
+    }
+    private OperationalProfileResponse operational(WarehouseOperationsService.OperationalProfile physical,
+                                                   WarehouseOperationalSettingsCommands.Snapshot settings) {
+        return new OperationalProfileResponse(physical.id(), physical.code(), physical.name(), physical.address(),
+                physical.status(), settings.startsAt(), settings.endsAt(), physical.serviceable(),
+                settings.selectionPolicy(), physical.version(), settings.version(), physical.latitude(),
+                physical.longitude());
     }
     private ZoneResponse zone(WarehouseOperationsService.ZoneSummary x) { return new ZoneResponse(x.id(), x.warehouseId(), x.code(), x.name(), x.type(), x.temperatureMin(), x.temperatureMax(), x.status(), x.version()); }
     private LotResponse lot(WarehouseOperationsService.LotSummary x) { return new LotResponse(x.id(), x.warehouseId(), x.zoneId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.receivedAt(), x.onHand(), x.reserved(), x.available(), x.unit(), x.status(), x.version(), x.skuId()); }
@@ -544,6 +588,10 @@ public final class WarehouseController {
                                        LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                        Boolean serviceable) {
             this(name, address, status, selectionPolicy, operatingHoursStart, operatingHoursEnd, serviceable, null, null);
+        }
+        @jakarta.validation.constraints.AssertFalse(message = "Selection policy and operating hours must be saved through /selection-policy or /hours.")
+        public boolean changesCentralSettings() {
+            return selectionPolicy != null || operatingHoursStart != null || operatingHoursEnd != null;
         }
         WarehouseOperationsService.OperationalPatch toPatch() {
             return new WarehouseOperationsService.OperationalPatch(name, address, status, selectionPolicy,
