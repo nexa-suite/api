@@ -2,6 +2,8 @@ package com.nexa.api.bootstrap.runtime.database.tenant.local;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -43,6 +45,8 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static final String RUNTIME_PASSWORD = "tenant-e2e-runtime-only-test-password";
 	private static final String POLICY_SNAPSHOT_WRITER_PASSWORD = "tenant-e2e-policy-snapshot-writer-only-test-password";
 	private static final String WRONG_RUNTIME_PASSWORD = "tenant-e2e-wrong-runtime-only-test-password";
+	private static String apiContainerName;
+	private static boolean apiContainerStarted;
 	private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS = Set.of(
 			PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
 	private static final Set<PosixFilePermission> PRIVATE_FILE_PERMISSIONS = Set.of(
@@ -53,6 +57,39 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			.withDatabaseName("nexa_central_e2e")
 			.withUsername("nexa_central_e2e_admin")
 			.withPassword(CENTRAL_PASSWORD);
+
+	@BeforeAll
+	static void startApiNetworkAnchor() throws Exception {
+		apiContainerName = "nexa-modern-api-it-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+		Process process = new ProcessBuilder("docker", "run", "--detach", "--name", apiContainerName,
+				"--label", "com.docker.compose.project=nexa-modern",
+				"--label", "com.docker.compose.service=modern-api",
+				"postgres:18.4-alpine", "sh", "-ec", "sleep infinity")
+				.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+				.redirectError(ProcessBuilder.Redirect.DISCARD)
+				.start();
+		if (!process.waitFor(90, TimeUnit.SECONDS)) {
+			process.destroyForcibly();
+			throw new IllegalStateException("The disposable API network-anchor container did not start in time");
+		}
+		assertThat(process.exitValue()).as("the disposable API network-anchor container should start").isZero();
+		apiContainerStarted = true;
+	}
+
+	@AfterAll
+	static void stopApiNetworkAnchor() throws Exception {
+		if (!apiContainerStarted) return;
+		Process process = new ProcessBuilder("docker", "rm", "--force", apiContainerName)
+				.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+				.redirectError(ProcessBuilder.Redirect.DISCARD)
+				.start();
+		if (!process.waitFor(30, TimeUnit.SECONDS)) {
+			process.destroyForcibly();
+			throw new IllegalStateException("The disposable API network-anchor container cleanup timed out");
+		}
+		assertThat(process.exitValue()).as("the disposable API network-anchor container should be removed").isZero();
+		apiContainerStarted = false;
+	}
 
 	@Test
 	@Timeout(value = 300, unit = TimeUnit.SECONDS)
@@ -391,8 +428,10 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 				workspaceId.toString(), Integer.toString(port), "--central-configfile", centralConfig.toString(),
 				"--local-state-dir", stateDirectory.toString()));
 		if (retryFailed) command.add("--retry-failed");
-		Process process = new ProcessBuilder(command).directory(REPOSITORY_ROOT.toFile())
-				.redirectErrorStream(true).redirectOutput(log.toFile()).start();
+		ProcessBuilder processBuilder = new ProcessBuilder(command).directory(REPOSITORY_ROOT.toFile())
+				.redirectErrorStream(true).redirectOutput(log.toFile());
+		processBuilder.environment().put("NEXA_LOCAL_API_CONTAINER_NAME", apiContainerName);
+		Process process = processBuilder.start();
 		if (!process.waitFor(240, TimeUnit.SECONDS)) {
 			process.destroyForcibly();
 			throw new IllegalStateException("The local Tenant provisioner did not finish within four minutes");

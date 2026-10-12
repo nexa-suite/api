@@ -166,6 +166,7 @@ ROLE_SQL_FILE="$API_DIRECTORY/ops/database/provision-local-tenant-database-roles
 SCOPE_SQL_FILE="$API_DIRECTORY/ops/database/seed-local-tenant-database-scope.sql"
 PROJECT_NAME="nexa-tenant-db-$TENANT_ID"
 VOLUME_NAME="nexa-tenant-business-$TENANT_ID"
+API_CONTAINER_NAME="${NEXA_LOCAL_API_CONTAINER_NAME:-nexa-modern-api}"
 CLI_MAIN='com.nexa.api.bootstrap.runtime.database.tenant.local.LocalTenantBusinessDatabaseProvisioningCli'
 BINDING_ACTIVE=0 BINDING_VERSION='' DATABASE_IDENTITY='' SECRET_REFERENCE='' STAGING_DIRECTORY=''
 LOCAL_ROOT='' TENANT_DIRECTORY='' VOLUME_MARKER='' LOCK_DIRECTORY=''
@@ -176,6 +177,8 @@ WORKER_CREDENTIALS_MISSING=0
 BUSINESS_DOCUMENTS_WORKER_CREDENTIALS_MISSING=0
 PAYMENT_WORKER_CREDENTIALS_MISSING=0
 BUSINESS_TRACEABILITY_WORKER_CREDENTIALS_MISSING=0
+[[ "$API_CONTAINER_NAME" =~ ^nexa-modern-api(-[A-Za-z0-9][A-Za-z0-9_.-]{0,100})?$ ]] \
+	|| fail 'The local API container name is invalid.'
 trap cleanup EXIT
 
 command -v docker >/dev/null 2>&1 || fail 'Docker is required for local Tenant provisioning.'
@@ -295,7 +298,7 @@ tenant_compose() {
 TENANT_NETWORK_NAME="nexa-tenant-business-$TENANT_ID"
 ensure_api_tenant_network() {
 	local api_identity network_identity attached_network_id
-	api_identity="$(docker inspect --format '{{.Id}}|{{.State.Status}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project"}}' nexa-modern-api 2>/dev/null)" \
+	api_identity="$(docker inspect --format '{{.Id}}|{{.State.Status}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project"}}' "$API_CONTAINER_NAME" 2>/dev/null)" \
 		|| fail 'The local Modern API container could not be identified for Tenant network attachment.'
 	[[ "$api_identity" =~ ^([0-9a-f]{64})\|running\|modern-api\|nexa-modern$ ]] \
 		|| fail 'Tenant provisioning requires the matching running local Modern API container.'

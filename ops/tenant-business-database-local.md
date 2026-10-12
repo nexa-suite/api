@@ -36,6 +36,10 @@ container must be running, use the official PostgreSQL image, and provide
 explicit state directory must be an absolute path beneath a mode-`0700` parent
 and is created mode `0700`. This isolated path uses the target container's local
 PostgreSQL socket and accepts no database host URL or credentials in the config.
+The normal application attachment target is `nexa-modern-api`. The E2E harness
+may set `NEXA_LOCAL_API_CONTAINER_NAME` to its unique disposable container name;
+the provisioner still requires a running container with the exact
+`modern-api` service and `nexa-modern` project labels before attaching it.
 
 Each Tenant uses a separate Compose project and persistent volume named from
 the Tenant UUID. PostgreSQL publishes only on `127.0.0.1`. Its bridge network

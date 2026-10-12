@@ -26,6 +26,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -197,7 +198,19 @@ public abstract class PostgresIntegrationSupport {
 
 	/** Signs in through the real HTTP stack and returns the access token. */
 	protected String accessToken(String email, String surface) throws Exception {
+		MvcResult csrfBootstrap = mockMvc.perform(get("/api/v1/authentication/csrf")
+						.header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
+				.andExpect(status().isOk())
+				.andReturn();
+		String csrfToken = tools.jackson.databind.json.JsonMapper.shared()
+				.readTree(csrfBootstrap.getResponse().getContentAsString()).get("token").asText();
+		var csrfCookie = csrfBootstrap.getResponse().getCookie("NEXA_CSRF");
+		if (csrfToken.isBlank() || csrfCookie == null) {
+			throw new IllegalStateException("Browser CSRF bootstrap must return its request token and cookie");
+		}
 		MvcResult result = mockMvc.perform(post("/api/v1/authentication/sign-in")
+						.cookie(csrfCookie)
+						.header("X-Nexa-CSRF", csrfToken)
 						.header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"identifier\":\"" + email + "\",\"password\":\"" + TEST_PASSWORD
