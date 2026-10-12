@@ -99,10 +99,26 @@ function expectStatus(response, expected, label) {
 }
 
 function login(user, label) {
+  const csrfResponse = http.get(url('/api/v1/authentication/csrf'), {
+    headers: { Origin: user.origin },
+    tags: { workflow: 'business-foundation' },
+  });
+  const csrf = expectStatus(csrfResponse, 200, `${label} CSRF bootstrap`);
+  if (!csrf.token) {
+    throw new Error(`${label} CSRF bootstrap did not return a request token`);
+  }
   const response = http.post(
     url('/api/v1/authentication/sign-in'),
     JSON.stringify({ identifier: user.email, password: user.password, workspaceSlug: workspace, surface: user.surface }),
-    { headers: { 'Content-Type': 'application/json', Origin: user.origin }, tags: { workflow: 'business-foundation' } },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: user.origin,
+        Cookie: `NEXA_CSRF=${csrf.token}`,
+        'X-Nexa-CSRF': csrf.token,
+      },
+      tags: { workflow: 'business-foundation' },
+    },
   );
   const body = expectStatus(response, 200, `${label} login`);
   if (!body.accessToken) {

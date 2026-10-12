@@ -14,6 +14,7 @@ set -a
 set +a
 
 base_url="${NEXA_LOCAL_API_URL:-http://localhost:8080}"
+csrf_url="${base_url}/api/v1/authentication/csrf"
 headers=$(mktemp)
 body=$(mktemp)
 trap 'rm -f "$headers" "$body"' EXIT HUP INT TERM
@@ -57,12 +58,14 @@ if [ "${code}" = '500' ]; then
 fi
 printf '%s: PASS (HTTP %s)\n' 'SQL/path injection probe' "${code}"
 
-code=$(http_code --request POST --header 'Content-Type: application/json' --data "{\"identifier\":\"' OR '1'='1\",\"password\":\"invalid\",\"workspaceSlug\":\"icisa\",\"surface\":\"PLATFORM\"}" "${base_url}/api/v1/authentication/sign-in")
-if [ "${code}" = '200' ] || [ "${code}" = '500' ]; then
-  printf '%s\n' 'Authentication injection probe: FAIL' >&2
-  exit 1
-fi
-printf '%s: PASS (HTTP %s)\n' 'Authentication injection probe' "${code}"
+csrf_token=$(curl --fail --silent --show-error --max-time 10 "${csrf_url}" | jq --exit-status --raw-output '.token | strings | select(length > 0)')
+code=$(http_code --request POST --header 'Content-Type: application/json' \
+  --header 'Origin: http://localhost:4200' \
+  --header "Cookie: NEXA_CSRF=${csrf_token}" \
+  --header "X-Nexa-CSRF: ${csrf_token}" \
+  --data "{\"identifier\":\"' OR '1'='1\",\"password\":\"invalid\",\"workspaceSlug\":\"icisa\",\"surface\":\"PLATFORM\"}" \
+  "${base_url}/api/v1/authentication/sign-in")
+assert_status 'Authentication injection probe' '401' "${code}"
 
 code=$(http_code --request POST --header 'Content-Type: application/json' --data '{"workspaceSlug":"unknown-security-probe"}' "${base_url}/api/v1/auth/workspace-previews")
 if [ "${code}" = '200' ] || [ "${code}" = '500' ]; then

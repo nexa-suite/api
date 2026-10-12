@@ -50,9 +50,12 @@ for definition in "${roles[@]}"; do
   [[ "$surface" == "PORTAL" ]] && origin_port=4300
   login_body=$(jq -nc --arg identifier "$email" --arg secret "$password" --arg workspace "$WORKSPACE" --arg surface "$surface" \
     '{identifier:$identifier,password:$secret,workspaceSlug:$workspace,surface:$surface}')
+  csrf_token=$(curl --fail --silent --show-error "$BASE_URL/api/v1/authentication/csrf" \
+    | jq --exit-status --raw-output '.token | strings | select(length > 0)')
   login_file="$REPORT_DIR/$role-login.json"
   login_code=$(curl --silent --show-error --output "$login_file" --write-out '%{http_code}' \
     -H 'Content-Type: application/json' -H "Origin: http://localhost:$origin_port" \
+    -H "Cookie: NEXA_CSRF=$csrf_token" -H "X-Nexa-CSRF: $csrf_token" \
     --data "$login_body" "$BASE_URL/api/v1/authentication/sign-in")
   token=$(jq -r '.accessToken // empty' "$login_file")
   if [[ "$login_code" != "200" || -z "$token" ]]; then

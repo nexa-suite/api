@@ -22,12 +22,24 @@ export default function () {
   const preview = http.post(`${baseUrl}/api/v1/auth/workspace-previews`, JSON.stringify({ workspaceSlug: workspace }), jsonParams);
   check(preview, { 'workspace preview is controlled': (response) => [200, 403].includes(response.status) });
 
+  const csrfResponse = http.get(`${baseUrl}/api/v1/authentication/csrf`, {
+    headers: { Origin: 'http://localhost:4200' },
+  });
+  check(csrfResponse, { 'browser CSRF bootstrap is available': (response) => response.status === 200 });
+  const csrfToken = csrfResponse.status === 200 ? csrfResponse.json('token') : '';
   const signIn = http.post(`${baseUrl}/api/v1/authentication/sign-in`, JSON.stringify({
     identifier: email,
     password,
     workspaceSlug: workspace,
     surface: 'PLATFORM',
-  }), jsonParams);
+  }), {
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'http://localhost:4200',
+      Cookie: `NEXA_CSRF=${csrfToken}`,
+      'X-Nexa-CSRF': csrfToken,
+    },
+  });
   check(signIn, { 'load identity signs in': (response) => response.status === 200 });
   const token = signIn.status === 200 ? signIn.json('accessToken') : '';
   if (token) {

@@ -15,7 +15,9 @@ set -a
 set +a
 
 workspace="${NEXA_DEV_WORKSPACE_SLUG}"
-api_url="${NEXA_LOCAL_API_URL:-http://localhost:8080}/api/v1/authentication/sign-in"
+base_url="${NEXA_LOCAL_API_URL:-http://localhost:8080}"
+api_url="${base_url}/api/v1/authentication/sign-in"
+csrf_url="${base_url}/api/v1/authentication/csrf"
 
 verify_login() {
   label="$1"
@@ -26,10 +28,13 @@ verify_login() {
   expected="$6"
   body=$(mktemp)
   trap 'rm -f "$body"' EXIT HUP INT TERM
+  csrf_token=$(curl --fail --silent --show-error --max-time 10 "$csrf_url" | jq --exit-status --raw-output '.token | strings | select(length > 0)')
   status=$(curl --silent --show-error --output "$body" --write-out '%{http_code}' \
     --max-time 10 --request POST \
     --header 'Content-Type: application/json' \
     --header "Origin: $origin" \
+    --header "Cookie: NEXA_CSRF=$csrf_token" \
+    --header "X-Nexa-CSRF: $csrf_token" \
     --data "{\"identifier\":\"$email\",\"password\":\"$password\",\"workspaceSlug\":\"$workspace\",\"surface\":\"$surface\"}" \
     "$api_url" || true)
   rm -f "$body"
