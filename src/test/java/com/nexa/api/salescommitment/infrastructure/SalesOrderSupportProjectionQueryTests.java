@@ -1,8 +1,8 @@
 package com.nexa.api.salescommitment.infrastructure;
 
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderSupportProjectionQuery;
+import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.salescommitment.infrastructure.persistence.JdbcTenantSalesOrderSupportProjectionQueryFactory;
-import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -45,6 +45,6 @@ class SalesOrderSupportProjectionQueryTests {
 		SalesOrderSupportProjectionQuery query = new JdbcTenantSalesOrderSupportProjectionQueryFactory().bindTo(jdbc);
 
 		assertThatThrownBy(() -> query.find(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))
-				.isInstanceOf(ApiResourceNotFoundException.class);
+				.isInstanceOf(SalesResourceNotFoundException.class);
 	}
 }

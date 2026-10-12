@@ -1,8 +1,8 @@
 package com.nexa.api.salescommitment.infrastructure.persistence;
 
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderSupportProjectionQuery;
+import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderSupportProjectionQueryFactory;
-import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -23,6 +23,6 @@ public final class JdbcTenantSalesOrderSupportProjectionQueryFactory
 				(rs, row) -> new SalesOrderSupportProjectionQuery.Snapshot(rs.getString("status"),
 						rs.getBigDecimal("total_amount"), rs.getString("currency"), rs.getLong("version")),
 				salesOrderId, tenantId, workspaceId).stream().findFirst()
-				.orElseThrow(() -> new ApiResourceNotFoundException("sales order"));
+				.orElseThrow(() -> new SalesResourceNotFoundException("sales-order"));
 	}
 }

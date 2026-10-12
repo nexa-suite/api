@@ -17,7 +17,7 @@ import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConf
 import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
 import com.nexa.api.payments.application.exception.BuyerWalletRefundUnavailableException;
 import com.nexa.api.businessdocuments.application.exception.BusinessEvidenceIdempotencyConflictException;
-import com.nexa.api.tenantaccessgovernance.support.application.exception.SupportConsoleOperationException;
+import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportConsoleOperationException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -669,7 +669,7 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(SupportConsoleOperationException.class)
 	public ResponseEntity<ProblemDetail> handleSupportConsoleOperation(SupportConsoleOperationException exception,
 			HttpServletRequest request) {
-		if (exception.kind() == SupportConsoleOperationException.Kind.FORBIDDEN) {
+		if (exception.isForbidden()) {
 			return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Support operation is not authorized", request);
 		}
 		return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION,

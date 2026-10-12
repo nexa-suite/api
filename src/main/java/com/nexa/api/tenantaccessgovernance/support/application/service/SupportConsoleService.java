@@ -2,13 +2,13 @@ package com.nexa.api.tenantaccessgovernance.support.application.service;
 
 import com.nexa.api.tenantaccessgovernance.support.application.model.SupportRequestView;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
-import com.nexa.api.tenantaccessgovernance.support.application.exception.SupportConsoleOperationException;
 import com.nexa.api.tenantaccessgovernance.support.application.port.in.SupportConsoleUseCase;
 import com.nexa.api.tenantaccessgovernance.support.application.port.out.SupportRequestPersistencePort;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrant;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrantIssuer;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportSalesOrderProjection;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportSalesOrderReadQueryFactory;
+import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportConsoleOperationException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -104,8 +104,7 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 			throw new ApiResourceNotFoundException("support request");
 		}
 		if (!"APPROVED".equals(request.status()) || !now.isBefore(request.expiresAt())) {
-			throw new SupportConsoleOperationException(SupportConsoleOperationException.Kind.FORBIDDEN,
-					"The support grant is no longer active.");
+			throw SupportConsoleOperationException.forbidden("The support grant is no longer active.");
 		}
 		SupportOrderReadGrant grant = SupportOrderReadGrantIssuer.fromApprovedRequest(request, now);
 		SupportSalesOrderProjection projection = orderReadQueries.open(grant).read();
@@ -127,12 +126,11 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 
 	private static void requireCompanyOwner(CurrentAccessContext context) {
 		if (context == null || !context.roles().contains(MembershipRole.COMPANY_OWNER)) {
-			throw new SupportConsoleOperationException(SupportConsoleOperationException.Kind.FORBIDDEN,
-					"A current Company Owner context is required.");
+			throw SupportConsoleOperationException.forbidden("A current Company Owner context is required.");
 		}
 	}
 
 	private static SupportConsoleOperationException conflict(String message) {
-		return new SupportConsoleOperationException(SupportConsoleOperationException.Kind.CONFLICT, message);
+		return SupportConsoleOperationException.conflict(message);
 	}
 }
