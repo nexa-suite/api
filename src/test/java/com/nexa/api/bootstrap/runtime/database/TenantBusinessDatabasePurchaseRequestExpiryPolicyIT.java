@@ -24,6 +24,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Use
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcTenantConfigurationAdapter;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -82,6 +83,11 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 	private static OperationalSettingsAccess centralSettings;
 	private static TenantBusinessDatabaseRouter router;
 	private static TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver resolver;
+
+	@AfterAll
+	static void closeTenantDatabasePoolsBeforeContainersStop() {
+		if (router != null) router.close();
+	}
 
 	@BeforeAll
 	static void provisionAndWireOptInFixture() {

@@ -13,8 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class MultiRoleAuthenticationIT extends NexaWorkflowIntegrationSupport {
     @Test
     void ownerAuthenticationExposesCanonicalRoleSetWithoutSingularAuthority() throws Exception {
-        var result = mockMvc.perform(post("/api/v1/authentication/sign-in").header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identifier\":\"" + OWNER_EMAIL + "\",\"password\":\"" + TEST_PASSWORD + "\",\"workspaceSlug\":\"" + WORKSPACE_SLUG + "\",\"surface\":\"PLATFORM\"}"))
+        var result = mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in").header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identifier\":\"" + OWNER_EMAIL + "\",\"password\":\"" + TEST_PASSWORD + "\",\"workspaceSlug\":\"" + WORKSPACE_SLUG + "\",\"surface\":\"PLATFORM\"}")))
                 .andExpect(status().isOk()).andReturn();
         var session = json(result).get("session");
         assertThat(session.get("roles").isArray()).isTrue();

@@ -61,6 +61,7 @@ jobs:
           NEXA_CLAMAV_PORT: "3310"
         run: >-
           ./mvnw clean verify -Dnexa.integration.enabled=true
+          -Dnexa.scheduling.enabled=false
           -Dspring.datasource.hikari.maximum-pool-size=4
       - name: Verify OpenAPI compatibility against base snapshot
         if: ${{ github.event_name == 'pull_request' }}
