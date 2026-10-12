@@ -349,26 +349,6 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(warehouseId));
     }
 
-    private String accessTokenForWorkspace(String email, String surface, String workspaceSlug) throws Exception {
-        MvcResult csrfBootstrap = mockMvc.perform(get("/api/v1/authentication/csrf")
-                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
-                .andExpect(status().isOk()).andReturn();
-        String csrfToken = tools.jackson.databind.json.JsonMapper.shared()
-                .readTree(csrfBootstrap.getResponse().getContentAsString()).get("token").asText();
-        var csrfCookie = csrfBootstrap.getResponse().getCookie("NEXA_CSRF");
-        if (csrfToken.isBlank() || csrfCookie == null) {
-            throw new IllegalStateException("Browser CSRF bootstrap must return its request token and cookie");
-        }
-        MvcResult result = mockMvc.perform(post("/api/v1/authentication/sign-in").cookie(csrfCookie)
-                        .header("X-Nexa-CSRF", csrfToken).header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identifier\":\"" + email + "\",\"password\":\"" + TEST_PASSWORD
-                                + "\",\"workspaceSlug\":\"" + workspaceSlug + "\",\"surface\":\"" + surface + "\"}"))
-                .andExpect(status().isOk()).andReturn();
-        return tools.jackson.databind.json.JsonMapper.shared().readTree(result.getResponse().getContentAsString())
-                .get("accessToken").asText();
-    }
-
     private WorkspaceScope createAdditionalTenantAndWorkspace(String email, String suffix) {
         UUID tenantId = UUID.randomUUID();
         String normalizedSuffix = suffix.toLowerCase(java.util.Locale.ROOT);

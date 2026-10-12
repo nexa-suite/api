@@ -453,16 +453,6 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
         return workspaceSlug;
     }
 
-    private String accessTokenForWorkspace(String email, String workspaceSlug) throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/v1/authentication/sign-in")
-                        .header("Origin", ALLOWED_ORIGIN)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identifier\":\"" + email + "\",\"password\":\"" + TEST_PASSWORD
-                                + "\",\"workspaceSlug\":\"" + workspaceSlug + "\",\"surface\":\"PLATFORM\"}"))
-                .andExpect(status().isOk()).andReturn();
-        return json(result).get("accessToken").asText();
-    }
-
     private static String driverPath(AssignedDelivery fixture) {
         return "/api/v1/driver/deliveries/" + fixture.deliveryId();
     }

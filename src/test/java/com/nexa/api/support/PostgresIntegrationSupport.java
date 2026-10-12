@@ -198,6 +198,15 @@ public abstract class PostgresIntegrationSupport {
 
 	/** Signs in through the real HTTP stack and returns the access token. */
 	protected String accessToken(String email, String surface) throws Exception {
+		return accessTokenForWorkspace(email, surface, WORKSPACE_SLUG);
+	}
+
+	/** Signs into an explicitly selected Workspace through the real browser CSRF flow. */
+	protected String accessTokenForWorkspace(String email, String workspaceSlug) throws Exception {
+		return accessTokenForWorkspace(email, "PLATFORM", workspaceSlug);
+	}
+
+	protected String accessTokenForWorkspace(String email, String surface, String workspaceSlug) throws Exception {
 		MvcResult csrfBootstrap = mockMvc.perform(get("/api/v1/authentication/csrf")
 						.header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
 				.andExpect(status().isOk())
@@ -214,11 +223,11 @@ public abstract class PostgresIntegrationSupport {
 						.header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"identifier\":\"" + email + "\",\"password\":\"" + TEST_PASSWORD
-								+ "\",\"workspaceSlug\":\"" + WORKSPACE_SLUG + "\",\"surface\":\"" + surface + "\"}"))
+								+ "\",\"workspaceSlug\":\"" + workspaceSlug + "\",\"surface\":\"" + surface + "\"}"))
 				.andExpect(status().isOk())
 				.andReturn();
-		String body = result.getResponse().getContentAsString();
-		return tools.jackson.databind.json.JsonMapper.shared().readTree(body).get("accessToken").asText();
+		return tools.jackson.databind.json.JsonMapper.shared()
+				.readTree(result.getResponse().getContentAsString()).get("accessToken").asText();
 	}
 
 	protected String membershipId(String email) {
