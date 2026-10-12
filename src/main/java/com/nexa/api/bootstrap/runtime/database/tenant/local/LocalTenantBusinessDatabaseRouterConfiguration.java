@@ -12,6 +12,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRout
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSupportOrderReadRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSupportSalesOrderReadQueryFactory;
+import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderSupportProjectionQueryFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrantValidationPort;
@@ -96,8 +97,9 @@ public class LocalTenantBusinessDatabaseRouterConfiguration {
     @ConditionalOnProperty(prefix = "nexa.tenant-business.support-sales-order-read", name = "enabled",
             havingValue = "true")
     SupportSalesOrderReadQueryFactory localSupportSalesOrderReadQueryFactory(
-            TenantBusinessDatabaseSupportOrderReadRouter router) {
-        return new TenantBusinessDatabaseSupportSalesOrderReadQueryFactory(router);
+            TenantBusinessDatabaseSupportOrderReadRouter router,
+            TenantSalesOrderSupportProjectionQueryFactory salesOrders) {
+        return new TenantBusinessDatabaseSupportSalesOrderReadQueryFactory(router, salesOrders);
     }
 
     @Bean

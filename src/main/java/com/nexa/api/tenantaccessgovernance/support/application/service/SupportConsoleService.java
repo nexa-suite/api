@@ -1,6 +1,8 @@
 package com.nexa.api.tenantaccessgovernance.support.application.service;
 
 import com.nexa.api.tenantaccessgovernance.support.application.model.SupportRequestView;
+import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
+import com.nexa.api.tenantaccessgovernance.support.application.exception.SupportConsoleOperationException;
 import com.nexa.api.tenantaccessgovernance.support.application.port.in.SupportConsoleUseCase;
 import com.nexa.api.tenantaccessgovernance.support.application.port.out.SupportRequestPersistencePort;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrant;
@@ -10,10 +12,8 @@ import com.nexa.api.tenantaccessgovernance.support.application.publicapi.Support
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -41,7 +41,7 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 			UUID salesOrderId, Instant expiresAt) {
 		Instant now = Instant.now();
 		if (expiresAt == null || !expiresAt.isAfter(now) || expiresAt.isAfter(now.plus(MAX_GRANT_DURATION))) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Support deadline must be within one hour.");
+			throw new IllegalArgumentException("Support deadline must be within one hour.");
 		}
 		return persistence.create(UUID.randomUUID(), required(tenantId), required(workspaceId),
 			required(salesOrderId), required(requesterOperatorId), expiresAt, now);
@@ -81,7 +81,7 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 	@Transactional
 	public SupportRequestView revokeByOperator(UUID requestId, UUID operatorId) {
 		return persistence.revokeByOperator(required(requestId), required(operatorId), Instant.now())
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Active support request not found."));
+			.orElseThrow(() -> new ApiResourceNotFoundException("support request"));
 	}
 
 	@Override
@@ -90,7 +90,7 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 		requireCompanyOwner(ownerContext);
 		return persistence.revokeByOwner(required(requestId), ownerContext.tenantId().value(), ownerContext.workspaceId().value(),
 			ownerContext.userId().value(), ownerContext.membershipId().value(), Instant.now())
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Active support request not found."));
+			.orElseThrow(() -> new ApiResourceNotFoundException("support request"));
 	}
 
 	@Override
@@ -99,12 +99,13 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 		UUID operatorId = required(requesterOperatorId);
 		Instant now = Instant.now();
 		SupportRequestView request = persistence.findForOperator(requestIdValue, operatorId, now)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Approved support request not found."));
+			.orElseThrow(() -> new ApiResourceNotFoundException("support request"));
 		if (!requestIdValue.equals(request.id()) || !operatorId.equals(request.requestedByOperatorId())) {
-			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Approved support request not found.");
+			throw new ApiResourceNotFoundException("support request");
 		}
 		if (!"APPROVED".equals(request.status()) || !now.isBefore(request.expiresAt())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "The support grant is no longer active.");
+			throw new SupportConsoleOperationException(SupportConsoleOperationException.Kind.FORBIDDEN,
+					"The support grant is no longer active.");
 		}
 		SupportOrderReadGrant grant = SupportOrderReadGrantIssuer.fromApprovedRequest(request, now);
 		SupportSalesOrderProjection projection = orderReadQueries.open(grant).read();
@@ -114,7 +115,7 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 
 	private static UUID required(UUID value) {
 		if (value == null) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Support request identity and scope are required.");
+			throw new IllegalArgumentException("Support request identity and scope are required.");
 		}
 		return value;
 	}
@@ -126,11 +127,12 @@ public class SupportConsoleService implements SupportConsoleUseCase {
 
 	private static void requireCompanyOwner(CurrentAccessContext context) {
 		if (context == null || !context.roles().contains(MembershipRole.COMPANY_OWNER)) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "A current Company Owner context is required.");
+			throw new SupportConsoleOperationException(SupportConsoleOperationException.Kind.FORBIDDEN,
+					"A current Company Owner context is required.");
 		}
 	}
 
-	private static ResponseStatusException conflict(String message) {
-		return new ResponseStatusException(HttpStatus.CONFLICT, message);
+	private static SupportConsoleOperationException conflict(String message) {
+		return new SupportConsoleOperationException(SupportConsoleOperationException.Kind.CONFLICT, message);
 	}
 }

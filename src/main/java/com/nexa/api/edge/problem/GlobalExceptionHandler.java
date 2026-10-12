@@ -17,6 +17,7 @@ import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConf
 import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
 import com.nexa.api.payments.application.exception.BuyerWalletRefundUnavailableException;
 import com.nexa.api.businessdocuments.application.exception.BusinessEvidenceIdempotencyConflictException;
+import com.nexa.api.tenantaccessgovernance.support.application.exception.SupportConsoleOperationException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
@@ -663,6 +664,16 @@ public final class GlobalExceptionHandler {
 			default -> ApiErrorCode.RESOURCE_NOT_FOUND;
 		};
 		return response(HttpStatus.NOT_FOUND, code, "Resource not found", request);
+	}
+
+	@ExceptionHandler(SupportConsoleOperationException.class)
+	public ResponseEntity<ProblemDetail> handleSupportConsoleOperation(SupportConsoleOperationException exception,
+			HttpServletRequest request) {
+		if (exception.kind() == SupportConsoleOperationException.Kind.FORBIDDEN) {
+			return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Support operation is not authorized", request);
+		}
+		return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION,
+				"Support request cannot be changed in its current state", request);
 	}
 
 	@ExceptionHandler(com.nexa.api.payments.application.exception.PaymentOperationInProgressException.class)
