@@ -28,10 +28,10 @@ then wait for its health check before starting the API. `local` alone uses the
 private filesystem adapter. The security/load workflow uses `local,minio` and
 runs an S3 adapter integration test against that MinIO service. The source
 build is pinned to MinIO `RELEASE.2025-10-15T17-29-55Z` and `mc`
-`RELEASE.2025-08-13T08-35-41Z`; see `minio-community/Dockerfile`. MinIO
-Community Edition is archived upstream, so this Compose service supports
-development and verification only. Select a maintained object-storage
-provider before the Production Gate.
+`RELEASE.2025-08-13T08-35-41Z`; see `minio-community/Dockerfile`. The image
+runs MinIO as unprivileged UID 10001. MinIO Community Edition is archived
+upstream, so this Compose service supports development and verification only.
+Select a maintained object-storage provider before the Production Gate.
 
 Legacy expone API ASP.NET `5068`, Platform Vue `5173` y Portal Vue `5174`. PostgreSQL no publica puerto y vive en `nexa-legacy-data`.
 
