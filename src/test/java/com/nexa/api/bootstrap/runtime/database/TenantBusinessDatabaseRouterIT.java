@@ -7,6 +7,10 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBind
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogFamilySkuMappingLoader;
+import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceSeedItemRecord;
+import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceSeedLoader;
+import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceSeedValidator;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
@@ -35,6 +39,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.json.JsonMapper;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -42,6 +47,7 @@ import java.sql.DriverManager;
 import java.sql.SQLNonTransientConnectionException;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +61,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /** Exercises opt-in routing against one central and two physically separate PostgreSQL databases. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -192,6 +199,105 @@ class TenantBusinessDatabaseRouterIT {
 
 		assertThat(countProbe(tenantAAdmin, "wrong-physical-database")).isZero();
 		assertThat(countProbe(tenantBAdmin, "wrong-physical-database")).isZero();
+	}
+
+	@Test
+	void workspaceAnchorMismatchFailsBeforeBusinessWorkRuns() {
+		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
+		WorkspaceId incorrectWorkspace = WorkspaceId.random();
+		tenantAAdmin.update("UPDATE nexa_platform.tenant_workspace_scope_anchor SET workspace_id=? WHERE tenant_id=?",
+				incorrectWorkspace.value(), tenantA.tenantId().value());
+		CountingFactory pools = new CountingFactory(credentialsFor(fixture, false));
+		AtomicBoolean callbackRan = new AtomicBoolean();
+
+		try (TenantBusinessDatabaseRouter router = router(pools)) {
+			setRequestScope(fixture.tenantA());
+			assertThatThrownBy(() -> router.inTransaction(tenantA, jdbc -> {
+				callbackRan.set(true);
+				return jdbc.update("INSERT INTO nexa_platform.route_probe (id, tenant_id, workspace_id, marker) VALUES (?, ?, ?, ?)",
+						UUID.randomUUID(), tenantA.tenantId().value(), tenantA.workspaceId().value(), "wrong-workspace-anchor");
+			})).hasRootCauseInstanceOf(SQLNonTransientConnectionException.class);
+			assertThat(callbackRan).as("verified Workspace scope is checked before business work").isFalse();
+		} finally {
+			tenantAAdmin.update("UPDATE nexa_platform.tenant_workspace_scope_anchor SET workspace_id=? WHERE tenant_id=?",
+					fixture.tenantA().workspaceId().value(), fixture.tenantA().tenantId().value());
+		}
+
+		assertThat(countProbe(tenantAAdmin, "wrong-workspace-anchor")).isZero();
+	}
+
+	@Test
+	void missingWorkspaceAnchorFailsBeforeBusinessWorkRuns() {
+		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
+		tenantAAdmin.update("DELETE FROM nexa_platform.tenant_workspace_scope_anchor WHERE tenant_id=?",
+				tenantA.tenantId().value());
+		CountingFactory pools = new CountingFactory(credentialsFor(fixture, false));
+		AtomicBoolean callbackRan = new AtomicBoolean();
+
+		try (TenantBusinessDatabaseRouter router = router(pools)) {
+			setRequestScope(fixture.tenantA());
+			assertThatThrownBy(() -> router.inTransaction(tenantA, jdbc -> {
+				callbackRan.set(true);
+				return jdbc.update("INSERT INTO nexa_platform.route_probe (id, tenant_id, workspace_id, marker) VALUES (?, ?, ?, ?)",
+						UUID.randomUUID(), tenantA.tenantId().value(), tenantA.workspaceId().value(), "missing-workspace-anchor");
+			})).hasRootCauseInstanceOf(SQLNonTransientConnectionException.class);
+			assertThat(callbackRan).as("missing local scope metadata fails closed").isFalse();
+		} finally {
+			tenantAAdmin.update("INSERT INTO nexa_platform.tenant_workspace_scope_anchor (tenant_id,workspace_id) VALUES (?,?)",
+					fixture.tenantA().tenantId().value(), fixture.tenantA().workspaceId().value());
+		}
+
+		assertThat(countProbe(tenantAAdmin, "missing-workspace-anchor")).isZero();
+	}
+
+	@Test
+	void tenantRuntimeCanReadButCannotWriteTheWorkspaceScopeAnchor() {
+		TenantRecord tenant = fixture.tenantA();
+		JdbcTemplate tenantRuntime = new JdbcTemplate(runtimeDataSource(TENANT_A, TENANT_A_RUNTIME_PASSWORD));
+
+		assertThat(tenantRuntime.queryForObject("SELECT count(*) FROM nexa_platform.tenant_workspace_scope_anchor WHERE tenant_id=? AND workspace_id=?",
+				Integer.class, tenant.tenantId().value(), tenant.workspaceId().value())).isEqualTo(1);
+		Throwable writeFailure = catchThrowable(() -> tenantRuntime.update(
+				"UPDATE nexa_platform.tenant_workspace_scope_anchor SET workspace_id=? WHERE tenant_id=?",
+				WorkspaceId.random().value(), tenant.tenantId().value()));
+		assertThat(writeFailure).isNotNull();
+		assertThat(rootCause(writeFailure)).isInstanceOf(SQLException.class);
+		assertThat(((SQLException) rootCause(writeFailure)).getSQLState()).isEqualTo("42501");
+		assertThat(tenantAAdmin.queryForObject("SELECT count(*) FROM nexa_platform.tenant_workspace_scope_anchor WHERE tenant_id=? AND workspace_id=?",
+				Integer.class, tenant.tenantId().value(), tenant.workspaceId().value())).isEqualTo(1);
+	}
+
+	@Test
+	void optInCatalogReferenceFixturePreservesExplicitMappingsAndIdentifiersAcrossPhysicalDatabases() {
+		var objectMapper = JsonMapper.builder().build();
+		List<CatalogPersistenceSeedItemRecord> items = new CatalogPersistenceSeedLoader(objectMapper).load();
+		Map<String, CatalogFamilySkuMappingLoader.MappingItem> mappings =
+				new CatalogFamilySkuMappingLoader(objectMapper).byLegacyCatalogItemId();
+		assertThat(items).hasSize(CatalogPersistenceSeedValidator.EXPECTED_COUNT);
+		assertThat(mappings).hasSize(CatalogPersistenceSeedValidator.EXPECTED_COUNT);
+		assertThat(items.stream().filter(CatalogPersistenceSeedItemRecord::buyerVisible))
+				.hasSize(CatalogPersistenceSeedValidator.EXPECTED_CURATED_COUNT);
+		assertThat(items.stream().filter(CatalogPersistenceSeedItemRecord::provisionalReference))
+				.hasSize(CatalogPersistenceSeedValidator.EXPECTED_PROVISIONAL_COUNT);
+		assertThat(mappings.keySet()).containsExactlyInAnyOrderElementsOf(
+				items.stream().map(CatalogPersistenceSeedItemRecord::catalogItemId).toList());
+
+		try {
+			List<CatalogFixtureProjection> tenantAProjection = provisionCatalogFixture(tenantAAdmin, fixture.tenantA(), items, mappings);
+			List<CatalogFixtureProjection> tenantBProjection = provisionCatalogFixture(tenantBAdmin, fixture.tenantB(), items, mappings);
+
+			assertThat(tenantAProjection).hasSize(102).containsExactlyElementsOf(expectedCatalogFixture(fixture.tenantA(), items, mappings));
+			assertThat(tenantBProjection).hasSize(102).containsExactlyElementsOf(expectedCatalogFixture(fixture.tenantB(), items, mappings));
+			assertThat(tenantAProjection).extracting(CatalogFixtureProjection::productId)
+					.doesNotContainAnyElementsOf(tenantBProjection.stream().map(CatalogFixtureProjection::productId).toList());
+			assertThat(tenantAAdmin.queryForObject("SELECT count(*) FROM nexa_platform.tenant_workspace_scope_anchor", Integer.class))
+					.isEqualTo(1);
+			assertThat(tenantBAdmin.queryForObject("SELECT count(*) FROM nexa_platform.tenant_workspace_scope_anchor", Integer.class))
+					.isEqualTo(1);
+		} finally {
+			dropCatalogFixtureProbe(tenantAAdmin);
+			dropCatalogFixtureProbe(tenantBAdmin);
+		}
 	}
 
 	@Test
@@ -567,6 +673,74 @@ class TenantBusinessDatabaseRouterIT {
 	private static void insertDatabaseIdentity(JdbcTemplate admin, TenantRecord tenant) {
 		admin.update("INSERT INTO nexa_platform.tenant_business_database_identity (tenant_id,database_identity) VALUES (?,?)",
 				tenant.tenantId().value(), tenant.databaseIdentity());
+		admin.update("INSERT INTO nexa_platform.tenant_workspace_scope_anchor (tenant_id,workspace_id) VALUES (?,?)",
+				tenant.tenantId().value(), tenant.workspaceId().value());
+	}
+
+	private static List<CatalogFixtureProjection> provisionCatalogFixture(JdbcTemplate jdbc, TenantRecord tenant,
+			List<CatalogPersistenceSeedItemRecord> items,
+			Map<String, CatalogFamilySkuMappingLoader.MappingItem> mappings) {
+		jdbc.execute("""
+				CREATE TABLE nexa_platform.tenant_catalog_fixture_probe (
+				    tenant_id UUID NOT NULL,
+				    workspace_id UUID NOT NULL,
+				    catalog_item_id VARCHAR(64) NOT NULL,
+				    product_code VARCHAR(64) NOT NULL,
+				    product_id UUID NOT NULL,
+				    family_code VARCHAR(80) NOT NULL,
+				    sku_code VARCHAR(80) NOT NULL,
+				    sellable_sku_id UUID NOT NULL,
+				    buyer_visible BOOLEAN NOT NULL,
+				    provisional_reference BOOLEAN NOT NULL,
+				    source_price_code VARCHAR(80) NOT NULL,
+				    PRIMARY KEY (tenant_id, workspace_id, catalog_item_id),
+				    CONSTRAINT fk_tenant_catalog_fixture_scope FOREIGN KEY (tenant_id, workspace_id)
+				        REFERENCES nexa_platform.tenant_workspace_scope_anchor (tenant_id, workspace_id)
+				)
+				""");
+		for (CatalogPersistenceSeedItemRecord item : items) {
+			CatalogFamilySkuMappingLoader.MappingItem mapping = mappings.get(item.catalogItemId());
+			UUID productId = catalogProductId(tenant, item.productId());
+			jdbc.update("""
+					INSERT INTO nexa_platform.tenant_catalog_fixture_probe
+					    (tenant_id,workspace_id,catalog_item_id,product_code,product_id,family_code,sku_code,sellable_sku_id,
+				     buyer_visible,provisional_reference,source_price_code)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?)
+				""", tenant.tenantId().value(), tenant.workspaceId().value(), item.catalogItemId(), item.productId(), productId,
+					mapping.familyCode(), mapping.skuCode(), productId, item.buyerVisible(), item.provisionalReference(), item.sourcePriceCode());
+		}
+		return jdbc.query("""
+				SELECT catalog_item_id,product_code,product_id,family_code,sku_code,sellable_sku_id,
+				       buyer_visible,provisional_reference,source_price_code
+				FROM nexa_platform.tenant_catalog_fixture_probe
+				WHERE tenant_id=? AND workspace_id=?
+				ORDER BY catalog_item_id
+				""", (result, row) -> new CatalogFixtureProjection(result.getString("catalog_item_id"),
+					result.getString("product_code"), result.getObject("product_id", UUID.class),
+					result.getString("family_code"), result.getString("sku_code"),
+					result.getObject("sellable_sku_id", UUID.class), result.getBoolean("buyer_visible"),
+					result.getBoolean("provisional_reference"), result.getString("source_price_code")),
+				tenant.tenantId().value(), tenant.workspaceId().value());
+	}
+
+	private static List<CatalogFixtureProjection> expectedCatalogFixture(TenantRecord tenant,
+			List<CatalogPersistenceSeedItemRecord> items,
+			Map<String, CatalogFamilySkuMappingLoader.MappingItem> mappings) {
+		return items.stream().map(item -> {
+			CatalogFamilySkuMappingLoader.MappingItem mapping = mappings.get(item.catalogItemId());
+			UUID productId = catalogProductId(tenant, item.productId());
+			return new CatalogFixtureProjection(item.catalogItemId(), item.productId(), productId, mapping.familyCode(),
+					mapping.skuCode(), productId, item.buyerVisible(), item.provisionalReference(), item.sourcePriceCode());
+		}).toList();
+	}
+
+	private static UUID catalogProductId(TenantRecord tenant, String productCode) {
+		return UUID.nameUUIDFromBytes((tenant.tenantId() + ":" + tenant.workspaceId() + ":product:" + productCode)
+				.getBytes(StandardCharsets.UTF_8));
+	}
+
+	private static void dropCatalogFixtureProbe(JdbcTemplate jdbc) {
+		jdbc.execute("DROP TABLE IF EXISTS nexa_platform.tenant_catalog_fixture_probe");
 	}
 
 	private static void prepareProbeTable(PostgreSQLContainer container) {
@@ -577,7 +751,9 @@ class TenantBusinessDatabaseRouterIT {
 					    id UUID PRIMARY KEY,
 					    tenant_id UUID NOT NULL,
 					    workspace_id UUID NOT NULL,
-					    marker TEXT NOT NULL
+					    marker TEXT NOT NULL,
+					    CONSTRAINT fk_route_probe_workspace_scope FOREIGN KEY (tenant_id, workspace_id)
+					        REFERENCES nexa_platform.tenant_workspace_scope_anchor (tenant_id, workspace_id)
 					)
 					""");
 			statement.execute("ALTER TABLE nexa_platform.route_probe ENABLE ROW LEVEL SECURITY");
@@ -643,6 +819,10 @@ class TenantBusinessDatabaseRouterIT {
 			UserId userId, UUID databaseIdentity, String credentialSecretReference,
 			PostgreSQLContainer container, String runtimePassword) { }
 
+	private record CatalogFixtureProjection(String catalogItemId, String productCode, UUID productId,
+			String familyCode, String skuCode, UUID sellableSkuId, boolean buyerVisible,
+			boolean provisionalReference, String sourcePriceCode) { }
+
 	private static final class CountingFactory implements com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDataSourceFactory {
 		private final HikariTenantBusinessDatabaseDataSourceFactory delegate;
 		private final java.util.concurrent.CopyOnWriteArrayList<String> createdSecrets = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -678,5 +858,11 @@ class TenantBusinessDatabaseRouterIT {
 			Thread.currentThread().interrupt();
 			throw new IllegalStateException("Interrupted while awaiting test transaction release", exception);
 		}
+	}
+
+	private static Throwable rootCause(Throwable exception) {
+		Throwable root = exception;
+		while (root.getCause() != null) root = root.getCause();
+		return root;
 	}
 }
