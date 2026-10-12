@@ -131,7 +131,7 @@ public class ApiSecurityConfiguration {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Resume-Token", "X-Organization-Registration-Token", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-Client", "X-Nexa-Context-Ticket", InternalOperatorAuthenticationFilter.OPERATOR_ID_HEADER, InternalOperatorAuthenticationFilter.OPERATOR_TOKEN_HEADER));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Resume-Token", "X-Organization-Registration-Token", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-Client", "X-Nexa-Context-Ticket"));
 		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-ID", "X-Trace-ID"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();
