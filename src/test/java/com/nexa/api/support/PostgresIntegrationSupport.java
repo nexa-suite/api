@@ -63,7 +63,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 		"nexa.tenant-business.business-traceability.enabled=true",
 		"nexa.tenant-business.notifications.enabled=true",
 		"nexa.business-traceability.worker-delay-ms=3600000",
-		"nexa.scheduling.enabled=false"
+		"nexa.scheduling.enabled=false",
+		"spring.modulith.moments.enabled=false"
 })
 @Import(TenantBusinessIntegrationTestConfiguration.class)
 public abstract class PostgresIntegrationSupport {

@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -100,6 +101,11 @@ class TenantBusinessCapabilitiesContextIT extends NexaWorkflowIntegrationSupport
         assertThat(jdbc.queryForObject("select rolcanlogin and not rolinherit and not rolbypassrls "
                 + "and not exists (select 1 from pg_auth_members where member=pg_roles.oid or roleid=pg_roles.oid) "
                 + "from pg_roles where rolname='nexa_business_documents_scope_reader'", Boolean.class)).isTrue();
+    }
+
+    @Test
+    void backgroundSchedulersRemainDisabledDuringIntegrationTests() {
+        assertThat(context.getBeansOfType(ScheduledAnnotationBeanPostProcessor.class)).isEmpty();
     }
 
     @Test
