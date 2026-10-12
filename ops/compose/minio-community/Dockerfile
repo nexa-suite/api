@@ -43,9 +43,14 @@ COPY --from=minio-build /src/dockerscripts/docker-entrypoint.sh /usr/bin/docker-
 COPY --from=minio-build /src/LICENSE /licenses/minio-LICENSE
 COPY --from=mc-build /out/mc /usr/bin/mc
 COPY --from=mc-build /src/LICENSE /licenses/mc-LICENSE
-RUN chmod 0755 /usr/bin/minio /usr/bin/mc /usr/bin/docker-entrypoint.sh
+RUN addgroup -S -g 10001 minio \
+    && adduser -S -D -H -u 10001 -G minio minio \
+    && mkdir -p /data \
+    && chown minio:minio /data \
+    && chmod 0755 /usr/bin/minio /usr/bin/mc /usr/bin/docker-entrypoint.sh
 
 EXPOSE 9000 9001
 VOLUME ["/data"]
+USER 10001:10001
 ENTRYPOINT ["/usr/bin/docker-entrypoint.sh"]
 CMD ["minio"]
