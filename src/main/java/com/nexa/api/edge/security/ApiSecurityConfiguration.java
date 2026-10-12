@@ -3,6 +3,9 @@ package com.nexa.api.edge.security;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -12,14 +15,16 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.core.annotation.Order;
-import tools.jackson.databind.ObjectMapper;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.Arrays;
 import java.util.List;
@@ -28,6 +33,11 @@ import java.util.Set;
 @Configuration(proxyBeanMethods = false)
 @EnableMethodSecurity
 public class ApiSecurityConfiguration {
+	private static final Set<String> BROWSER_SESSION_POSTS = Set.of(
+			"/api/v1/authentication/sign-in",
+			"/api/v1/authentication/refresh",
+			"/api/v1/authentication/sign-out");
+
 	@Bean
 	@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 	@Order(-200)
@@ -35,7 +45,7 @@ public class ApiSecurityConfiguration {
 			InternalOperatorAuthenticationFilter operatorFilter, CorsConfigurationSource corsConfigurationSource,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) throws Exception {
 		http.securityMatcher("/api/v1/internal/console/**", "/api/v1/internal/support/**")
-				.csrf(AbstractHttpConfigurer::disable)
+				.csrf(csrf -> csrf.ignoringRequestMatchers("/api/v1/internal/console/**", "/api/v1/internal/support/**"))
 				.cors(cors -> cors.configurationSource(corsConfigurationSource))
 				.formLogin(AbstractHttpConfigurer::disable)
 				.httpBasic(AbstractHttpConfigurer::disable)
@@ -54,7 +64,9 @@ public class ApiSecurityConfiguration {
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler) throws Exception {
 		http.securityMatcher("/api/v1/internal/organization-registrations/*/activation",
 				"/api/v1/internal/organization-registrations/*/rejection")
-				.csrf(AbstractHttpConfigurer::disable)
+				.csrf(csrf -> csrf.ignoringRequestMatchers(
+						"/api/v1/internal/organization-registrations/*/activation",
+						"/api/v1/internal/organization-registrations/*/rejection"))
 				.cors(AbstractHttpConfigurer::disable)
 				.formLogin(AbstractHttpConfigurer::disable)
 				.httpBasic(AbstractHttpConfigurer::disable)
@@ -71,56 +83,61 @@ public class ApiSecurityConfiguration {
 	SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, Environment environment,
 			AuthenticationEntryPoint authenticationEntryPoint, AccessDeniedHandler accessDeniedHandler,
 			ObjectMapper objectMapper, JwtAuthenticationConverter jwtAuthenticationConverter,
+			CsrfTokenRepository csrfTokenRepository,
 			ObjectProvider<CurrentAccessContextFilter> currentAccessContextFilter) throws Exception {
-				boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
-				boolean observabilityProfile = environment.acceptsProfiles(Profiles.of("observability"));
-				boolean swaggerEnabled = localProfile
-						|| Boolean.parseBoolean(environment.getProperty("nexa.swagger.enabled", "false"))
-						|| Boolean.parseBoolean(environment.getProperty("springdoc.swagger-ui.enabled", "false"))
-						|| Boolean.parseBoolean(environment.getProperty("springdoc.api-docs.enabled", "false"));
+		boolean localProfile = environment.acceptsProfiles(Profiles.of("local"));
+		boolean observabilityProfile = environment.acceptsProfiles(Profiles.of("observability"));
+		boolean swaggerEnabled = localProfile
+				|| Boolean.parseBoolean(environment.getProperty("nexa.swagger.enabled", "false"))
+				|| Boolean.parseBoolean(environment.getProperty("springdoc.swagger-ui.enabled", "false"))
+				|| Boolean.parseBoolean(environment.getProperty("springdoc.api-docs.enabled", "false"));
 		Set<String> allowedOrigins = allowedOrigins(environment);
 		String contentSecurityPolicyDirectives = swaggerEnabled
 				? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
 				: "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
-			http.csrf(AbstractHttpConfigurer::disable)
-				.headers(headers -> {
-					headers.contentSecurityPolicy(policy -> policy.policyDirectives(contentSecurityPolicyDirectives));
-					headers.contentTypeOptions(content -> { });
-					headers.referrerPolicy(referrer -> referrer.policy(org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER));
-					headers.permissionsPolicy(permissions -> permissions.policy("camera=(), microphone=(), geolocation=()"));
-					if (!localProfile) headers.httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).preload(true));
-				})
-				.cors(cors -> cors.configurationSource(corsConfigurationSource(environment)))
-				.formLogin(AbstractHttpConfigurer::disable)
-				.httpBasic(AbstractHttpConfigurer::disable)
-				.logout(AbstractHttpConfigurer::disable)
-				.requestCache(AbstractHttpConfigurer::disable)
-				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-				.addFilterBefore(new CookieOriginGuardFilter(objectMapper, allowedOrigins), BearerTokenAuthenticationFilter.class)
-				.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint).accessDeniedHandler(accessDeniedHandler))
-				.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
-						.authenticationEntryPoint(authenticationEntryPoint))
-				.authorizeHttpRequests(authorize -> {
+		http.csrf(csrf -> csrf
+				.csrfTokenRepository(csrfTokenRepository)
+				.csrfTokenRequestHandler(new XorCsrfTokenRequestAttributeHandler())
+				.requireCsrfProtectionMatcher(browserSessionCsrfRequestMatcher()))
+			.headers(headers -> {
+				headers.contentSecurityPolicy(policy -> policy.policyDirectives(contentSecurityPolicyDirectives));
+				headers.contentTypeOptions(content -> { });
+				headers.referrerPolicy(referrer -> referrer.policy(
+						org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER));
+				headers.permissionsPolicy(permissions -> permissions.policy("camera=(), microphone=(), geolocation=()"));
+				if (!localProfile) headers.httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).preload(true));
+			})
+			.cors(cors -> cors.configurationSource(corsConfigurationSource(environment)))
+			.formLogin(AbstractHttpConfigurer::disable)
+			.httpBasic(AbstractHttpConfigurer::disable)
+			.logout(AbstractHttpConfigurer::disable)
+			.requestCache(AbstractHttpConfigurer::disable)
+			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+			.addFilterBefore(new CookieOriginGuardFilter(objectMapper, allowedOrigins), BearerTokenAuthenticationFilter.class)
+			.exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint)
+					.accessDeniedHandler(accessDeniedHandler))
+			.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
+				.authenticationEntryPoint(authenticationEntryPoint))
+			.authorizeHttpRequests(authorize -> {
 				authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
-					if (observabilityProfile) {
-						if (localProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
-						else authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").authenticated();
-					}
-					if (swaggerEnabled) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
-						authorize.requestMatchers("/api/v1/authentication/sign-in", "/api/v1/authentication/identity-sign-in",
-						"/api/v1/authentication/refresh", "/api/v1/me/access-contexts", "/api/v1/me/access-context-selections",
+				if (observabilityProfile) {
+					if (localProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();
+					else authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").authenticated();
+				}
+				if (swaggerEnabled) authorize.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
+				authorize.requestMatchers("/api/v1/authentication/csrf", "/api/v1/authentication/sign-in",
+						"/api/v1/authentication/identity-sign-in", "/api/v1/authentication/refresh",
+						"/api/v1/me/access-contexts", "/api/v1/me/access-context-selections",
 						"/api/v1/authentication/sign-out", "/api/v1/auth/workspace-previews",
-						"/api/v1/integrations/stripe/webhooks",
-						"/api/v1/auth/password-reset-requests", "/api/v1/auth/password-resets",
-						"/api/v1/organization-invitation-acceptances",
-						"/api/v1/public/contact-requests",
-						"/api/v1/tenant-management/organization-registration-drafts",
+						"/api/v1/integrations/stripe/webhooks", "/api/v1/auth/password-reset-requests",
+						"/api/v1/auth/password-resets", "/api/v1/organization-invitation-acceptances",
+						"/api/v1/public/contact-requests", "/api/v1/tenant-management/organization-registration-drafts",
 						"/api/v1/tenant-management/organization-registration-drafts/**",
 						"/api/v1/tenant-management/organization-registrations",
 						"/api/v1/tenant-management/organization-registrations/**").permitAll();
-					authorize.requestMatchers("/api/**").authenticated();
-					authorize.anyRequest().denyAll();
-					});
+				authorize.requestMatchers("/api/**").authenticated();
+				authorize.anyRequest().denyAll();
+			});
 		CurrentAccessContextFilter accessFilter = currentAccessContextFilter.getIfAvailable();
 		if (accessFilter != null) http.addFilterAfter(accessFilter, BearerTokenAuthenticationFilter.class);
 		return http.build();
@@ -131,12 +148,30 @@ public class ApiSecurityConfiguration {
 		var configuration = new CorsConfiguration();
 		configuration.setAllowedOrigins(List.copyOf(allowedOrigins(environment)));
 		configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Resume-Token", "X-Organization-Registration-Token", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-Client", "X-Nexa-Context-Ticket"));
+		configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "If-Match", "Idempotency-Key", "X-Resume-Token", "X-Organization-Registration-Token", "X-Correlation-Id", "X-Trace-ID", "X-Nexa-Surface", "X-Nexa-Client", "X-Nexa-Context-Ticket", "X-Nexa-CSRF"));
 		configuration.setExposedHeaders(List.of("ETag", "X-Correlation-ID", "X-Trace-ID"));
 		configuration.setAllowCredentials(true);
 		var source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/**", configuration);
 		return source;
+	}
+
+	@Bean
+	CsrfTokenRepository csrfTokenRepository(Environment environment,
+			@Value("${nexa.security.refresh-cookie-secure:true}") boolean configuredSecureCookie) {
+		var repository = new CookieCsrfTokenRepository();
+		repository.setCookieName("NEXA_CSRF");
+		repository.setHeaderName("X-Nexa-CSRF");
+		repository.setCookiePath("/api/v1/authentication");
+		boolean secureCookie = !environment.acceptsProfiles(Profiles.of("local")) || configuredSecureCookie;
+		repository.setCookieCustomizer(cookie -> cookie.httpOnly(true).secure(secureCookie).sameSite("Strict"));
+		return repository;
+	}
+
+	private static RequestMatcher browserSessionCsrfRequestMatcher() {
+		return request -> "POST".equalsIgnoreCase(request.getMethod())
+				&& BROWSER_SESSION_POSTS.contains(request.getRequestURI())
+				&& !CookieOriginGuardFilter.isNativeSessionTransport(request);
 	}
 
 	private static Set<String> allowedOrigins(Environment environment) {

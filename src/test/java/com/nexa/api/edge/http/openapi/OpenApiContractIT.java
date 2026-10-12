@@ -24,6 +24,8 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertNullableMoneyProperty(document, "CatalogItemDetailResponse", "basePrice");
         assertNullableMoneyProperty(document, "CatalogItemDetailResponse", "currentOfferPrice");
         assertThat(document.get("paths").has("/api/v1/authentication/identity-sign-in")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/authentication/csrf")).isTrue();
+        assertThat(document.get("paths").get("/api/v1/authentication/csrf").has("get")).isTrue();
         assertThat(document.get("paths").has("/api/v1/me/access-contexts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/me/access-context-selections")).isTrue();
         assertRequiredHeader(document, "/api/v1/authentication/identity-sign-in", "post", "X-Nexa-Client");

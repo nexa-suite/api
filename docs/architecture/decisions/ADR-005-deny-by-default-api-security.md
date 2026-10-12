@@ -13,7 +13,7 @@ Every reachable business endpoint must have authenticated, active membership and
 - Every `/api/**` route and every other unspecified route is denied by default.
 - Anonymous business access returns `401` Problem Details.
 - Authenticated access without an approved authorization rule returns `403` Problem Details.
-- Form login, HTTP Basic, CSRF state, logout and sessions are disabled for this stateless API foundation.
+- Form login, HTTP Basic, framework logout and session creation remain disabled for this stateless API. CSRF validation protects browser cookie-based sign-in, refresh and sign-out; only explicitly authenticated internal service routes and the validated native session transport are exempt from browser CSRF state.
 - After JWT verification, every bearer request is revalidated against the active user, tenant, workspace and membership rows, including membership and role claim equality; DB-derived permissions replace token permissions for the request. A valid bearer token with an invalid active context returns `403 ACCESS_CONTEXT_INVALID`.
 
 ## Consequences
