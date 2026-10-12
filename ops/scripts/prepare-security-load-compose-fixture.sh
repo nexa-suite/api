@@ -169,7 +169,7 @@ SQL
 	fi
 	worker_log="$API_DIRECTORY/.local/tenant-provisioning-worker/worker.log"
 	if [[ -f "$worker_log" && ! -L "$worker_log" ]]; then
-		safe_lines="$(grep -Ei 'provisioning.*failed|failed to|could not|must be|requires|unsupported|invalid|unavailable|refusing|cannot|unable|error|exception|migration.*(error|fail)' "$worker_log" \
+		safe_lines="$(grep -Ei 'PROVISIONER_FAILURE:|provisioning.*failed|failed to|could not|must be|requires|unsupported|invalid|unavailable|refusing|cannot|unable|error|exception|migration.*(error|fail)' "$worker_log" \
 			| tail -n 30 \
 			| sed -E \
 				-e 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/[EMAIL]/g' \

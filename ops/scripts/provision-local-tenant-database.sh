@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-fail() { printf '%s\n' "$1" >&2; exit 1; }
+fail() { printf 'PROVISIONER_FAILURE: %s\n' "$1" >&2; exit 1; }
 usage() {
 	printf '%s\n' 'Usage: ops/scripts/provision-local-tenant-database.sh <tenant-uuid> <workspace-uuid> <loopback-port> [--retry-failed] [--task-id <uuid> --claim-token <uuid>] [--workspace-anchor-only --workspace-task-id <uuid> --claim-token <uuid>] [--central-configfile <private-file> --local-state-dir <private-directory>]' >&2
 }
