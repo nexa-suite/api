@@ -180,7 +180,10 @@ services:
       retries: 12
 
   modern-minio:
-    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
+    image: nexa/minio-community:RELEASE.2025-10-15T17-29-55Z
+    build:
+      context: ./minio-community
+      dockerfile: Dockerfile
     container_name: nexa-modern-minio
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
