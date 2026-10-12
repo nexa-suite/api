@@ -26,11 +26,17 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         UUID account = UUID.fromString(clientAccountId);
-        String addressId = tenantJdbc().queryForObject("select id::text from sales.client_account_address "
-                        + "where tenant_id=? and workspace_id=? and client_account_id=? and label=? and status='ACTIVE'",
-                String.class, tenant, workspace, account, "Buyer delivery · CLI-001");
+        UUID addressId = UUID.randomUUID();
+        int insertedAddress = tenantJdbc().update("insert into sales.client_account_address "
+                        + "(id,tenant_id,workspace_id,client_account_id,label,recipient_name,address_line,"
+                        + "department_code,province_code,district_code,source,"
+                        + "default_address,status,version,created_at,updated_at) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,'MANUAL',false,'ACTIVE',0,current_timestamp,current_timestamp)",
+                addressId, tenant, workspace, account, "Ungeocoded route preview destination", "Buyer recipient",
+                "Av. Sucre 1992", "15", "1501", "150121");
+        assertThat(insertedAddress).isEqualTo(1);
         assertThat(tenantJdbc().queryForObject("select latitude is null and longitude is null "
-                + "from sales.client_account_address where id=?", Boolean.class, UUID.fromString(addressId))).isTrue();
+                + "from sales.client_account_address where id=?", Boolean.class, addressId)).isTrue();
 
         MvcResult created = mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts")
                         .header("Authorization", "Bearer " + buyer)
@@ -43,7 +49,10 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
                         .header("If-Match", created.getResponse().getHeader("ETag"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"addressId\":\"" + addressId + "\"}"))
-                .andExpect(status().isOk()).andReturn();
+                .andReturn();
+        assertThat(destination.getResponse().getStatus())
+                .as("Destination selection failed: %s", json(destination).path("detail").asText())
+                .isEqualTo(200);
 
         mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/route-previews")
                         .header("Authorization", "Bearer " + buyer)
