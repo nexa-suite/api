@@ -866,7 +866,7 @@ if [[ "$WORKSPACE_ANCHOR_ONLY" == 1 ]]; then
 	ensure_api_tenant_network
 	ready=0
 	for _ in $(seq 1 60); do
-		if tenant_compose exec -T tenant-database pg_isready -U nexa_tenant_bootstrap_admin -d nexa_tenant_business >/dev/null 2>&1; then ready=1; break; fi
+		if tenant_compose exec -T tenant-database pg_isready -h 127.0.0.1 -U nexa_tenant_bootstrap_admin -d nexa_tenant_business >/dev/null 2>&1; then ready=1; break; fi
 		sleep 1
 	done
 	[[ "$ready" == 1 ]] || fail 'The existing Tenant PostgreSQL service is not ready for scope projection.'
@@ -986,7 +986,7 @@ tenant_compose up -d tenant-database
 ensure_api_tenant_network
 ready=0
 for _ in $(seq 1 60); do
-	if tenant_compose exec -T tenant-database pg_isready -U nexa_tenant_bootstrap_admin -d nexa_tenant_business >/dev/null 2>&1; then ready=1; break; fi
+	if tenant_compose exec -T tenant-database pg_isready -h 127.0.0.1 -U nexa_tenant_bootstrap_admin -d nexa_tenant_business >/dev/null 2>&1; then ready=1; break; fi
 	sleep 1
 done
 [[ "$ready" == 1 ]] || fail 'The local Tenant PostgreSQL service did not become ready.'
