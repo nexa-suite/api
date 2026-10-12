@@ -142,7 +142,8 @@ central_psql() {
 		-X -qAt -v ON_ERROR_STOP=1 -U nexa_runtime -d nexa "$@"
 }
 report_provisioning_failure() {
-	local diagnostic worker_log safe_lines
+	local diagnostic worker_log safe_lines tenant_database_container_id tenant_database_state tenant_database_log
+	local -a tenant_database_containers=()
 	if diagnostic="$(central_psql -v tenant_id="$tenant_id" -v workspace_id="$workspace_id" <<'SQL' 2>/dev/null
 SET app.current_tenant_id = :'tenant_id';
 SET app.current_workspace_id = :'workspace_id';
@@ -166,6 +167,32 @@ SQL
 			"$(printf '%s' "$diagnostic" | tr -cd 'A-Za-z0-9_|.-')" >&2
 	else
 		printf '%s\n' 'Provisioning diagnostic query failed; no database error details were emitted.' >&2
+	fi
+	mapfile -t tenant_database_containers < <(docker ps -aq \
+		--filter "label=com.docker.compose.project=nexa-tenant-db-$tenant_id" \
+		--filter 'label=com.docker.compose.service=tenant-database' || true)
+	if [[ "${#tenant_database_containers[@]}" == 1 ]]; then
+		tenant_database_container_id="${tenant_database_containers[0]}"
+		tenant_database_state="$(docker inspect --format '{{.State.Status}}|{{.State.ExitCode}}|{{.State.OOMKilled}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
+			"$tenant_database_container_id" 2>/dev/null || printf 'unavailable')"
+		printf 'Tenant PostgreSQL container state (status|exit|oom|restarts|health): %s\n' \
+			"$(printf '%s' "$tenant_database_state" | tr -cd 'A-Za-z0-9_|.-')" >&2
+		tenant_database_log="$(docker logs --tail 100 "$tenant_database_container_id" 2>&1 \
+			| grep -Ei 'FATAL:|PANIC:|database system|no space|permission denied|could not|killed|shut down|ready to accept' \
+			| tail -n 12 \
+			| sed -E \
+				-e 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/[EMAIL]/g' \
+				-e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[UUID]/g' \
+				-e 's/(password|secret|token|credential|authorization)[^:= ]*([:=])[[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig' \
+				-e 's#jdbc:[^[:space:]]+#[JDBC_URL]#Ig' \
+			| cut -c 1-320 || true)"
+		if [[ -n "$tenant_database_log" ]]; then
+			printf 'Sanitized Tenant PostgreSQL diagnostics:\n%s\n' "$tenant_database_log" >&2
+		else
+			printf '%s\n' 'No safe Tenant PostgreSQL failure lines were available.' >&2
+		fi
+	else
+		printf 'Tenant PostgreSQL container count for scoped project: %s\n' "${#tenant_database_containers[@]}" >&2
 	fi
 	worker_log="$API_DIRECTORY/.local/tenant-provisioning-worker/worker.log"
 	if [[ -f "$worker_log" && ! -L "$worker_log" ]]; then
