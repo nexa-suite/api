@@ -148,6 +148,12 @@ worker_state="$api_dir/.local/tenant-provisioning-worker"
 pid_file="$worker_state/worker.pid"
 ready_file="$worker_state/worker.ready"
 log_file="$worker_state/worker.log"
+maven_home_directory="${HOME:-}"
+if [ -z "$maven_home_directory" ]; then
+	printf '%s\n' 'Local Tenant provisioning worker requires a user home for the Maven Wrapper.' >&2
+	exit 1
+fi
+maven_user_home="${MAVEN_USER_HOME:-$maven_home_directory/.m2}"
 if [ -L "$api_dir/.local" ] || [ -L "$worker_state" ]; then
 	printf '%s\n' 'Local Tenant provisioning worker state cannot be a symbolic link.' >&2
 	exit 1
@@ -176,7 +182,8 @@ if [ -e "$log_file" ] && [ ! -f "$log_file" ]; then
 	printf '%s\n' 'Local Tenant provisioning worker log is not a regular file.' >&2
 	exit 1
 fi
-nohup env -i PATH="$PATH" "$worker_script" >> "$log_file" 2>&1 </dev/null &
+nohup env -i PATH="$PATH" HOME="$maven_home_directory" MAVEN_USER_HOME="$maven_user_home" \
+	"$worker_script" >> "$log_file" 2>&1 </dev/null &
 worker_pid=$!
 pid_temporary="$pid_file.$$.tmp"
 printf '%s\n' "$worker_pid" > "$pid_temporary"
