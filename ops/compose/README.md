@@ -23,11 +23,15 @@ To run both stacks for comparison:
 Modern expone API `8080`, Platform `4200` y Portal `4300`. PostgreSQL no publica puerto y vive en `nexa-modern-data`.
 
 The Modern startup script follows `NEXA_MODERN_SPRING_PROFILE`: profiles that
-include `minio` or `s3` start and wait for the MinIO service before the API;
-`local` uses the private filesystem adapter and does not start MinIO. The
-security/load workflow uses that local adapter because its runner cannot
-authorize a pull of the pinned MinIO image. This keeps document workflows
-enabled in that runtime; it does not verify the S3-compatible adapter.
+include `minio` or `s3` build and start the pinned MinIO Community Edition image,
+then wait for its health check before starting the API. `local` alone uses the
+private filesystem adapter. The security/load workflow uses `local,minio` and
+runs an S3 adapter integration test against that MinIO service. The source
+build is pinned to MinIO `RELEASE.2025-10-15T17-29-55Z` and `mc`
+`RELEASE.2025-08-13T08-35-41Z`; see `minio-community/Dockerfile`. MinIO
+Community Edition is archived upstream, so this Compose service supports
+development and verification only. Select a maintained object-storage
+provider before the Production Gate.
 
 Legacy expone API ASP.NET `5068`, Platform Vue `5173` y Portal Vue `5174`. PostgreSQL no publica puerto y vive en `nexa-legacy-data`.
 
