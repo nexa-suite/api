@@ -350,7 +350,17 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
     }
 
     private String accessTokenForWorkspace(String email, String surface, String workspaceSlug) throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/v1/authentication/sign-in").header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
+        MvcResult csrfBootstrap = mockMvc.perform(get("/api/v1/authentication/csrf")
+                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
+                .andExpect(status().isOk()).andReturn();
+        String csrfToken = tools.jackson.databind.json.JsonMapper.shared()
+                .readTree(csrfBootstrap.getResponse().getContentAsString()).get("token").asText();
+        var csrfCookie = csrfBootstrap.getResponse().getCookie("NEXA_CSRF");
+        if (csrfToken.isBlank() || csrfCookie == null) {
+            throw new IllegalStateException("Browser CSRF bootstrap must return its request token and cookie");
+        }
+        MvcResult result = mockMvc.perform(post("/api/v1/authentication/sign-in").cookie(csrfCookie)
+                        .header("X-Nexa-CSRF", csrfToken).header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"identifier\":\"" + email + "\",\"password\":\"" + TEST_PASSWORD
                                 + "\",\"workspaceSlug\":\"" + workspaceSlug + "\",\"surface\":\"" + surface + "\"}"))
