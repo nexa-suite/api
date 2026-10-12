@@ -42,9 +42,15 @@ def _resolve(schema, components):
 
 
 def _nullable_union_value_schema(schema):
-    """Return a sole non-null anyOf branch when the other branch is JSON null."""
+    """Normalize supported nullable schemas to their single non-null value branch."""
     if not isinstance(schema, dict):
         return None
+    declared_type = schema.get("type")
+    if (isinstance(declared_type, list) and len(declared_type) == 2
+            and declared_type.count("null") == 1):
+        value_type = next(value for value in declared_type if value != "null")
+        if isinstance(value_type, str):
+            return {**schema, "type": value_type}
     alternatives = schema.get("anyOf")
     if not isinstance(alternatives, list) or len(alternatives) != 2:
         return None

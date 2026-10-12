@@ -1,11 +1,13 @@
 package com.nexa.api.bootstrap.runtime.presentation;
 
+import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferenceView;
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationPreferencesView;
 import com.nexa.api.notifications.application.publicapi.TenantNotificationSettingsCommands;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.TenantConfigurationModels;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,24 +43,42 @@ public final class TenantNotificationSettingsController {
     }
 
     @GetMapping("/workspaces/{workspaceId}/notifications")
-    public ResponseEntity<NotificationPreferencesView> notifications(
+    public ResponseEntity<TenantConfigurationModels.NotificationSettingsView> notifications(
             @RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
             @PathVariable String workspaceId) {
         var value = settings.settings(context, workspaceUuid(workspaceId));
-        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+        return ResponseEntity.ok().eTag(etag(value.version())).body(legacyView(value));
     }
 
     @PatchMapping("/workspaces/{workspaceId}/notifications")
-    public ResponseEntity<NotificationPreferencesView> updateNotifications(
+    public ResponseEntity<TenantConfigurationModels.NotificationSettingsView> updateNotifications(
             @RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
             @PathVariable String workspaceId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @RequestBody NotificationPreferencesView request, HttpServletRequest servletRequest) {
+            @RequestBody TenantConfigurationModels.NotificationSettingsView request,
+            HttpServletRequest servletRequest) {
         long expectedVersion = version(ifMatch);
-        var normalizedRequest = new NotificationPreferencesView(request.preferences(), expectedVersion);
+        var normalizedRequest = currentView(request, expectedVersion);
         var value = settings.updateSettings(context, workspaceUuid(workspaceId), normalizedRequest,
                 expectedVersion, correlation(servletRequest));
-        return ResponseEntity.ok().eTag(etag(value.version())).body(value);
+        return ResponseEntity.ok().eTag(etag(value.version())).body(legacyView(value));
+    }
+
+    private static TenantConfigurationModels.NotificationSettingsView legacyView(NotificationPreferencesView value) {
+        var preferences = value.preferences().stream()
+                .map(preference -> new TenantConfigurationModels.NotificationPreferenceView(
+                        preference.eventCategory(), preference.channel(), preference.enabled(), preference.version()))
+                .toList();
+        return new TenantConfigurationModels.NotificationSettingsView(preferences, value.version());
+    }
+
+    private static NotificationPreferencesView currentView(
+            TenantConfigurationModels.NotificationSettingsView value, long version) {
+        var preferences = value.preferences().stream()
+                .map(preference -> new NotificationPreferenceView(
+                        preference.eventCategory(), preference.channel(), preference.enabled(), preference.version()))
+                .toList();
+        return new NotificationPreferencesView(preferences, version);
     }
 
     private static UUID workspaceUuid(String value) {

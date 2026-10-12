@@ -1,10 +1,11 @@
 package com.nexa.api.fulfillmentdelivery.application.model;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import io.swagger.v3.oas.annotations.media.Schema;
 
 public final class FulfillmentModels {
     private FulfillmentModels() { }
@@ -41,7 +42,7 @@ public final class FulfillmentModels {
      * the handoff command. The Warehouse actor field is retained for historical rows only; a matching
      * outgoing-goods check does not establish who physically transferred the goods.
      */
-    @Schema(name = "FulfillmentHandoffEvidence")
+    @Schema(name = "HandoffEvidence")
     public record HandoffEvidence(UUID id, UUID fulfillmentId, long fulfillmentVersion,
                                   UUID deliveryId,
                                   @Schema(description = "Legacy Warehouse actor value retained for historical rows; null for new handoffs unless independently verified physical-transfer evidence exists.", nullable = true, requiredMode = Schema.RequiredMode.NOT_REQUIRED)

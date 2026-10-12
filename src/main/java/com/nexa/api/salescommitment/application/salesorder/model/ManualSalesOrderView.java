@@ -1,7 +1,8 @@
 package com.nexa.api.salescommitment.application.salesorder.model;
 
-import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.customerbuyerrelationships.contract.Address;
+import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.modulith.NamedInterface;
 
 import java.math.BigDecimal;
@@ -21,22 +22,27 @@ public record ManualSalesOrderView(String id, String number, String tenantId, St
     }
 
     @NamedInterface(value = "sales-public", propagate = false)
+    @Schema(name = "ManualSalesOrderSnapshot")
     public record SnapshotView(DeliveryView delivery, CommercialView commercial, PaymentView payment,
                                Instant capturedAt, String notes) { }
 
     @NamedInterface(value = "sales-public", propagate = false)
+    @Schema(name = "DeliverySnapshot")
     public record DeliveryView(LocalDate requestedDate, String notes, DeliveryAddressView address,
                                WarehouseView warehouse, RouteView route) { }
 
     @NamedInterface(value = "sales-public", propagate = false)
+    @Schema(name = "DeliveryAddressSnapshot")
     public record DeliveryAddressView(String id, String label, Address address, boolean defaultAddress) { }
 
     @NamedInterface(value = "sales-public", propagate = false)
+    @Schema(name = "WarehouseSnapshot")
     public record WarehouseView(String id, String code, String name, String address, String selectionReason,
                                String serviceStatus, int priority, boolean preferred, Instant selectedAt,
                                BigDecimal latitude, BigDecimal longitude) { }
 
     @NamedInterface(value = "sales-public", propagate = false)
+    @Schema(name = "RouteSnapshot")
     public record RouteView(String provider, String reference, String originLabel, String destinationLabel,
                             long distanceMeters, long durationSeconds, String previewUrl,
                             BigDecimal originLatitude, BigDecimal originLongitude,
@@ -44,19 +50,28 @@ public record ManualSalesOrderView(String id, String number, String tenantId, St
                             Instant calculatedAt, String mode, String path) { }
 
     @NamedInterface(value = "sales-public", propagate = false)
+    @Schema(name = "CommercialSnapshot")
     public record CommercialView(String clientAccountId, String businessName, String commercialName,
                                  String taxIdentifier, CreditView credit, PaymentTermsView paymentTerms,
                                  boolean active) { }
 
     @NamedInterface(value = "sales-public", propagate = false)
-    public record CreditView(BigDecimal limit, BigDecimal used, String status) {
+    @Schema(name = "CreditProfile")
+    public record CreditView(BigDecimal limit, BigDecimal used,
+                             @Schema(allowableValues = {"AVAILABLE", "ATTENTION", "BLOCKED", "OVERDUE"})
+                             String status) {
         public BigDecimal available() { return limit.subtract(used).max(BigDecimal.ZERO); }
     }
 
     @NamedInterface(value = "sales-public", propagate = false)
+    @Schema(name = "PaymentTerms")
     public record PaymentTermsView(String code, String label, int dueDays, boolean credit) { }
 
     @NamedInterface(value = "sales-public", propagate = false)
-    public record PaymentView(String option, String termsCode, BigDecimal amount, String currency,
-                              boolean creditAuthorized) { }
+    @Schema(name = "PaymentSnapshot")
+    public record PaymentView(
+            @Schema(allowableValues = {"CREDIT_LINE", "BANK_TRANSFER", "CARD_STRIPE", "WALLET",
+                    "CASH", "CASH_ON_DELIVERY", "PREPAID", "IMMEDIATE"})
+            String option, String termsCode, BigDecimal amount, String currency,
+            boolean creditAuthorized) { }
 }
