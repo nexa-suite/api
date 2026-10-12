@@ -154,7 +154,7 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
         assertThat(body).isNotNull();
         UUID documentId = UUID.fromString(body.asText());
         assertThat(json(response).get("status").asText()).isEqualTo("PENDING");
-        assertThat(jdbc.queryForObject("select count(*) from business_documents.document_generation_request "
+        assertThat(tenantJdbc().queryForObject("select count(*) from business_documents.document_generation_request "
                         + "where tenant_id=? and workspace_id=? and document_id=? and requested_by_membership_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), documentId,
                 UUID.fromString(membershipId(OWNER_EMAIL)))).isEqualTo(1);
@@ -190,13 +190,13 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         UUID subject = UUID.fromString(salesOrderId);
-        int documents = jdbc.queryForObject("select count(*) from business_documents.business_document "
+        int documents = tenantJdbc().queryForObject("select count(*) from business_documents.business_document "
                         + "where tenant_id=? and workspace_id=? and subject_type='SALES_ORDER' and subject_id=? and document_type='ORDER_SUMMARY'",
                 Integer.class, tenant, workspace, subject);
-        int requests = jdbc.queryForObject("select count(*) from business_documents.document_generation_request "
+        int requests = tenantJdbc().queryForObject("select count(*) from business_documents.document_generation_request "
                         + "where tenant_id=? and workspace_id=? and subject_type='SALES_ORDER' and subject_id=? and document_type='ORDER_SUMMARY'",
                 Integer.class, tenant, workspace, subject);
-        int outboxEvents = jdbc.queryForObject("select count(*) from integration.outbox_event "
+        int outboxEvents = tenantJdbc().queryForObject("select count(*) from integration.outbox_event "
                         + "where tenant_id=? and workspace_id=? and event_type='BUSINESS_DOCUMENT_GENERATION_REQUESTED' "
                         + "and payload->>'subjectId'=?",
                 Integer.class, tenant, workspace, subject.toString());
@@ -207,7 +207,7 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
         UUID documentId = UUID.randomUUID();
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID clientAccount = UUID.fromString(jdbc.queryForObject(
+        UUID clientAccount = UUID.fromString(tenantJdbc().queryForObject(
                 "select client_account_id::text from sales.sales_order where tenant_id=? and workspace_id=? and id=?",
                 String.class, tenant, workspace, UUID.fromString(salesOrderId)));
         Instant now = Instant.now();
@@ -215,12 +215,12 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
         byte[] content = "%PDF-1.7\nNexa issued document".getBytes(StandardCharsets.US_ASCII);
         ObjectStoragePort.StoredObject stored = storage.put(objectKey, new ByteArrayInputStream(content), content.length,
                 "application/pdf");
-        jdbc.update("insert into business_documents.object_storage_object "
+        tenantJdbc().update("insert into business_documents.object_storage_object "
                         + "(object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) "
                         + "values (?,?,?,?,?,?,?,?,?)",
                 stored.objectKey(), tenant, workspace, "nexa-private", stored.checksumSha256(), stored.contentType(),
                 stored.byteSize(), true, Timestamp.from(now));
-        jdbc.update("insert into business_documents.business_document "
+        tenantJdbc().update("insert into business_documents.business_document "
                         + "(id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,format,storage_object_key,checksum_sha256,content_type,byte_size,generated_at,created_at,updated_at) "
                         + "values (?,?,?,?,?,?,?,1,'GENERATED','PDF',?,?,?,?,?,?,?)",
                 documentId, tenant, workspace, clientAccount, "SALES_ORDER", UUID.fromString(salesOrderId),

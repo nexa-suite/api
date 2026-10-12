@@ -250,7 +250,7 @@ class WarehouseDiscrepancyApiIntegrationTests extends PostgresIntegrationSupport
         assertLot(lot.id(), "8", "AVAILABLE", 1);
         assertThat(movementCount(lot.id())).isEqualTo(movementsBefore + 1);
         assertThat(eventCount(lot.id())).isEqualTo(eventsBefore + 1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_cycle_count_correction where cycle_count_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_cycle_count_correction where cycle_count_id=?",
                 Integer.class, UUID.fromString(countId))).isEqualTo(1);
 
         MvcResult replayedCorrection = mockMvc.perform(post(correctionPath)
@@ -296,7 +296,7 @@ class WarehouseDiscrepancyApiIntegrationTests extends PostgresIntegrationSupport
                         .header("Idempotency-Key", "stale-cycle-correction-" + lot.suffix()))
                 .andExpect(status().isPreconditionFailed());
         assertLot(lot.id(), "11", "AVAILABLE", 1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_cycle_count_correction where cycle_count_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_cycle_count_correction where cycle_count_id=?",
                 Integer.class, UUID.fromString(countId))).isZero();
 
         String salesToken = accessToken(SALES_EMAIL, "PLATFORM");
@@ -387,43 +387,43 @@ class WarehouseDiscrepancyApiIntegrationTests extends PostgresIntegrationSupport
     }
 
     private void assertLot(String lotId, String quantity, String status, long version) {
-        var state = jdbc.queryForMap("select stock_quantity,status,version from warehouse.inventory_lot where id=?", UUID.fromString(lotId));
+        var state = tenantJdbc().queryForMap("select stock_quantity,status,version from warehouse.inventory_lot where id=?", UUID.fromString(lotId));
         assertThat((java.math.BigDecimal) state.get("stock_quantity")).isEqualByComparingTo(quantity);
         assertThat(state.get("status")).isEqualTo(status);
         assertThat(((Number) state.get("version")).longValue()).isEqualTo(version);
     }
 
     private int movementCount(String lotId) {
-        return jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class, UUID.fromString(lotId));
+        return tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=?", Integer.class, UUID.fromString(lotId));
     }
 
     private int eventCount(String lotId) {
-        return jdbc.queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=?", Integer.class, UUID.fromString(lotId));
+        return tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=?", Integer.class, UUID.fromString(lotId));
     }
 
     private int eventCount(String lotId, String eventType) {
-        return jdbc.queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=? and event_type=?",
+        return tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=? and event_type=?",
                 Integer.class, UUID.fromString(lotId), eventType);
     }
 
     private int dispositionCount(String lotId) {
-        return jdbc.queryForObject("select count(*) from warehouse.inventory_lot_disposition where lot_id=?", Integer.class, UUID.fromString(lotId));
+        return tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot_disposition where lot_id=?", Integer.class, UUID.fromString(lotId));
     }
 
     private int openTemperatureEvidenceCount(String lotId) {
-        return jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=? and status='OPEN'",
+        return tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=? and status='OPEN'",
                 Integer.class, UUID.fromString(lotId));
     }
 
     private int commandCount(String operation, String key) {
-        return jdbc.queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation=? and idempotency_key=?",
+        return tenantJdbc().queryForObject("select count(*) from warehouse.command_idempotency where tenant_id=? and workspace_id=? and operation=? and idempotency_key=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), operation, key);
     }
 
     private void assertOpenTemperatureEvidence(String lotId) { assertThat(openTemperatureEvidenceCount(lotId)).isEqualTo(1); }
 
     private void assertResolvedTemperatureEvidence(String lotId) {
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=? and status='RESOLVED' and disposition='RELEASE'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=? and status='RESOLVED' and disposition='RELEASE'",
                 Integer.class, UUID.fromString(lotId))).isEqualTo(1);
     }
 

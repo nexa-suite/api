@@ -21,12 +21,12 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
         OpenReceivable firstReceivable = createOpenReceivable();
         OpenReceivable secondReceivable = createOpenReceivable();
         ensureBuyerCreditAccount(firstReceivable.currency());
-        CreditAccountState originalAccount = jdbc.query("select credit_limit,credit_exposure,reserved_exposure,status from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+        CreditAccountState originalAccount = tenantJdbc().query("select credit_limit,credit_exposure,reserved_exposure,status from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
                         (rs, n) -> new CreditAccountState(rs.getBigDecimal(1), rs.getBigDecimal(2), rs.getBigDecimal(3), rs.getString(4)),
                         tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency())
                 .stream().findFirst().orElseThrow();
         BigDecimal limit = firstReceivable.amount().max(secondReceivable.amount());
-        jdbc.update("update payments.credit_account set credit_limit=?,credit_exposure=0,reserved_exposure=0 where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+        tenantJdbc().update("update payments.credit_account set credit_limit=?,credit_exposure=0,reserved_exposure=0 where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
                 limit, tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency());
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -37,14 +37,14 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
 
             assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 201).count()).isEqualTo(1);
             assertThat(results.stream().filter(result -> result.getResponse().getStatus() == 400).count()).isEqualTo(1);
-            BigDecimal exposure = jdbc.queryForObject("select credit_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?", BigDecimal.class,
+            BigDecimal exposure = tenantJdbc().queryForObject("select credit_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=?", BigDecimal.class,
                     tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency());
             assertThat(exposure).isLessThanOrEqualTo(limit);
         } finally {
             executor.shutdownNow();
-            jdbc.update("update payments.receivable set status='VOID',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id in (?,?)",
+            tenantJdbc().update("update payments.receivable set status='VOID',updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id in (?,?)",
                     tenantUuid(), workspaceUuid(), firstReceivable.id(), secondReceivable.id());
-            jdbc.update("update payments.credit_account set credit_limit=?,credit_exposure=?,reserved_exposure=?,status=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+            tenantJdbc().update("update payments.credit_account set credit_limit=?,credit_exposure=?,reserved_exposure=?,status=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
                     originalAccount.limit(), originalAccount.exposure(), originalAccount.reserved(), originalAccount.status(),
                     tenantUuid(), workspaceUuid(), java.util.UUID.fromString(buyerClientAccountId()), firstReceivable.currency());
         }
@@ -56,7 +56,7 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
     }
 
     private void ensureBuyerCreditAccount(String currency) {
-        jdbc.update("insert into payments.credit_account "
+        tenantJdbc().update("insert into payments.credit_account "
                         + "(id,tenant_id,workspace_id,client_account_id,currency,credit_limit,credit_exposure,reserved_exposure,status,version,created_at,updated_at) "
                         + "select md5(c.id::text || ':' || ?)::uuid,c.tenant_id,c.workspace_id,c.id,?,c.credit_limit,0,0,"
                         + "case when c.status='ACTIVE' then 'ACTIVE' else 'SUSPENDED' end,0,current_timestamp,current_timestamp "

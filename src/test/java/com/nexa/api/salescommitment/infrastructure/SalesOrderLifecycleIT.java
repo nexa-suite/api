@@ -52,13 +52,13 @@ class SalesOrderLifecycleIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
 
         assertThat(json(cancelled).get("status").asText()).isEqualTo("CANCELLED");
-        assertThat(jdbc.queryForObject("select status from payments.payment where id=?", String.class, paymentId))
+        assertThat(tenantJdbc().queryForObject("select status from payments.payment where id=?", String.class, paymentId))
                 .isEqualTo("SUCCEEDED");
-        assertThat(jdbc.queryForObject("select count(*) from payments.financial_adjustment where tenant_id=? and workspace_id=? and source_type='SALES_ORDER_CANCELLATION' and source_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.financial_adjustment where tenant_id=? and workspace_id=? and source_type='SALES_ORDER_CANCELLATION' and source_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(order.id()))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from payments.refund_credit_obligation where tenant_id=? and workspace_id=? and sales_order_id=? and status='OPEN' and obligation_type='CUSTOMER_CREDIT'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.refund_credit_obligation where tenant_id=? and workspace_id=? and sales_order_id=? and status='OPEN' and obligation_type='CUSTOMER_CREDIT'",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(order.id()))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select adjustment_total from payments.receivable where id=?", BigDecimal.class, receivableId))
+        assertThat(tenantJdbc().queryForObject("select adjustment_total from payments.receivable where id=?", BigDecimal.class, receivableId))
                 .isEqualByComparingTo(json(receivableResult).get("amount").decimalValue().negate());
     }
 }

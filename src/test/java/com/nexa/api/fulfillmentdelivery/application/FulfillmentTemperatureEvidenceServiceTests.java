@@ -4,6 +4,7 @@ import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuer
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentLifecycleModels;
 import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels.TemperatureEvidenceView;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
@@ -65,7 +66,7 @@ class FulfillmentTemperatureEvidenceServiceTests {
 
         TemperatureEvidenceView result = fixture.service().recordFulfillmentTemperatureEvidence(
                 fixture.context(), fixture.fulfillmentId(), 4, "temp-evidence-1",
-                new FulfillmentLifecycleService.FulfillmentTemperatureEvidenceCommand(
+                new FulfillmentLifecycleModels.FulfillmentTemperatureEvidenceCommand(
                         fixture.lotId(), BigDecimal.valueOf(-5), "CELSIUS", OCCURRED_AT, 7L, evidenceObjectId));
 
         assertSame(stored, result);
@@ -91,7 +92,7 @@ class FulfillmentTemperatureEvidenceServiceTests {
 
         TemperatureEvidenceView result = fixture.service().recordFulfillmentTemperatureEvidence(
                 fixture.context(), fixture.fulfillmentId(), 4, "temp-evidence-1",
-                new FulfillmentLifecycleService.FulfillmentTemperatureEvidenceCommand(
+                new FulfillmentLifecycleModels.FulfillmentTemperatureEvidenceCommand(
                         fixture.lotId(), BigDecimal.valueOf(-5), "CELSIUS", OCCURRED_AT, 7L, evidenceObjectId));
 
         assertSame(stored, result);

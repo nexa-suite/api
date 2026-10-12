@@ -3,10 +3,14 @@ package com.nexa.api.support;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Real HTTP workflow fixture shared by TASK-008 and TASK-010 integration gates. */
@@ -73,6 +77,43 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                                 + "\",\"catalogItemId\":\"" + catalogItemId + "\",\"batchNumber\":\"B-COM-" + suffix
                                 + "\",\"expirationDate\":\"" + expirationDate + "\",\"quantity\":100,\"unit\":\"UNIT\"}"))
                 .andExpect(status().isCreated());
+    }
+
+    /** Configures the real Tenant credit account and preserves its current exposure buckets. */
+    protected void ensureBuyerCreditAccountConfigured() throws Exception {
+        UUID accountId = UUID.fromString(buyerClientAccountId());
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String path = "/api/v1/client-accounts/" + accountId + "/credit-account";
+        MvcResult current = mockMvc.perform(get(path).param("currency", "PEN")
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        var snapshot = json(current);
+        if ("NOT_CONFIGURED".equals(snapshot.get("status").asText())) {
+            mockMvc.perform(put(path)
+                            .header("Authorization", "Bearer " + owner)
+                            .header("If-None-Match", "*")
+                            .header("Idempotency-Key", "workflow-credit-" + uuid())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"currency\":\"PEN\",\"creditLimit\":42000,\"active\":true}"))
+                    .andExpect(status().isCreated());
+            return;
+        }
+
+        assertThat(snapshot.get("status").asText()).isNotEqualTo("CLOSED");
+        if ("ACTIVE".equals(snapshot.get("status").asText())
+                && snapshot.get("availableCredit").decimalValue().compareTo(new BigDecimal("20.50")) >= 0) {
+            return;
+        }
+        BigDecimal requestedLimit = snapshot.get("used").decimalValue().add(new BigDecimal("100.00"))
+                .max(snapshot.get("creditLimit").decimalValue());
+        mockMvc.perform(put(path)
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", current.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "workflow-credit-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currency\":\"PEN\",\"creditLimit\":" + requestedLimit.toPlainString()
+                                + ",\"active\":true}"))
+                .andExpect(status().isOk());
     }
 
     protected SalesOrderResource convert(PurchaseRequestResource request, String key) throws Exception {

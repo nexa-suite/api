@@ -4,6 +4,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.EffectiveAuthorization;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.PermissionCatalog;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.RoleDefinitionType;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.identity.RoleDefinitionId;
@@ -48,6 +49,16 @@ class DynamicAuthorizationTests {
 			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface.PLATFORM)).isTrue();
 			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface.PORTAL)).isFalse();
 		});
+	}
+
+	@Test
+	void dispatchCompleteRetainsTheExistingLogisticsWriteCompatibilityAlias() {
+		EffectiveAuthorization logistics = EffectiveAuthorization.fixed(Set.of(MembershipRole.LOGISTICS), 11);
+		EffectiveAuthorization warehouse = EffectiveAuthorization.fixed(Set.of(MembershipRole.WAREHOUSE), 11);
+
+		assertThat(logistics.allows(PermissionKey.DISPATCH_COMPLETE)).isTrue();
+		assertThat(logistics.allowsLegacy(Permission.LOGISTICS_WRITE)).isTrue();
+		assertThat(warehouse.allows(PermissionKey.DISPATCH_COMPLETE)).isFalse();
 	}
 
 	@Test

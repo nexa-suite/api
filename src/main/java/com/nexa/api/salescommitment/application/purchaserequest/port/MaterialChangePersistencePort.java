@@ -22,6 +22,13 @@ public interface MaterialChangePersistencePort {
             String purchaseRequestId, String proposalId, long expectedVersion, String actorMembershipId,
             MaterialChangeTerms acceptedTerms, long nowEpochMillis);
 
+    default PurchaseRequestView accept(String tenantId, String workspaceId, String buyerAccountId,
+            String purchaseRequestId, String proposalId, long expectedVersion, String actorMembershipId,
+            MaterialChangeTerms acceptedTerms, String walletBeneficiaryIdentityId, long nowEpochMillis) {
+        return accept(tenantId, workspaceId, buyerAccountId, purchaseRequestId, proposalId,
+                expectedVersion, actorMembershipId, acceptedTerms, nowEpochMillis);
+    }
+
     PurchaseRequestView reject(String tenantId, String workspaceId, String buyerAccountId,
             String purchaseRequestId, String proposalId, long expectedVersion, String actorMembershipId,
             long nowEpochMillis);

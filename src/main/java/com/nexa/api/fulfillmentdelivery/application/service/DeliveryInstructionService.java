@@ -8,6 +8,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DeliveryInstructionMod
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryInstructionModels.PublishRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryInstructionModels.PublishedInstruction;
 import com.nexa.api.fulfillmentdelivery.application.port.DeliveryInstructionPersistencePort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.DeliveryInstructionOperations;
 import com.nexa.api.fulfillmentdelivery.domain.instruction.DeliveryInstructionKind;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -28,7 +29,7 @@ import java.util.UUID;
 /** Application authority for dispatch instructions and assigned-driver acknowledgements. */
 @Service
 @Profile("!test")
-public class DeliveryInstructionService {
+public class DeliveryInstructionService implements DeliveryInstructionOperations {
     private final DeliveryInstructionPersistencePort persistence;
     private final DispatchReadinessService readiness;
     private final Clock clock;
@@ -41,6 +42,7 @@ public class DeliveryInstructionService {
     }
 
     @Transactional(readOnly = true)
+    @Override
     public InstructionSetView getForDriver(CurrentAccessContext context, UUID deliveryId) {
         context.requirePermission(PermissionKey.DISPATCH_READ);
         if (deliveryId == null) throw invalid("DELIVERY_NOT_FOUND");
@@ -48,6 +50,7 @@ public class DeliveryInstructionService {
     }
 
     @Transactional(readOnly = true)
+    @Override
     public InstructionSetView getForDispatch(CurrentAccessContext context, UUID deliveryId) {
         context.requirePermission(PermissionKey.DISPATCH_READ);
         if (deliveryId == null) throw invalid("DELIVERY_NOT_FOUND");
@@ -60,6 +63,7 @@ public class DeliveryInstructionService {
     }
 
     @Transactional
+    @Override
     public AcknowledgementResult acknowledge(CurrentAccessContext context, UUID deliveryId,
                                              long expectedInstructionSetVersion,
                                              List<UUID> instructionIds, String idempotencyKey) {
@@ -82,6 +86,7 @@ public class DeliveryInstructionService {
     }
 
     @Transactional
+    @Override
     public PublishedInstruction publish(CurrentAccessContext context, UUID deliveryId,
                                         long expectedDeliveryVersion, UUID instructionId,
                                         DeliveryInstructionKind kind, String content, String idempotencyKey) {

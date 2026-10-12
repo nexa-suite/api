@@ -1,7 +1,7 @@
 package com.nexa.api.salescommitment.presentation.purchaserequest;
 
 import com.nexa.api.salescommitment.application.model.FieldPurchaseRequestModels;
-import com.nexa.api.salescommitment.application.service.FieldPurchaseRequestSubmissionService;
+import com.nexa.api.salescommitment.application.purchaserequest.port.FieldPurchaseRequestSubmissionUseCase;
 import com.nexa.api.salescommitment.presentation.SalesHttpHeaders;
 import com.nexa.api.salescommitment.presentation.purchaserequest.mapper.PurchaseRequestHttpMapper;
 import com.nexa.api.salescommitment.presentation.purchaserequest.response.PurchaseRequestDetailResponse;
@@ -27,9 +27,9 @@ import java.util.List;
 @SecurityRequirement(name = "bearerAuth")
 public class FieldPurchaseRequestController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final FieldPurchaseRequestSubmissionService service;
+    private final FieldPurchaseRequestSubmissionUseCase service;
     private final PurchaseRequestHttpMapper mapper;
-    public FieldPurchaseRequestController(FieldPurchaseRequestSubmissionService service, PurchaseRequestHttpMapper mapper) {
+    public FieldPurchaseRequestController(FieldPurchaseRequestSubmissionUseCase service, PurchaseRequestHttpMapper mapper) {
         this.service = service; this.mapper = mapper;
     }
     @PostMapping

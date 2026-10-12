@@ -1,6 +1,7 @@
 package com.nexa.api.inventoryavailability.application.service;
 
 import com.nexa.api.inventoryavailability.application.publicapi.LotIdentifierResolutionQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.LotIdentifierResolutionUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -15,7 +16,7 @@ import java.util.UUID;
 /** Application contract for read-only batch/lot identifier resolution. */
 @Service
 @Profile("!test")
-public class LotIdentifierResolutionService {
+public class LotIdentifierResolutionService implements LotIdentifierResolutionUseCase {
     private final LotIdentifierResolutionQuery query;
     private final WarehouseObjectAccess warehouseAccess;
 
@@ -25,7 +26,7 @@ public class LotIdentifierResolutionService {
     }
 
     @Transactional(readOnly = true)
-    public Resolution resolve(CurrentAccessContext context, String batchNumber) {
+    public LotIdentifierResolutionUseCase.Resolution resolve(CurrentAccessContext context, String batchNumber) {
         context.requirePermission(PermissionKey.INVENTORY_READ);
         if (batchNumber == null || batchNumber.isBlank() || batchNumber.trim().length() > 160) {
             throw new IllegalArgumentException("Batch number is required");
@@ -36,7 +37,7 @@ public class LotIdentifierResolutionService {
                 warehouseAccess.activeWarehouseIds(context));
         String outcome = candidates.isEmpty() ? "NOT_FOUND" : candidates.size() == 1 ? "RESOLVED" : "AMBIGUOUS";
         LotIdentifierResolutionQuery.Candidate candidate = candidates.size() == 1 ? candidates.get(0) : null;
-        return new Resolution(outcome, "BATCH_NUMBER", normalized, candidates.size(),
+        return new LotIdentifierResolutionUseCase.Resolution(outcome, "BATCH_NUMBER", normalized, candidates.size(),
                 candidate == null ? null : candidate.lotId(), candidate == null ? null : candidate.skuId(),
                 candidate == null ? null : candidate.catalogItemId(), candidate == null ? null : candidate.warehouseId(),
                 candidate == null ? null : candidate.zoneId(), candidate == null ? null : candidate.expirationDate(),
@@ -44,8 +45,4 @@ public class LotIdentifierResolutionService {
                 candidate == null ? null : candidate.unit());
     }
 
-    public record Resolution(String outcome, String identifierType, String normalizedIdentifier,
-                             int candidateCount, UUID lotId, UUID skuId, String catalogItemId,
-                             UUID warehouseId, UUID zoneId, java.time.LocalDate expirationDate,
-                             java.time.Instant receivedAt, String status, String unit) { }
 }

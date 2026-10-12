@@ -28,7 +28,7 @@ class FieldVisitEvidenceIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(post(path).header("Authorization","Bearer "+sales).header("Idempotency-Key",key)
             .header("If-Match",version).contentType(MediaType.APPLICATION_JSON).content(body.replace("Review customer demand","Changed purpose")))
             .andExpect(status().isConflict());
-        assertThat(jdbc.queryForObject("select count(*) from sales.field_visit_evidence where tenant_id=? and workspace_id=? and idempotency_key=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.field_visit_evidence where tenant_id=? and workspace_id=? and idempotency_key=?",
             Long.class, UUID.fromString(tenantId()),UUID.fromString(workspaceId()),key)).isEqualTo(1);
         mockMvc.perform(post(path).header("Authorization","Bearer "+sales).header("Idempotency-Key","stale-"+uuid())
             .header("If-Match","\"999999\"").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isPreconditionFailed());

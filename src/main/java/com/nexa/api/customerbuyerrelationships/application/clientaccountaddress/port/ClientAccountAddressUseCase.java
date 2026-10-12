@@ -7,6 +7,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 
 import java.util.List;
 
+@org.springframework.modulith.NamedInterface("customer-address-usecases")
 public interface ClientAccountAddressUseCase {
     List<ClientAccountAddressView> list(CurrentAccessContext context, String clientAccountId);
 

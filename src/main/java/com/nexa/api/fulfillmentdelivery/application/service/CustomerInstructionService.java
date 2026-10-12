@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.application.service;
 
 import com.nexa.api.fulfillmentdelivery.application.model.CustomerInstructionModels.*;
 import com.nexa.api.fulfillmentdelivery.application.port.CustomerInstructionPort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.CustomerInstructionOperations;
 import com.nexa.api.fulfillmentdelivery.domain.instruction.DeliveryInstructionKind;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
@@ -23,7 +24,7 @@ import java.util.Objects;
 
 @Service
 @Profile("!test")
-public class CustomerInstructionService {
+public class CustomerInstructionService implements CustomerInstructionOperations {
     private final CustomerInstructionPort instructions;
     private final SalesOrderFulfillmentQuery orders;
     private final CustomerAccountQuery customers;
@@ -33,6 +34,7 @@ public class CustomerInstructionService {
         this.instructions = instructions; this.orders = orders; this.customers = customers; this.clock = clock;
     }
     @Transactional(readOnly = true)
+    @Override
     public Snapshot read(CurrentAccessContext c, UUID order, boolean buyer) {
         var currentOrder = authorize(c, order, buyer, false);
         Snapshot result = instructions.read(c.tenantId().value(), c.workspaceId().value(), order);
@@ -40,6 +42,7 @@ public class CustomerInstructionService {
         return new Snapshot(result.salesOrderId(),result.version(),active && result.editable(),result.instructions());
     }
     @Transactional
+    @Override
     public Snapshot publish(CurrentAccessContext c, UUID order, boolean buyer, long version,
                             UUID instructionId, DeliveryInstructionKind kind, String content,
                             String sourceReference, String key) {

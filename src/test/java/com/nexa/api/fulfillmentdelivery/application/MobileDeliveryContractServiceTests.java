@@ -4,6 +4,7 @@ import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabil
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.MobileDeliveryContractPort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.MobileDeliveryContractOperations;
 import com.nexa.api.fulfillmentdelivery.application.service.MobileDeliveryContractService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
@@ -51,7 +52,7 @@ class MobileDeliveryContractServiceTests {
                     request.expiresAt(), "ACTIVE", false);
         });
 
-        MobileDeliveryContractService.IssuedHandoff issued = service(persistence, accounts, traceability)
+        MobileDeliveryContractOperations.IssuedHandoff issued = service(persistence, accounts, traceability)
                 .issue(context(), deliveryId, attemptId, "handoff-retry-1");
 
         assertThat(issued.token()).isNotBlank();

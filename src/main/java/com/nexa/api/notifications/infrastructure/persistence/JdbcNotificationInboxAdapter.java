@@ -4,11 +4,13 @@ import com.nexa.api.notifications.application.model.NotificationModels.Notificat
 import com.nexa.api.notifications.application.model.NotificationModels.NotificationView;
 import com.nexa.api.notifications.application.model.NotificationModels.ProjectedNotification;
 import com.nexa.api.notifications.application.port.out.NotificationInboxPersistencePort;
+import com.nexa.api.notifications.application.publicapi.PreflightedNotificationRecipients;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
@@ -23,10 +25,20 @@ import java.util.UUID;
 public class JdbcNotificationInboxAdapter implements NotificationInboxPersistencePort {
 	private final JdbcTemplate jdbc;
 	private final WorkforceDirectory workforce;
+	private final PreflightedNotificationRecipients tenantRecipients;
 
+	@Autowired
 	public JdbcNotificationInboxAdapter(JdbcTemplate jdbc, WorkforceDirectory workforce) {
 		this.jdbc = jdbc;
 		this.workforce = workforce;
+		this.tenantRecipients = null;
+	}
+
+	public JdbcNotificationInboxAdapter(JdbcTemplate jdbc, PreflightedNotificationRecipients tenantRecipients) {
+		this.jdbc = jdbc;
+		this.workforce = null;
+		this.tenantRecipients = java.util.Objects.requireNonNull(tenantRecipients,
+				"Central recipient preflight is required for Tenant notification writes");
 	}
 
 	@Override
@@ -77,7 +89,11 @@ public class JdbcNotificationInboxAdapter implements NotificationInboxPersistenc
 		UUID tenantId = uuid(notification.tenantId());
 		UUID workspaceId = uuid(notification.workspaceId());
 		UUID recipientMembershipId = uuid(notification.recipientMembershipId());
-		if (!workforce.membershipExists(tenantId, workspaceId, recipientMembershipId)) return 0;
+		if (tenantRecipients != null) {
+			if (!tenantRecipients.allows(tenantId, workspaceId, recipientMembershipId)) {
+				throw new IllegalStateException("Notification recipient escaped its central Tenant preflight");
+			}
+		} else if (!workforce.membershipExists(tenantId, workspaceId, recipientMembershipId)) return 0;
 		return jdbc.update("insert into notifications.inbox_item (id,tenant_id,workspace_id,recipient_membership_id,event_id,category,title,message,deep_link,subject_type,subject_id,created_at,read_at) "
 				+ "values (?,?,?,?,?,?,?,?,?,?,?,?,null) "
 				+ "on conflict (event_id,recipient_membership_id) do nothing",
@@ -93,8 +109,14 @@ public class JdbcNotificationInboxAdapter implements NotificationInboxPersistenc
 				rs.getTimestamp(9) == null ? null : rs.getTimestamp(9).toInstant());
 	}
 
-	private static Scope scope(String tenantId, String workspaceId, String recipientMembershipId) {
-		return new Scope(uuid(tenantId), uuid(workspaceId), uuid(recipientMembershipId));
+	private Scope scope(String tenantId, String workspaceId, String recipientMembershipId) {
+		UUID tenant = uuid(tenantId);
+		UUID workspace = uuid(workspaceId);
+		UUID recipient = uuid(recipientMembershipId);
+		if (tenantRecipients != null && !tenantRecipients.allows(tenant, workspace, recipient)) {
+			throw new IllegalStateException("Notification request escaped its verified Tenant/Workspace preflight");
+		}
+		return new Scope(tenant, workspace, recipient);
 	}
 	private static UUID uuid(String value) { return UUID.fromString(value); }
 	private static UUID uuidOrNull(String value) { return value == null || value.isBlank() ? null : uuid(value); }

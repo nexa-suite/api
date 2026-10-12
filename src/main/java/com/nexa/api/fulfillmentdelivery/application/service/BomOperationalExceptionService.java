@@ -7,6 +7,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.BomOperationalExceptio
 import com.nexa.api.fulfillmentdelivery.application.model.BomOperationalExceptionModels.MutationResult;
 import com.nexa.api.fulfillmentdelivery.application.model.BomOperationalExceptionModels.Snapshot;
 import com.nexa.api.fulfillmentdelivery.application.port.BomOperationalExceptionPersistencePort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.BomOperationalExceptionOperations;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -26,7 +27,7 @@ import java.util.UUID;
 /** Coordinates case ownership and follow-up while preserving underlying Delivery authority. */
 @Service
 @Profile("!test")
-public class BomOperationalExceptionService {
+public class BomOperationalExceptionService implements BomOperationalExceptionOperations {
     private final BomOperationalExceptionPersistencePort persistence;
     private final WorkforceDirectory workforce;
     private final Clock clock;
@@ -39,12 +40,14 @@ public class BomOperationalExceptionService {
     }
 
     @Transactional(readOnly = true)
+    @Override
     public Snapshot list(CurrentAccessContext context) {
         requireRead(context);
         return persistence.list(tenant(context), workspace(context));
     }
 
     @Transactional(readOnly = true)
+    @Override
     public List<Assignee> assignees(CurrentAccessContext context, UUID exceptionId) {
         requireRead(context);
         if (exceptionId == null) throw error("OPERATIONAL_EXCEPTION_NOT_FOUND", true);
@@ -53,6 +56,7 @@ public class BomOperationalExceptionService {
     }
 
     @Transactional
+    @Override
     public MutationResult mutate(CurrentAccessContext context, UUID exceptionId, String operation,
             UUID targetMembershipId, long expectedVersion, String idempotencyKey, String reason, String note) {
         requireCoordinate(context);

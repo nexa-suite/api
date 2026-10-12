@@ -239,7 +239,7 @@ public final class BusinessDocumentProjections {
             String subjectId,
             BusinessParty issuer,
             BusinessParty buyer,
-            String dispatchNumber,
+            String deliveryReference,
             String salesOrderReference,
             Instant issueDate,
             String status,
@@ -256,7 +256,7 @@ public final class BusinessDocumentProjections {
             subjectId = required(subjectId, "Subject id");
             issuer = Objects.requireNonNull(issuer, "Issuer is required");
             buyer = Objects.requireNonNull(buyer, "Buyer is required");
-            dispatchNumber = required(dispatchNumber, "Dispatch number");
+            deliveryReference = required(deliveryReference, "POD delivery reference");
             salesOrderReference = required(salesOrderReference, "Sales order reference");
             issueDate = Objects.requireNonNull(issueDate, "Issue date is required");
             status = required(status, "POD status");
@@ -272,7 +272,7 @@ public final class BusinessDocumentProjections {
         }
 
         @Override public BusinessDocumentType type() { return BusinessDocumentType.POD_REPORT; }
-        @Override public String reference() { return dispatchNumber; }
+        @Override public String reference() { return deliveryReference; }
     }
 
     public record IncidentReportProjection(

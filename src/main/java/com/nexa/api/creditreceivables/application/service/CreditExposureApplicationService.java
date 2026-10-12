@@ -2,6 +2,7 @@ package com.nexa.api.creditreceivables.application.service;
 
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
+import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -10,14 +11,13 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Locale;
 
 /** Application boundary for the authorized, current customer credit exposure projection. */
 @Service
 @Profile("!test")
-public class CreditExposureApplicationService {
+public class CreditExposureApplicationService implements CreditExposureUseCase {
     private final CustomerAccountQuery customerAccounts;
     private final CreditExposureQuery exposures;
 
@@ -27,7 +27,8 @@ public class CreditExposureApplicationService {
     }
 
     @Transactional(readOnly = true)
-    public CreditExposureView read(CurrentAccessContext context, String clientAccountId, String currency) {
+    @Override
+    public CreditExposureUseCase.CreditExposureView read(CurrentAccessContext context, String clientAccountId, String currency) {
         context.requirePermission(PermissionKey.CLIENT_READ);
         String tenantId = context.tenantId().toString();
         String workspaceId = context.workspaceId().toString();
@@ -37,7 +38,8 @@ public class CreditExposureApplicationService {
     }
 
     @Transactional(readOnly = true)
-    public CreditExposureView readBuyer(CurrentAccessContext context, String currency) {
+    @Override
+    public CreditExposureUseCase.CreditExposureView readBuyer(CurrentAccessContext context, String currency) {
         context.requireSurface(Surface.PORTAL);
         context.requirePermission(PermissionKey.PAYMENT_READ);
         String tenantId = context.tenantId().toString();
@@ -48,11 +50,11 @@ public class CreditExposureApplicationService {
         return projection(tenantId, workspaceId, customer.id(), currency);
     }
 
-    private CreditExposureView projection(String tenantId, String workspaceId, String customerId, String currency) {
+    private CreditExposureUseCase.CreditExposureView projection(String tenantId, String workspaceId, String customerId, String currency) {
         String normalizedCurrency = normalizeCurrency(currency);
         CreditExposureQuery.CreditExposureSnapshot snapshot = exposures.find(
                 tenantId, workspaceId, customerId, normalizedCurrency);
-        return new CreditExposureView(customerId, snapshot.currency(), snapshot.creditLimit(),
+        return new CreditExposureUseCase.CreditExposureView(customerId, snapshot.currency(), snapshot.creditLimit(),
                 snapshot.ledgerExposure(), snapshot.outstandingReceivables(), snapshot.reservedExposure(),
                 snapshot.used(), snapshot.availableCredit(), snapshot.active(), Instant.now());
     }
@@ -63,8 +65,4 @@ public class CreditExposureApplicationService {
         return normalized;
     }
 
-    public record CreditExposureView(String clientAccountId, String currency, BigDecimal creditLimit,
-                                     BigDecimal ledgerExposure, BigDecimal outstandingReceivables,
-                                     BigDecimal reservedExposure, BigDecimal used, BigDecimal availableCredit,
-                                     boolean active, Instant asOf) { }
 }

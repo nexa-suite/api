@@ -22,7 +22,7 @@ class PaymentIntentSecurityIT extends PaymentIntegrationSupport {
                         .header("Authorization", "Bearer " + fixture.buyerToken()))
                 .andExpect(status().isOk()).andReturn();
         assertThat(detail.getResponse().getContentAsString()).doesNotContain("clientSecret");
-        assertThat(jdbc.queryForObject("select amount from payments.payment where id=?", java.math.BigDecimal.class, java.util.UUID.fromString(fixture.paymentId())))
+        assertThat(tenantJdbc().queryForObject("select amount from payments.payment where id=?", java.math.BigDecimal.class, java.util.UUID.fromString(fixture.paymentId())))
                 .isEqualByComparingTo(fixture.receivable().amount());
     }
 

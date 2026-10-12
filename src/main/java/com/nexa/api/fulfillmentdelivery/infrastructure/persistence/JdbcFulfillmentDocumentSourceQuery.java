@@ -37,17 +37,48 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
 
     @Override
     public Optional<ProofOfDelivery> findPod(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId) {
-        return jdbc.query("select p.id,d.client_account_id,p.receiver_name,p.completed_at,p.notes,p.status,"
-                        + "p.photo_evidence_declared,p.signature_evidence_declared,d.id dispatch_id "
-                        + "from logistics.proof_of_delivery p join logistics.dispatch_order d "
-                        + "on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id and d.id=p.dispatch_order_id "
-                        + "where p.tenant_id=? and p.workspace_id=? and p.id=?",
+        return jdbc.query("select p.id,d.client_account_id,p.receiver_name,coalesce(p.sealed_at,p.completed_at) completed_at,"
+                        + "p.notes,p.status,p.photo_evidence_declared,p.signature_evidence_declared,d.id dispatch_id,"
+                        + "delivery.id delivery_id,coalesce(d.sales_order_id,fulfillment.sales_order_id) sales_order_id,"
+                        + "delivery.destination_snapshot,"
+                        + "case when d.id is null then coalesce((select evidence.status from logistics.temperature_evidence evidence "
+                        + "where evidence.tenant_id=p.tenant_id and evidence.workspace_id=p.workspace_id "
+                        + "and evidence.delivery_id=delivery.id order by evidence.recorded_at desc,evidence.id desc limit 1),'UNKNOWN') end temperature_status,"
+                        + "case when d.id is null then coalesce((select string_agg(coalesce(evidence.temperature_celsius::text,'n/a') "
+                        + "|| ' ' || evidence.unit, ', ' order by evidence.recorded_at desc,evidence.id desc) "
+                        + "from logistics.temperature_evidence evidence where evidence.tenant_id=p.tenant_id "
+                        + "and evidence.workspace_id=p.workspace_id and evidence.delivery_id=delivery.id),"
+                        + "'No temperature readings') end temperature_summary "
+                        + "from logistics.proof_of_delivery p "
+                        + "left join logistics.dispatch_order d on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id "
+                        + "and d.id=p.dispatch_order_id "
+                        + "left join logistics.delivery delivery on delivery.tenant_id=p.tenant_id "
+                        + "and delivery.workspace_id=p.workspace_id and delivery.id=p.delivery_id "
+                        + "left join logistics.fulfillment fulfillment on fulfillment.tenant_id=delivery.tenant_id "
+                        + "and fulfillment.workspace_id=delivery.workspace_id and fulfillment.id=delivery.fulfillment_id "
+                        + "where p.tenant_id=? and p.workspace_id=? and p.id=? and p.status in ('SEALED','COMPLETED') "
+                        + "and (d.id is not null or fulfillment.sales_order_id is not null)",
                 (rs, row) -> new ProofOfDelivery(rs.getObject("id", UUID.class),
                         rs.getObject("client_account_id", UUID.class), rs.getString("receiver_name"),
-                        rs.getTimestamp("completed_at").toInstant(), rs.getString("notes"), rs.getString("status"),
+                        instant(rs, "completed_at"), rs.getString("notes"), rs.getString("status"),
                         rs.getBoolean("photo_evidence_declared"), rs.getBoolean("signature_evidence_declared"),
-                        rs.getObject("dispatch_id", UUID.class)), tenantId, workspaceId, proofOfDeliveryId)
+                        rs.getObject("dispatch_id", UUID.class), rs.getObject("delivery_id", UUID.class),
+                        rs.getObject("sales_order_id", UUID.class), rs.getString("destination_snapshot"),
+                        rs.getString("temperature_status"),
+                        rs.getString("temperature_summary")), tenantId, workspaceId, proofOfDeliveryId)
                 .stream().findFirst();
+    }
+
+    @Override
+    public Optional<ProofOfDelivery> findSealedPodForDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId) {
+        var sealedPodIds = jdbc.query("select id from logistics.proof_of_delivery where tenant_id=? and workspace_id=? "
+                        + "and delivery_id=? and status='SEALED' order by sealed_at,id limit 2",
+                (rs, row) -> rs.getObject("id", UUID.class), tenantId, workspaceId, deliveryId);
+        if (sealedPodIds.size() > 1) {
+            throw new IllegalStateException("Delivery has multiple sealed proof-of-delivery sources");
+        }
+        return sealedPodIds.isEmpty() ? Optional.empty()
+                : findPod(tenantId, workspaceId, sealedPodIds.get(0));
     }
 
     @Override

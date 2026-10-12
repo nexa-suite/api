@@ -1,6 +1,6 @@
 package com.nexa.api.salescommitment.infrastructure;
 
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.salescommitment.infrastructure.maps.GoogleMapsHttpBoundaryAdapter;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;

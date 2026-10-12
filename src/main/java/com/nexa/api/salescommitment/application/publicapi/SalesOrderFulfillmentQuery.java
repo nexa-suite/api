@@ -16,7 +16,22 @@ public interface SalesOrderFulfillmentQuery {
     /** Batch header facts for owner-scoped fulfillment projections. */
     Map<UUID, Header> findHeaders(UUID tenantId, UUID workspaceId, List<UUID> salesOrderIds);
 
+    /**
+     * Bounded sales-order references scoped by the owning Buyer account.
+     * Results are ordered by creation time descending, then ID ascending.
+     */
+    OrderReferencePage findReferencesByClientAccount(UUID tenantId, UUID workspaceId,
+                                                      UUID clientAccountId, int page, int size);
+
     record Header(UUID id, String number, UUID clientAccountId, String priority) { }
+
+    record OrderReference(UUID id, String number, Instant createdAt) { }
+
+    record OrderReferencePage(List<OrderReference> items, int page, int size, boolean hasMore) {
+        public OrderReferencePage {
+            items = List.copyOf(items == null ? List.of() : items);
+        }
+    }
 
     record Snapshot(UUID id, String number, UUID clientAccountId, String status,
                     String paymentOption, UUID commercialCommitmentId,

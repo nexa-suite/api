@@ -79,10 +79,17 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 
 	@Override
 	public void insert(PurchaseRequestView request, String tenant, String workspace, UUID id, long epoch) {
+		insert(request, tenant, workspace, id, epoch, null);
+	}
+
+	@Override
+	public void insert(PurchaseRequestView request, String tenant, String workspace, UUID id, long epoch,
+			String walletBeneficiaryIdentityId) {
 		Timestamp now = timestamp(epoch);
-		jdbc.update("insert into sales.purchase_request (id,tenant_id,workspace_id,client_account_id,buyer_membership_id,code,status,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
+		jdbc.update("insert into sales.purchase_request (id,tenant_id,workspace_id,client_account_id,buyer_membership_id,code,status,priority,requested_delivery_date,delivery_profile_snapshot,payment_option,comments,created_at,updated_at,version,buyer_wallet_beneficiary_identity_id) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)",
 				id, uuid(tenant), uuid(workspace), uuid(request.clientAccountId()), uuid(request.buyerMembershipId()), request.code(), request.status(),
-				request.priority(), request.requestedDeliveryDate(), request.deliveryProfileSnapshot(), request.paymentOption(), request.comment(), now, now);
+				request.priority(), request.requestedDeliveryDate(), request.deliveryProfileSnapshot(), request.paymentOption(), request.comment(), now, now,
+				walletBeneficiaryIdentityId == null ? null : uuid(walletBeneficiaryIdentityId));
 	}
 
 	@Override
@@ -95,19 +102,28 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 	@Override
 	public int update(String tenant, String workspace, String buyerAccount, String id, String priority, LocalDate date,
 			String delivery, String payment, String comment, long version) {
+		return update(tenant, workspace, buyerAccount, id, priority, date, delivery, payment, comment, version, null);
+	}
+
+	@Override
+	public int update(String tenant, String workspace, String buyerAccount, String id, String priority, LocalDate date,
+			String delivery, String payment, String comment, long version, String walletBeneficiaryIdentityId) {
 		String scope = buyerAccount == null ? "" : " and client_account_id=?";
 		List<Object> args = new ArrayList<>();
 		args.add(priority);
 		args.add(date);
 		args.add(delivery);
 		args.add(payment);
+		args.add(payment);
+		args.add(payment);
+		args.add(walletBeneficiaryIdentityId == null ? null : uuid(walletBeneficiaryIdentityId));
 		args.add(comment);
 		args.add(uuid(tenant));
 		args.add(uuid(workspace));
 		if (buyerAccount != null) args.add(uuid(buyerAccount));
 		args.add(uuid(id));
 		args.add(version);
-		return jdbc.update("update sales.purchase_request set priority=coalesce(?,priority),requested_delivery_date=coalesce(?,requested_delivery_date),delivery_profile_snapshot=coalesce(?,delivery_profile_snapshot),payment_option=coalesce(?,payment_option),comments=coalesce(?,comments),updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=?" + scope + " and id=? and status in ('DRAFT','NEEDS_ADJUSTMENT') and version=?", args.toArray());
+		return jdbc.update("update sales.purchase_request set priority=coalesce(?,priority),requested_delivery_date=coalesce(?,requested_delivery_date),delivery_profile_snapshot=coalesce(?,delivery_profile_snapshot),payment_option=coalesce(?,payment_option),buyer_wallet_beneficiary_identity_id=case when ? is null then buyer_wallet_beneficiary_identity_id when ?='WALLET' then ? else null end,comments=coalesce(?,comments),updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=?" + scope + " and id=? and status in ('DRAFT','NEEDS_ADJUSTMENT') and version=?", args.toArray());
 	}
 
 	@Override
@@ -127,6 +143,12 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 	@Override
 	public int transition(String tenant, String workspace, String buyerAccount, String id, String from, String to,
 			String note, String actor, long version) {
+		return transition(tenant, workspace, buyerAccount, id, from, to, note, actor, version, null);
+	}
+
+	@Override
+	public int transition(String tenant, String workspace, String buyerAccount, String id, String from, String to,
+			String note, String actor, long version, String walletBeneficiaryIdentityId) {
 		String scope = buyerAccount == null ? "" : " and client_account_id=?";
 		List<Object> args = new ArrayList<>();
 		args.add(to);
@@ -134,12 +156,14 @@ public class PurchaseRequestPersistenceAdapter implements PurchaseRequestPersist
 		args.add(to);
 		args.add(uuid(actor));
 		args.add(to);
+		args.add(walletBeneficiaryIdentityId == null ? null : uuid(walletBeneficiaryIdentityId));
+		args.add(to);
 		args.add(to);
 		args.add(uuid(tenant));
 		args.add(uuid(workspace));
 		if (buyerAccount != null) args.add(uuid(buyerAccount));
 		args.add(uuid(id)); args.add(from); args.add(version);
-		return jdbc.update("update sales.purchase_request set status=?,review_note=?,reviewed_by_membership_id=case when ? in ('IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED','REJECTED') then ? else reviewed_by_membership_id end,submitted_at=case when ?='SUBMITTED' then current_timestamp else submitted_at end,reviewed_at=case when ? in ('IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED','REJECTED') then current_timestamp else reviewed_at end,updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=?" + scope + " and id=? and status=? and version=?", args.toArray());
+		return jdbc.update("update sales.purchase_request set status=?,review_note=?,reviewed_by_membership_id=case when ? in ('IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED','REJECTED') then ? else reviewed_by_membership_id end,buyer_wallet_beneficiary_identity_id=case when ?='SUBMITTED' and payment_option='WALLET' then ? else buyer_wallet_beneficiary_identity_id end,submitted_at=case when ?='SUBMITTED' then current_timestamp else submitted_at end,reviewed_at=case when ? in ('IN_REVIEW','NEEDS_ADJUSTMENT','APPROVED','REJECTED') then current_timestamp else reviewed_at end,updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=?" + scope + " and id=? and status=? and version=?", args.toArray());
 	}
 
 	private int advanceParent(String tenant, String workspace, String buyerAccount, String requestId, long version) {

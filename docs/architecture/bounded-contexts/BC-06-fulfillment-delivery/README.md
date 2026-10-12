@@ -16,6 +16,23 @@
 Discrepancies are immutable observations; final shortage resolution is a
 separate append-only fact.
 
+## Buyer delivery projection
+
+`GET /api/v1/buyer/deliveries`, `GET /api/v1/buyer/deliveries/{deliveryId}`
+and the matching `/events` route read actual BC-06 Delivery records created by
+Fulfillment handoff. They require `buyer.tracking.read` and derive the active
+Customer Account from the current Buyer relationship. The API retains the
+legacy `/dispatch-orders` projection separately; a Delivery ID is not treated
+as a Dispatch Order ID. The list accepts `page` and `size` (1–100, default
+25), ordered by Sales Order creation descending and Delivery creation
+descending within an order.
+
+BC-06 reads its own Delivery/Fulfillment facts and resolves Sales Order
+references through the BC-04 public query contract. Responses omit account,
+fulfillment, driver, assignment and evidence-storage identifiers. The timeline
+uses stored handoff, transit, attempt and sealed-POD facts, and omits actor and
+reason text.
+
 ## Driver incidents and operational exceptions
 
 The assigned Driver incident route is `POST

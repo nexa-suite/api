@@ -65,7 +65,9 @@ abstract class PaymentIntegrationSupport extends NexaWorkflowIntegrationSupport 
     protected String stripePayload(String eventId, String eventType, String paymentIntentId,
                                    String status, long amountMinor, String currency,
                                    String tenantId, String workspaceId) {
-        return "{\"id\":\"" + eventId + "\",\"type\":\"" + eventType
+        String routeId = jdbc.queryForObject("select route_id::text from tenant_management.payment_provider_route "
+                + "where provider_code='STRIPE' and provider_payment_intent_id=?", String.class, paymentIntentId);
+        return "{\"nexa_payment_route_id\":\"" + routeId + "\",\"id\":\"" + eventId + "\",\"type\":\"" + eventType
                 + "\",\"payment_intent_id\":\"" + paymentIntentId + "\",\"status\":\"" + status
                 + "\",\"amount\":" + amountMinor + ",\"currency\":\"" + currency
                 + "\",\"nexa_tenant_id\":\"" + tenantId + "\",\"nexa_workspace_id\":\"" + workspaceId + "\"}";
@@ -100,11 +102,13 @@ abstract class PaymentIntegrationSupport extends NexaWorkflowIntegrationSupport 
                 foreignTenant, "Foreign payment tenant", "foreign-payment-" + foreignTenant, Timestamp.from(now), Timestamp.from(now));
         jdbc.update("insert into tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at) values (?,?,?,?,'ACTIVE',?,?)",
                 foreignWorkspace, foreignTenant, "Foreign payment workspace", "foreign-payment-" + foreignWorkspace, Timestamp.from(now), Timestamp.from(now));
-        jdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
+        provisionTenantBusinessDatabase(foreignTenant, foreignWorkspace);
+        var foreignTenantJdbc = tenantJdbcFor(foreignTenant);
+        foreignTenantJdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 foreignClient, foreignTenant, foreignWorkspace, "F-" + foreignClient.toString().substring(0, 8), "Foreign Client", "Foreign Client",
                 "PE", "RUC", "20" + foreignClient.toString().replace("-", "").substring(0, 11), "B2B", "Foreign Contact",
                 "foreign@example.test", "+51000000000", "Lima", "NET_30", Timestamp.from(now), Timestamp.from(now));
-        jdbc.update("insert into payments.receivable (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,due_at,status,created_at,updated_at) values (?,?,?,?,? ,?, ?, 'PEN', 10.00, ?, 'OPEN', ?, ?)",
+        foreignTenantJdbc.update("insert into payments.receivable (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,due_at,status,created_at,updated_at) values (?,?,?,?,? ,?, ?, 'PEN', 10.00, ?, 'OPEN', ?, ?)",
                 foreignReceivable, foreignTenant, foreignWorkspace, foreignClient, "SALES_ORDER", UUID.randomUUID(),
                 "AR-FOREIGN-" + foreignReceivable.toString().substring(0, 8), Timestamp.from(now.plusSeconds(86400)), Timestamp.from(now), Timestamp.from(now));
         return new ForeignReceivable(foreignTenant, foreignWorkspace, foreignReceivable);

@@ -18,9 +18,9 @@ class PaymentTenantIsolationIT extends PaymentIntegrationSupport {
                         .header("Authorization", "Bearer " + owner))
                 .andExpect(status().isBadRequest());
 
-        assertThat(jdbc.queryForObject("select count(*) from payments.receivable where tenant_id=? and workspace_id=? and id=?", Integer.class,
+        assertThat(tenantJdbcFor(foreign.tenantId()).queryForObject("select count(*) from payments.receivable where tenant_id=? and workspace_id=? and id=?", Integer.class,
                 foreign.tenantId(), foreign.workspaceId(), foreign.receivableId())).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from payments.receivable where tenant_id=? and workspace_id=? and id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.receivable where tenant_id=? and workspace_id=? and id=?", Integer.class,
                 tenantUuid(), workspaceUuid(), foreign.receivableId())).isZero();
     }
 }

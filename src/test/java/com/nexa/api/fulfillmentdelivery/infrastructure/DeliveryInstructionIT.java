@@ -22,7 +22,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** PostgreSQL and HTTP coverage for dispatch instruction revisions and Driver acknowledgements. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-@TestPropertySource(properties = "spring.datasource.hikari.minimum-idle=1")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.buyer-wallet-read.enabled=true",
+        "nexa.tenant-business.buyer-wallet-recharge.enabled=true",
+        "nexa.tenant-business.purchase-request.enabled=true",
+        "nexa.tenant-business.catalog-detail-read.enabled=true",
+        "nexa.tenant-business.catalog-management.enabled=true",
+        "nexa.tenant-business.payments.enabled=true",
+        "nexa.tenant-business.fulfillment-delivery.enabled=true",
+        "nexa.tenant-business.warehouse-operations.enabled=true",
+        "nexa.tenant-business.local-fixtures.enabled=true",
+        "nexa.tenant-business.support-sales-order-read.enabled=true",
+        "nexa.tenant-business.business-documents.enabled=true",
+        "nexa.tenant-business.business-traceability.enabled=true",
+        "nexa.tenant-business.notifications.enabled=true",
+        "nexa.business-traceability.worker-delay-ms=3600000",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
 
     private UUID temperatureFixtureSku;
@@ -32,7 +48,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
     @AfterEach
     void restoreChangedSkuTemperaturePolicy() {
         if (temperatureFixtureSku != null) {
-            jdbc.update("update catalog_management.sellable_sku set temperature_min=?,temperature_max=? where id=?",
+            tenantJdbc().update("update catalog_management.sellable_sku set temperature_min=?,temperature_max=? where id=?",
                     originalTemperatureMinimum, originalTemperatureMaximum, temperatureFixtureSku);
         }
     }
@@ -191,15 +207,15 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
     @Test
     void transitTemperatureReplaysImmutableReadingAndDoesNotGrantDriverDisposition() throws Exception {
         AssignedDelivery fixture = createAssignedDelivery();
-        UUID fulfillment = jdbc.queryForObject("select fulfillment_id from logistics.delivery where id=?", UUID.class, fixture.deliveryId());
-        UUID line = jdbc.queryForObject("select id from logistics.fulfillment_line where fulfillment_id=?", UUID.class, fulfillment);
-        UUID sku = jdbc.queryForObject("select sku_id from logistics.fulfillment_line where id=?", UUID.class, line);
-        originalTemperatureMinimum = jdbc.queryForObject(
+        UUID fulfillment = tenantJdbc().queryForObject("select fulfillment_id from logistics.delivery where id=?", UUID.class, fixture.deliveryId());
+        UUID line = tenantJdbc().queryForObject("select id from logistics.fulfillment_line where fulfillment_id=?", UUID.class, fulfillment);
+        UUID sku = tenantJdbc().queryForObject("select sku_id from logistics.fulfillment_line where id=?", UUID.class, line);
+        originalTemperatureMinimum = tenantJdbc().queryForObject(
                 "select temperature_min from catalog_management.sellable_sku where id=?", BigDecimal.class, sku);
-        originalTemperatureMaximum = jdbc.queryForObject(
+        originalTemperatureMaximum = tenantJdbc().queryForObject(
                 "select temperature_max from catalog_management.sellable_sku where id=?", BigDecimal.class, sku);
         temperatureFixtureSku = sku;
-        jdbc.update("update catalog_management.sellable_sku set temperature_min=0,temperature_max=8 where id=?", sku);
+        tenantJdbc().update("update catalog_management.sellable_sku set temperature_min=0,temperature_max=8 where id=?", sku);
         String path = "/api/v1/driver/deliveries/" + fixture.deliveryId() + "/execution-temperature-readings";
         MvcResult snapshot = mockMvc.perform(get(path).header("Authorization", bearer(fixture.token())))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].skuId").value(sku.toString())).andReturn();
@@ -212,14 +228,17 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("WITHIN_RANGE"))
                 .andExpect(jsonPath("$.temperatureUnit").value("CELSIUS")).andReturn();
-        jdbc.update("update catalog_management.sellable_sku set temperature_min=5,temperature_max=9 where id=?", sku);
+        tenantJdbc().update("update catalog_management.sellable_sku set temperature_min=5,temperature_max=9 where id=?", sku);
         MvcResult replay = mockMvc.perform(post(path).header("Authorization", bearer(fixture.token()))
                         .header("If-Match", snapshot.getResponse().getHeader("ETag")).header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.replayed").value(true))
                 .andExpect(jsonPath("$.minimumCelsius").value(0)).andReturn();
         assertThat(json(replay).get("id").asText()).isEqualTo(json(recorded).get("id").asText());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_execution_temperature_evidence where delivery_id=?", Integer.class, fixture.deliveryId())).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_execution_temperature_evidence where delivery_id=?", Integer.class, fixture.deliveryId())).isEqualTo(1);
+        UUID recordedId = UUID.fromString(json(recorded).get("id").asText());
+        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_execution_temperature_evidence where id=?",
+                Integer.class, recordedId)).isZero();
         mockMvc.perform(post(path).header("Authorization", bearer(fixture.token()))
                         .header("If-Match", recorded.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "transit-no-photo-" + UUID.randomUUID())
@@ -230,7 +249,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "transit-denied-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"disposition\":\"RELEASE\",\"reason\":\"Driver report is not disposition authority\"}"))
                 .andExpect(status().isForbidden());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_execution_hold where delivery_id=?", Integer.class, fixture.deliveryId())).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_execution_hold where delivery_id=?", Integer.class, fixture.deliveryId())).isZero();
     }
 
     private AssignedDelivery createAssignedDelivery() throws Exception { return createAssignedDelivery(false); }
@@ -270,7 +289,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                     .andExpect(jsonPath("$.instructions.length()").value(1));
         }
         String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
-        List<UUID> backedWarehouseIds = jdbc.query("select distinct p.warehouse_id from warehouse.inventory_backing b "
+        List<UUID> backedWarehouseIds = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
                         + "join warehouse.inventory_backing_position p on p.tenant_id=l.tenant_id and p.workspace_id=l.workspace_id and p.backing_line_id=l.id "
@@ -362,7 +381,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                 + "\",\"driverAssignmentVersion\":" + assignmentView.get("fulfillmentVersion").asLong()
                 + ",\"outgoingGoodsCheckId\":\"" + json(outgoingCheck).get("id").asText() + "\"}";
         MvcResult dispatched = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/dispatches")
-                        .header("Authorization", bearer(warehouseToken))
+                        .header("Authorization", bearer(logisticsToken))
                         .header("If-Match", assignment.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "delivery-instructions-handover-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON).content(dispatchBody))
@@ -430,17 +449,8 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
                         + "where membership_id=?",
                 membership, tenant, workspace, sourceMembership);
+        provisionTenantBusinessDatabase(tenant, workspace);
         return workspaceSlug;
-    }
-
-    private String accessTokenForWorkspace(String email, String workspaceSlug) throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/v1/authentication/sign-in")
-                        .header("Origin", ALLOWED_ORIGIN)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identifier\":\"" + email + "\",\"password\":\"" + TEST_PASSWORD
-                                + "\",\"workspaceSlug\":\"" + workspaceSlug + "\",\"surface\":\"PLATFORM\"}"))
-                .andExpect(status().isOk()).andReturn();
-        return json(result).get("accessToken").asText();
     }
 
     private static String driverPath(AssignedDelivery fixture) {

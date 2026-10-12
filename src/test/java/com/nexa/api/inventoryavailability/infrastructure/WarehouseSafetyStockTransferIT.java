@@ -183,7 +183,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .header("Idempotency-Key", "tr-dispatch-" + suffix))
                 .andExpect(status().isOk()).andReturn();
         assertThat(json(dispatchReplay).get("status").asText()).isEqualTo("IN_TRANSIT");
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_OUT'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_OUT'",
                 Integer.class, UUID.fromString(lotId))).isEqualTo(1);
 
         MvcResult received = mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/receipts")
@@ -200,11 +200,11 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         assertThat(stock(lotId)).isEqualByComparingTo("6");
         assertThat(stock(destinationLotId)).isEqualByComparingTo("4");
         assertAvailabilityDelta(availabilityBefore, availability(token), "0");
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_OUT'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_OUT'",
                 Integer.class, UUID.fromString(lotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_IN'",
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='TRANSFER_IN'",
                 Integer.class, UUID.fromString(destinationLotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select array_to_string(array_agg(to_status order by transfer_version), ',')"
+        assertThat(tenantJdbc().queryForObject("select array_to_string(array_agg(to_status order by transfer_version), ',')"
                         + " from warehouse.inventory_transfer_history where transfer_id=?",
                 String.class, UUID.fromString(transferId))).isEqualTo("REQUESTED,IN_TRANSIT,RECEIVED");
 
@@ -267,7 +267,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andReturn();
         assertThat(json(replay).get("observationId").asText()).isEqualTo(observationId);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_transfer_receipt_observation"
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_transfer_receipt_observation"
                         + " where tenant_id=? and workspace_id=? and transfer_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(transferId))).isEqualTo(1);
 
@@ -294,12 +294,12 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
         assertThat(json(current).get("destinationLotId").isNull()).isTrue();
         assertThat(stock(sourceLotId)).isEqualByComparingTo("6");
         assertThat(destinationLotCount(destination.warehouseId(), destinationZone, "B-OBSERVED-" + suffix)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.stock_movement where lot_id=?"
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=?"
                         + " and movement_type='TRANSFER_OUT'", Integer.class, UUID.fromString(sourceLotId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=?"
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_event where aggregate_id=?"
                         + " and event_type='warehouse.inventory.transfer.receipt-observation-recorded'",
                 Integer.class, UUID.fromString(observationId))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select array_to_string(array_agg(to_status order by transfer_version), ',')"
+        assertThat(tenantJdbc().queryForObject("select array_to_string(array_agg(to_status order by transfer_version), ',')"
                         + " from warehouse.inventory_transfer_history where transfer_id=?",
                 String.class, UUID.fromString(transferId))).isEqualTo("REQUESTED,IN_TRANSIT");
 
@@ -310,7 +310,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                         .header("Idempotency-Key", "obs-ungranted-" + suffix)
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().is4xxClientError());
-        assertThat(jdbc.queryForObject("select count(*) from warehouse.inventory_transfer_receipt_observation"
+        assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_transfer_receipt_observation"
                         + " where transfer_id=?", Integer.class, UUID.fromString(transferId))).isEqualTo(1);
     }
 
@@ -333,7 +333,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
     }
 
     private int destinationLotCount(String warehouseId, String zoneId, String batch) {
-        return jdbc.queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=?"
+        return tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=?"
                         + " and warehouse_id=? and zone_id=? and batch_number=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(warehouseId),
                 UUID.fromString(zoneId), batch);
@@ -365,7 +365,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
                 "list-transfer-2-" + suffix);
         String firstTransferId = json(firstTransfer).get("id").asText();
         String secondTransferId = json(secondTransfer).get("id").asText();
-        String newestTransferId = jdbc.queryForObject("select id::text from warehouse.inventory_transfer where tenant_id=? and workspace_id=?"
+        String newestTransferId = tenantJdbc().queryForObject("select id::text from warehouse.inventory_transfer where tenant_id=? and workspace_id=?"
                         + " order by created_at desc,id desc limit 1", String.class,
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
 
@@ -423,7 +423,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
     }
 
     private MvcResult receive(String token, WarehouseLocation warehouse, String batch, String quantity, String key) throws Exception {
-        String zoneId = jdbc.queryForObject("select id::text from warehouse.storage_zone where warehouse_id=? and code like 'Z-%' order by created_at desc limit 1",
+        String zoneId = tenantJdbc().queryForObject("select id::text from warehouse.storage_zone where warehouse_id=? and code like 'Z-%' order by created_at desc limit 1",
                 String.class, UUID.fromString(warehouse.warehouseId()));
         return mockMvc.perform(post("/api/v1/inventory/inbound-receipts")
                         .header("Authorization", "Bearer " + token).header("Idempotency-Key", key)
@@ -453,7 +453,7 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
     }
 
     private BigDecimal stock(String lotId) {
-        return jdbc.queryForObject("select stock_quantity from warehouse.inventory_lot where id=?", BigDecimal.class,
+        return tenantJdbc().queryForObject("select stock_quantity from warehouse.inventory_lot where id=?", BigDecimal.class,
                 UUID.fromString(lotId));
     }
 

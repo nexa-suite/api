@@ -158,6 +158,27 @@ class OpenApiCompatibilityFixtures(unittest.TestCase):
         })
         self.assertFail(old, new)
 
+    def test_p_nullable_type_array_preserves_the_existing_value_type(self):
+        old = document(operation(), {"Item": item_schema(properties={
+            "id": {"type": "string", "format": "uuid"}})})
+        new = document(operation(), {"Item": item_schema(properties={
+            "id": {"type": ["string", "null"], "format": "uuid"}})})
+        self.assertPass(old, new)
+
+    def test_q_nullable_type_array_still_fails_when_value_type_changes(self):
+        old = document(operation(), {"Item": item_schema(properties={
+            "id": {"type": "string"}})})
+        new = document(operation(), {"Item": item_schema(properties={
+            "id": {"type": ["integer", "null"]}})})
+        self.assertFail(old, new)
+
+    def test_r_nullable_type_removal_fails(self):
+        old = document(operation(), {"Item": item_schema(properties={
+            "id": {"type": ["string", "null"]}})})
+        new = document(operation(), {"Item": item_schema(properties={
+            "id": {"type": "string"}})})
+        self.assertFail(old, new)
+
     def test_m_nullable_to_nullable_change_still_checks_value_fields(self):
         old = document(operation(), {
             "MoneyResponse": {"type": "object", "properties": {

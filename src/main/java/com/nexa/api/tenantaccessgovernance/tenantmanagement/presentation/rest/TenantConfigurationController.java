@@ -105,17 +105,6 @@ public final class TenantConfigurationController {
 		return ResponseEntity.ok().eTag(etag(value.version())).body(value);
 	}
 
-	@GetMapping("/workspaces/{workspaceId}/notifications")
-	public ResponseEntity<TenantConfigurationModels.NotificationSettingsView> notifications(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context, @PathVariable String workspaceId) { var value = configuration.notificationSettings(context, workspaceId); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
-
-	@PatchMapping("/workspaces/{workspaceId}/notifications")
-	public ResponseEntity<TenantConfigurationModels.NotificationSettingsView> updateNotifications(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
-			@PathVariable String workspaceId, @RequestHeader(name = "If-Match", required = false) String ifMatch,
-			@RequestBody TenantConfigurationModels.NotificationSettingsView request, HttpServletRequest servletRequest) {
-		var value = configuration.updateNotificationSettings(context, workspaceId, request, version(ifMatch), correlation(servletRequest));
-		return ResponseEntity.ok().eTag(etag(value.version())).body(value);
-	}
-
 	@GetMapping("/settings/security")
 	public ResponseEntity<TenantConfigurationModels.TenantSecuritySettingsView> security(@RequestAttribute("com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context) { var value = configuration.tenantSecuritySettings(context); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
 
@@ -183,7 +172,6 @@ public final class TenantConfigurationController {
 	}
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
-
 	public record OrganizationProfileRequest(String legalName, String displayName, String businessIdentifier, String operationCategory) {
 		TenantConfigurationModels.OrganizationProfileView toView() { return new TenantConfigurationModels.OrganizationProfileView(legalName, displayName, businessIdentifier, operationCategory, 0); }
 	}

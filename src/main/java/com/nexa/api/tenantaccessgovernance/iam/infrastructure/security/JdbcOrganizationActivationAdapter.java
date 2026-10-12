@@ -57,6 +57,10 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
                 tenantId, organization.displayName(), registration.workspaceSlug().value(), timestamp(now), timestamp(now));
         jdbc.update("insert into tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at,version) values (?,?,?,?,'ACTIVE',?,?,0)",
                 workspaceId, tenantId, workspaceName, registration.workspaceSlug().value(), timestamp(now), timestamp(now));
+        jdbc.update("insert into tenant_management.tenant_business_database_provisioning_task "
+                        + "(task_id,tenant_id,workspace_id) values (?,?,?) on conflict (tenant_id) do nothing",
+                UUID.randomUUID(), tenantId, workspaceId);
+        enqueueWorkspaceDatabaseAnchor(tenantId, workspaceId);
         jdbc.update("insert into tenant_management.organization_settings (tenant_id,legal_name,display_name,business_identifier,operation_category,version,updated_at) values (?,?,?,?,?,0,?)",
                 tenantId, organization.legalName(), organization.displayName(), nullable(organization.businessIdentifier()), organization.operationCategory(), timestamp(now));
 
@@ -76,11 +80,19 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
         return new ActivatedOrganization(tenantId, workspaceId, userId, membershipId, founderEmail);
     }
 
+    private void enqueueWorkspaceDatabaseAnchor(UUID tenantId, UUID workspaceId) {
+        jdbc.update("insert into tenant_management.tenant_business_database_workspace_anchor_task "
+                        + "(task_id,tenant_id,workspace_id) values (?,?,?) on conflict (tenant_id,workspace_id) do nothing",
+                UUID.randomUUID(), tenantId, workspaceId);
+    }
+
     private void ensureSystemWorkflowActor(UUID tenantId, UUID workspaceId) {
         String membership = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid", String.class, workspaceId);
-        jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do update set membership_type='SYSTEM_WORKFLOW',status='ACTIVE',updated_at=current_timestamp", membership, workspaceId);
-        jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?::uuid,?::uuid,?::uuid,'22222222-2222-4222-8222-222222222222'::uuid,current_timestamp) on conflict do nothing", membership, tenantId, workspaceId);
-        jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?::uuid,?::uuid,?::uuid,0,current_timestamp) on conflict (membership_id) do nothing", membership, tenantId, workspaceId);
+        int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, workspaceId);
+        if (inserted == 1) {
+            jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?::uuid,?::uuid,?::uuid,'22222222-2222-4222-8222-222222222222'::uuid,current_timestamp) on conflict do nothing", membership, tenantId, workspaceId);
+            jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?::uuid,?::uuid,?::uuid,0,current_timestamp) on conflict (membership_id) do nothing", membership, tenantId, workspaceId);
+        }
     }
 
     @Override

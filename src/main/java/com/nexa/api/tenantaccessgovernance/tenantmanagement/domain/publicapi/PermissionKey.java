@@ -82,6 +82,7 @@ public enum PermissionKey {
 	PAYMENT_CREATE("payment.create", PermissionGroup.PAYMENTS),
 	PAYMENT_RECONCILE("payment.reconcile", PermissionGroup.PAYMENTS),
 	CLIENT_CREDIT_MANAGE("client.credit.manage", PermissionGroup.CLIENT_ACCOUNTS),
+	CLIENT_CREDIT_CONFIGURATION_MANAGE("client.credit.configuration.manage", PermissionGroup.CLIENT_ACCOUNTS),
 	ANALYTICS_EXECUTIVE_READ("analytics.executive.read", PermissionGroup.ANALYTICS, "owner:dashboard:read"),
 
 	NOTIFICATION_READ("notification.read", PermissionGroup.NOTIFICATIONS),

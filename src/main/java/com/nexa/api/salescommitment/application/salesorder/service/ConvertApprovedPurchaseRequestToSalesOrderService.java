@@ -9,6 +9,7 @@ import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrder;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,25 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
     public SalesOrderView convert(CurrentAccessContext context, String purchaseRequestId,
                                   long purchaseRequestVersion, String idempotencyKey, String note) {
         requireCommercialWrite(context);
+        return convertApprovedSnapshot(context, purchaseRequestId, purchaseRequestVersion, idempotencyKey, note,
+                false);
+    }
+
+    @Transactional(noRollbackFor = com.nexa.api.salescommitment.application.exception.PurchaseRequestExpiredException.class)
+    public SalesOrderView convertApprovedBySystemWorkflow(CurrentAccessContext context, String purchaseRequestId,
+            long purchaseRequestVersion, String idempotencyKey, String note) {
+        if (context == null || context.surface() != Surface.PLATFORM || !context.hasRoleCode("system_workflow")) {
+            throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation(
+                    "Only the verified SYSTEM_WORKFLOW actor can convert an approved Purchase Request");
+        }
+        context.requirePermission(PermissionKey.SALES_PURCHASE_REQUEST_READ);
+        context.requirePermission(PermissionKey.SALES_ORDER_CREATE_MANUAL);
+        return convertApprovedSnapshot(context, purchaseRequestId, purchaseRequestVersion, idempotencyKey, note,
+                true);
+    }
+
+    private SalesOrderView convertApprovedSnapshot(CurrentAccessContext context, String purchaseRequestId,
+            long purchaseRequestVersion, String idempotencyKey, String note, boolean systemWorkflow) {
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 160) {
             throw new IdempotencyKeyRequiredException();
         }
@@ -50,7 +70,10 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
 
         // The adapter locks and rehydrates the approved snapshot inside the
         // transaction. The application still owns the ordering and decisions.
-        var snapshot = persistence.loadApprovedSnapshot(tenant, workspace, purchaseRequestId, purchaseRequestVersion);
+        var snapshot = systemWorkflow
+                ? persistence.loadApprovedSnapshotForSystemWorkflow(tenant, workspace, purchaseRequestId,
+                        purchaseRequestVersion)
+                : persistence.loadApprovedSnapshot(tenant, workspace, purchaseRequestId, purchaseRequestVersion);
         if (snapshot.isEmpty()) {
             // A concurrent request can have completed while this request waited
             // on the Purchase Request row lock. Replay wins before conflict.
@@ -67,7 +90,7 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
                 new MembershipId(context.membershipId().value()),
                 java.time.Instant.ofEpochMilli(System.currentTimeMillis()));
         return persistence.persistConversion(aggregate, purchaseRequestVersion, actor, idempotencyKey, note,
-                System.currentTimeMillis(), requestHash);
+                System.currentTimeMillis(), requestHash, context);
     }
 
     private static void requireCommercialWrite(CurrentAccessContext context) {

@@ -1,7 +1,7 @@
 package com.nexa.api.businessdocuments.infrastructure.workflow;
 
 import com.nexa.api.businessdocuments.application.publicapi.DocumentGenerationCommands;
-import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Profile;
 @Profile("!test")
 class DocumentGenerationCommandsConfiguration {
     @Bean
-    DocumentGenerationCommands documentGenerationCommands(BusinessDocumentPort documents) {
+    DocumentGenerationCommands documentGenerationCommands(BusinessDocumentUseCase documents) {
         return (context, subjectType, subjectId, documentType, format, key) -> { documents.request(context, subjectType, subjectId, documentType, format, key); };
     }
 }

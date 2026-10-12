@@ -2,7 +2,7 @@ package com.nexa.api.salescommitment.infrastructure.salesorder;
 
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
-import com.nexa.api.salescommitment.application.port.out.MapRoutingPort;
+import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CustomerTermsQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountDetails;

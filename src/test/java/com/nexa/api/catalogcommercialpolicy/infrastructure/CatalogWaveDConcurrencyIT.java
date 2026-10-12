@@ -49,26 +49,26 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
 
     @AfterEach
     void cleanFixtures() {
-        commandKeys.forEach(key -> jdbc.update(
+        commandKeys.forEach(key -> tenantJdbc().update(
                 "delete from catalog_management.command_idempotency where operation=? and idempotency_key=?",
                 key.operation(), key.key()));
         if (promotion != null) {
-            jdbc.update("delete from catalog_management.promotion_product where promotion_id=?", promotion);
-            jdbc.update("delete from catalog_management.promotion_category where promotion_id=?", promotion);
-            jdbc.update("delete from catalog_management.promotion_client_account where promotion_id=?", promotion);
-            jdbc.update("delete from catalog_management.promotion_rule where promotion_id=?", promotion);
-            jdbc.update("delete from catalog_management.promotion where id=?", promotion);
+            tenantJdbc().update("delete from catalog_management.promotion_product where promotion_id=?", promotion);
+            tenantJdbc().update("delete from catalog_management.promotion_category where promotion_id=?", promotion);
+            tenantJdbc().update("delete from catalog_management.promotion_client_account where promotion_id=?", promotion);
+            tenantJdbc().update("delete from catalog_management.promotion_rule where promotion_id=?", promotion);
+            tenantJdbc().update("delete from catalog_management.promotion where id=?", promotion);
         }
         if (priceProduct != null) {
-            jdbc.update("delete from catalog_management.product_price where product_id=?", priceProduct);
-            jdbc.update("delete from catalog_management.sku_price where sku_id=?", priceProduct);
-            UUID familyId = jdbc.query("select family_id from catalog_management.sellable_sku where id=?", (rs, row) -> rs.getObject(1, UUID.class), priceProduct).stream().findFirst().orElse(null);
-            jdbc.update("delete from catalog_management.sellable_sku where id=?", priceProduct);
-            if (familyId != null) jdbc.update("delete from catalog_management.product_family where id=?", familyId);
-            jdbc.update("delete from catalog_management.product_presentation where product_id=?", priceProduct);
-            jdbc.update("delete from catalog_management.product_visibility where product_id=?", priceProduct);
-            jdbc.update("delete from catalog_management.product_asset_reference where product_id=?", priceProduct);
-            jdbc.update("delete from catalog_management.product where id=?", priceProduct);
+            tenantJdbc().update("delete from catalog_management.product_price where product_id=?", priceProduct);
+            tenantJdbc().update("delete from catalog_management.sku_price where sku_id=?", priceProduct);
+            UUID familyId = tenantJdbc().query("select family_id from catalog_management.sellable_sku where id=?", (rs, row) -> rs.getObject(1, UUID.class), priceProduct).stream().findFirst().orElse(null);
+            tenantJdbc().update("delete from catalog_management.sellable_sku where id=?", priceProduct);
+            if (familyId != null) tenantJdbc().update("delete from catalog_management.product_family where id=?", familyId);
+            tenantJdbc().update("delete from catalog_management.product_presentation where product_id=?", priceProduct);
+            tenantJdbc().update("delete from catalog_management.product_visibility where product_id=?", priceProduct);
+            tenantJdbc().update("delete from catalog_management.product_asset_reference where product_id=?", priceProduct);
+            tenantJdbc().update("delete from catalog_management.product where id=?", priceProduct);
         }
     }
 
@@ -95,7 +95,7 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         assertThat(results.stream().map(HttpResult::status).toList()).containsExactlyInAnyOrder(201, 409);
         HttpResult conflict = results.stream().filter(result -> result.status() == 409).findFirst().orElseThrow();
         assertThat(JSON.readTree(conflict.body()).get("code").asText()).isEqualTo("CATALOG_PRICE_OVERLAP");
-        assertThat(jdbc.queryForObject(
+        assertThat(tenantJdbc().queryForObject(
                 "select count(*) from catalog_management.sku_price where sku_id=? and cancelled_at is null",
                 Integer.class, priceProduct)).isEqualTo(1);
     }
@@ -133,15 +133,15 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         assertThat(results.stream().map(HttpResult::status).toList()).containsExactlyInAnyOrder(200, 412);
         HttpResult conflict = results.stream().filter(result -> result.status() == 412).findFirst().orElseThrow();
         assertThat(JSON.readTree(conflict.body()).get("code").asText()).isEqualTo("PRECONDITION_FAILED");
-        assertThat(jdbc.queryForObject("select status from catalog_management.promotion where id=?", String.class, promotion))
+        assertThat(tenantJdbc().queryForObject("select status from catalog_management.promotion where id=?", String.class, promotion))
                 .isEqualTo("ACTIVE");
-        assertThat(jdbc.queryForObject("select version from catalog_management.promotion where id=?", Long.class, promotion))
+        assertThat(tenantJdbc().queryForObject("select version from catalog_management.promotion where id=?", Long.class, promotion))
                 .isEqualTo(1L);
     }
 
     @Test
     void persistentCatalogSearchUsesFourJdbcQueriesForPageSizesOneTenAndTwentyFive() {
-        DataSource dataSource = jdbc.getDataSource();
+        DataSource dataSource = tenantJdbc().getDataSource();
         assertThat(dataSource).isNotNull();
         CatalogScope scope = new CatalogScope(UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
 
@@ -165,12 +165,12 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
     @Test
     void missingSkuPriceStaysAbsentForOperationsAndCustomerScopedQueriesRemainFailClosed() {
         priceProduct = createPriceProduct();
-        String catalogItemId = jdbc.queryForObject(
+        String catalogItemId = tenantJdbc().queryForObject(
                 "select legacy_catalog_item_id from catalog_management.sellable_sku where id=?", String.class, priceProduct);
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         CatalogScope operationsScope = new CatalogScope(tenant, workspace);
-        DataSource dataSource = jdbc.getDataSource();
+        DataSource dataSource = tenantJdbc().getDataSource();
         assertThat(dataSource).isNotNull();
         CountingJdbcTemplate countedJdbc = new CountingJdbcTemplate(dataSource);
         var catalogAccounts = new com.nexa.api.bootstrap.runtime.boundaries.CatalogClientAccountCompositionAdapter(
@@ -185,7 +185,7 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         var summary = page.items().stream().filter(item -> item.catalogItemId().equals(catalogItemId)).findFirst().orElseThrow();
         var detail = adapter.findByCatalogItemId(operationsScope, new CatalogItemId(catalogItemId)).orElseThrow();
 
-        assertThat(jdbc.queryForObject("select count(*) from catalog_management.sku_price where sku_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.sku_price where sku_id=?", Integer.class,
                 priceProduct)).isZero();
         assertThat(summary.unitPriceAmount()).isNull();
         assertThat(summary.unitPriceCurrency()).isNull();
@@ -204,25 +204,25 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
     private UUID createPriceProduct() {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID category = jdbc.queryForObject(
+        UUID category = tenantJdbc().queryForObject(
                 "select id from catalog_management.category where tenant_id=? and workspace_id=? limit 1",
                 UUID.class, tenant, workspace);
-        UUID brand = jdbc.queryForObject(
+        UUID brand = tenantJdbc().queryForObject(
                 "select id from catalog_management.brand where tenant_id=? and workspace_id=? limit 1",
                 UUID.class, tenant, workspace);
         UUID product = UUID.randomUUID();
         Instant now = Instant.now();
         String suffix = product.toString();
         String catalogItemId = "CAT-WAVE-D-" + suffix.toUpperCase(java.util.Locale.ROOT);
-        jdbc.update("insert into catalog_management.product (id,tenant_id,workspace_id,catalog_item_id,product_code,slug,name,description,category_id,brand_id,storage_temperature,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
+        tenantJdbc().update("insert into catalog_management.product (id,tenant_id,workspace_id,catalog_item_id,product_code,slug,name,description,category_id,brand_id,storage_temperature,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
                 product, tenant, workspace, catalogItemId, "WAVE-D-" + suffix, "wave-d-" + suffix,
                 "Wave D price product", "Concurrency test product", category, brand, "REFRIGERATED",
                 Timestamp.from(now), Timestamp.from(now));
         UUID family = UUID.randomUUID();
-        jdbc.update("insert into catalog_management.product_family (id,tenant_id,workspace_id,family_code,name,description,category_id,brand_id,storage_family,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
+        tenantJdbc().update("insert into catalog_management.product_family (id,tenant_id,workspace_id,family_code,name,description,category_id,brand_id,storage_family,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,'ACTIVE',0,?,?)",
                 family, tenant, workspace, "WAVE-D-FAM-" + suffix, "Wave D price family", "Concurrency test family", category, brand,
                 "REFRIGERATED", Timestamp.from(now), Timestamp.from(now));
-        jdbc.update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,legacy_product_id,legacy_catalog_item_id,sku_code,presentation,packaging_type,unit_of_measure,pack_quantity,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',true,0,?,?)",
+        tenantJdbc().update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,legacy_product_id,legacy_catalog_item_id,sku_code,presentation,packaging_type,unit_of_measure,pack_quantity,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',true,0,?,?)",
                 product, tenant, workspace, family, product, catalogItemId, "WAVE-D-" + suffix, "UNIT", "UNSPECIFIED", "UNIT", BigDecimal.ONE,
                 Timestamp.from(now), Timestamp.from(now));
         return product;
@@ -234,7 +234,7 @@ class CatalogWaveDConcurrencyIT extends PostgresIntegrationSupport {
         return jdbc.query("select currency from tenant_management.regional_settings where tenant_id=?",
                         (rs, row) -> rs.getString(1), tenant).stream()
                 .findFirst()
-                .orElseGet(() -> jdbc.query("select currency from catalog_management.product_price where tenant_id=? and workspace_id=? and cancelled_at is null order by valid_from limit 1",
+                .orElseGet(() -> tenantJdbc().query("select currency from catalog_management.product_price where tenant_id=? and workspace_id=? and cancelled_at is null order by valid_from limit 1",
                                 (rs, row) -> rs.getString(1), tenant, workspace).stream()
                         .findFirst()
                         .orElse("PEN"))

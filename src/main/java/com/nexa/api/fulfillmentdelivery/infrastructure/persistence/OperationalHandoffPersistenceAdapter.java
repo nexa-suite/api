@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 
+import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
+
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffNotificationPort;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffPort;
@@ -32,7 +34,7 @@ public class OperationalHandoffPersistenceAdapter extends DispatchJdbcSupport im
 
     @Override
     @Transactional(readOnly = true)
-    public List<LogisticsOperationsService.HandoffNoteView> notes(String tenantId, String workspaceId,
+    public List<LogisticsOperationsModels.HandoffNoteView> notes(String tenantId, String workspaceId,
                                                                   String clientAccountId, String dispatchId) {
         UUID tenant = uuid(tenantId);
         UUID workspace = uuid(workspaceId);
@@ -49,7 +51,7 @@ public class OperationalHandoffPersistenceAdapter extends DispatchJdbcSupport im
                         "where e.tenant_id=? and e.workspace_id=? and e.dispatch_order_id=? " +
                         "and e.event_type='warehouse.logistics.handoff-note'" + clientScope +
                         " order by e.occurred_at asc,e.id asc",
-                (rs, row) -> new LogisticsOperationsService.HandoffNoteView(rs.getObject("id").toString(),
+                (rs, row) -> new LogisticsOperationsModels.HandoffNoteView(rs.getObject("id").toString(),
                         rs.getObject("dispatch_order_id").toString(), rs.getString("reason"),
                         rs.getObject("actor_membership_id").toString(), rs.getTimestamp("occurred_at").toInstant(),
                         rs.getLong("version")), args.toArray());
@@ -57,7 +59,7 @@ public class OperationalHandoffPersistenceAdapter extends DispatchJdbcSupport im
 
     @Override
     @Transactional
-    public LogisticsOperationsService.HandoffNoteView append(String tenantId, String workspaceId,
+    public LogisticsOperationsModels.HandoffNoteView append(String tenantId, String workspaceId,
                                                               String dispatchId, long expectedVersion,
                                                               String actorMembershipId, String idempotencyKey,
                                                               String note, long now) {
@@ -66,7 +68,7 @@ public class OperationalHandoffPersistenceAdapter extends DispatchJdbcSupport im
         UUID dispatch = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
         String requestHash = hash("dispatch-handoff-note", dispatchId, expectedVersion, note);
-        LogisticsOperationsService.HandoffNoteView replay = replayHandoff(tenant, workspace, idempotencyKey, requestHash);
+        LogisticsOperationsModels.HandoffNoteView replay = replayHandoff(tenant, workspace, idempotencyKey, requestHash);
         if (replay != null) return replay;
         DispatchRow row = locked(tenant, workspace, dispatch, null);
         if (row == null) throw error("RESOURCE_NOT_FOUND", true);

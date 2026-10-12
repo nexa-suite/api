@@ -24,7 +24,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** PostgreSQL and HTTP coverage for append-only current-driver incident facts. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-@TestPropertySource(properties = "spring.datasource.hikari.minimum-idle=1")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.buyer-wallet-read.enabled=true",
+        "nexa.tenant-business.buyer-wallet-recharge.enabled=true",
+        "nexa.tenant-business.purchase-request.enabled=true",
+        "nexa.tenant-business.catalog-detail-read.enabled=true",
+        "nexa.tenant-business.catalog-management.enabled=true",
+        "nexa.tenant-business.payments.enabled=true",
+        "nexa.tenant-business.fulfillment-delivery.enabled=true",
+        "nexa.tenant-business.warehouse-operations.enabled=true",
+        "nexa.tenant-business.local-fixtures.enabled=true",
+        "nexa.tenant-business.support-sales-order-read.enabled=true",
+        "nexa.tenant-business.business-documents.enabled=true",
+        "nexa.tenant-business.business-traceability.enabled=true",
+        "nexa.tenant-business.notifications.enabled=true",
+        "nexa.business-traceability.worker-delay-ms=3600000",
+        "spring.datasource.hikari.minimum-idle=1"
+})
 class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
 
     @Test
@@ -51,6 +67,10 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.evidenceObjectIds").isEmpty()).andReturn();
         UUID incidentId = UUID.fromString(json(recorded).get("id").asText());
         UUID exceptionId = UUID.fromString(json(recorded).get("operationalExceptionId").asText());
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.driver_delivery_incident where id=?",
+                Integer.class, incidentId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from logistics.driver_delivery_incident where id=?",
+                Integer.class, incidentId)).isZero();
         String incidentEtag = recorded.getResponse().getHeader("ETag");
 
         long replayVersion = Long.parseLong(incidentEtag.substring(1, incidentEtag.length() - 1));
@@ -63,13 +83,13 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
                 legacyReason, legacyDescription, legacyPlace);
         UUID legacyIncidentId = UUID.randomUUID();
         Timestamp legacyReportedAt = Timestamp.from(Instant.now());
-        jdbc.update("insert into logistics.driver_delivery_incident(id,tenant_id,workspace_id,delivery_id,"
+        tenantJdbc().update("insert into logistics.driver_delivery_incident(id,tenant_id,workspace_id,delivery_id,"
                         + "delivery_attempt_id,reason,description,place,reported_by_membership_id,reported_at,"
                         + "delivery_version,request_hash) values (?,?,?,?,?,?,?,?,?,?,?,?)",
                 legacyIncidentId, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId(),
                 fixture.attemptId(), legacyReason, legacyDescription, legacyPlace, fixture.membershipId(),
                 legacyReportedAt, replayVersion, legacyHash);
-        jdbc.update("insert into logistics.delivery_command_idempotency(tenant_id,workspace_id,actor_membership_id,"
+        tenantJdbc().update("insert into logistics.delivery_command_idempotency(tenant_id,workspace_id,actor_membership_id,"
                         + "operation,idempotency_key,request_hash,resource_id,created_at) values (?,?,?,?,?,?,?,?)",
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.membershipId(),
                 "DRIVER_INCIDENT", legacyKey, legacyHash, legacyIncidentId, legacyReportedAt);
@@ -194,21 +214,21 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
                         .isEqualTo(reviewEtag))
                 .andExpect(jsonPath("$.exceptions[0].status").value("UNDER_REVIEW"));
 
-        assertThat(jdbc.queryForObject("select status from logistics.delivery where id=?", String.class,
+        assertThat(tenantJdbc().queryForObject("select status from logistics.delivery where id=?", String.class,
                 fixture.deliveryId())).isEqualTo("IN_TRANSIT");
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_active_attempt where delivery_id=? and id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_active_attempt where delivery_id=? and id=?",
                 Integer.class, fixture.deliveryId(), fixture.attemptId())).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.driver_delivery_incident where id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.driver_delivery_incident where id=?",
                 Integer.class, incidentId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.operational_exception_case where id=? "
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.operational_exception_case where id=? "
                 + "and source_kind='DRIVER_INCIDENT' and source_driver_incident_id=? and severity='BLOCKING'",
                 Integer.class, exceptionId, incidentId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.operational_exception_transition "
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.operational_exception_transition "
                 + "where exception_id=? and transition_number=1 and to_status='OPEN'",
                 Integer.class, exceptionId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.driver_delivery_incident_evidence where incident_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.driver_delivery_incident_evidence where incident_id=?",
                 Integer.class, incidentId)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
                 Integer.class, fixture.deliveryId())).isZero();
     }
 
@@ -255,13 +275,13 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/operational-exceptions")
                         .header("Authorization", "Bearer " + fixture.token()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.exceptions[0].status").value("CLOSED"));
-        assertThat(jdbc.queryForObject("select count(*) from logistics.operational_exception_transition where exception_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.operational_exception_transition where exception_id=?",
                 Integer.class, UUID.fromString(exceptionId))).isEqualTo(5);
-        assertThat(jdbc.queryForObject("select status from logistics.delivery where id=?", String.class, fixture.deliveryId())).isEqualTo("IN_TRANSIT");
-        assertThat(jdbc.queryForObject("select i.incident_type from logistics.driver_delivery_incident i join logistics.operational_exception_case c on c.source_driver_incident_id=i.id where c.id=?",
+        assertThat(tenantJdbc().queryForObject("select status from logistics.delivery where id=?", String.class, fixture.deliveryId())).isEqualTo("IN_TRANSIT");
+        assertThat(tenantJdbc().queryForObject("select i.incident_type from logistics.driver_delivery_incident i join logistics.operational_exception_case c on c.source_driver_incident_id=i.id where c.id=?",
                 String.class, UUID.fromString(exceptionId))).isEqualTo("DELAY");
         // Simulate later terminalization independently of the already persisted WARNING command.
-        jdbc.update("update logistics.delivery set status='CANCELLED',version=version+1 where id=?", fixture.deliveryId());
+        tenantJdbc().update("update logistics.delivery set status='CANCELLED',version=version+1 where id=?", fixture.deliveryId());
         mockMvc.perform(post(path + "/resolutions").header("Authorization", "Bearer " + fixture.token())
                         .header("If-Match", reviewTag).header("Idempotency-Key", resolutionKey)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"resolution\":\"Congestion cleared; normal travel resumed\"}"))
@@ -270,7 +290,7 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
         mockMvc.perform(post(path + "/closures").header("Authorization", "Bearer " + fixture.token())
                         .header("If-Match", resolvedTag).header("Idempotency-Key", "fresh-terminal-close-" + UUID.randomUUID()))
                 .andExpect(status().isNotFound());
-        assertThat(jdbc.queryForObject("select count(*) from logistics.operational_exception_transition where exception_id=?",
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.operational_exception_transition where exception_id=?",
                 Integer.class, UUID.fromString(exceptionId))).isEqualTo(5);
     }
 
@@ -282,11 +302,11 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
         UUID membershipId = UUID.fromString(membershipId(LOGISTICS_EMAIL));
         UUID userId = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
                 UUID.class, membershipId);
-        jdbc.update("update logistics.dispatch_order set status='IN_ROUTE',version=version+1,updated_at=current_timestamp where id=?",
+        tenantJdbc().update("update logistics.dispatch_order set status='IN_ROUTE',version=version+1,updated_at=current_timestamp where id=?",
                 deliveryId);
-        jdbc.update("update logistics.delivery set status='IN_TRANSIT',version=version+1,updated_at=current_timestamp where id=?",
+        tenantJdbc().update("update logistics.delivery set status='IN_TRANSIT',version=version+1,updated_at=current_timestamp where id=?",
                 deliveryId);
-        jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,"
+        tenantJdbc().update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,"
                         + "operator_id,vehicle_reference,route_name,assigned_at,actor_membership_id) values (?,?,?,?,?,?,?,?,current_timestamp,?)",
                 UUID.randomUUID(), tenant, workspace, deliveryId, membershipId, userId, "VAN-TEST", "ROUTE-TEST", membershipId);
         String token = accessToken(LOGISTICS_EMAIL, "PLATFORM");
@@ -309,7 +329,7 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isCreated()).andReturn();
         UUID attemptId = UUID.fromString(json(start).get("attempt").get("id").asText());
-        UUID clientAccount = jdbc.queryForObject("select client_account_id from logistics.dispatch_order where id=?",
+        UUID clientAccount = tenantJdbc().queryForObject("select client_account_id from logistics.dispatch_order where id=?",
                 UUID.class, deliveryId);
         return new ActiveDelivery(deliveryId, attemptId, membershipId, clientAccount, token,
                 start.getResponse().getHeader("ETag"));
@@ -320,11 +340,11 @@ class DriverDeliveryIncidentIT extends NexaWorkflowIntegrationSupport {
         String objectKey = "evidence/test/driver-incident-" + UUID.randomUUID() + ".jpg";
         String checksum = "b".repeat(64);
         Timestamp now = Timestamp.from(Instant.now());
-        jdbc.update("insert into business_documents.object_storage_object "
+        tenantJdbc().update("insert into business_documents.object_storage_object "
                         + "(object_key,tenant_id,workspace_id,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) "
                         + "values (?,?,?,?,?,?,?,?,?)", objectKey, UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), "nexa-private", checksum, "image/jpeg", 8L, true, now);
-        jdbc.update("insert into business_documents.evidence_object "
+        tenantJdbc().update("insert into business_documents.evidence_object "
                         + "(id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,object_key,lifecycle_status,"
                         + "declared_content_type,detected_content_type,original_filename,checksum_sha256,byte_size,created_at,scanned_at,"
                         + "requested_by_membership_id,idempotency_key,scan_attempt_count,next_scan_at,updated_at) "

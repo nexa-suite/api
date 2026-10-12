@@ -1,6 +1,6 @@
 package com.nexa.api.businessdocuments.infrastructure;
 
-import com.nexa.api.businessdocuments.application.port.BusinessDocumentPort;
+import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -11,7 +11,6 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Ten
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.test.annotation.DirtiesContext;
@@ -32,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class BusinessDocumentDisabledScannerIT extends NexaWorkflowIntegrationSupport {
     @Autowired
-    private BusinessDocumentPort documents;
+    private BusinessDocumentUseCase documents;
 
     @Autowired
     private ResolveCurrentAccessContextUseCase accessContext;
@@ -55,9 +54,9 @@ class BusinessDocumentDisabledScannerIT extends NexaWorkflowIntegrationSupport {
         assertThat(json(result).get("lifecycleStatus").asText()).isEqualTo("REJECTED");
         assertThat(json(result).get("failureCode").asText()).isEqualTo("MALWARE_SCANNER_DISABLED");
         String evidenceId = json(result).get("id").asText();
-        assertThat(jdbc.queryForObject("select lifecycle_status from business_documents.evidence_object where id=?",
+        assertThat(tenantJdbc().queryForObject("select lifecycle_status from business_documents.evidence_object where id=?",
                 String.class, java.util.UUID.fromString(evidenceId))).isEqualTo("REJECTED");
-        assertThat(jdbc.queryForObject("select next_scan_at from business_documents.evidence_object where id=?",
+        assertThat(tenantJdbc().queryForObject("select next_scan_at from business_documents.evidence_object where id=?",
                 java.sql.Timestamp.class, java.util.UUID.fromString(evidenceId))).isNull();
 
         UUID tenant = UUID.fromString(tenantId());
@@ -69,7 +68,7 @@ class BusinessDocumentDisabledScannerIT extends NexaWorkflowIntegrationSupport {
             CurrentAccessContext context = accessContext.resolve(new CurrentAccessRequest(
                     new UserId(user), new TenantId(tenant), new WorkspaceId(workspace), Surface.PLATFORM));
             assertThatThrownBy(() -> documents.downloadEvidence(context, UUID.fromString(evidenceId)))
-                    .isInstanceOf(InvalidDataAccessApiUsageException.class)
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("Evidence is not available");
         } finally {
             RlsRequestScope.clear();

@@ -33,10 +33,10 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(signInPayload()))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/authentication/sign-in")
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signInPayload().replace(TEST_PASSWORD, "wrong")))
+                        .content(signInPayload().replace(TEST_PASSWORD, "wrong"))))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -58,10 +58,10 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
     }
 
     @Test void refreshCookieRequiresAllowedOriginAndKeepsConfiguredBoundaryAttributes() throws Exception {
-        var login = mockMvc.perform(post("/api/v1/authentication/sign-in")
+        var login = mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signInPayload()))
+                        .content(signInPayload())))
                 .andExpect(status().isOk())
                 .andReturn();
         String setCookie = login.getResponse().getHeader(HttpHeaders.SET_COOKIE);
@@ -82,15 +82,15 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                         .header("X-Nexa-Surface", "PLATFORM")
                         .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue)))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/authentication/refresh")
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/refresh")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .header("X-Nexa-Surface", "PORTAL")
-                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue)))
+                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue))))
                 .andExpect(status().isUnauthorized());
-        mockMvc.perform(post("/api/v1/authentication/refresh")
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/refresh")
                         .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                         .header("X-Nexa-Surface", "PLATFORM")
-                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue)))
+                        .cookie(new Cookie("NEXA_PLATFORM_REFRESH", cookieValue))))
                 .andExpect(status().isOk());
     }
 
@@ -145,8 +145,15 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
     @Test void signInSessionAndSignOutUseRealSessionLifecycle() throws Exception {
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
-        mockMvc.perform(post("/api/v1/authentication/sign-in").header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON).content("{\"identifier\":\"" + SALES_EMAIL + "\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}" )).andExpect(status().isUnauthorized());
-        mockMvc.perform(post("/api/v1/authentication/sign-out").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).header("X-Nexa-Surface", "PLATFORM").header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
+                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identifier\":\"" + SALES_EMAIL + "\",\"password\":\"wrong\",\"workspaceSlug\":\"icisa-test\",\"surface\":\"PLATFORM\"}")))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-out")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("X-Nexa-Surface", "PLATFORM")
+                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)))
                 .andExpect(status().isNoContent())
                 .andExpect(header().string(HttpHeaders.SET_COOKIE, containsString("Max-Age=0")));
         mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
@@ -165,10 +172,10 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
         jdbc.update("update tenant_management.workspace_membership set status='DISABLED' where id=?",
                 java.util.UUID.fromString(membershipId));
         try {
-            mockMvc.perform(post("/api/v1/authentication/sign-out")
+            mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-out")
                             .header("Authorization", "Bearer " + token)
                             .header("X-Nexa-Surface", "PLATFORM")
-                            .header("Origin", ALLOWED_ORIGIN))
+                            .header("Origin", ALLOWED_ORIGIN)))
                     .andExpect(status().isNoContent());
             mockMvc.perform(get("/api/v1/session").header("Authorization", "Bearer " + token))
                     .andExpect(status().isUnauthorized());
@@ -185,10 +192,10 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                         .header("X-Nexa-Surface", "PLATFORM")
                         .header(HttpHeaders.ORIGIN, "https://evil.example"))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/authentication/sign-out")
+        mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-out")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .header("X-Nexa-Surface", "PLATFORM")
-                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN))
+                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)))
                 .andExpect(status().isNoContent());
     }
 
@@ -516,10 +523,10 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
     @Test void browserBearerContextSwitchUsesCookieTransportAndRevokesOnlyTheInvokingFamily() throws Exception {
         CreatedContext secondContext = createSecondWorkspaceMembership(SALES_EMAIL);
         try {
-            MvcResult invokingLogin = mockMvc.perform(post("/api/v1/authentication/sign-in")
+            MvcResult invokingLogin = mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/sign-in")
                             .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(signInPayload()))
+                            .content(signInPayload())))
                     .andExpect(status().isOk())
                     .andReturn();
             String invokingToken = json(invokingLogin).get("accessToken").asText();
@@ -582,15 +589,15 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
             assertThat(jdbc.queryForObject("select count(*) from iam.refresh_session where family_id=? and family_revoked_at is not null",
                     Integer.class, java.util.UUID.fromString(replacementFamily))).isZero();
 
-            mockMvc.perform(post("/api/v1/authentication/refresh")
+            mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/refresh")
                             .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                             .header("X-Nexa-Surface", "PLATFORM")
-                            .cookie(new Cookie("NEXA_PLATFORM_REFRESH", invokingRefreshCookie)))
+                            .cookie(new Cookie("NEXA_PLATFORM_REFRESH", invokingRefreshCookie))))
                     .andExpect(status().isUnauthorized());
-            MvcResult rotated = mockMvc.perform(post("/api/v1/authentication/refresh")
+            MvcResult rotated = mockMvc.perform(withBrowserCsrf(post("/api/v1/authentication/refresh")
                             .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
                             .header("X-Nexa-Surface", "PLATFORM")
-                            .cookie(new Cookie("NEXA_PLATFORM_REFRESH", replacementRefreshCookie)))
+                            .cookie(new Cookie("NEXA_PLATFORM_REFRESH", replacementRefreshCookie))))
                     .andExpect(status().isOk())
                     .andExpect(header().doesNotExist("X-Nexa-Refresh-Token"))
                     .andReturn();

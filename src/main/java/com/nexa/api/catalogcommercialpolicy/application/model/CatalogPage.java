@@ -2,6 +2,7 @@ package com.nexa.api.catalogcommercialpolicy.application.model;
 
 import java.util.List;
 
+@org.springframework.modulith.NamedInterface("catalog-list-read")
 public record CatalogPage<T>(
 		List<T> items,
 		int page,

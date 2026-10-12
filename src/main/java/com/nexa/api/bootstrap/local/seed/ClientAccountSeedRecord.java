@@ -6,4 +6,5 @@ public record ClientAccountSeedRecord(String code, String businessName, String c
 		String segment, String contact, String contactEmail, String phone, String paymentCondition,
 		BigDecimal monthlyCreditLimit, BigDecimal monthlyCreditUsed, String monthlyCreditStatus,
 		String deliveryPreference, String address, String district, String province, String deliveryReference,
+		String departmentCode, String provinceCode, String districtCode,
 		boolean portalAccess, String sellerWorkspaceEmail, String status) { }

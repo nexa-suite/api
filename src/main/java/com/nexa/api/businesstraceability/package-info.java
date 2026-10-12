@@ -4,6 +4,7 @@
                 "BC-01-tenant-access-governance :: access-contracts",
                 "BC-01-tenant-access-governance :: access-values",
                 "shared :: shared-error-primitives",
+                "shared :: shared-event-acl",
                 "shared :: shared-technical-out"
         })
 package com.nexa.api.businesstraceability;

@@ -1,7 +1,8 @@
 package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentView;
-import com.nexa.api.fulfillmentdelivery.application.service.DriverDeliveryIncidentService;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.fulfillmentdelivery.domain.operationalexception.DriverDeliveryIncidentType;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,10 +33,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class DriverDeliveryIncidentController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final DriverDeliveryIncidentService service;
+    private final FulfillmentDeliveryRequestRunner runner;
 
-    public DriverDeliveryIncidentController(DriverDeliveryIncidentService service) {
-        this.service = service;
+    public DriverDeliveryIncidentController(FulfillmentDeliveryRequestRunner runner) {
+        this.runner = runner;
     }
 
     @PostMapping
@@ -46,8 +47,9 @@ public final class DriverDeliveryIncidentController {
                                                @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                @Valid @RequestBody RecordIncidentRequest request) {
-        IncidentView value = service.record(context, deliveryId, attemptId, version(ifMatch), key,
-                request.reason(), request.description(), request.place(), request.type());
+        IncidentView value = runner.execute(context, Requirements.none(), composition ->
+                composition.driverDeliveryIncidents().record(context, deliveryId, attemptId, version(ifMatch), key,
+                        request.reason(), request.description(), request.place(), request.type()));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }
@@ -61,8 +63,9 @@ public final class DriverDeliveryIncidentController {
                                                        @RequestHeader(name = "If-Match", required = false) String ifMatch,
                                                        @RequestHeader(name = "Idempotency-Key", required = false) String key,
                                                        @Valid @RequestBody AttachIncidentEvidenceRequest request) {
-        IncidentView value = service.attachEvidence(context, deliveryId, attemptId, incidentId,
-                version(ifMatch), key, request.evidenceObjectIds());
+        IncidentView value = runner.execute(context, Requirements.none(), composition ->
+                composition.driverDeliveryIncidents().attachEvidence(context, deliveryId, attemptId, incidentId,
+                        version(ifMatch), key, request.evidenceObjectIds()));
         return ResponseEntity.status(value.replayed() ? 200 : 201)
                 .eTag(etag(value.deliveryVersion())).body(value);
     }

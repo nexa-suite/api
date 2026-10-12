@@ -24,8 +24,9 @@ import java.util.UUID;
 /** Builds a picking work page only after current warehouse grants are applied. */
 @Service
 @Profile("!test")
-public class FulfillmentWorkListService {
-    private static final Set<String> PICKABLE_FULFILLMENT_STATES = Set.of("ALLOCATED", "PICKING");
+public class FulfillmentWorkListService implements com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentWorkListQueries {
+    private static final Set<String> WAREHOUSE_WORK_STATES =
+            Set.of("ALLOCATED", "PICKING", "READY_FOR_DISPATCH");
     private static final String ALLOCATED = "ALLOCATED";
 
     private final DispatchReadinessPersistencePort fulfillments;
@@ -59,7 +60,7 @@ public class FulfillmentWorkListService {
         List<FulfillmentWorkListModels.Item> visible = new ArrayList<>();
         for (DispatchReadinessPersistencePort.PreparedFulfillment candidate :
                 fulfillments.candidates(context.tenantId().value(), context.workspaceId().value())) {
-            if (!PICKABLE_FULFILLMENT_STATES.contains(candidate.status())
+            if (!WAREHOUSE_WORK_STATES.contains(candidate.status())
                     || candidate.physicalAllocationId() == null || candidate.lines().isEmpty()) {
                 continue;
             }

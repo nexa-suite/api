@@ -33,9 +33,9 @@ class ManualSalesOrderConcurrencyIT extends NexaWorkflowIntegrationSupport {
         String tenant = tenantId();
         String workspace = workspaceId();
         String actor = membershipId(SALES_EMAIL);
-        assertThat(jdbc.queryForObject("select count(*) from sales.manual_order_idempotency where tenant_id=? and workspace_id=? and actor_membership_id=? and idempotency_key=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.manual_order_idempotency where tenant_id=? and workspace_id=? and actor_membership_id=? and idempotency_key=?", Integer.class,
                 java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace), java.util.UUID.fromString(actor), key)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where tenant_id=? and workspace_id=? and created_by_membership_id=? and order_source='MANUAL' and number in (select o.number from sales.sales_order o join sales.manual_order_idempotency i on i.sales_order_id=o.id where i.tenant_id=? and i.workspace_id=? and i.actor_membership_id=? and i.idempotency_key=?)", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where tenant_id=? and workspace_id=? and created_by_membership_id=? and order_source='MANUAL' and number in (select o.number from sales.sales_order o join sales.manual_order_idempotency i on i.sales_order_id=o.id where i.tenant_id=? and i.workspace_id=? and i.actor_membership_id=? and i.idempotency_key=?)", Integer.class,
                 java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace), java.util.UUID.fromString(actor),
                 java.util.UUID.fromString(tenant), java.util.UUID.fromString(workspace), java.util.UUID.fromString(actor), key)).isEqualTo(1);
     }

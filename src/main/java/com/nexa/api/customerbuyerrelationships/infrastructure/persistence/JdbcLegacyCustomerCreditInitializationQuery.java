@@ -16,8 +16,9 @@ public class JdbcLegacyCustomerCreditInitializationQuery implements LegacyCustom
 
     @Override
     public Optional<Snapshot> find(UUID tenantId, UUID workspaceId, UUID customerAccountId, String currency) {
-        return jdbc.query("select id,credit_currency,credit_limit from sales.client_account where tenant_id=? and workspace_id=? and id=? and credit_currency=?",
-                (rs, row) -> new Snapshot(rs.getObject(1, UUID.class), rs.getString(2), rs.getBigDecimal(3)),
+        return jdbc.query("select id,credit_currency,credit_limit,current_commercial_exposure from sales.client_account where tenant_id=? and workspace_id=? and id=? and credit_currency=?",
+                (rs, row) -> new Snapshot(rs.getObject(1, UUID.class), rs.getString(2), rs.getBigDecimal(3),
+                        rs.getBigDecimal(4)),
                 tenantId, workspaceId, customerAccountId, currency).stream().findFirst();
     }
 }

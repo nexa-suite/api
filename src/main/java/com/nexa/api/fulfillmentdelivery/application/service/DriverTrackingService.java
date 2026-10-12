@@ -23,7 +23,7 @@ import java.util.UUID;
 
 @Service
 @Profile("!test")
-public class DriverTrackingService {
+public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.application.publicapi.DriverTrackingOperations {
     private final DriverTrackingPort tracking;
     private final WorkforceDirectory workforce;
     private final CustomerAccountQuery accounts;

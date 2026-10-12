@@ -3,12 +3,14 @@ package com.nexa.api.catalogcommercialpolicy.presentation.rest;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPricingPreviewModels;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogPricingPreviewUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,10 +32,19 @@ import java.util.UUID;
 public final class CatalogPricingPreviewController {
     private final CatalogPricingPreviewUseCase pricing;
     private final ObjectProvider<CatalogClientAccountPort> clientAccounts;
+    private final ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests;
 
     public CatalogPricingPreviewController(CatalogPricingPreviewUseCase pricing, ObjectProvider<CatalogClientAccountPort> clientAccounts) {
+        this(pricing, clientAccounts, null);
+    }
+
+    @Autowired
+    public CatalogPricingPreviewController(CatalogPricingPreviewUseCase pricing,
+            ObjectProvider<CatalogClientAccountPort> clientAccounts,
+            ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests) {
         this.pricing = pricing;
         this.clientAccounts = clientAccounts;
+        this.tenantRequests = tenantRequests;
     }
 
     @PostMapping
@@ -43,7 +54,10 @@ public final class CatalogPricingPreviewController {
             @Valid @RequestBody Request request) {
         CatalogPricingPreviewModels.Request input = new CatalogPricingPreviewModels.Request(
                 request.items().stream().map(item -> new CatalogPricingPreviewModels.ItemRequest(item.productId(), item.quantity())).toList(), request.asOf());
-        return ResponseEntity.ok(Response.from(pricing.preview(CatalogHttpSupport.scope(context, clientAccounts), input)));
+        var result = CatalogHttpSupport.tenantRequest(context, tenantRequests,
+                () -> pricing.preview(CatalogHttpSupport.scope(context, clientAccounts), input),
+                scoped -> scoped.pricingPreview().preview(scoped.readScope(), input));
+        return ResponseEntity.ok(Response.from(result));
     }
 
     public record Request(List<Item> items, Instant asOf) {

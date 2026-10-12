@@ -9,29 +9,42 @@ import com.nexa.api.salescommitment.application.salesorder.model.FulfillmentCand
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderEventView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderWalletRefundView;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderWalletRefundCandidateView;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderApprovedWorkflowConversion;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFinancialStateQuery;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderAggregatePersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderConversionPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.IdempotencyPersistencePort;
 import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrder;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands;
+import com.nexa.api.payments.application.publicapi.BuyerWalletRefundBalanceQuery;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReservationCommands.RefundCommand;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
-public class SalesOrderService implements SalesOrderUseCase {
+public class SalesOrderService implements SalesOrderUseCase, SalesOrderApprovedWorkflowConversion {
+	private static final BigDecimal ZERO_MONEY = new BigDecimal("0.0000");
 	private final SalesOrderPersistencePort persistence;
 	private final CustomerAccountQuery accounts;
 	private final SalesOrderAggregatePersistencePort aggregatePersistence;
@@ -39,6 +52,9 @@ public class SalesOrderService implements SalesOrderUseCase {
 	private final ConvertApprovedPurchaseRequestToSalesOrderService conversionService;
 	private final IdempotencyPersistencePort idempotency;
 	private final ObjectMapper objectMapper;
+	private final SalesOrderFinancialStateQuery financialStates;
+	private final BuyerWalletReservationCommands walletRefunds;
+	private final BuyerWalletRefundBalanceQuery walletRefundBalances;
 
 	public SalesOrderService(SalesOrderPersistencePort persistence, CustomerAccountQuery accounts) {
 		this(persistence, accounts, persistence instanceof SalesOrderAggregatePersistencePort aggregate ? aggregate : null,
@@ -65,6 +81,22 @@ public class SalesOrderService implements SalesOrderUseCase {
 	public SalesOrderService(SalesOrderPersistencePort persistence, CustomerAccountQuery accounts,
 			SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence,
 			IdempotencyPersistencePort idempotency, ObjectMapper objectMapper) {
+		this(persistence, accounts, aggregatePersistence, conversionPersistence, idempotency, objectMapper, null, null);
+	}
+
+	public SalesOrderService(SalesOrderPersistencePort persistence, CustomerAccountQuery accounts,
+			SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence,
+			IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
+			SalesOrderFinancialStateQuery financialStates, BuyerWalletReservationCommands walletRefunds) {
+		this(persistence, accounts, aggregatePersistence, conversionPersistence, idempotency, objectMapper,
+				financialStates, walletRefunds, null);
+	}
+
+	public SalesOrderService(SalesOrderPersistencePort persistence, CustomerAccountQuery accounts,
+			SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence,
+			IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
+			SalesOrderFinancialStateQuery financialStates, BuyerWalletReservationCommands walletRefunds,
+			BuyerWalletRefundBalanceQuery walletRefundBalances) {
 		this.persistence = Objects.requireNonNull(persistence, "Sales Order persistence is required");
 		this.accounts = Objects.requireNonNull(accounts, "Client Account persistence is required");
 		this.aggregatePersistence = Objects.requireNonNull(aggregatePersistence, "Sales Order aggregate persistence is required");
@@ -72,6 +104,9 @@ public class SalesOrderService implements SalesOrderUseCase {
 		this.conversionService = new ConvertApprovedPurchaseRequestToSalesOrderService(conversionPersistence);
 		this.idempotency = idempotency;
 		this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+		this.financialStates = financialStates;
+		this.walletRefunds = walletRefunds;
+		this.walletRefundBalances = walletRefundBalances;
 	}
 
 	@Override
@@ -79,6 +114,14 @@ public class SalesOrderService implements SalesOrderUseCase {
 	public SalesOrderView convert(CurrentAccessContext context, String purchaseRequestId, long purchaseRequestVersion,
 			String idempotencyKey, String note) {
 		return conversionService.convert(context, purchaseRequestId, purchaseRequestVersion, idempotencyKey, note);
+	}
+
+	@Override
+	@Transactional(noRollbackFor = com.nexa.api.salescommitment.application.exception.PurchaseRequestExpiredException.class)
+	public SalesOrderView convertApprovedBySystemWorkflow(CurrentAccessContext context, String purchaseRequestId,
+			long purchaseRequestVersion, String idempotencyKey, String note) {
+		return conversionService.convertApprovedBySystemWorkflow(context, purchaseRequestId, purchaseRequestVersion,
+				idempotencyKey, note);
 	}
 
 	@Override
@@ -130,12 +173,66 @@ public class SalesOrderService implements SalesOrderUseCase {
 			case "cancel" -> aggregate.cancel(at);
 		}
         SalesOrderView result = aggregatePersistence.saveTransition(aggregate, normalized, reason,
-                context.membershipId().toString(), context.userId().toString(), expectedVersion, at.toEpochMilli());
+                context.membershipId().toString(), context.userId().toString(), expectedVersion,
+                at.toEpochMilli(), context);
 		if (requestHash != null) {
 			idempotency.save(scope(context), workspace(context), context.membershipId().toString(), "sales-order-transition", idempotencyKey,
 						result.id(), result.version(), java.util.UUID.randomUUID(), at.toEpochMilli(), requestHash, serialize(result));
 		}
 		return result;
+	}
+
+	@Override
+	public SalesOrderWalletRefundView refundBuyerWallet(CurrentAccessContext context, String id, BigDecimal amountPEN,
+			String reason, String idempotencyKey) {
+		requireWalletRefundAuthority(context);
+		if (financialStates == null || walletRefunds == null) {
+			throw new com.nexa.api.payments.application.exception.BuyerWalletRefundUnavailableException();
+		}
+		if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.trim().length() > 160) {
+			throw new IdempotencyKeyRequiredException();
+		}
+		String normalizedKey = idempotencyKey.trim();
+		UUID orderId = UUID.fromString(Objects.requireNonNull(id, "Sales Order id is required"));
+		String normalizedReason = reason == null ? null : reason.trim();
+		Instant occurredAt = Instant.now();
+		RefundCommand command = new RefundCommand(orderId, refundId(context, orderId, normalizedKey), amountPEN,
+			normalizedReason, normalizedKey, occurredAt);
+		SalesOrderFinancialStateQuery.State state = financialStates.findWalletRefundState(
+				context.tenantId().value(), context.workspaceId().value(), orderId)
+			.orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("sales-order"));
+		if (!"CANCELLED".equals(state.status()) || !"WALLET".equals(state.paymentOption())) {
+			throw new SalesOrderTransitionException();
+		}
+		BuyerWalletReservationCommands.Refund refund = walletRefunds.refundForSalesOrder(context, command);
+		return new SalesOrderWalletRefundView(orderId, refund.refundId(), refund.ledgerEntryId(), refund.amountPEN(),
+			"PEN", "POSTED");
+	}
+
+	@Override
+	public com.nexa.api.salescommitment.application.model.SalesPage<SalesOrderWalletRefundCandidateView>
+	walletRefundCandidates(CurrentAccessContext context, int page, int size) {
+		requireWalletRefundAuthority(context);
+		if (financialStates == null || walletRefundBalances == null) {
+			throw new com.nexa.api.payments.application.exception.BuyerWalletRefundUnavailableException();
+		}
+		int normalizedPage = Math.max(0, page);
+		int normalizedSize = Math.min(100, Math.max(1, size));
+		SalesOrderFinancialStateQuery.CandidatePage candidatePage = financialStates.findCancelledWalletRefundCandidates(
+				context.tenantId().value(), context.workspaceId().value(), normalizedPage, normalizedSize);
+		List<UUID> salesOrderIds = candidatePage.items().stream()
+				.map(SalesOrderFinancialStateQuery.Candidate::salesOrderId).toList();
+		Map<UUID, BuyerWalletRefundBalanceQuery.RefundableBalance> balances =
+				walletRefundBalances.findRefundableBalances(context, salesOrderIds);
+		List<SalesOrderWalletRefundCandidateView> items = candidatePage.items().stream().map(candidate -> {
+			var balance = balances.get(candidate.salesOrderId());
+			return new SalesOrderWalletRefundCandidateView(candidate.salesOrderId(), candidate.orderNumber(), "PEN",
+					balance == null ? ZERO_MONEY : balance.consumedPEN(),
+					balance == null ? ZERO_MONEY : balance.refundedPEN(),
+					balance == null ? ZERO_MONEY : balance.refundablePEN());
+		}).toList();
+		return new SalesPage<>(items, candidatePage.page(),
+				candidatePage.size(), candidatePage.total());
 	}
 
 	@Override
@@ -161,6 +258,14 @@ public class SalesOrderService implements SalesOrderUseCase {
 	private static void commercialWrite(CurrentAccessContext context) {
 		context.requirePermission(Permission.SALES_WRITE);
 	}
+	private static void requireWalletRefundAuthority(CurrentAccessContext context) {
+		Objects.requireNonNull(context, "Verified current access context is required").requireSurface(Surface.PLATFORM);
+		if (!context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER)
+				&& !context.hasRole(MembershipRole.COMPANY_OWNER)) {
+			throw new AccessPolicyViolation("A Business Operations Manager or Company Owner role is required");
+		}
+		context.requirePermission(PermissionKey.PAYMENT_RECONCILE);
+	}
 	private static void requireIdempotencyKey(String key) {
 		if (key.length() > 160) throw new IdempotencyKeyRequiredException();
 	}
@@ -171,6 +276,12 @@ public class SalesOrderService implements SalesOrderUseCase {
 		} catch (NoSuchAlgorithmException exception) {
 			throw new IllegalStateException("SHA-256 is required", exception);
 		}
+	}
+	private static UUID refundId(CurrentAccessContext context, UUID orderId, String idempotencyKey) {
+		String canonical = "buyer-wallet-refund-v1|" + context.tenantId().value() + "|"
+				+ context.workspaceId().value() + "|" + context.membershipId().value() + "|" + orderId + "|"
+				+ idempotencyKey.trim();
+		return UUID.nameUUIDFromBytes(canonical.getBytes(StandardCharsets.UTF_8));
 	}
 	private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }
 	private static String workspace(CurrentAccessContext context) { return context.workspaceId().toString(); }

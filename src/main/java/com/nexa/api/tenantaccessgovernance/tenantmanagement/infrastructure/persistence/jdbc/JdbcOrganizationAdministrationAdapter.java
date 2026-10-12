@@ -36,7 +36,18 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	@Override public List<WorkspaceMembershipSummary> findMemberships(String tenantId, String workspaceId) { return jdbc.query(membershipSql() + " where w.tenant_id=? and m.workspace_id=? group by m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.membership_type,m.status,m.version order by u.display_name", (org.springframework.jdbc.core.RowMapper<WorkspaceMembershipSummary>) this::membership, uuid(tenantId), uuid(workspaceId)); }
 	@Override public List<WorkspaceMembershipSummary> findMemberships(String tenantId) { return jdbc.query(membershipSql() + " where w.tenant_id=? group by m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.membership_type,m.status,m.version order by u.display_name", (org.springframework.jdbc.core.RowMapper<WorkspaceMembershipSummary>) this::membership, uuid(tenantId)); }
 	@Override public Optional<WorkspaceMembershipSummary> findMembership(String tenantId, String membershipId) { return jdbc.query(membershipSql() + " where w.tenant_id=? and m.id=? group by m.id,m.workspace_id,m.user_id,u.email,u.display_name,m.membership_type,m.status,m.version",rs -> rs.next()?Optional.of(membership(rs)):Optional.empty(),uuid(tenantId),uuid(membershipId)); }
-	@Override public int createWorkspace(String tenantId, java.util.UUID workspaceId, String name, String slug, java.time.Instant createdAt) { try { return jdbc.update("insert into tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at,version) values (?,?,?,?,'ACTIVE',?,?,0)", workspaceId, uuid(tenantId), name, slug, java.sql.Timestamp.from(createdAt), java.sql.Timestamp.from(createdAt)); } catch (DuplicateKeyException exception) { return 0; } }
+	@Override @Transactional public int createWorkspace(String tenantId, java.util.UUID workspaceId, String name, String slug, java.time.Instant createdAt) {
+		try {
+			java.util.UUID tenantUuid = uuid(tenantId);
+			int created = jdbc.update("insert into tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at,version) values (?,?,?,?,'ACTIVE',?,?,0)", workspaceId, tenantUuid, name, slug, java.sql.Timestamp.from(createdAt), java.sql.Timestamp.from(createdAt));
+			if (created == 1) {
+				jdbc.update("insert into tenant_management.tenant_business_database_workspace_anchor_task "
+						+ "(task_id,tenant_id,workspace_id) values (?,?,?) on conflict (tenant_id,workspace_id) do nothing",
+						java.util.UUID.randomUUID(), tenantUuid, workspaceId);
+			}
+			return created;
+		} catch (DuplicateKeyException exception) { return 0; }
+	}
 	@Override public Optional<java.util.UUID> findWorkspaceIdempotent(String tenantId, String idempotencyKey, String requestHash) { return jdbc.query("select workspace_id from tenant_management.workspace_creation_idempotency where tenant_id=? and idempotency_key=? and request_hash=?", (rs, row) -> rs.getObject(1, java.util.UUID.class), uuid(tenantId), idempotencyKey, requestHash).stream().findFirst(); }
 	@Override public boolean workspaceIdempotencyKeyHasDifferentPayload(String tenantId, String idempotencyKey, String requestHash) { return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from tenant_management.workspace_creation_idempotency where tenant_id=? and idempotency_key=? and request_hash<>?)", Boolean.class, uuid(tenantId), idempotencyKey, requestHash)); }
 	@Override public int saveWorkspaceIdempotency(String tenantId, String idempotencyKey, String requestHash, java.util.UUID workspaceId) { return jdbc.update("insert into tenant_management.workspace_creation_idempotency (tenant_id,idempotency_key,request_hash,workspace_id,created_at) values (?,?,?,?,current_timestamp) on conflict (tenant_id,idempotency_key) do nothing", uuid(tenantId), idempotencyKey, requestHash, workspaceId); }
@@ -98,7 +109,7 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 		roles = roles.stream().map(JdbcOrganizationAdministrationAdapter::apiRoleCode).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 		Set<String> roleIds = new LinkedHashSet<>(stringArray(rs.getArray(10)));
 		Set<String> permissions = new LinkedHashSet<>(stringArray(rs.getArray(11)));
-		return new WorkspaceMembershipSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getObject(3).toString(),rs.getString(4),rs.getString(5),rs.getString(7),rs.getLong(8),roles,roleIds,permissions);
+		return new WorkspaceMembershipSummary(rs.getObject(1).toString(),rs.getObject(2).toString(),rs.getObject(3).toString(),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getLong(8),roles,roleIds,permissions);
 	}
 	private static String apiRoleCode(String code) { return java.util.Arrays.stream(MembershipRole.values()).filter(role -> role.name().equalsIgnoreCase(code)).map(Enum::name).findFirst().orElse(code); }
 	private static Set<String> stringArray(java.sql.Array array) throws java.sql.SQLException {
@@ -114,9 +125,11 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	}
 	private void ensureSystemWorkflowActor(java.util.UUID tenantId, java.util.UUID workspaceId) {
 		String membership = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid", String.class, workspaceId);
-		jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do update set membership_type='SYSTEM_WORKFLOW',status='ACTIVE',updated_at=current_timestamp", membership, workspaceId);
-		jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?::uuid,?::uuid,?::uuid,'22222222-2222-4222-8222-222222222222'::uuid,current_timestamp) on conflict do nothing", membership, tenantId, workspaceId);
-		jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?::uuid,?::uuid,?::uuid,0,current_timestamp) on conflict (membership_id) do nothing", membership, tenantId, workspaceId);
+		int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, workspaceId);
+		if (inserted == 1) {
+			jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?::uuid,?::uuid,?::uuid,'22222222-2222-4222-8222-222222222222'::uuid,current_timestamp) on conflict do nothing", membership, tenantId, workspaceId);
+			jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?::uuid,?::uuid,?::uuid,0,current_timestamp) on conflict (membership_id) do nothing", membership, tenantId, workspaceId);
+		}
 	}
 	private static java.util.UUID uuid(String value) { return java.util.UUID.fromString(value); }
 }

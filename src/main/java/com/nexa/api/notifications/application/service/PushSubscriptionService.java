@@ -1,11 +1,14 @@
 package com.nexa.api.notifications.application.service;
 
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
+import com.nexa.api.notifications.application.port.in.PushSubscriptionUseCase;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
+import com.nexa.api.notifications.application.publicapi.PushSubscriptionView;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,7 +23,8 @@ import java.util.UUID;
 /** Application boundary for register, rotate, disable and unregister operations. */
 @Service
 @Profile("!test")
-public class PushSubscriptionService {
+@ConditionalOnProperty(prefix = "nexa.tenant-business.notifications", name = "enabled", havingValue = "false", matchIfMissing = true)
+public class PushSubscriptionService implements PushSubscriptionUseCase {
     private final PushSubscriptionPersistencePort persistence;
     private final Clock clock;
 
@@ -35,7 +39,8 @@ public class PushSubscriptionService {
     }
 
     @Transactional
-    public PushSubscriptionPersistencePort.PushSubscription register(CurrentAccessContext context, String nativeClient,
+    @Override
+    public PushSubscriptionView register(CurrentAccessContext context, String nativeClient,
                                                                        String installationId, String platform,
                                                                        String providerToken, String idempotencyKey) {
         context.requirePermission(PermissionKey.NOTIFICATION_READ);
@@ -45,25 +50,32 @@ public class PushSubscriptionService {
         String normalizedPlatform = platform == null ? "" : platform.trim().toUpperCase(Locale.ROOT);
         if (!normalizedPlatform.equals("IOS") && !normalizedPlatform.equals("ANDROID")) throw invalid("PUSH_PLATFORM_INVALID");
         if (providerToken == null || providerToken.isBlank() || providerToken.trim().length() > 4096) throw invalid("PUSH_TOKEN_INVALID");
-        return persistence.register(new PushSubscriptionPersistencePort.RegisterRequest(
+        return view(persistence.register(new PushSubscriptionPersistencePort.RegisterRequest(
                 context.tenantId().value(), context.workspaceId().value(), context.membershipId().value(),
                 context.userId().value(), context.surface().name(), installationId.trim(), normalizedPlatform,
                 hash(providerToken.trim()), context.membershipId().value(), idempotencyKey.trim(),
                 hash("push-register-v1|" + installationId.trim() + "|" + normalizedPlatform + "|" + hash(providerToken.trim())),
-                clock.instant()));
+                clock.instant())));
     }
 
     @Transactional
-    public PushSubscriptionPersistencePort.PushSubscription disable(CurrentAccessContext context, String nativeClient,
+    @Override
+    public PushSubscriptionView disable(CurrentAccessContext context, String nativeClient,
                                                                      UUID subscriptionId, String idempotencyKey, boolean unregister) {
         context.requirePermission(PermissionKey.NOTIFICATION_READ);
         requireNative(nativeClient);
         requireKey(idempotencyKey);
         if (subscriptionId == null) throw invalid("PUSH_SUBSCRIPTION_NOT_FOUND");
-        return persistence.disable(new PushSubscriptionPersistencePort.DisableRequest(
+        return view(persistence.disable(new PushSubscriptionPersistencePort.DisableRequest(
                 context.tenantId().value(), context.workspaceId().value(), context.membershipId().value(), subscriptionId,
                 unregister ? "UNREGISTER" : "DISABLE", context.membershipId().value(), idempotencyKey.trim(),
-                hash("push-" + (unregister ? "unregister" : "disable") + "-v1|" + subscriptionId), clock.instant()));
+                hash("push-" + (unregister ? "unregister" : "disable") + "-v1|" + subscriptionId), clock.instant())));
+    }
+
+    private static PushSubscriptionView view(PushSubscriptionPersistencePort.PushSubscription subscription) {
+        return new PushSubscriptionView(subscription.id(), subscription.recipientMembershipId(),
+                subscription.installationId(), subscription.platform(), subscription.surface(), subscription.status(),
+                subscription.createdAt(), subscription.updatedAt(), subscription.version());
     }
 
     private static void requireNative(String value) {

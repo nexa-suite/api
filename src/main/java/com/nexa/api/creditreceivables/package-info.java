@@ -5,6 +5,7 @@
                 "BC-01-tenant-access-governance :: access-contracts",
                 "BC-01-tenant-access-governance :: access-values",
                 "BC-02-customer-buyer-relationships :: customer-relationships",
+                "BC-02-customer-buyer-relationships :: tenant-database-binding",
                 "BC-11-business-traceability :: traceability-public",
                 "shared :: shared-technical-out"
         })

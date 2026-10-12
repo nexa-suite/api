@@ -5,7 +5,6 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 compose_dir=$(CDPATH= cd -- "${script_dir}/.." && pwd)
 api_dir=$(CDPATH= cd -- "${compose_dir}/../.." && pwd)
 env_file="${api_dir}/.env.local"
-modern_file="${compose_dir}/modern.compose.yml"
 legacy_file="${compose_dir}/legacy.compose.yml"
 
 if [ ! -f "$env_file" ]; then
@@ -13,5 +12,5 @@ if [ ! -f "$env_file" ]; then
   exit 1
 fi
 
-docker compose --env-file "$env_file" -f "$modern_file" up --build -d
+"${compose_dir}/scripts/modern-up.sh" fullstack
 exec docker compose --env-file "$env_file" -f "$legacy_file" up --build -d

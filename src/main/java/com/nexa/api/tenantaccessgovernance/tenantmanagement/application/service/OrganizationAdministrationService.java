@@ -150,7 +150,7 @@ public class OrganizationAdministrationService implements OrganizationAdministra
 
 	@Override
 	public List<WorkspaceMembershipSummary> memberships(CurrentAccessContext context) {
-		read(context); return port.findMemberships(context.tenantId().toString());
+		read(context); return port.findMemberships(context.tenantId().toString(), context.workspaceId().toString());
 	}
 
 	@Override

@@ -7,6 +7,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncident
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentRequest;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryIncidentModels.IncidentView;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryIncidentPersistencePort;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.DriverDeliveryIncidentOperations;
 import com.nexa.api.fulfillmentdelivery.domain.operationalexception.DriverDeliveryIncidentType;
 import com.nexa.api.fulfillmentdelivery.domain.operationalexception.OperationalExceptionSourceClassifier;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -30,7 +31,7 @@ import java.util.UUID;
 /** Current-driver append-only incident commands; delivery outcomes are never modified. */
 @Service
 @Profile("!test")
-public class DriverDeliveryIncidentService {
+public class DriverDeliveryIncidentService implements DriverDeliveryIncidentOperations {
     private final DriverDeliveryIncidentPersistencePort persistence;
     private final BusinessEvidenceQuery businessEvidence;
     private final BusinessTraceabilityCommands traceability;
@@ -46,6 +47,7 @@ public class DriverDeliveryIncidentService {
     }
 
     @Transactional
+    @Override
     public IncidentView record(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
                                long expectedVersion, String key, String reason,
                                String description, String place, DriverDeliveryIncidentType type) {
@@ -76,6 +78,7 @@ public class DriverDeliveryIncidentService {
     }
 
     @Transactional
+    @Override
     public IncidentView attachEvidence(CurrentAccessContext context, UUID deliveryId, UUID attemptId,
                                        UUID incidentId, long expectedVersion, String key,
                                        List<UUID> requestedEvidenceIds) {

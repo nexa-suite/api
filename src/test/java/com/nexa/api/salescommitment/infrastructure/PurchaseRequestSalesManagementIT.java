@@ -25,18 +25,19 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
 
     @AfterEach
     void removePriceListFixture() {
-        if (customerTermsId != null) jdbc.update("delete from catalog_management.customer_terms where terms_id=?", customerTermsId);
-        if (priceListItemId != null) jdbc.update("delete from catalog_management.price_list_item where item_id=?", priceListItemId);
-        if (priceListId != null) jdbc.update("delete from catalog_management.price_list where price_list_id=?", priceListId);
+        if (customerTermsId != null) tenantJdbc().update("delete from catalog_management.customer_terms where terms_id=?", customerTermsId);
+        if (priceListItemId != null) tenantJdbc().update("delete from catalog_management.price_list_item where item_id=?", priceListItemId);
+        if (priceListId != null) tenantJdbc().update("delete from catalog_management.price_list where price_list_id=?", priceListId);
     }
 
     @Test
     void purchaseRequestUsesPermittedPriceListAndRejectsStalePriceAtSubmission() throws Exception {
+        ensureBuyerCreditAccountConfigured();
         ensureCommercialInventory();
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         UUID account = UUID.fromString(buyerClientAccountId());
-        UUID sku = jdbc.queryForObject("select id from catalog_management.sellable_sku "
+        UUID sku = tenantJdbc().queryForObject("select id from catalog_management.sellable_sku "
                 + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0002'",
                 UUID.class, tenant, workspace);
         priceListId = UUID.randomUUID();
@@ -45,13 +46,13 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
         Timestamp startsAt = Timestamp.from(Instant.parse("2020-01-01T00:00:00Z"));
         Timestamp endsAt = Timestamp.from(Instant.parse("2099-12-31T00:00:00Z"));
         Timestamp createdAt = Timestamp.from(Instant.now());
-        jdbc.update("insert into catalog_management.price_list (price_list_id,tenant_id,workspace_id,code,name,currency,status,valid_from,valid_to,created_at,updated_at,version) "
+        tenantJdbc().update("insert into catalog_management.price_list (price_list_id,tenant_id,workspace_id,code,name,currency,status,valid_from,valid_to,created_at,updated_at,version) "
                         + "values (?,?,?,?,?,'PEN','ACTIVE',?,?,?, ?,0)", priceListId, tenant, workspace,
                 "IT-" + priceListId, "Buyer price list", startsAt, endsAt, createdAt, createdAt);
-        jdbc.update("insert into catalog_management.price_list_item (item_id,tenant_id,workspace_id,price_list_id,sku_id,unit_price,currency,valid_from,valid_to) "
+        tenantJdbc().update("insert into catalog_management.price_list_item (item_id,tenant_id,workspace_id,price_list_id,sku_id,unit_price,currency,valid_from,valid_to) "
                         + "values (?,?,?,?,?,?,'PEN',?,?)", priceListItemId, tenant, workspace,
                 priceListId, sku, new java.math.BigDecimal("275.00"), startsAt, endsAt);
-        jdbc.update("insert into catalog_management.customer_terms (terms_id,tenant_id,workspace_id,customer_account_id,price_list_id,credit_days,currency,valid_from,valid_to,created_at,version) "
+        tenantJdbc().update("insert into catalog_management.customer_terms (terms_id,tenant_id,workspace_id,customer_account_id,price_list_id,credit_days,currency,valid_from,valid_to,created_at,version) "
                         + "values (?,?,?,?,?,0,'PEN',?,?,?,0)", customerTermsId, tenant, workspace, account,
                 priceListId, startsAt, endsAt, createdAt);
 
@@ -63,11 +64,11 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isCreated()).andReturn();
         String requestId = json(created).get("id").asText();
         UUID request = UUID.fromString(requestId);
-        assertThat(jdbc.queryForObject("select unit_price_amount from sales.purchase_request_line "
+        assertThat(tenantJdbc().queryForObject("select unit_price_amount from sales.purchase_request_line "
                 + "where purchase_request_id=? and superseded_at is null", java.math.BigDecimal.class, request))
                 .isEqualByComparingTo("275");
 
-        jdbc.update("update catalog_management.price_list_item set unit_price=? where item_id=?",
+        tenantJdbc().update("update catalog_management.price_list_item set unit_price=? where item_id=?",
                 new java.math.BigDecimal("300.00"), priceListItemId);
         mockMvc.perform(post("/api/v1/purchase-requests/" + requestId + "/submissions")
                         .header("Authorization", "Bearer " + buyer)
@@ -75,12 +76,13 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "stale-price-" + uuid()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("COMMERCIAL_POLICY_CHANGED"));
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request where id=?", String.class, request))
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request where id=?", String.class, request))
                 .isEqualTo("DRAFT");
     }
 
     @Test
     void buyerAcceptanceRevalidatesAndAtomicallyReplacesPurchaseRequestBacking() throws Exception {
+        ensureBuyerCreditAccountConfigured();
         ensureCommercialInventory();
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
@@ -126,16 +128,16 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUBMITTED"))
                 .andExpect(jsonPath("$.lines[0].quantity").value(2));
 
-        assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request_line where purchase_request_id=?", Integer.class, request)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from sales.purchase_request_line where purchase_request_id=? and superseded_at is null", Integer.class, request)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select sum(quantity) from sales.purchase_request_line where purchase_request_id=? and superseded_at is null", java.math.BigDecimal.class, request)).isEqualByComparingTo("2");
-        assertThat(jdbc.queryForObject("select status from sales.commercial_commitment where purchase_request_id=?", String.class, request)).isEqualTo("ACTIVE");
-        assertThat(jdbc.queryForObject("select status from warehouse.inventory_backing where commercial_commitment_id=(select id from sales.commercial_commitment where purchase_request_id=?)", String.class, request)).isEqualTo("BACKED");
-        assertThat(jdbc.queryForObject("select sum(requested_quantity) from warehouse.inventory_backing_line where backing_id=(select b.id from warehouse.inventory_backing b join sales.commercial_commitment c on c.id=b.commercial_commitment_id where c.purchase_request_id=?)", java.math.BigDecimal.class, request)).isEqualByComparingTo("2");
-        java.math.BigDecimal requestTotal = jdbc.queryForObject("select sum(quantity*unit_price_amount) from sales.purchase_request_line where purchase_request_id=? and superseded_at is null", java.math.BigDecimal.class, request);
-        java.math.BigDecimal reservedTotal = jdbc.queryForObject("select amount from payments.credit_reservation where purchase_request_id=? and status='RESERVED'", java.math.BigDecimal.class, request);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_line where purchase_request_id=?", Integer.class, request)).isEqualTo(2);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_line where purchase_request_id=? and superseded_at is null", Integer.class, request)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select sum(quantity) from sales.purchase_request_line where purchase_request_id=? and superseded_at is null", java.math.BigDecimal.class, request)).isEqualByComparingTo("2");
+        assertThat(tenantJdbc().queryForObject("select status from sales.commercial_commitment where purchase_request_id=?", String.class, request)).isEqualTo("ACTIVE");
+        assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_backing where commercial_commitment_id=(select id from sales.commercial_commitment where purchase_request_id=?)", String.class, request)).isEqualTo("BACKED");
+        assertThat(tenantJdbc().queryForObject("select sum(requested_quantity) from warehouse.inventory_backing_line where backing_id=(select b.id from warehouse.inventory_backing b join sales.commercial_commitment c on c.id=b.commercial_commitment_id where c.purchase_request_id=?)", java.math.BigDecimal.class, request)).isEqualByComparingTo("2");
+        java.math.BigDecimal requestTotal = tenantJdbc().queryForObject("select sum(quantity*unit_price_amount) from sales.purchase_request_line where purchase_request_id=? and superseded_at is null", java.math.BigDecimal.class, request);
+        java.math.BigDecimal reservedTotal = tenantJdbc().queryForObject("select amount from payments.credit_reservation where purchase_request_id=? and status='RESERVED'", java.math.BigDecimal.class, request);
         assertThat(reservedTotal).isEqualByComparingTo(requestTotal);
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request_material_change where id=?", String.class, UUID.fromString(proposalId))).isEqualTo("ACCEPTED");
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request_material_change where id=?", String.class, UUID.fromString(proposalId))).isEqualTo("ACCEPTED");
     }
 
     @Test
@@ -168,10 +170,10 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$[0].originalTerms.lines[0].quantity").value(1))
                 .andExpect(jsonPath("$[0].proposedTerms.lines[0].quantity").value(2));
 
-        assertThat(jdbc.queryForObject("select sum(quantity) from sales.purchase_request_line "
+        assertThat(tenantJdbc().queryForObject("select sum(quantity) from sales.purchase_request_line "
                         + "where purchase_request_id=? and superseded_at is null", java.math.BigDecimal.class, scenario.request()))
                 .isEqualByComparingTo("1");
-        assertThat(jdbc.queryForObject("select status from sales.purchase_request_material_change where id=?",
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request_material_change where id=?",
                 String.class, UUID.fromString(scenario.proposalId()))).isEqualTo("REJECTED");
     }
 
@@ -191,12 +193,13 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$[0].status").value("EXPIRED"))
                 .andExpect(jsonPath("$[0].originalTerms.lines[0].quantity").value(1))
                 .andExpect(jsonPath("$[0].proposedTerms.lines[0].quantity").value(2));
-        assertThat(jdbc.queryForObject("select resolved_at is not null from sales.purchase_request_material_change where id=?",
+        assertThat(tenantJdbc().queryForObject("select resolved_at is not null from sales.purchase_request_material_change where id=?",
                 Boolean.class, UUID.fromString(scenario.proposalId()))).isTrue();
     }
 
     @Test
     void salesCanCreateAndSubmitInternalPurchaseRequestForActiveClientAccount() throws Exception {
+        ensureBuyerCreditAccountConfigured();
         ensureCommercialInventory();
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
@@ -242,24 +245,25 @@ class PurchaseRequestSalesManagementIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
 
         UUID requestId = UUID.fromString(id);
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+        org.assertj.core.api.Assertions.assertThat(tenantJdbc().queryForObject(
                 "select count(*) from sales.commercial_commitment where purchase_request_id=? and status='RELEASED'",
                 Integer.class, requestId)).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+        org.assertj.core.api.Assertions.assertThat(tenantJdbc().queryForObject(
                 "select count(*) from warehouse.inventory_backing b join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "where c.purchase_request_id=? and b.status='RELEASED'",
                 Integer.class, requestId)).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+        org.assertj.core.api.Assertions.assertThat(tenantJdbc().queryForObject(
                 "select count(*) from payments.credit_reservation where purchase_request_id=? and status='RELEASED'",
                 Integer.class, requestId)).isEqualTo(1);
 
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject(
+        org.assertj.core.api.Assertions.assertThat(tenantJdbc().queryForObject(
                 "select count(*) from payments.credit_account where tenant_id=?::uuid and workspace_id=?::uuid "
                         + "and client_account_id=?::uuid and currency='PEN' and status='ACTIVE'",
                 Integer.class, tenantId(), workspaceId(), buyerClientAccountId())).isEqualTo(1);
     }
 
     private ProposedChange createProposedMaterialChange() throws Exception {
+        ensureBuyerCreditAccountConfigured();
         ensureCommercialInventory();
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")

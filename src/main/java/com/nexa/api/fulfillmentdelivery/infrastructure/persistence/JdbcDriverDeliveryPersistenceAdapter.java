@@ -10,6 +10,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.A
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.OutcomeLineView;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryPersistencePort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -30,9 +31,16 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersistencePort {
     private final JdbcTemplate jdbc;
+    private final boolean requiresActiveWorkday;
 
+    @Autowired
     public JdbcDriverDeliveryPersistenceAdapter(JdbcTemplate jdbc) {
+        this(jdbc, true);
+    }
+
+    public JdbcDriverDeliveryPersistenceAdapter(JdbcTemplate jdbc, boolean requiresActiveWorkday) {
         this.jdbc = Objects.requireNonNull(jdbc, "JdbcTemplate is required");
+        this.requiresActiveWorkday = requiresActiveWorkday;
     }
 
     @Override
@@ -142,12 +150,14 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
             throw error("DELIVERY_CRITICAL_INSTRUCTION_ACK_REQUIRED");
         }
 
-        List<String> workdayStatuses = jdbc.query("select status from logistics.driver_workday "
-                        + "where tenant_id=? and workspace_id=? and actor_membership_id=? "
-                        + "and status<>'CLOSED' for update",
-                (rs, row) -> rs.getString("status"), request.tenantId(), request.workspaceId(), request.actorMembershipId());
-        if (workdayStatuses.isEmpty() || !"ACTIVE".equals(workdayStatuses.getFirst())) {
-            throw new FulfillmentOperationException("DRIVER_LOCATION_UNAVAILABLE", false);
+        if (requiresActiveWorkday) {
+            List<String> workdayStatuses = jdbc.query("select status from logistics.driver_workday "
+                            + "where tenant_id=? and workspace_id=? and actor_membership_id=? "
+                            + "and status<>'CLOSED' for update",
+                    (rs, row) -> rs.getString("status"), request.tenantId(), request.workspaceId(), request.actorMembershipId());
+            if (workdayStatuses.isEmpty() || !"ACTIVE".equals(workdayStatuses.getFirst())) {
+                throw new FulfillmentOperationException("DRIVER_LOCATION_UNAVAILABLE", false);
+            }
         }
 
         Integer attemptNumber = jdbc.queryForObject("select coalesce(max(attempt_number),0)+1 from logistics.delivery_attempt where tenant_id=? and workspace_id=? and delivery_id=?",

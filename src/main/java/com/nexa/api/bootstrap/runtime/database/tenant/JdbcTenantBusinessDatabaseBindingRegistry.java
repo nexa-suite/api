@@ -10,7 +10,7 @@ import java.util.UUID;
 /** Central-database adapter. Its JdbcTemplate must use the central registry DataSource. */
 public final class JdbcTenantBusinessDatabaseBindingRegistry implements TenantBusinessDatabaseBindingRegistry {
 	private static final String FIND_READY_BINDING = """
-			SELECT tenant_id, database_identity, credential_secret_reference
+			SELECT tenant_id, database_identity, credential_secret_reference, verified_schema_manifest_sha256
 			FROM tenant_management.tenant_business_database_binding
 			WHERE tenant_id = ? AND lifecycle_state = 'READY'
 			""";
@@ -29,7 +29,8 @@ public final class JdbcTenantBusinessDatabaseBindingRegistry implements TenantBu
 				(result, row) -> new TenantBusinessDatabaseBinding(
 						new TenantId(result.getObject("tenant_id", UUID.class)),
 						result.getObject("database_identity", UUID.class),
-						result.getString("credential_secret_reference")),
+						result.getString("credential_secret_reference"),
+						result.getString("verified_schema_manifest_sha256")),
 				tenantId.value()).stream().findFirst();
 	}
 }

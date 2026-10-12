@@ -6,7 +6,9 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 
 import java.util.List;
 import java.util.UUID;
+import org.springframework.modulith.NamedInterface;
 
+@NamedInterface(value = "sales-public", propagate = false)
 public interface ManualSalesOrderDraftUseCase {
     ManualSalesOrderDraftModels.DraftView create(CurrentAccessContext context, String idempotencyKey);
     ManualSalesOrderDraftModels.DraftView get(CurrentAccessContext context, UUID draftId);

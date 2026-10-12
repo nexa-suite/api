@@ -5,6 +5,7 @@ import com.nexa.api.salescommitment.application.salesorder.model.CreateManualSal
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderLineView;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderPersistencePort;
+import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOrderSnapshotViewMapper;
 import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOrderService;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
@@ -68,7 +69,8 @@ class ManualSalesOrderServiceTests {
                     line.unitPriceCurrency(), line.lineSubtotal())).toList();
             saved = new ManualSalesOrderView(order.id().value(), order.number().value(), order.tenantId().toString(),
                     order.workspaceId().toString(), order.clientAccountId().value(), order.createdByMembershipId().toString(),
-                    order.priority(), order.requestedDeliveryDate(), order.snapshot(), order.snapshot().payment().currency(),
+                    order.priority(), order.requestedDeliveryDate(), ManualSalesOrderSnapshotViewMapper.toView(order.snapshot()),
+                    order.snapshot().payment().currency(),
                     order.total(), order.status().name(), order.createdAt(), Instant.ofEpochMilli(now), order.version(), lines);
             return saved;
         }

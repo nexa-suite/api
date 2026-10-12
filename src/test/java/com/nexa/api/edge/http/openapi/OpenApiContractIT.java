@@ -24,6 +24,9 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertNullableMoneyProperty(document, "CatalogItemDetailResponse", "basePrice");
         assertNullableMoneyProperty(document, "CatalogItemDetailResponse", "currentOfferPrice");
         assertThat(document.get("paths").has("/api/v1/authentication/identity-sign-in")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/authentication/csrf")).isTrue();
+        assertThat(document.get("paths").get("/api/v1/authentication/csrf").has("get")).isTrue();
+        assertThat(document.get("paths").get("/api/v1/authentication/csrf").get("get").has("parameters")).isFalse();
         assertThat(document.get("paths").has("/api/v1/me/access-contexts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/me/access-context-selections")).isTrue();
         assertRequiredHeader(document, "/api/v1/authentication/identity-sign-in", "post", "X-Nexa-Client");
@@ -54,6 +57,9 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/buyer/warehouses")).isTrue();
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/route-starts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/dispatch-orders/{id}/handoff-notes")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/buyer/deliveries")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/buyer/deliveries/{deliveryId}")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/buyer/deliveries/{deliveryId}/events")).isTrue();
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
         assertThat(document.get("paths").has("/api/v1/skus/resolve")).isTrue();
         assertThat(document.get("paths").has("/api/v1/inventory/lots/resolve")).isTrue();
@@ -94,6 +100,10 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
             assertThat(document.get("paths").has(path)).as("current mobile contract: %s", path).isTrue();
         }
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/handoff-tokens")).isTrue();
+        assertThat(document.at("/paths/~1api~1v1~1deliveries~1{deliveryId}~1pod/get/operationId").asText())
+                .isEqualTo("getCurrentDeliveryProofOfDelivery");
+        assertResponseSchemaRef(document, "/api/v1/deliveries/{deliveryId}/pod", "get", "200",
+                "#/components/schemas/PodView");
         assertThat(document.get("paths").has("/api/v1/delivery-handoff/validations")).isTrue();
         assertThat(document.get("paths").has("/api/v1/deliveries/{deliveryId}/buyer-receipts")).isTrue();
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions")).isTrue();

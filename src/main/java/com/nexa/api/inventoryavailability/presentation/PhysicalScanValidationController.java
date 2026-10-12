@@ -1,7 +1,7 @@
 package com.nexa.api.inventoryavailability.presentation;
 
 import com.nexa.api.inventoryavailability.application.publicapi.PhysicalAllocationCommands;
-import com.nexa.api.inventoryavailability.application.service.PhysicalScanValidationService;
+import com.nexa.api.inventoryavailability.application.port.WarehouseAuxiliaryOperationsRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -29,10 +29,10 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class PhysicalScanValidationController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final PhysicalScanValidationService service;
+    private final WarehouseAuxiliaryOperationsRequestRunner operations;
 
-    public PhysicalScanValidationController(PhysicalScanValidationService service) {
-        this.service = service;
+    public PhysicalScanValidationController(WarehouseAuxiliaryOperationsRequestRunner operations) {
+        this.operations = operations;
     }
 
     @PostMapping("/inventory/physical-allocation-scan-validations")
@@ -40,11 +40,12 @@ public final class PhysicalScanValidationController {
     public PhysicalAllocationCommands.PickingScanValidationResult validate(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @Valid @RequestBody ScanRequest request) {
-        return service.validate(context, new PhysicalAllocationCommands.PickingScanValidationRequest(
+        return operations.execute(context, services -> services.scanValidation().validate(context,
+                new PhysicalAllocationCommands.PickingScanValidationRequest(
                 context.tenantId().value(), context.workspaceId().value(), request.fulfillmentId(),
                 request.physicalAllocationLineId(), request.skuId(), request.lotId(), request.warehouseId(),
                 request.quantity(), request.unit(), request.allocationVersion(), java.time.Instant.now(),
-                context.membershipId().value(), false, null));
+                context.membershipId().value(), false, null)));
     }
 
     public record ScanRequest(@NotNull UUID fulfillmentId, @NotNull UUID physicalAllocationLineId,

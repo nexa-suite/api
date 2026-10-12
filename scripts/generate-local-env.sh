@@ -26,6 +26,14 @@ minio_password=$(existing_value NEXA_MINIO_ROOT_PASSWORD)
 if [ -z "${minio_password}" ]; then
   minio_password=$(random_password)
 fi
+business_documents_scope_reader_password=$(existing_value NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD)
+if [ -z "${business_documents_scope_reader_password}" ]; then
+  business_documents_scope_reader_password=$(random_password)
+fi
+internal_operator_allowlist=$(existing_value NEXA_INTERNAL_OPERATOR_ALLOWLIST)
+if [ -z "${internal_operator_allowlist}" ]; then
+  internal_operator_allowlist="${NEXA_INTERNAL_OPERATOR_ALLOWLIST:-}"
+fi
 cat > "${env_file}" <<EOF
 NEXA_POSTGRES_PASSWORD=${modern_postgres_password}
 NEXA_SECURITY_JWT_SIGNING_KEY=$(random_password)
@@ -35,14 +43,17 @@ NEXA_DATABASE_PASSWORD=${modern_postgres_password}
 NEXA_MODERN_POSTGRES_DB=nexa
 NEXA_MODERN_POSTGRES_USER=nexa
 NEXA_MODERN_POSTGRES_PASSWORD=${modern_postgres_password}
+NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD=${business_documents_scope_reader_password}
 NEXA_MINIO_ROOT_USER=nexa-minio
 NEXA_MINIO_ROOT_PASSWORD=${minio_password}
 NEXA_MODERN_SPRING_PROFILE=local,minio
+NEXA_TENANT_BUSINESS_PAYMENTS_ENABLED=true
 NEXA_SECURITY_ISSUER=http://localhost:8080
 NEXA_SECURITY_AUDIENCE=nexa-local
 NEXA_PASSWORD_RESET_THROTTLE_KEY=$(random_password)
 NEXA_NOTIFICATION_OUTBOX_KEY=$(random_password)
 NEXA_SYSTEM_OPERATOR_TOKEN=$(random_password)
+NEXA_INTERNAL_OPERATOR_ALLOWLIST=${internal_operator_allowlist}
 NEXA_SECURITY_RSA_PUBLIC_KEY=./.local-keys/access-token-public.pem
 NEXA_SECURITY_RSA_PRIVATE_KEY=./.local-keys/access-token-private.pem
 NEXA_BCRYPT_STRENGTH=12

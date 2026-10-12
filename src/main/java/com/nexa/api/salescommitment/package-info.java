@@ -10,6 +10,7 @@
                 "BC-05-inventory-availability :: sales-availability",
                 "BC-07-credit-receivables :: credit-receivables-public",
                 "BC-08-payments :: payments-public",
+                "BC-08-payments :: payments-errors",
                 "shared :: shared-technical-out"
         })
 package com.nexa.api.salescommitment;

@@ -1,5 +1,6 @@
 package com.nexa.api.salescommitment.application.port;
 
+import org.springframework.modulith.NamedInterface;
 import com.nexa.api.salescommitment.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
@@ -8,6 +9,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+@NamedInterface("sales-public")
 public interface PurchaseRequestDraftPort {
     PurchaseRequestDraftModels.DraftView create(CurrentAccessContext context, UUID clientAccountId, LocalDate requestedDeliveryDate);
     PurchaseRequestDraftModels.DraftPage list(CurrentAccessContext context, int page, int size);
@@ -19,5 +21,6 @@ public interface PurchaseRequestDraftPort {
     PurchaseRequestDraftModels.ReviewView review(CurrentAccessContext context, UUID draftId);
     PurchaseRequestDraftModels.DraftView submit(CurrentAccessContext context, UUID draftId, long expectedVersion, String idempotencyKey);
 
+    @NamedInterface("sales-public")
     record LineCommand(UUID skuId, BigDecimal quantity, String unit, String notes) { }
 }

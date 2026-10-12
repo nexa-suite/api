@@ -4,7 +4,6 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ValidateAcces
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
-import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.edge.streaming.ChangeEventAudience;
 import com.nexa.api.edge.streaming.ChangeEventView;
@@ -38,20 +37,27 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class ChangeFeedStreamService implements AutoCloseable {
     private static final int MAX_REPLAY = 100;
     private static final long MAX_STREAM_MILLIS = 60_000;
-    private final ChangeFeedQueryPort feed;
+    private final ChangeFeedReadUseCase feed;
     private final ResolveCurrentAccessContextUseCase accessContext;
     private final ValidateAccessSessionUseCase accessSession;
-    private final CustomerAccountQuery accounts;
     private final ChangeFeedConnectionRegistry connections;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "nexa-change-feed"); thread.setDaemon(true); return thread;
     });
     private final AtomicInteger activeStreams = new AtomicInteger();
 
+    public ChangeFeedStreamService(ChangeFeedReadUseCase feed, ResolveCurrentAccessContextUseCase accessContext,
+            ValidateAccessSessionUseCase accessSession,
+            ChangeFeedConnectionRegistry connections) {
+        this.feed = feed; this.accessContext = accessContext; this.accessSession = accessSession; this.connections = connections;
+    }
+
+    /** Compatibility constructor for callers that still compose the central-backed legacy reader. */
     public ChangeFeedStreamService(ChangeFeedQueryPort feed, ResolveCurrentAccessContextUseCase accessContext,
             ValidateAccessSessionUseCase accessSession, CustomerAccountQuery accounts,
             ChangeFeedConnectionRegistry connections) {
-        this.feed = feed; this.accessContext = accessContext; this.accessSession = accessSession; this.accounts = accounts; this.connections = connections;
+        this(new com.nexa.api.edge.streaming.infrastructure.CentralChangeFeedReadUseCase(feed, accounts),
+                accessContext, accessSession, connections);
     }
 
     public SseEmitter open(CurrentAccessContext initial, Jwt jwt, String lastEventId) {
@@ -64,12 +70,11 @@ public final class ChangeFeedStreamService implements AutoCloseable {
         AtomicBoolean closed = new AtomicBoolean(); AtomicLong cursor = new AtomicLong(last); long started = System.currentTimeMillis();
         Runnable release = () -> { if (closed.compareAndSet(false, true)) { activeStreams.decrementAndGet(); lease.close(); } };
         emitter.onCompletion(release); emitter.onTimeout(() -> { release.run(); emitter.complete(); }); emitter.onError(ignored -> release.run());
-        Set<ChangeEventAudience> audiences = audiences(initial);
         try {
             verified = verify(jwt, initial);
-            String clientAccount = clientAccount(verified);
-            if (isTooOld(verified, clientAccount, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
-            sendBatch(emitter, cursor, feed.after(scope(verified), workspace(verified), clientAccount, audiences, last, MAX_REPLAY), jwt, initial);
+            Set<ChangeEventAudience> audiences = audiences(verified);
+            if (isTooOld(verified, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
+            sendBatch(emitter, cursor, feed.after(verified, audiences, last, MAX_REPLAY), jwt, initial);
         } catch (RuntimeException | IOException exception) {
             release.run(); emitter.completeWithError(exception); return emitter;
         }
@@ -77,10 +82,10 @@ public final class ChangeFeedStreamService implements AutoCloseable {
             if (closed.get()) return;
             if (System.currentTimeMillis() - started >= MAX_STREAM_MILLIS) { release.run(); emitter.complete(); return; }
             try {
-                CurrentAccessContext current = verify(jwt, initial); String clientAccount = clientAccount(current); long position = cursor.get();
+                CurrentAccessContext current = verify(jwt, initial); long position = cursor.get();
                 Set<ChangeEventAudience> currentAudiences = audiences(current);
-                if (isTooOld(current, clientAccount, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
-                sendBatch(emitter, cursor, feed.after(scope(current), workspace(current), clientAccount, currentAudiences, position, MAX_REPLAY), jwt, initial);
+                if (isTooOld(current, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
+                sendBatch(emitter, cursor, feed.after(current, currentAudiences, position, MAX_REPLAY), jwt, initial);
                 emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
             } catch (RuntimeException | IOException exception) { release.run(); emitter.completeWithError(exception); }
         }, 15, 15, TimeUnit.SECONDS);
@@ -95,7 +100,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
         }
     }
     private void sendResync(SseEmitter emitter) throws IOException { emitter.send(SseEmitter.event().name("resync-required").data("{\"reason\":\"replay-window-expired\"}", MediaType.APPLICATION_JSON)); }
-    private boolean isTooOld(CurrentAccessContext context, String clientAccount, long last) { long minimum = feed.minimumId(scope(context), workspace(context), clientAccount); return last > 0 && minimum > 0 && last < minimum - 1; }
+    private boolean isTooOld(CurrentAccessContext context, long last) { long minimum = feed.minimumId(context); return last > 0 && minimum > 0 && last < minimum - 1; }
     private static Set<ChangeEventAudience> audiences(CurrentAccessContext context) {
         EnumSet<ChangeEventAudience> result = EnumSet.noneOf(ChangeEventAudience.class);
         for (String role : context.roleCodes()) switch (role.toUpperCase(Locale.ROOT)) {
@@ -119,14 +124,22 @@ public final class ChangeFeedStreamService implements AutoCloseable {
         Surface surface = Surface.valueOf(required(jwt, "surface").toUpperCase(Locale.ROOT));
         accessSession.validate(new SessionId(required(jwt, "sid")), new UserAccountId(jwt.getSubject()), ClientSurface.valueOf(surface.name()), requiredLong(jwt, "authorization_version"));
         CurrentAccessContext resolved = accessContext.resolve(new CurrentAccessRequest(new UserId(jwt.getSubject()), new TenantId(required(jwt, "tenant_id")), new WorkspaceId(required(jwt, "workspace_id")), surface));
-        if (!resolved.membershipId().equals(expected.membershipId()) || !resolved.roleCodes().equals(expected.roleCodes()) || !resolved.roleDefinitionIds().equals(expected.roleDefinitionIds()) || !resolved.tenantId().equals(expected.tenantId()) || !resolved.workspaceId().equals(expected.workspaceId()) || !resolved.surface().equals(expected.surface()) || resolved.authorizationVersion() != requiredLong(jwt, "authorization_version")) throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation("Change feed access context changed");
+        if (!resolved.userId().equals(expected.userId())
+                || !resolved.membershipId().equals(expected.membershipId())
+                || !resolved.roleCodes().equals(expected.roleCodes())
+                || !resolved.roleDefinitionIds().equals(expected.roleDefinitionIds())
+                || !resolved.permissionCodes().equals(expected.permissionCodes())
+                || !resolved.tenantId().equals(expected.tenantId())
+                || !resolved.workspaceId().equals(expected.workspaceId())
+                || !resolved.surface().equals(expected.surface())
+                || resolved.authorizationVersion() != requiredLong(jwt, "authorization_version")) {
+            throw new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation(
+                    "Change feed access context changed");
+        }
         return resolved;
     }
-    private String clientAccount(CurrentAccessContext context) { return context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole.BUYER) ? accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString()).map(CustomerAccountReference::id).orElseThrow() : null; }
     private static String required(Jwt jwt, String name) { String value = jwt.getClaimAsString(name); if (value == null || value.isBlank()) throw new IllegalArgumentException("Missing JWT claim " + name); return value; }
     private static long requiredLong(Jwt jwt, String name) { Object raw = jwt.getClaims().get(name); try { long value = raw instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(raw)); if (value < 0) throw new NumberFormatException(); return value; } catch (RuntimeException exception) { throw new IllegalArgumentException("Missing or invalid JWT claim " + name, exception); } }
     private static long parseLastEventId(String value) { if (value == null || value.isBlank()) return 0; try { long parsed = Long.parseLong(value); if (parsed < 0) throw new NumberFormatException(); return parsed; } catch (NumberFormatException exception) { throw new IllegalArgumentException("Last-Event-ID is invalid"); } }
-    private static String scope(CurrentAccessContext context) { return context.tenantId().toString(); }
-    private static String workspace(CurrentAccessContext context) { return context.workspaceId().toString(); }
     @Override public void close() { scheduler.shutdownNow(); }
 }

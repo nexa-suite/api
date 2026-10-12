@@ -117,7 +117,7 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
 
     private ManualSalesOrderView view(ResultSet rs) throws java.sql.SQLException {
         String id = rs.getObject(1).toString();
-        var snapshot = read(rs.getString(8), com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrderSnapshot.class);
+        var snapshot = readSnapshotView(rs.getString(8), mapper);
         List<SalesOrderLineView> lines = jdbc.query("select catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,line_subtotal,sku_id,product_family_id,sku_code_snapshot,product_family_code_snapshot "
                         + "from sales.sales_order_line where sales_order_id=? order by created_at,id",
                 (line, row) -> new SalesOrderLineView(line.getString(1), line.getString(2), line.getString(3), line.getBigDecimal(4),
@@ -125,7 +125,8 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
                         stringUuid(line.getObject(10)), line.getString(11), line.getString(12)), uuid(id));
         return new ManualSalesOrderView(id, rs.getString(2), rs.getObject(3).toString(), rs.getObject(4).toString(),
                 rs.getObject(5).toString(), rs.getObject(6).toString(), PurchaseRequestPriority.from(rs.getString(7)),
-                snapshot.delivery().requestedDate(), snapshot, rs.getString(9), rs.getBigDecimal(10), rs.getString(11),
+                snapshot.delivery().requestedDate(), snapshot,
+                rs.getString(9), rs.getBigDecimal(10), rs.getString(11),
                 rs.getTimestamp(12).toInstant(), rs.getTimestamp(13).toInstant(), rs.getLong(14), lines);
     }
 
@@ -134,8 +135,8 @@ public class ManualSalesOrderPersistenceAdapter implements ManualSalesOrderPersi
         catch (JacksonException exception) { throw new IllegalStateException("Unable to serialize sales snapshot", exception); }
     }
 
-    private <T> T read(String value, Class<T> type) {
-        try { return mapper.readValue(value, type); }
+    static ManualSalesOrderView.SnapshotView readSnapshotView(String value, ObjectMapper mapper) {
+        try { return mapper.readValue(value, ManualSalesOrderView.SnapshotView.class); }
         catch (JacksonException exception) { throw new IllegalStateException("Unable to read sales snapshot", exception); }
     }
 

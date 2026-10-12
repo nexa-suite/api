@@ -1,6 +1,6 @@
 package com.nexa.api.payments.presentation;
 
-import com.nexa.api.payments.application.model.PaymentModels;
+import com.nexa.api.payments.application.publicapi.model.PaymentModels;
 import com.nexa.api.payments.application.service.PaymentServiceFacade;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;

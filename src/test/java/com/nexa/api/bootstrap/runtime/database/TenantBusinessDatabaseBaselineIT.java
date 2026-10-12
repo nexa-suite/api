@@ -113,12 +113,13 @@ class TenantBusinessDatabaseBaselineIT {
 
     private static void migrateCentral() {
         Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
-                .locations("classpath:db/migration").load().migrate();
+                .locations("classpath:db/migration").target("146").load().migrate();
     }
 
     private static void migrateTenant(PostgreSQLContainer tenant) {
         Flyway.configure().dataSource(tenant.getJdbcUrl(), TenantBusinessDatabaseBaselineGenerator.MIGRATOR_ROLE, MIGRATOR_PASSWORD)
                 .locations("filesystem:" + REPOSITORY_ROOT.resolve("src/main/resources/db/tenant-migration"))
+                .target("3")
                 .load().migrate();
     }
 

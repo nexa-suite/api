@@ -52,7 +52,7 @@ class ClientAccountBuyerAssociationIT extends PostgresIntegrationSupport {
         } finally {
             executor.shutdownNow();
         }
-        assertThat(jdbc.queryForObject("select count(*) from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=?", Integer.class,
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.client_account_membership where tenant_id=? and workspace_id=? and client_account_id=?", Integer.class,
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(accountId))).isEqualTo(1);
     }
 

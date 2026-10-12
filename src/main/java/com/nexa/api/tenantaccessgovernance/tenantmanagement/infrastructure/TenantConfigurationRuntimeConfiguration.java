@@ -9,6 +9,9 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationInvitationService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.TenantConfigurationService;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.WarehouseOperationalSettingsCommandService;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -25,6 +28,12 @@ public class TenantConfigurationRuntimeConfiguration {
 			PlatformTransactionManager transactionManager) {
 		return TenantTransactionalProxy.required(new TenantConfigurationService(configuration, scope, audit, clock),
 				TenantConfigurationUseCase.class, transactionManager);
+	}
+
+	@Bean
+	WarehouseOperationalSettingsCommands warehouseOperationalSettingsCommands(
+			TenantConfigurationUseCase configuration, OperationalSettingsAccess settings) {
+		return new WarehouseOperationalSettingsCommandService(configuration, settings);
 	}
 
 	@Bean

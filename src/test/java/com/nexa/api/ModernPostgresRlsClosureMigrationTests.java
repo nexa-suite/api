@@ -35,7 +35,7 @@ class ModernPostgresRlsClosureMigrationTests {
             statement.execute("create role nexa_runtime");
         }
         Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-                .locations("classpath:db/migration").load().migrate();
+                .locations("classpath:db/migration").target("146").load().migrate();
 
         try (Connection connection = POSTGRES.createConnection("")) {
             Map<String, InventoryEntry> inventory = readInventory("v146");

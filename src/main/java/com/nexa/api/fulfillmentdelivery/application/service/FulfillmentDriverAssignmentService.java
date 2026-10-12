@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.application.service;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentDriverAssignmentModels.AssignmentView;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort.AssignDriverRequest;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentPersistencePort.FulfillmentDriverAssignmentView;
@@ -29,7 +30,7 @@ import java.util.UUID;
 /** Current-authority command for assigning an eligible Logistics member to prepared Fulfillment work. */
 @Service
 @Profile("!test")
-public class FulfillmentDriverAssignmentService {
+public class FulfillmentDriverAssignmentService implements com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentDriverAssignmentOperations {
     private final DispatchReadinessService readiness;
     private final PhysicalAllocationCommands physicalAllocations;
     private final WorkforceDirectory workforce;
@@ -52,7 +53,7 @@ public class FulfillmentDriverAssignmentService {
     }
 
     @Transactional
-    public FulfillmentDriverAssignmentView assign(CurrentAccessContext context, UUID fulfillmentId,
+    public AssignmentView assign(CurrentAccessContext context, UUID fulfillmentId,
                                                   long expectedFulfillmentVersion, UUID expectedAllocationId,
                                                   long expectedAllocationVersion, UUID responsibleMembershipId,
                                                   String idempotencyKey) {
@@ -85,11 +86,11 @@ public class FulfillmentDriverAssignmentService {
                 responsible.userId(), responsible.displayName(), actorMembershipId, idempotencyKey,
                 requestHash, now));
         trace(context, fulfillmentId, responsible.id(), idempotencyKey, now);
-        return result;
+        return publicView(result);
     }
 
     @Transactional
-    public FulfillmentDriverAssignmentView changePlan(CurrentAccessContext context, UUID fulfillmentId,
+    public AssignmentView changePlan(CurrentAccessContext context, UUID fulfillmentId,
                                                        long expectedFulfillmentVersion,
                                                        UUID expectedAssignmentId,
                                                        long expectedAssignmentVersion,
@@ -141,20 +142,29 @@ public class FulfillmentDriverAssignmentService {
                         actorMembershipId, idempotencyKey, requestHash, changedAt));
         tracePlanChange(context, fulfillmentId, result.id(), responsible.id(), targetDispatchAt,
                 idempotencyKey, changedAt);
-        return result;
+        return publicView(result);
     }
 
     @Transactional(readOnly = true)
-    public Optional<FulfillmentDriverAssignmentView> current(CurrentAccessContext context, UUID fulfillmentId) {
+    public Optional<AssignmentView> current(CurrentAccessContext context, UUID fulfillmentId) {
         readiness.readiness(context, fulfillmentId);
-        return fulfillments.findDriverAssignment(context.tenantId().value(), context.workspaceId().value(), fulfillmentId);
+        return fulfillments.findDriverAssignment(context.tenantId().value(), context.workspaceId().value(), fulfillmentId)
+                .map(FulfillmentDriverAssignmentService::publicView);
     }
 
     @Transactional(readOnly = true)
-    public List<FulfillmentDriverAssignmentView> history(CurrentAccessContext context, UUID fulfillmentId) {
+    public List<AssignmentView> history(CurrentAccessContext context, UUID fulfillmentId) {
         readiness.readiness(context, fulfillmentId);
         return fulfillments.findDriverAssignmentHistory(
-                context.tenantId().value(), context.workspaceId().value(), fulfillmentId);
+                context.tenantId().value(), context.workspaceId().value(), fulfillmentId).stream()
+                .map(FulfillmentDriverAssignmentService::publicView).toList();
+    }
+
+    private static AssignmentView publicView(FulfillmentDriverAssignmentView value) {
+        return new AssignmentView(value.id(), value.fulfillmentId(), value.fulfillmentVersion(),
+                value.physicalAllocationId(), value.physicalAllocationVersion(),
+                value.responsibleMembershipId(), value.responsibleDisplayName(), value.actorMembershipId(),
+                value.assignedAt(), value.plannedDispatchAt(), value.deliveryId(), value.current());
     }
 
     private void trace(CurrentAccessContext context, UUID fulfillmentId, UUID responsibleMembershipId,

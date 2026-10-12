@@ -25,8 +25,8 @@ class SalesOrderConversionConcurrencyIT extends NexaWorkflowIntegrationSupport {
             assertThat(results).allMatch(value -> value.status() == 201);
             assertThat(results.get(0).id()).isEqualTo(results.get(1).id());
         }
-        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, UUID.fromString(request.id()))).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from sales.idempotency_record where actor_membership_id=? and operation='purchase-request-order-conversion' and idempotency_key=?", Integer.class, java.util.UUID.fromString(membershipId(SALES_EMAIL)), key)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where source_purchase_request_id=?", Integer.class, UUID.fromString(request.id()))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.idempotency_record where actor_membership_id=? and operation='purchase-request-order-conversion' and idempotency_key=?", Integer.class, java.util.UUID.fromString(membershipId(SALES_EMAIL)), key)).isEqualTo(1);
     }
 
     @Test void sameKeyWithDifferentPayloadReturnsIdempotencyConflict() throws Exception {

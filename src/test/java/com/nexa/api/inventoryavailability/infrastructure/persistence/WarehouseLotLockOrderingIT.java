@@ -3,9 +3,9 @@ package com.nexa.api.inventoryavailability.infrastructure.persistence;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.springframework.beans.factory.annotation.Autowired;
 
 import javax.sql.DataSource;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -27,9 +27,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
 
-    @Autowired
-    private DataSource dataSource;
-
     @Test
     void legacyReservationAndPhysicalAllocationLockPathsDoNotDeadlockAcrossWarehouses() throws Exception {
         assertLockPathsDoNotDeadlock(legacyReservationLockSql(), physicalAllocationLockSql());
@@ -47,7 +44,7 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
 
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        List<LotRef> catalogTwoLots = jdbc.query("select distinct on (l.warehouse_id) l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.expiration_date,l.received_at "
+        List<LotRef> catalogTwoLots = tenantJdbc().query("select distinct on (l.warehouse_id) l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.expiration_date,l.received_at "
                         + "from warehouse.inventory_lot l where l.tenant_id=? and l.workspace_id=? and l.catalog_item_id='CAT-0002' "
                         + "and l.batch_number like 'B-COM-%' and l.status='AVAILABLE' and l.stock_quantity>l.reserved_quantity "
                         + "order by l.warehouse_id,l.received_at desc,l.id desc limit 2",
@@ -59,7 +56,7 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
         List<UUID> insertedCatalogOneLots = new ArrayList<>();
         for (LotRef source : catalogTwoLots) {
             UUID lotId = UUID.randomUUID();
-            jdbc.update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,version,sku_id) "
+            tenantJdbc().update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,version,sku_id) "
                             + "select ?,tenant_id,workspace_id,warehouse_id,zone_id,'CAT-0001',?,current_date+365,current_timestamp,100,0,unit,'AVAILABLE',temperature_range_snapshot,0, "
                             + "(select id from catalog_management.sellable_sku target where target.tenant_id=inventory_lot.tenant_id "
                             + "and target.workspace_id=inventory_lot.workspace_id and target.legacy_catalog_item_id='CAT-0001') "
@@ -74,7 +71,7 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
         String candidatePlaceholders = candidateIds.stream().map(ignored -> "?").collect(java.util.stream.Collectors.joining(","));
         List<Object> candidateArgs = new ArrayList<>(List.of(tenant, workspace));
         candidateArgs.addAll(candidateIds);
-        List<LotRef> allLots = jdbc.query("select id,sku_id,catalog_item_id,warehouse_id,expiration_date,received_at from warehouse.inventory_lot "
+        List<LotRef> allLots = tenantJdbc().query("select id,sku_id,catalog_item_id,warehouse_id,expiration_date,received_at from warehouse.inventory_lot "
                         + "where tenant_id=? and workspace_id=? and id in (" + candidatePlaceholders + ") order by warehouse_id,catalog_item_id,id",
                 (rs, row) -> new LotRef(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
                         rs.getString("catalog_item_id"), rs.getObject("warehouse_id", UUID.class),
@@ -114,9 +111,9 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
 
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID sku = jdbc.queryForObject("select id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id=? and status='ACTIVE'",
+        UUID sku = tenantJdbc().queryForObject("select id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id=? and status='ACTIVE'",
                 UUID.class, tenant, workspace, "CAT-0002");
-        List<LotRef> lots = jdbc.query("select distinct on (l.warehouse_id) l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.expiration_date,l.received_at "
+        List<LotRef> lots = tenantJdbc().query("select distinct on (l.warehouse_id) l.id,l.sku_id,l.catalog_item_id,l.warehouse_id,l.expiration_date,l.received_at "
                         + "from warehouse.inventory_lot l where l.tenant_id=? and l.workspace_id=? and l.sku_id=? "
                         + "and l.status='AVAILABLE' and l.stock_quantity>l.reserved_quantity and l.expiration_date>current_date "
                         + "order by l.warehouse_id,l.expiration_date,l.received_at,l.id",
@@ -130,9 +127,9 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
         // selection may remain FEFO, but every route must lock canonically.
         LotRef canonicalFirst = selected.get(0);
         LotRef canonicalSecond = selected.get(1);
-        jdbc.update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
+        tenantJdbc().update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
                 LocalDate.now().plusDays(120), tenant, workspace, canonicalFirst.id());
-        jdbc.update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
+        tenantJdbc().update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
                 LocalDate.now().plusDays(30), tenant, workspace, canonicalSecond.id());
 
         CountDownLatch ready = new CountDownLatch(2);
@@ -150,16 +147,16 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
             assertThat(reservationResult.lockedIds()).containsExactlyElementsOf(physicalResult.lockedIds());
             assertThat(reservationResult.lockedIds()).containsExactly(canonicalFirst.id(), canonicalSecond.id());
         } finally {
-            jdbc.update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
+            tenantJdbc().update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
                     canonicalFirst.expirationDate(), tenant, workspace, canonicalFirst.id());
-            jdbc.update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
+            tenantJdbc().update("update warehouse.inventory_lot set expiration_date=? where tenant_id=? and workspace_id=? and id=?",
                     canonicalSecond.expirationDate(), tenant, workspace, canonicalSecond.id());
         }
     }
 
     private LockResult lockLots(String sql, UUID tenant, UUID workspace, UUID sku, List<LotRef> lots,
                                 CountDownLatch ready, CountDownLatch start) throws Exception {
-        try (Connection connection = dataSource.getConnection()) {
+        try (Connection connection = tenantDataSource().getConnection()) {
             connection.setAutoCommit(false);
             try (Statement setup = connection.createStatement()) {
                 setup.execute("set local lock_timeout='3s'");
@@ -188,7 +185,7 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
 
     private void lockPhysicalPickingCandidates(UUID tenant, UUID workspace, List<LotRef> lots,
                                                CountDownLatch ready, CountDownLatch start) throws Exception {
-        try (Connection connection = dataSource.getConnection()) {
+        try (Connection connection = tenantDataSource().getConnection()) {
             connection.setAutoCommit(false);
             try (Statement setup = connection.createStatement()) {
                 setup.execute("set local lock_timeout='3s'");
@@ -204,6 +201,10 @@ class WarehouseLotLockOrderingIT extends NexaWorkflowIntegrationSupport {
             sleepWhileHolding(connection);
             connection.commit();
         }
+    }
+
+    private DataSource tenantDataSource() {
+        return tenantJdbc().getDataSource();
     }
 
     private static void executeLockQuery(Connection connection, String sql, UUID tenant, UUID workspace,
