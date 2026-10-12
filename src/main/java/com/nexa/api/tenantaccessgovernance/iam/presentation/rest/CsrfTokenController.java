@@ -1,6 +1,7 @@
-package com.nexa.api.edge.security;
+package com.nexa.api.tenantaccessgovernance.iam.presentation.rest;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
@@ -16,7 +17,7 @@ public class CsrfTokenController {
 	@GetMapping("/csrf")
 	@Operation(summary = "Get a CSRF token for browser session requests",
 			description = "Returns a request token for browser sign-in, refresh and sign-out. Native clients use the explicit native session transport instead.")
-	public CsrfTokenResponse csrfToken(CsrfToken csrfToken, HttpServletResponse response) {
+	public CsrfTokenResponse csrfToken(@Parameter(hidden = true) CsrfToken csrfToken, HttpServletResponse response) {
 		response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
 		return new CsrfTokenResponse(csrfToken.getToken());
 	}
