@@ -3,6 +3,13 @@ set -Eeuo pipefail
 umask 077
 
 fail() { printf 'PROVISIONER_FAILURE: %s\n' "$1" >&2; exit 1; }
+unexpected_failure() {
+	local status="$1" line="$2"
+	trap - ERR
+	printf 'PROVISIONER_FAILURE: unexpected command failure at line %s (exit %s).\n' "$line" "$status" >&2
+	exit "$status"
+}
+trap 'unexpected_failure "$?" "${BASH_LINENO[0]:-$LINENO}"' ERR
 usage() {
 	printf '%s\n' 'Usage: ops/scripts/provision-local-tenant-database.sh <tenant-uuid> <workspace-uuid> <loopback-port> [--retry-failed] [--task-id <uuid> --claim-token <uuid>] [--workspace-anchor-only --workspace-task-id <uuid> --claim-token <uuid>] [--central-configfile <private-file> --local-state-dir <private-directory>]' >&2
 }
