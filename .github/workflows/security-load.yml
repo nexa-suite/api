@@ -11,6 +11,57 @@ permissions:
   contents: read
 
 jobs:
+  minio-storage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: Build pinned rootless MinIO Community Edition
+        run: docker build --tag nexa/minio-community:ci ops/compose/minio-community
+      - name: Start MinIO with ephemeral credentials
+        run: |
+          set -euo pipefail
+          root_user="ci$(openssl rand -hex 8)"
+          root_password="$(openssl rand -hex 32)"
+          printf '::add-mask::%s\n' "$root_user"
+          printf '::add-mask::%s\n' "$root_password"
+          docker run --detach --rm --name nexa-minio-integration \
+            --publish 127.0.0.1:9000:9000 \
+            --env "MINIO_ROOT_USER=$root_user" \
+            --env "MINIO_ROOT_PASSWORD=$root_password" \
+            nexa/minio-community:ci server /data --console-address :9001
+          {
+            printf 'NEXA_MINIO_ROOT_USER=%s\n' "$root_user"
+            printf 'NEXA_MINIO_ROOT_PASSWORD=%s\n' "$root_password"
+          } >> "$GITHUB_ENV"
+      - name: Wait for MinIO and create the private test bucket
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if docker exec nexa-minio-integration mc alias set local http://127.0.0.1:9000 \
+              "$NEXA_MINIO_ROOT_USER" "$NEXA_MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
+              && docker exec nexa-minio-integration mc mb --ignore-existing local/nexa-private >/dev/null 2>&1 \
+              && docker exec nexa-minio-integration mc ready local >/dev/null 2>&1; then
+              printf '%s\n' 'Rootless MinIO is ready with the private test bucket.'
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs nexa-minio-integration
+          exit 1
+      - name: Verify the S3 adapter against MinIO
+        env:
+          NEXA_OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+          NEXA_OBJECT_STORAGE_BUCKET: nexa-private
+        run: ./mvnw -B -ntp -Dtest=MinioObjectStorageIntegrationTests -Dnexa.minio.integration.enabled=true test
+      - name: Stop MinIO
+        if: ${{ always() }}
+        run: docker stop nexa-minio-integration || true
+
   security-load:
     runs-on: ubuntu-latest
     steps:
@@ -22,8 +73,6 @@ jobs:
           cache: maven
       - name: Start API Compose runtime with MinIO and seed scoped Tenant fixtures
         run: ./ops/scripts/prepare-security-load-compose-fixture.sh
-      - name: Verify S3 object storage against Compose MinIO
-        run: ./mvnw -B -ntp -Dtest=MinioObjectStorageIntegrationTests -Dnexa.minio.integration.enabled=true test
       - name: Run local security and abuse matrix
         run: ./scripts/verify-local-security.sh
       - name: Run authenticated OWASP ZAP role matrix

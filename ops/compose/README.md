@@ -26,8 +26,9 @@ The Modern startup script follows `NEXA_MODERN_SPRING_PROFILE`: profiles that
 include `minio` or `s3` build and start the pinned MinIO Community Edition image,
 then wait for its health check before starting the API. `local` alone uses the
 private filesystem adapter. The security/load workflow uses `local,minio` and
-runs an S3 adapter integration test against that MinIO service. The source
-build is pinned to MinIO `RELEASE.2025-10-15T17-29-55Z` and `mc`
+runs the API against MinIO; its independent `minio-storage` job builds the same
+image and runs the S3 adapter integration test without Tenant provisioning.
+The source build is pinned to MinIO `RELEASE.2025-10-15T17-29-55Z` and `mc`
 `RELEASE.2025-08-13T08-35-41Z`; see `minio-community/Dockerfile`. The image
 runs MinIO as unprivileged UID 10001. MinIO Community Edition is archived
 upstream, so this Compose service supports development and verification only.

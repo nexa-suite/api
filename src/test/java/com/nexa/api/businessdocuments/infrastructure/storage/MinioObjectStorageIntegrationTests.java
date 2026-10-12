@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @EnabledIfSystemProperty(named = "nexa.minio.integration.enabled", matches = "true")
 class MinioObjectStorageIntegrationTests {
     @Test
-    void writesReadsAndDeletesAnObjectThroughTheComposeMinioService() throws Exception {
+    void writesReadsAndDeletesAnObjectThroughTheMinioService() throws Exception {
         MockEnvironment environment = new MockEnvironment()
                 .withProperty("nexa.object-storage.endpoint", requiredEnvironment("NEXA_OBJECT_STORAGE_ENDPOINT"))
                 .withProperty("nexa.object-storage.bucket", requiredEnvironment("NEXA_OBJECT_STORAGE_BUCKET"))
