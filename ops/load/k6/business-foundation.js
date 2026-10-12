@@ -98,6 +98,16 @@ function expectStatus(response, expected, label) {
   return parsed(response);
 }
 
+function csrfCookieValue(response) {
+  const responseCookies = response.cookies && response.cookies.NEXA_CSRF;
+  if (responseCookies && responseCookies.length > 0 && responseCookies[0].value) {
+    return responseCookies[0].value;
+  }
+  const jarCookies = http.cookieJar().cookiesForURL(url('/api/v1/authentication/csrf'));
+  const storedCookies = jarCookies && jarCookies.NEXA_CSRF;
+  return storedCookies && storedCookies.length > 0 ? storedCookies[0] : '';
+}
+
 function login(user, label) {
   const csrfResponse = http.get(url('/api/v1/authentication/csrf'), {
     headers: { Origin: user.origin },
@@ -107,8 +117,7 @@ function login(user, label) {
   if (!csrf.token) {
     throw new Error(`${label} CSRF bootstrap did not return a request token`);
   }
-  const csrfCookies = csrfResponse.cookies && csrfResponse.cookies.NEXA_CSRF;
-  const csrfCookie = csrfCookies && csrfCookies.length > 0 ? csrfCookies[0].value : '';
+  const csrfCookie = csrfCookieValue(csrfResponse);
   if (!csrfCookie) {
     throw new Error(`${label} CSRF bootstrap did not return its cookie`);
   }

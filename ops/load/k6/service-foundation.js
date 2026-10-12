@@ -18,6 +18,16 @@ export const options = {
 
 const jsonParams = { headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:4200' } };
 
+function csrfCookieValue(response) {
+  const responseCookies = response.cookies && response.cookies.NEXA_CSRF;
+  if (responseCookies && responseCookies.length > 0 && responseCookies[0].value) {
+    return responseCookies[0].value;
+  }
+  const jarCookies = http.cookieJar().cookiesForURL(`${baseUrl}/api/v1/authentication/csrf`);
+  const storedCookies = jarCookies && jarCookies.NEXA_CSRF;
+  return storedCookies && storedCookies.length > 0 ? storedCookies[0] : '';
+}
+
 export default function () {
   const preview = http.post(`${baseUrl}/api/v1/auth/workspace-previews`, JSON.stringify({ workspaceSlug: workspace }), jsonParams);
   check(preview, { 'workspace preview is controlled': (response) => [200, 403].includes(response.status) });
@@ -27,8 +37,7 @@ export default function () {
   });
   check(csrfResponse, { 'browser CSRF bootstrap is available': (response) => response.status === 200 });
   const csrfToken = csrfResponse.status === 200 ? csrfResponse.json('token') : '';
-  const csrfCookies = csrfResponse.cookies && csrfResponse.cookies.NEXA_CSRF;
-  const csrfCookie = csrfCookies && csrfCookies.length > 0 ? csrfCookies[0].value : '';
+  const csrfCookie = csrfCookieValue(csrfResponse);
   if (!csrfToken || !csrfCookie) {
     throw new Error('browser CSRF bootstrap did not return its request token and cookie');
   }

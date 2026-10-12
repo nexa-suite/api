@@ -117,8 +117,9 @@ public final class LocalTenantBusinessFixtureSeeder {
 					+ "district_code,default_address,status,version,created_at,updated_at) "
 					+ "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,true,'ACTIVE',0,?,?) on conflict (id) do nothing",
 				addressId, tenantId, workspaceId, accountId, "Buyer delivery · " + seed.code(), seed.contact(), seed.phone(),
-				null, null, null, seedAddress.line(), seedAddress.reference(), seed.deliveryPreference(), null, null,
-				null, seedAddress.source(), seedAddress.departmentCode(), seedAddress.provinceCode(), seedAddress.districtCode(),
+				null, null, null, seedAddress.line(), seedAddress.reference(), seed.deliveryPreference(), null,
+				seedAddress.latitude(), seedAddress.longitude(), seedAddress.source(), seedAddress.departmentCode(),
+				seedAddress.provinceCode(), seedAddress.districtCode(),
 				timestamp(now), timestamp(now));
 			existing = findBuyerAddress(jdbc, addressId);
 		}
@@ -132,17 +133,42 @@ public final class LocalTenantBusinessFixtureSeeder {
 				throw new IllegalStateException("Existing buyer address differs from the known ungeocoded local fixture");
 			}
 			int updated = jdbc.update("update sales.client_account_address set department_code=?,province_code=?,district_code=?,"
+					+ "latitude=?,longitude=?,source=?,"
 					+ "updated_at=?,version=version+1 where id=? and tenant_id=? and workspace_id=? and client_account_id=? "
 					+ "and label=? and recipient_name=? and recipient_phone=? and road_type is null and street_name is null "
 					+ "and street_number is null and interior is null and address_line=? and postal_code is null and reference=? "
 					+ "and receiving_instructions=? and receiving_hours is null and latitude is null and longitude is null "
 					+ "and place_id is null and source='MANUAL' and department_code is null and province_code is null "
 					+ "and district_code is null and default_address and status='ACTIVE' and version=0",
-				seedAddress.departmentCode(), seedAddress.provinceCode(), seedAddress.districtCode(), timestamp(now),
+				seedAddress.departmentCode(), seedAddress.provinceCode(), seedAddress.districtCode(), seedAddress.latitude(),
+				seedAddress.longitude(), seedAddress.source(), timestamp(now),
 				addressId, tenantId, workspaceId, accountId, "Buyer delivery · " + seed.code(), seed.contact(), seed.phone(),
 				seed.address(), seed.deliveryReference(), seed.deliveryPreference());
 			if (updated != 1) {
 				throw new IllegalStateException("Known ungeocoded buyer fixture changed before its scoped repair");
+			}
+			existing = findBuyerAddress(jdbc, addressId);
+			if (existing.size() != 1) throw new IllegalStateException("Repaired buyer address could not be reloaded");
+			row = existing.getFirst();
+		}
+		if (seedAddress.latitude() != null && row.latitude() == null && row.longitude() == null) {
+			if (!isRepairableMissingCoordinatesFixture(row, addressId, tenantId, workspaceId, accountId, seed,
+					seedAddress)) {
+				throw new IllegalStateException("Existing buyer address differs from the known local fixture without route coordinates");
+			}
+			int updated = jdbc.update("update sales.client_account_address set latitude=?,longitude=?,source=?,updated_at=?,"
+					+ "version=version+1 where id=? and tenant_id=? and workspace_id=? and client_account_id=? "
+					+ "and label=? and recipient_name=? and recipient_phone=? and road_type is null and street_name is null "
+					+ "and street_number is null and interior is null and address_line=? and postal_code is null and reference=? "
+					+ "and receiving_instructions=? and receiving_hours is null and latitude is null and longitude is null "
+					+ "and place_id is null and source='MANUAL' and department_code=? and province_code=? and district_code=? "
+					+ "and default_address and status='ACTIVE' and version between 0 and 1",
+				seedAddress.latitude(), seedAddress.longitude(), seedAddress.source(), timestamp(now), addressId, tenantId,
+					workspaceId, accountId, "Buyer delivery · " + seed.code(), seed.contact(), seed.phone(),
+					seed.address(), seed.deliveryReference(), seed.deliveryPreference(), seedAddress.departmentCode(),
+					seedAddress.provinceCode(), seedAddress.districtCode());
+			if (updated != 1) {
+				throw new IllegalStateException("Known local buyer fixture changed before its scoped coordinate repair");
 			}
 			existing = findBuyerAddress(jdbc, addressId);
 			if (existing.size() != 1) throw new IllegalStateException("Repaired buyer address could not be reloaded");
@@ -154,6 +180,12 @@ public final class LocalTenantBusinessFixtureSeeder {
 	static Address addressForBuyerSeed(ClientAccountSeedRecord seed) {
 		if (seed.address() == null || seed.address().isBlank()) {
 			throw new IllegalStateException("Selected Buyer seed account has no reviewed delivery address");
+		}
+		if ("CLI-001".equals(seed.code())) {
+			return new Address("STREET", seed.address(), seed.deliveryReference(), "PE", seed.departmentCode(),
+					seed.provinceCode(), seed.districtCode(), seed.contact(), seed.phone(), "STREET", null, null, null,
+					null, seed.deliveryPreference(), null, new BigDecimal("-12.0725"), new BigDecimal("-77.0685"),
+					null, "MAP_PIN");
 		}
 		return Address.peru("STREET", seed.address(), seed.deliveryReference(), seed.departmentCode(),
 				seed.provinceCode(), seed.districtCode());
@@ -199,6 +231,20 @@ public final class LocalTenantBusinessFixtureSeeder {
 				&& row.receivingHours() == null && row.latitude() == null && row.longitude() == null
 				&& row.placeId() == null && "MANUAL".equals(row.source()) && row.defaultAddress()
 				&& "ACTIVE".equalsIgnoreCase(row.status()) && row.version() == 0;
+	}
+
+	private static boolean isRepairableMissingCoordinatesFixture(BuyerAddress row, UUID addressId, UUID tenantId,
+			UUID workspaceId, UUID accountId, ClientAccountSeedRecord seed, Address address) {
+		return sameScope(row, addressId, tenantId, workspaceId, accountId) && matchesGeography(row, address)
+				&& ("Buyer delivery · " + seed.code()).equals(row.label())
+				&& seed.contact().equals(row.recipientName()) && seed.phone().equals(row.recipientPhone())
+				&& row.roadType() == null && row.streetName() == null && row.streetNumber() == null
+				&& row.interior() == null && seed.address().equals(row.addressLine()) && row.postalCode() == null
+				&& java.util.Objects.equals(seed.deliveryReference(), row.reference())
+				&& java.util.Objects.equals(seed.deliveryPreference(), row.receivingInstructions())
+				&& row.receivingHours() == null && row.latitude() == null && row.longitude() == null
+				&& row.placeId() == null && "MANUAL".equals(row.source()) && row.defaultAddress()
+				&& "ACTIVE".equalsIgnoreCase(row.status()) && row.version() >= 0 && row.version() <= 1;
 	}
 
 	private static void validateBuyerAddress(BuyerAddress row, UUID addressId, UUID tenantId, UUID workspaceId,
