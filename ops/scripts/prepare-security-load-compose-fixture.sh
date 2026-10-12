@@ -141,6 +141,51 @@ central_psql() {
 	compose exec -T -e "PGPASSWORD=$postgres_password" modern-postgres psql \
 		-X -qAt -v ON_ERROR_STOP=1 -U nexa_runtime -d nexa "$@"
 }
+report_provisioning_failure() {
+	local diagnostic worker_log safe_lines
+	if diagnostic="$(central_psql -v tenant_id="$tenant_id" -v workspace_id="$workspace_id" <<'SQL' 2>/dev/null
+SET app.current_tenant_id = :'tenant_id';
+SET app.current_workspace_id = :'workspace_id';
+SELECT coalesce(binding.lifecycle_state, 'MISSING') || '|'
+       || coalesce(provisioning.status, 'MISSING') || '|'
+       || coalesce(provisioning.attempt_count::text, '-') || '|'
+       || coalesce(provisioning.failure_code, '-') || '|'
+       || coalesce(anchor.status, 'MISSING') || '|'
+       || coalesce(anchor.attempt_count::text, '-') || '|'
+       || coalesce(anchor.failure_code, '-')
+  FROM (SELECT :'tenant_id'::UUID AS tenant_id, :'workspace_id'::UUID AS workspace_id) scope
+  LEFT JOIN tenant_management.tenant_business_database_binding binding
+    ON binding.tenant_id=scope.tenant_id
+  LEFT JOIN tenant_management.tenant_business_database_provisioning_task provisioning
+    ON provisioning.tenant_id=scope.tenant_id AND provisioning.workspace_id=scope.workspace_id
+  LEFT JOIN tenant_management.tenant_business_database_workspace_anchor_task anchor
+    ON anchor.tenant_id=scope.tenant_id AND anchor.workspace_id=scope.workspace_id;
+SQL
+	)"; then
+		printf 'Provisioning diagnostic (binding|task|attempt|task-code|anchor|attempt|anchor-code): %s\n' \
+			"$(printf '%s' "$diagnostic" | tr -cd 'A-Za-z0-9_|.-')" >&2
+	else
+		printf '%s\n' 'Provisioning diagnostic query failed; no database error details were emitted.' >&2
+	fi
+	worker_log="$API_DIRECTORY/.local/tenant-provisioning-worker/worker.log"
+	if [[ -f "$worker_log" && ! -L "$worker_log" ]]; then
+		safe_lines="$(grep -Ei 'provisioning.*failed|failed to|could not|must be|requires|unsupported|invalid|unavailable|refusing|cannot|unable|error|exception|migration.*(error|fail)' "$worker_log" \
+			| tail -n 30 \
+			| sed -E \
+				-e 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/[EMAIL]/g' \
+				-e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[UUID]/g' \
+				-e 's/(password|secret|token|credential|authorization)[^:= ]*([:=])[[:space:]]*[^[:space:]]+/\1=[REDACTED]/Ig' \
+				-e 's#jdbc:[^[:space:]]+#[JDBC_URL]#Ig' \
+			| cut -c 1-320 || true)"
+		if [[ -n "$safe_lines" ]]; then
+			printf 'Sanitized provisioning worker diagnostics:\n%s\n' "$safe_lines" >&2
+		else
+			printf '%s\n' 'No safe provisioning failure lines were available in the worker log.' >&2
+		fi
+	else
+		printf '%s\n' 'Provisioning worker log was unavailable or unsafe; contents were not read.' >&2
+	fi
+}
 
 identity=''
 for _ in $(seq 1 60); do
@@ -195,6 +240,13 @@ SQL
 	else
 		provision_state='central-query-unavailable'
 	fi
+	case "$provision_state" in
+		*FAILED*)
+			printf 'Tenant provisioning entered a terminal failure state: %s\n' "$provision_state" >&2
+			report_provisioning_failure
+			fail 'Tenant provisioning failed; inspect the sanitized worker diagnostic above.'
+			;;
+	esac
 	if (( _ % 6 == 0 )); then
 		printf 'Waiting for Tenant provisioning and Workspace anchor; current state: %s\n' "$provision_state"
 	fi
