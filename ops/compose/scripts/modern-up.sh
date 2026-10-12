@@ -57,7 +57,9 @@ esac
 docker compose --env-file "$env_file" -f "$compose_file" up -d modern-postgres
 ready=0
 for _ in $(seq 1 60); do
-	if docker compose --env-file "$env_file" -f "$compose_file" exec -T modern-postgres pg_isready -U "$NEXA_MODERN_POSTGRES_USER" -d "$NEXA_MODERN_POSTGRES_DB" >/dev/null 2>&1; then
+	# The official image starts a socket-only server while initializing a new cluster.
+	# Probe TCP so this gate waits for the final server before applying runtime roles.
+	if docker compose --env-file "$env_file" -f "$compose_file" exec -T modern-postgres pg_isready -h 127.0.0.1 -U "$NEXA_MODERN_POSTGRES_USER" -d "$NEXA_MODERN_POSTGRES_DB" >/dev/null 2>&1; then
 		ready=1
 		break
 	fi
