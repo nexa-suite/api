@@ -60,6 +60,7 @@ public final class PermissionCatalog {
 	public static Set<PermissionKey> forBuiltInRole(MembershipRole role) {
 		return switch (Objects.requireNonNull(role, "Membership role is required")) {
 			case TENANT_ADMIN -> Set.of(
+					PermissionKey.CATALOG_READ, PermissionKey.CLIENT_READ,
 					PermissionKey.TENANT_ORGANIZATION_READ, PermissionKey.TENANT_ORGANIZATION_MANAGE,
 					PermissionKey.TENANT_WORKSPACE_READ, PermissionKey.TENANT_WORKSPACE_MANAGE,
 					PermissionKey.TENANT_MEMBER_READ, PermissionKey.TENANT_MEMBER_INVITE,
@@ -93,7 +94,8 @@ public final class PermissionCatalog {
 					PermissionKey.SALES_PURCHASE_REQUEST_READ, PermissionKey.SALES_PURCHASE_REQUEST_REVIEW,
 					PermissionKey.SALES_ORDER_READ, PermissionKey.SALES_ORDER_CREATE_MANUAL,
 					PermissionKey.SALES_ORDER_MANAGE, PermissionKey.CLIENT_READ, PermissionKey.CLIENT_MANAGE,
-					PermissionKey.CLIENT_ADDRESS_MANAGE, PermissionKey.ORDER_EXPORT_READ,
+					PermissionKey.CLIENT_ADDRESS_MANAGE, PermissionKey.CLIENT_COMMERCIAL_TERMS_MANAGE,
+					PermissionKey.ORDER_EXPORT_READ,
 					PermissionKey.DOCUMENT_READ, PermissionKey.DOCUMENT_DOWNLOAD,
 					PermissionKey.PAYMENT_READ, PermissionKey.NOTIFICATION_READ);
 			case WAREHOUSE -> Set.of(

@@ -614,7 +614,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 
 	private String buyerAccount(CurrentAccessContext context) {
 		if (!context.hasRole(MembershipRole.BUYER)) {
-			internal(context, Permission.SALES_READ);
+			internal(context, PermissionKey.SALES_PURCHASE_REQUEST_READ);
 			return null;
 		}
 		return accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString())

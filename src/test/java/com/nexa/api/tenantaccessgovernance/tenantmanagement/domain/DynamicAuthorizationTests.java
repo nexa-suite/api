@@ -52,6 +52,43 @@ class DynamicAuthorizationTests {
 	}
 
 	@Test
+	void tenantAdministratorPresetCanReadCatalogAndClientsWithoutBusinessWritePermissions() {
+		EffectiveAuthorization authorization = EffectiveAuthorization.fixed(Set.of(MembershipRole.TENANT_ADMIN), 11);
+
+		assertThat(authorization.allows(PermissionKey.CATALOG_READ)).isTrue();
+		assertThat(authorization.allows(PermissionKey.CLIENT_READ)).isTrue();
+		assertThat(authorization.allows(PermissionKey.CATALOG_PRODUCT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CATALOG_TAXONOMY_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CATALOG_PRICE_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CATALOG_PROMOTION_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_ADDRESS_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_COMMERCIAL_TERMS_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE)).isFalse();
+	}
+
+	@Test
+	void salesPresetRetainsItsPersistedCommercialTermsAuthorityWithoutCreditAuthority() {
+		EffectiveAuthorization authorization = EffectiveAuthorization.fixed(Set.of(MembershipRole.SALES), 11);
+
+		assertThat(authorization.allows(PermissionKey.CLIENT_COMMERCIAL_TERMS_MANAGE)).isTrue();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE)).isFalse();
+	}
+
+	@Test
+	void logisticsPresetHasWarehouseReadButNoWarehouseObjectGrantOrInventoryWrites() {
+		EffectiveAuthorization authorization = EffectiveAuthorization.fixed(Set.of(MembershipRole.LOGISTICS), 11);
+
+		assertThat(authorization.allows(PermissionKey.WAREHOUSE_READ)).isTrue();
+		assertThat(authorization.allows(PermissionKey.WAREHOUSE_LOCATION_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.INVENTORY_RECEIVE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.INVENTORY_ADJUST)).isFalse();
+		assertThat(authorization.allows(PermissionKey.INVENTORY_RESERVE)).isFalse();
+	}
+
+	@Test
 	void dispatchCompleteRetainsTheExistingLogisticsWriteCompatibilityAlias() {
 		EffectiveAuthorization logistics = EffectiveAuthorization.fixed(Set.of(MembershipRole.LOGISTICS), 11);
 		EffectiveAuthorization warehouse = EffectiveAuthorization.fixed(Set.of(MembershipRole.WAREHOUSE), 11);
