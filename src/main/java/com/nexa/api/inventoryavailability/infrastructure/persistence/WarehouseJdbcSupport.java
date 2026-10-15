@@ -186,7 +186,7 @@ abstract class WarehouseJdbcSupport {
 
     protected WarehouseOperationsService.LotSummary loadLot(UUID tenantId, UUID workspaceId, UUID id, boolean lock) {
         return jdbc.query(
-                        "select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
+                        "select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,production_date,"
                                 + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
                                 + " temperature_held_quantity,unit,status,version from warehouse.inventory_lot "
                                 + "where tenant_id=? and workspace_id=? and id=?" + (lock ? " for update" : ""),
