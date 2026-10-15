@@ -22,7 +22,8 @@ class BusinessDocumentFoundationTests {
         assertEquals(EnumSet.of(DocumentSubjectType.SALES_ORDER, DocumentSubjectType.PURCHASE_REQUEST,
                 DocumentSubjectType.RECEIVABLE, DocumentSubjectType.PAYMENT, DocumentSubjectType.DISPATCH_ORDER,
                 DocumentSubjectType.PROOF_OF_DELIVERY, DocumentSubjectType.DELIVERY_INCIDENT,
-                DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY, DocumentSubjectType.WAREHOUSE),
+                DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY, DocumentSubjectType.WAREHOUSE,
+                DocumentSubjectType.BUYER_RECEIPT),
                 EnumSet.allOf(DocumentSubjectType.class));
         assertEquals(EnumSet.of(DocumentAudience.INTERNAL, DocumentAudience.BUYER), EnumSet.allOf(DocumentAudience.class));
     }

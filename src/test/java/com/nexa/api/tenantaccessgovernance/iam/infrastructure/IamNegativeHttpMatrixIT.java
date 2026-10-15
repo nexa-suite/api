@@ -219,7 +219,8 @@ class IamNegativeHttpMatrixIT extends NexaWorkflowIntegrationSupport {
     }
 
     private void restoreOwnerFixtures() {
-        jdbc.update("update iam.user_account set display_name='Owner',phone=null,preferred_language='es',timezone='UTC' where normalized_email=?", OWNER_EMAIL);
+        jdbc.update("update iam.user_account set display_name='Owner',phone=null,preferred_language='es',timezone='UTC',"
+                + "first_name=null,last_name=null,document_type=null,document_number=null,document_country_code=null where normalized_email=?", OWNER_EMAIL);
         jdbc.update("update iam.password_credential set password_hash=?,algorithm='bcrypt',changed_at=current_timestamp where user_id=(select id from iam.user_account where normalized_email=?)",
                 PASSWORD_ENCODER.encode(TEST_PASSWORD), OWNER_EMAIL);
     }

@@ -128,7 +128,8 @@ public final class PermissionCatalog {
 					PermissionKey.BUYER_SALES_READ, PermissionKey.BUYER_SALES_WRITE,
 					PermissionKey.BUYER_ORDER_READ, PermissionKey.BUYER_TRACKING_READ, PermissionKey.NOTIFICATION_READ,
 					PermissionKey.BUYER_PROFILE_WRITE, PermissionKey.DOCUMENT_READ,
-					PermissionKey.DOCUMENT_DOWNLOAD, PermissionKey.PAYMENT_READ,
+					PermissionKey.DOCUMENT_DOWNLOAD, PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH,
+					PermissionKey.PAYMENT_READ,
 					PermissionKey.PAYMENT_CREATE);
 		};
 	}

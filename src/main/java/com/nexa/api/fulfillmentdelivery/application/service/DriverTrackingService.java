@@ -36,13 +36,20 @@ public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.a
     @Transactional(readOnly=true)
     public Workday current(CurrentAccessContext c) { driver(c); return tracking.current(t(c),w(c),a(c)); }
     @Transactional
+    public Workday start(CurrentAccessContext c, boolean locationAvailable, String key) {
+        return command(c, null, null, "START", key, locationAvailable);
+    }
+    @Transactional
     public Workday command(CurrentAccessContext c, UUID day, Long version, String action, String key) {
+        return command(c, day, version, action, key, true);
+    }
+    private Workday command(CurrentAccessContext c, UUID day, Long version, String action, String key, boolean locationAvailable) {
         driver(c);
         if (key==null || key.isBlank() || key.length()>160) throw error("IDEMPOTENCY_KEY_REQUIRED",false);
         if (!Set.of("START","END","AVAILABLE","UNAVAILABLE").contains(action)) throw error("INVALID_REQUEST",false);
         if (!"START".equals(action) && (day==null || version==null || version<0)) throw error("PRECONDITION_REQUIRED",false);
         return tracking.command(new WorkdayCommand(t(c),w(c),a(c),day,version,action,key,
-                hash(action+"|"+day+"|"+version),clock.instant()));
+                hash(action+"|"+day+"|"+version+("START".equals(action) && !locationAvailable ? "|location-unavailable" : "")),clock.instant(),locationAvailable));
     }
     @Transactional
     public Coordinate capture(CurrentAccessContext c,UUID day, UUID sampleId, double lat,double lon,
@@ -68,12 +75,14 @@ public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.a
         c.requirePermission(PermissionKey.BUYER_TRACKING_READ);
         if (!c.hasRole(MembershipRole.BUYER)) throw error("DELIVERY_NOT_FOUND",true);
         DeliveryScope scope=tracking.deliveryScope(t(c),w(c),delivery);
-        if (scope==null || !Set.of("DISPATCHED","IN_TRANSIT","PARTIAL").contains(scope.status())
+        if (scope==null || !Set.of("DISPATCHED","IN_TRANSIT").contains(scope.status())
                 || scope.salesOrderId()==null || scope.driverMembershipId()==null) throw error("DELIVERY_NOT_FOUND",true);
         var account=orders.get(t(c),w(c),scope.salesOrderId()).clientAccountId();
         if(account==null || !accounts.hasBuyerRelationship(t(c).toString(),w(c).toString(),a(c).toString(),account.toString()))
             throw error("DELIVERY_NOT_FOUND",true);
-        return new DeliveryTracking(delivery,tracking.latest(t(c),w(c),scope.driverMembershipId(),clock.instant()));
+        Coordinate location=tracking.latest(t(c),w(c),scope.driverMembershipId(),clock.instant());
+        if(location!=null && (scope.trackingStartedAt()==null || location.capturedAt().isBefore(scope.trackingStartedAt()))) location=null;
+        return new DeliveryTracking(delivery,location);
     }
     private void driver(CurrentAccessContext c) {
         c.requirePermission(PermissionKey.DISPATCH_START_ROUTE);

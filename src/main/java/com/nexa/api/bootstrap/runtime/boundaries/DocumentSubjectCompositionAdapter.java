@@ -56,7 +56,16 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
             case DELIVERY_INCIDENT -> resolveDeliveryIncident(tenant, workspace, id, subject);
             case INBOUND_RECEIVING_DISCREPANCY -> resolveInboundDiscrepancy(tenant, workspace, actor, id, subject);
             case WAREHOUSE -> resolveWarehouse(tenant, workspace, id, subject);
+            case BUYER_RECEIPT -> resolveBuyerReceipt(tenant, workspace, id, subject);
         };
+    }
+
+    private DocumentSubjectSnapshot resolveBuyerReceipt(UUID tenant, UUID workspace, UUID id,
+                                                        DocumentSubjectReference subject) {
+        return fulfillment.findBuyerReceipt(tenant, workspace, id)
+                .map(value -> snapshot(tenant, workspace, subject.type(), value.id().toString(),
+                        value.customerAccountId().toString(), value.decision(), true))
+                .orElseGet(() -> absent(tenant, workspace, subject));
     }
 
     private DocumentSubjectSnapshot resolveWarehouse(UUID tenant, UUID workspace, UUID id,

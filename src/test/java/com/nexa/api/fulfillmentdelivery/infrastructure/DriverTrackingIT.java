@@ -38,6 +38,20 @@ class DriverTrackingIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(jsonPath("$.startedAt").value(json(started).get("startedAt").asText()));
         Instant capturedAt = Instant.now().plusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).plusNanos(123456789);
         String sample = "{\"sampleId\":\""+UUID.randomUUID()+"\",\"latitude\":-12.1,\"longitude\":-77.0,\"accuracyMeters\":5,\"capturedAt\":\""+capturedAt+"\"}";
+        mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/locations").header("Authorization",auth)
+                .contentType(MediaType.APPLICATION_JSON).content(sample))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DRIVER_LOCATION_NO_ACTIVE_DELIVERY"));
+        UUID fixtureTenant = UUID.fromString(tenantId());
+        UUID fixtureWorkspace = UUID.fromString(workspaceId());
+        UUID fixtureDriver = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        UUID fixtureFulfillment = UUID.randomUUID();
+        UUID fixtureDelivery = UUID.randomUUID();
+        jdbc.update("insert into logistics.fulfillment(id,tenant_id,workspace_id,sales_order_id,physical_allocation_id,status,planned_at,created_at,updated_at,actor_membership_id) values(?,?,?,?,?,'HANDED_OVER',current_timestamp,current_timestamp,current_timestamp,?)",
+                fixtureFulfillment, fixtureTenant, fixtureWorkspace, UUID.randomUUID(), UUID.randomUUID(), fixtureDriver);
+        jdbc.update("insert into logistics.delivery(id,tenant_id,workspace_id,fulfillment_id,status,dispatched_at,created_at,updated_at) values(?,?,?,?,'DISPATCHED',current_timestamp-interval '1 minute',current_timestamp,current_timestamp)",
+                fixtureDelivery, fixtureTenant, fixtureWorkspace, fixtureFulfillment);
+        jdbc.update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,assigned_at,actor_membership_id) values(?,?,?,?,?,?,current_timestamp,?)",
+                UUID.randomUUID(), fixtureTenant, fixtureWorkspace, fixtureDelivery, fixtureDriver, UUID.randomUUID(), fixtureDriver);
         var firstSample = mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/locations").header("Authorization",auth)
                 .contentType(MediaType.APPLICATION_JSON).content(sample)).andExpect(status().isOk()).andReturn();
         var replayedSample = mockMvc.perform(post("/api/v1/driver/workdays/"+id+"/locations").header("Authorization",auth)

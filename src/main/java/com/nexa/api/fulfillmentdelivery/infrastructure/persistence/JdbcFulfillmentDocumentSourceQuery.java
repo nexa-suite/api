@@ -112,6 +112,24 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
                 tenantId, workspaceId, incidentId).stream().findFirst();
     }
 
+    @Override
+    public Optional<BuyerReceiptSubject> findBuyerReceipt(UUID tenantId, UUID workspaceId, UUID receiptId) {
+        return jdbc.query("select receipt.id,receipt.delivery_id,receipt.delivery_attempt_id,receipt.customer_account_id,"
+                        + "receipt.buyer_membership_id,receipt.decision,receipt.occurred_at "
+                        + "from logistics.buyer_receipt_fact receipt "
+                        + "join logistics.delivery delivery on delivery.tenant_id=receipt.tenant_id "
+                        + "and delivery.workspace_id=receipt.workspace_id and delivery.id=receipt.delivery_id "
+                        + "join logistics.delivery_attempt attempt on attempt.tenant_id=receipt.tenant_id "
+                        + "and attempt.workspace_id=receipt.workspace_id and attempt.id=receipt.delivery_attempt_id "
+                        + "and attempt.delivery_id=receipt.delivery_id "
+                        + "where receipt.tenant_id=? and receipt.workspace_id=? and receipt.id=?",
+                (rs, row) -> new BuyerReceiptSubject(rs.getObject("id", UUID.class),
+                        rs.getObject("delivery_id", UUID.class), rs.getObject("delivery_attempt_id", UUID.class),
+                        rs.getObject("customer_account_id", UUID.class), rs.getObject("buyer_membership_id", UUID.class),
+                        rs.getString("decision"), instant(rs, "occurred_at")),
+                tenantId, workspaceId, receiptId).stream().findFirst();
+    }
+
     private String temperatureSummary(UUID tenantId, UUID workspaceId, UUID dispatchId) {
         return jdbc.queryForObject("select coalesce(string_agg(coalesce(value::text,'n/a') || ' ' || unit, ', ' order by recorded_at desc), 'No temperature readings') "
                 + "from logistics.temperature_reading where tenant_id=? and workspace_id=? and dispatch_order_id=?",

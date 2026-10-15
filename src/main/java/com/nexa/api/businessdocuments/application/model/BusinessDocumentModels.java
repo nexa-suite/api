@@ -19,7 +19,7 @@ public final class BusinessDocumentModels {
             Instant processedAt, int attemptCount) { }
     public record EvidenceView(String id, String subjectType, String subjectId, String lifecycleStatus, String declaredContentType,
             String detectedContentType, String originalFilename, String checksumSha256, long byteSize, Instant createdAt, Instant scannedAt,
-            String failureCode, Instant updatedAt) { }
+            String failureCode, Instant updatedAt, String requestedByMembershipId) { }
     public record Download(String filename, String contentType, Supplier<InputStream> contentSource,
                            long byteSize, String checksumSha256) {
         public Download {

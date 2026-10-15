@@ -26,6 +26,11 @@ class DynamicAuthorizationTests {
 		assertThat(PermissionCatalog.require("catalog.read")).isEqualTo(PermissionKey.CATALOG_READ);
 		assertThat(PermissionCatalog.all()).contains(PermissionKey.TENANT_ROLE_ASSIGN_RESERVED,
 				PermissionKey.DISPATCH_COMPLETE, PermissionKey.ORDER_EXPORT_READ);
+		assertThat(PermissionCatalog.require("buyer.receipt.evidence.attach"))
+				.isEqualTo(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH);
+		assertThat(PermissionCatalog.forBuiltInRole(MembershipRole.BUYER))
+				.contains(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH)
+				.doesNotContain(PermissionKey.DOCUMENT_UPLOAD);
 		assertThat(PermissionCatalog.companyOwnerAssignableEnvelope())
 				.doesNotContain(PermissionKey.TENANT_SECURITY_MANAGE, PermissionKey.TENANT_ROLE_MANAGE,
 						PermissionKey.TENANT_ROLE_ASSIGN_RESERVED, PermissionKey.TENANT_AUDIT_READ);

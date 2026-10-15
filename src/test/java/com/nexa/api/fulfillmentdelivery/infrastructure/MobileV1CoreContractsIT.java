@@ -33,6 +33,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -619,20 +620,97 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("BUYER_ONLY_OPERATION"));
 
         String receiptKey = "buyer-receipt-" + uuid();
-        String receiptBody = "{\"token\":\"" + token + "\",\"decision\":\"ACCEPTED\",\"acceptedQuantity\":1}";
+        String receiptBody = "{\"token\":\"" + token + "\",\"decision\":\"DISPUTED\",\"acceptedQuantity\":0,\"reason\":\"Caja faltante\"}";
         MvcResult receipt = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/buyer-receipts")
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", receiptKey)
                         .contentType(MediaType.APPLICATION_JSON).content(receiptBody))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.decision").value("ACCEPTED")).andReturn();
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.decision").value("DISPUTED")).andReturn();
         MvcResult receiptReplay = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/buyer-receipts")
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", receiptKey)
                         .contentType(MediaType.APPLICATION_JSON).content(receiptBody))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.replayed").value(true)).andReturn();
         assertThat(json(receiptReplay).get("id").asText()).isEqualTo(json(receipt).get("id").asText());
+        String receiptId = json(receipt).get("id").asText();
+        mockMvc.perform(get("/api/v1/buyer/deliveries/" + deliveryId + "/buyer-receipts")
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(receiptId))
+                .andExpect(jsonPath("$[0].deliveryId").value(deliveryId))
+                .andExpect(jsonPath("$[0].attemptId").value(attemptId))
+                .andExpect(jsonPath("$[0].decision").value("DISPUTED"))
+                .andExpect(jsonPath("$[0].reason").value("Caja faltante"))
+                .andExpect(jsonPath("$[0].recordedByMembershipId").value(membershipId(BUYER_EMAIL)));
+
+        byte[] evidenceBytes = new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 1, 2, 3, 4};
+        String evidenceKey = "buyer-receipt-evidence-" + uuid();
+        MvcResult uploadedEvidence = uploadBuyerReceiptEvidence(buyer, evidenceKey, receiptId,
+                "receipt-photo.png", "image/png", evidenceBytes)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.subjectType").value("BUYER_RECEIPT"))
+                .andExpect(jsonPath("$.subjectId").value(receiptId))
+                .andExpect(jsonPath("$.requestedByMembershipId").value(membershipId(BUYER_EMAIL)))
+                .andReturn();
+        String evidenceId = json(uploadedEvidence).get("id").asText();
+        assertThat(json(uploadedEvidence).get("lifecycleStatus").asText()).isNotEqualTo("REQUESTED");
+        MvcResult evidenceReplay = uploadBuyerReceiptEvidence(buyer, evidenceKey, receiptId,
+                "receipt-photo.png", "image/png", evidenceBytes)
+                .andExpect(status().isCreated()).andReturn();
+        assertThat(json(evidenceReplay).get("id").asText()).isEqualTo(evidenceId);
+        byte[] changedEvidenceBytes = evidenceBytes.clone();
+        changedEvidenceBytes[changedEvidenceBytes.length - 1]++;
+        uploadBuyerReceiptEvidence(buyer, evidenceKey, receiptId, "receipt-photo.png", "image/png", changedEvidenceBytes)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
+        uploadBuyerReceiptEvidence(sales, "buyer-evidence-forbidden-" + uuid(), receiptId,
+                "receipt-photo.png", "image/png", evidenceBytes)
+                .andExpect(status().isForbidden());
+        uploadBuyerReceiptEvidence(buyer, "buyer-evidence-other-subject-" + uuid(), receiptId,
+                "receipt-photo.png", "image/png", evidenceBytes, "PROOF_OF_DELIVERY")
+                .andExpect(status().isForbidden());
+
+        UUID buyerMembership = UUID.fromString(membershipId(BUYER_EMAIL));
+        UUID clientAccount = UUID.fromString(buyerClientAccountId());
+        int detached = tenantJdbc().update("delete from sales.client_account_membership "
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?",
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), clientAccount, buyerMembership);
+        assertThat(detached).isEqualTo(1);
+        try {
+            mockMvc.perform(get("/api/v1/business-document-evidence/" + evidenceId)
+                            .header("Authorization", "Bearer " + buyer))
+                    .andExpect(status().isNotFound());
+            mockMvc.perform(get("/api/v1/business-document-evidence")
+                            .param("subjectType", "BUYER_RECEIPT").param("subjectId", receiptId)
+                            .header("Authorization", "Bearer " + buyer))
+                    .andExpect(status().isNotFound());
+        } finally {
+            tenantJdbc().update("insert into sales.client_account_membership "
+                            + "(client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) "
+                            + "values (?,?,?,?,current_timestamp)",
+                    clientAccount, buyerMembership, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+        }
+        mockMvc.perform(get("/api/v1/business-document-evidence")
+                        .param("subjectType", "BUYER_RECEIPT").param("subjectId", receiptId)
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(evidenceId));
+        MvcResult genericEvidenceList = mockMvc.perform(get("/api/v1/business-document-evidence")
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk()).andReturn();
+        List<String> genericEvidenceIds = new ArrayList<>();
+        json(genericEvidenceList).path("items")
+                .forEach(item -> genericEvidenceIds.add(item.path("id").asText()));
+        assertThat(genericEvidenceIds).doesNotContain(evidenceId);
+        mockMvc.perform(delete("/api/v1/business-document-evidence/" + evidenceId)
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/v1/business-document-evidence/" + evidenceId)
+                        .header("Authorization", "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM")))
+                .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/buyer-receipts")
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", receiptKey)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"token\":\"" + token + "\",\"decision\":\"DISPUTED\",\"acceptedQuantity\":0,\"reason\":\"Different decision\"}"))
+                        .content("{\"token\":\"" + token + "\",\"decision\":\"ACCEPTED\",\"acceptedQuantity\":1}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("IDEMPOTENCY_PAYLOAD_CONFLICT"));
         mockMvc.perform(post("/api/v1/delivery-handoff/validations").header("Authorization", "Bearer " + buyer)
                         .contentType(MediaType.APPLICATION_JSON).content(validateBody))
@@ -642,7 +720,25 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         assertThat(tenantJdbc().queryForObject("select count(*) from audit.event where event_type='BUYER_RECEIPT_RECORDED' and subject_id=?", Integer.class,
                 UUID.fromString(json(receipt).get("id").asText()))).isEqualTo(1);
         assertThat(tenantJdbc().queryForObject("select decision from logistics.buyer_receipt_fact where id=?", String.class,
-                UUID.fromString(json(receipt).get("id").asText()))).isEqualTo("ACCEPTED");
+                UUID.fromString(receiptId))).isEqualTo("DISPUTED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from business_documents.evidence_object "
+                        + "where id=? and requested_by_membership_id=? and subject_type='BUYER_RECEIPT' and subject_id=?",
+                Integer.class, UUID.fromString(evidenceId), buyerMembership, UUID.fromString(receiptId))).isEqualTo(1);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions uploadBuyerReceiptEvidence(String token, String key,
+            String receiptId, String filename, String contentType, byte[] bytes) throws Exception {
+        return uploadBuyerReceiptEvidence(token, key, receiptId, filename, contentType, bytes, "BUYER_RECEIPT");
+    }
+
+    private org.springframework.test.web.servlet.ResultActions uploadBuyerReceiptEvidence(String token, String key,
+            String subjectId, String filename, String contentType, byte[] bytes, String subjectType) throws Exception {
+        return mockMvc.perform(multipart("/api/v1/business-document-evidence")
+                .file(new org.springframework.mock.web.MockMultipartFile("file", filename, contentType, bytes))
+                .param("subjectType", subjectType)
+                .param("subjectId", subjectId)
+                .header("Authorization", "Bearer " + token)
+                .header("Idempotency-Key", key));
     }
 
     @Test

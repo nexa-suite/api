@@ -17,6 +17,9 @@ public interface FulfillmentDocumentSourceQuery {
     /** Minimal customer-scoped projection used only to bind BC-09 incident evidence to its subject. */
     Optional<IncidentSubject> findIncidentSubject(UUID tenantId, UUID workspaceId, UUID incidentId);
 
+    /** Buyer receipt fact joined to its actual Delivery and attempt before it can own BC-09 evidence. */
+    Optional<BuyerReceiptSubject> findBuyerReceipt(UUID tenantId, UUID workspaceId, UUID receiptId);
+
     record Dispatch(UUID id, UUID customerAccountId, String dispatchNumber, String status,
                     String destinationSnapshot, Instant deliveryWindowStart, Instant eta,
                     String responsibleDisplayNameSnapshot, String vehicleReference,
@@ -35,4 +38,7 @@ public interface FulfillmentDocumentSourceQuery {
                     UUID dispatchId) { }
 
     record IncidentSubject(UUID id, UUID customerAccountId, String status, UUID salesOrderId) { }
+
+    record BuyerReceiptSubject(UUID id, UUID deliveryId, UUID deliveryAttemptId, UUID customerAccountId,
+                               UUID buyerMembershipId, String decision, Instant occurredAt) { }
 }
