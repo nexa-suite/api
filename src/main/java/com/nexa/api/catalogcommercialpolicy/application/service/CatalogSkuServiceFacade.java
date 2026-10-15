@@ -48,7 +48,7 @@ public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
     @Override
     public CatalogSkuModels.FamilyView createFamily(CatalogScope scope, String code, String name, String description,
             UUID categoryId, UUID brandId, String country, String manufacturer, String supplier, String storageFamily) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.PRODUCT_MANAGE);
         ProductFamily family = ProductFamily.create(scope.tenantId(), scope.workspaceId(), code, name, description,
                 categoryId, brandId, country, manufacturer, supplier, storageFamily, clock.instant());
         return port.insertFamily(scope, family);
@@ -56,7 +56,7 @@ public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
 
     @Override
     public CatalogSkuModels.FamilyView changeFamilyStatus(CatalogScope scope, UUID id, String status, long version) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.PRODUCT_MANAGE);
         CatalogSkuModels.FamilyView current = port.family(scope, id);
         ProductFamily family = ProductFamily.restore(UUID.fromString(current.id()), scope.tenantId(), scope.workspaceId(),
                 current.code(), current.name(), current.description(), UUID.fromString(current.categoryId()),
@@ -91,7 +91,7 @@ public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
             String presentation, String packaging, String unit, BigDecimal netWeight, BigDecimal grossWeight,
             BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax, int shelfLifeDays,
             int minimumRemainingShelfLifeDays, boolean lotTracking, boolean expiryTracking, String taxCategory) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.PRODUCT_MANAGE);
         port.family(scope, familyId);
         SellableSku sku = SellableSku.create(scope.tenantId(), scope.workspaceId(), familyId, skuCode, gtin,
                 presentation, packaging, unit, netWeight, grossWeight,
@@ -103,7 +103,7 @@ public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
 
     @Override
     public CatalogSkuModels.SkuView changeSkuStatus(CatalogScope scope, UUID id, String status, long version) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.PRODUCT_MANAGE);
         CatalogSkuModels.SkuView current = port.sku(scope, id);
         SellableSku sku = SellableSku.restore(UUID.fromString(current.id()), scope.tenantId(), scope.workspaceId(),
                 UUID.fromString(current.familyId()), current.skuCode(), current.gtin(), current.presentation(),

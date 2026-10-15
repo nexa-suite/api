@@ -46,7 +46,7 @@ public final class CatalogProductService implements CatalogProductUseCase {
 	public CatalogManagementModels.ProductView createProduct(CatalogScope scope, String catalogItemId, String productCode,
 			String slug, String name, String description, UUID categoryId, UUID brandId, String storageTemperature,
 			String presentation, String unitOfMeasure, boolean buyerVisible, String imagePath, String idempotencyKey) {
-		authorization.require(CatalogPermissions.MANAGE);
+		authorization.require(CatalogPermissions.PRODUCT_MANAGE);
 		Product product = Product.create(UUID.randomUUID(), catalogItemId, productCode, slug, name, description);
 		return port.createProduct(scope, product.catalogItemId(), product.productCode(), product.slug(), product.name(), product.description(),
 				categoryId, brandId, storageTemperature, presentation, unitOfMeasure, buyerVisible, imagePath, idempotencyKey);
@@ -56,7 +56,7 @@ public final class CatalogProductService implements CatalogProductUseCase {
 	public CatalogManagementModels.ProductView updateProduct(CatalogScope scope, UUID id, String slug, String name, String description,
 			UUID categoryId, UUID brandId, String storageTemperature, String presentation, String unitOfMeasure,
 			boolean buyerVisible, String imagePath, long version) {
-		authorization.require(CatalogPermissions.MANAGE);
+		authorization.require(CatalogPermissions.PRODUCT_MANAGE);
 		CatalogManagementModels.ProductView current = port.product(scope, id)
 				.orElseThrow(() -> new CatalogResourceNotFoundException("product"));
 		Product product = Product.restore(id, current.catalogItemId(), current.productCode(), current.slug(), current.name(),
@@ -70,7 +70,7 @@ public final class CatalogProductService implements CatalogProductUseCase {
 
 	@Override
 	public CatalogManagementModels.ProductView changeStatus(CatalogScope scope, UUID id, String status, long version) {
-		authorization.require(CatalogPermissions.MANAGE);
+		authorization.require(CatalogPermissions.PRODUCT_MANAGE);
 		CatalogManagementModels.ProductView current = port.product(scope, id)
 				.orElseThrow(() -> new CatalogResourceNotFoundException("product"));
 		Product product = Product.restore(id, current.catalogItemId(), current.productCode(), current.slug(), current.name(),

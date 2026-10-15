@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Separate catalog product and taxonomy command permissions, preventing their
+  shared legacy alias from authorizing unrelated mutations.
+
 - Require feature-specific permissions for customer mutations, addresses,
   purchase requests, sales orders, manual drafts and logistics reads, preventing
   broad legacy sales aliases from granting unrelated operations.
