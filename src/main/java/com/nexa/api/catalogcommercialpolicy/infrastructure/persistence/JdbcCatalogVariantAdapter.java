@@ -22,10 +22,12 @@ import java.util.UUID;
 public class JdbcCatalogVariantAdapter implements CatalogVariantPort {
     private final JdbcTemplate jdbc;
     private final CatalogSkuPort skus;
+    private final CatalogCommandIdempotencySupport idempotency;
 
     public JdbcCatalogVariantAdapter(JdbcTemplate jdbc, CatalogSkuPort skus) {
         this.jdbc = jdbc;
         this.skus = skus;
+        this.idempotency = new CatalogCommandIdempotencySupport(jdbc);
     }
 
     @Override
@@ -52,13 +54,23 @@ public class JdbcCatalogVariantAdapter implements CatalogVariantPort {
     @Override
     @Transactional
     public CatalogVariantModels.VariantView insert(CatalogScope scope, UUID familyId, String code, String name, String description) {
-        requireFamily(scope, familyId);
+        return insert(scope, familyId, code, name, description, null);
+    }
+
+    @Override
+    @Transactional
+    public CatalogVariantModels.VariantView insert(CatalogScope scope, UUID familyId, String code, String name, String description, String idempotencyKey) {
         String normalizedCode = required(code, 80, "Variant code");
         String normalizedName = required(name, 200, "Variant name");
-        UUID id = UUID.randomUUID();
+        String normalizedDescription = optional(description, 4000);
+        UUID candidate = UUID.randomUUID();
+        UUID id = idempotency.reserve(scope, "variant:create", idempotencyKey,
+                CatalogCommandIdempotencySupport.structuredHash(familyId, normalizedCode, normalizedName, normalizedDescription), candidate);
+        if (!id.equals(candidate)) return variant(scope, id);
+        requireFamily(scope, familyId);
         Instant now = Instant.now();
         jdbc.update("insert into catalog_management.product_variant (id,tenant_id,workspace_id,family_id,variant_code,name,description,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,'DRAFT',0,?,?)",
-                id, scope.tenantId(), scope.workspaceId(), familyId, normalizedCode, normalizedName, optional(description, 4000), Timestamp.from(now), Timestamp.from(now));
+                id, scope.tenantId(), scope.workspaceId(), familyId, normalizedCode, normalizedName, normalizedDescription, Timestamp.from(now), Timestamp.from(now));
         return variant(scope, id);
     }
 

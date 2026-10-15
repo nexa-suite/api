@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Honor the required variant-creation idempotency key through the application
+  and persistence boundary, using the existing scoped catalog command ledger.
 - Separate catalog product and taxonomy command permissions, preventing their
   shared legacy alias from authorizing unrelated mutations.
 

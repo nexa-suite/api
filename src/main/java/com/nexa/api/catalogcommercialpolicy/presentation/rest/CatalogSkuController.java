@@ -107,8 +107,8 @@ public final class CatalogSkuController {
             @RequestBody VariantRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
         CatalogVariantModels.VariantView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
-                () -> variants.create(CatalogHttpSupport.scope(context), familyId, request.code(), request.name(), request.description()),
-                scoped -> scoped.variants().create(scoped.scope(), familyId, request.code(), request.name(), request.description()));
+                () -> variants.create(CatalogHttpSupport.scope(context), familyId, request.code(), request.name(), request.description(), idempotencyKey),
+                scoped -> scoped.variants().create(scoped.scope(), familyId, request.code(), request.name(), request.description(), idempotencyKey));
         return ResponseEntity.created(URI.create("/api/v1/product-variants/" + value.id())).body(value);
     }
     @GetMapping("/product-variants/{variantId}")
