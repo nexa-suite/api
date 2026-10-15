@@ -19,6 +19,25 @@ class BusinessDocumentStorageSecurityTests {
     Path root;
 
     @Test
+    void localStorageInitializesDirectoryAndRemovesWriteProbe() throws Exception {
+        Path directory = root.resolve("private-objects");
+        new LocalObjectStorageAdapter(new MockEnvironment().withProperty("nexa.object-storage.root", directory.toString()));
+        assertThat(directory).isDirectory();
+        try (var entries = Files.list(directory)) {
+            assertThat(entries.count()).isZero();
+        }
+    }
+
+    @Test
+    void localStorageFailsAtStartupWhenConfiguredRootIsAFile() throws Exception {
+        Path file = Files.createFile(root.resolve("not-a-directory"));
+        assertThatThrownBy(() -> new LocalObjectStorageAdapter(new MockEnvironment()
+                .withProperty("nexa.object-storage.root", file.toString())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Local private object storage must be writable");
+    }
+
+    @Test
     void localStorageStreamsBoundedPrivateObjectsAndUsesContentChecksum() throws Exception {
         var environment = new MockEnvironment().withProperty("nexa.object-storage.root", root.toString());
         var storage = new LocalObjectStorageAdapter(environment);

@@ -31,3 +31,64 @@ These are implementation obligations, not completed features, deployment claims 
 ## Evidence boundary
 
 Focused checks are recorded with each implementation increment. The existing local APK and executable API represent the preceding integrated baseline until rebuilt with new changes. They are not public deployment, physical-device validation, Product Acceptance or production-readiness evidence. No release, tag, push or merge is performed by this continuation.
+
+## Functional data increment — 2026-10-15
+
+Current local changes extend existing contracts without changing server business ownership:
+
+- `GET /catalog-items/filter-options?kind=brand|category` provides paginated, scoped references for catalog selectors. Product name, category, family and variety remain distinct. New SKUs receive stable catalog identifiers; Buyer reads require activation, visibility and a current price.
+- Own-profile updates support first/last names and a complete personal-document tuple. Omitting new fields preserves stored values. Business RUC remains separate from personal identification.
+- Warehouse location updates support structured address details, validate road-type references and the Peruvian department/province/district tuple, and retain optimistic concurrency. Unknown historical details remain null.
+- Inbound receipts accept `productionDate` and `receivedAt`, preserve them in lot reads, reject invalid chronology and validate quantity units against the SKU. Omitted dates preserve legacy request compatibility; they do not establish historical production facts. New transfer destination lots retain the source production date.
+- Driver coordinate capture requires an active workday with location enabled and an assigned `DISPATCHED` or `IN_TRANSIT` delivery. Buyer reads require their own active delivery. Closing a delivery prevents further capture for that delivery and removes its Buyer tracking access. Starting a workday with location disabled is supported. Existing coordinate retention policy is unchanged.
+
+Central migrations V164–V167 and Tenant migrations V24–V25 are additive. Tenant readiness now requires V24 and V25. Published migrations remain unchanged.
+
+`node ops/scripts/seed-functional-demo.mjs --apply` enriches configured synthetic local profiles and creates labeled warehouse and Buyer addresses through authenticated local APIs. It requires the local profile and `.test`/`.local` identities and does not mutate the catalog. Optional `--simulate-gps` requires an existing assigned active delivery; it cannot manufacture a completed delivery.
+
+Technical checks executed for this increment:
+
+- `./mvnw -Dnexa.integration.enabled=true '-Dtest=CatalogManagementIT#newlyCreatedSkuCanBeReadByBuyerOnlyAfterExplicitActivation,WarehouseStructuredAddressIT,WarehouseInventoryPagingIT#receivingPreservesProductionAndEntryDatesAndRejectsInvalidChronology,DriverLiveLocationIT' test`: four passed, no skips.
+- `./mvnw -Dnexa.integration.enabled=true '-Dtest=DriverTrackingIT,LocalTenantBusinessDatabaseProvisioningCliTests' test`: fourteen passed, no skips, after adding an assigned active-delivery fixture to the retained central tracking test.
+- Local Docker API build: 865 discovered tests, zero failures, 319 integration tests skipped by their opt-in gate. The separate enabled integration commands above provide the applicable PostgreSQL evidence.
+- Local Tenant provisioning applied V24 and V25 and verified identity, Workspace anchor and writer restrictions. Recreating the API container requires the existing `ops/scripts/reconcile-local-tenant-api-networks.sh` recovery step before Tenant workflows; central readiness alone does not verify those private connections.
+
+These checks do not establish complete US/AC coverage, physical GPS accuracy, device permission behavior, Product Acceptance or production readiness. A live map provider must be explicitly configured; map-provider approval and physical-device checks remain separate gates.
+
+### Document download regression found during local integration
+
+The connected Buyer test found a generated document whose stored PDF is absent. This is unresolved stored-content evidence; its cause and recovery are not established. Metadata alone is not proof that bytes remain available.
+
+The download controller now opens content before returning binary headers and uses Spring `InputStreamResource` with the resource message converter. Typed storage failures can therefore produce the existing sanitized `502 STORAGE_UNAVAILABLE` problem before committing a download response. The stream remains bounded in memory and is closed by the converter. Both document and evidence downloads share this path. This follows the official [Spring resource API](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/core/io/InputStreamResource.html) and [resource converter API](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/http/converter/ResourceHttpMessageConverter.html).
+
+`./mvnw '-Dtest=BusinessDocumentDownloadTests,BusinessDocumentStorageSecurityTests,BusinessDocumentArchitectureTests' test` passed eleven tests without skips, including binary-byte equality, stream closure, and a sanitized failure without download headers. This correction does not recover the missing historical PDF or establish a passing full Buyer workflow.
+
+A separate new-generation failure was traced to the local named volume directory: it was owned by root with mode 0755 while the API runs as UID/GID 10001. The local directory ownership was corrected to 10001:10001 with mode 0700. The Dockerfile now prepares that private directory before switching users, so new volumes inherit the intended ownership. Local storage initialization also checks an actual temporary write/delete and fails at startup when storage cannot be written. It does not reset failed document jobs or rewrite issued-document history.
+
+Compose also runs `modern-object-storage-init` before the API, repairing the existing named volume with directories 0700/files 0600 owned by UID/GID 10001. The initializer has no network, no credentials, a read-only root filesystem and access only to that private volume. It rejects symlinks and special entries before changing ownership. It ran successfully against the existing local volume; isolated temporary-filesystem checks also passed for an empty root-owned directory and rejection of a symlink. The subsequent `docker compose --env-file .env.local -f ops/compose/modern.compose.yml up -d modern-api` recreation completed the initializer successfully before starting the API. Readiness returned `UP`, and an API-container write/delete probe succeeded as UID 10001. Docker's [volume initialization behavior](https://docs.docker.com/engine/storage/volumes/#mounting-a-volume-over-existing-data) explains why image-layer ownership alone cannot repair a pre-existing volume.
+
+The same focused command passed thirteen tests after adding startup directory/probe checks. The enabled PostgreSQL document regression command (`BusinessDocumentGenerationAuthorizationIT,BusinessDocumentReplacementIT,BusinessDocumentTenantIsolationIT`) passed nine tests without skips after fixing the replacement test to account for the worker's bounded one-request queue processing. The first run failed because an earlier queued order document preceded the replacement; the worker limit and generation assertions remain intact.
+
+### Transfer merge chronology
+
+Transfer receipt now compares both expiration and production dates before merging into an existing destination lot with the same SKU and batch. Different dates, including a known production date versus an unknown historical value, reject the merge without inferring a date or changing destination stock. The transfer remains in transit, preserving the existing dispatched stock history; resolving incompatible lot metadata requires an authorized operational correction.
+
+`./mvnw -Dnexa.integration.enabled=true '-Dtest=WarehouseSafetyStockTransferIT,BusinessDocumentStorageSecurityTests,BusinessDocumentDownloadTests,BusinessDocumentArchitectureTests' test` passed 21 tests without skips. Transfer coverage includes matching chronology, conflicting expiration, conflicting production and unknown destination production, alongside the four existing transfer/safety-stock tests.
+
+### Rebuilt local runtime and synthetic tracking
+
+The subsequent `docker compose --env-file .env.local -f ops/compose/modern.compose.yml build modern-api` completed with 871 discovered tests, zero failures and 320 skipped tests; 551 tests executed successfully. Enabled integration results above remain separate evidence. Central migration V168 was present and successful after recreation; private Tenant networks were reconciled before connected workflows.
+
+`node ops/scripts/seed-functional-demo.mjs --apply --simulate-gps` completed against the recreated local API. Six synthetic coordinates were accepted through Driver endpoints and each matching sample was read through the related Buyer's active-delivery endpoint. Profiles and labeled addresses use authenticated API writes; the catalog was unchanged. This verifies connected local API tracking with synthetic data, not physical-device GPS or map rendering.
+
+### Buyer receipt evidence and connected clients
+
+Buyer evidence uses the existing immutable disputed receipt fact as subject `BUYER_RECEIPT`, not a new discrepancy aggregate. Central V168 grants the narrow `buyer.receipt.evidence.attach` permission. Upload, list and download revalidate Tenant/Workspace, Delivery/Attempt linkage and the current Buyer relationship; generic evidence listing excludes receipt evidence unless its subject is explicitly requested. Receipt evidence cannot be deleted through the generic deletion endpoint. Existing content validation and scanning remain authoritative.
+
+`./mvnw -Dnexa.integration.enabled=true -Dtest=MobileV1CoreContractsIT test` passed all twelve tests with zero failures, errors or skips after the revoked-relationship access fence correction. The connected upload/scanner workflow against the persistent local runtime remains unverified.
+
+The Web command `npx playwright test e2e/portal/real-buyer-order-flow.spec.mjs --project=portal-chromium` passed one test in 47.9 seconds against the rebuilt runtime. It covered Buyer request submission, Sales conversion/confirmation, Warehouse picking/packing/staging, Logistics assignment and dispatch, Buyer foreground refresh to `DISPATCHED`, document generation and a successful PDF download.
+
+`node ops/scripts/seed-functional-demo.mjs --apply --receive-stock` created one labeled synthetic inbound lot in the synthetic Warehouse and zone through the real local API, using an existing catalog SKU and its authoritative unit and temperature limits. The same-key POST replay returned the same lot with quantity five and preserved production, entry and expiration dates; a subsequent lot GET confirmed persisted quantity. Running the command again reused the existing lot without receiving additional stock. The catalog was unchanged. This is persistent API evidence, not a Web or Android form submission.
+
+From the Mobile repository, `python3 scripts/run-buyer-local-api-tests.py` with the private fixture supplied through `NEXA_BUYER_LOCAL_API_ENV_FILE` passed five connected Flutter tests without skips. These exercised scoped reads, brand/category references, purchase-request submission/detail and protected PDF bytes/checksum. Empty receivables/payment history fixtures supplied read-path evidence only. This is a native HTTP client integration run, not emulator or physical-device UI acceptance. The earlier missing historical PDF remains unresolved; the successful download used an available document.
