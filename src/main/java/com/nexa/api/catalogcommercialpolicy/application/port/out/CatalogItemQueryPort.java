@@ -13,6 +13,10 @@ import java.util.Map;
 import java.math.BigDecimal;
 
 public interface CatalogItemQueryPort {
+    default com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CatalogScope scope, String kind, String search, int page, int size) {
+        throw new UnsupportedOperationException("Catalog filter choices are unavailable");
+    }
+
 	CatalogPage<CatalogItemSummary> search(CatalogSearchCriteria criteria);
 
 	Optional<CatalogItemDetail> findByCatalogItemId(CatalogItemId catalogItemId);

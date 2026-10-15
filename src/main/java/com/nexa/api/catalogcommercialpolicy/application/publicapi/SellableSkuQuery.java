@@ -92,6 +92,9 @@ public interface SellableSkuQuery {
     }
 
     record SellableSkuPolicy(UUID skuId, String status, boolean visible,
-                             BigDecimal temperatureMin, BigDecimal temperatureMax) {
+                             BigDecimal temperatureMin, BigDecimal temperatureMax, String unitOfMeasure) {
+        public SellableSkuPolicy(UUID skuId, String status, boolean visible, BigDecimal temperatureMin, BigDecimal temperatureMax) {
+            this(skuId, status, visible, temperatureMin, temperatureMax, null);
+        }
     }
 }

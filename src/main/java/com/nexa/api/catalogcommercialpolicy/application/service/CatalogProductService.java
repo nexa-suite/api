@@ -29,6 +29,12 @@ public final class CatalogProductService implements CatalogProductUseCase {
 	}
 
 	@Override
+	public CatalogManagementModels.Page<CatalogManagementModels.ProductView> products(CatalogScope scope, int page, int size, String search, String status, String brand, String category) {
+		authorization.require(CatalogPermissions.READ);
+		return port.products(scope, page, size, search, status, brand, category);
+	}
+
+	@Override
 	public CatalogManagementModels.ProductView product(CatalogScope scope, UUID id) {
 		authorization.require(CatalogPermissions.READ);
 		return port.product(scope, id).orElseThrow(() -> new CatalogResourceNotFoundException("product"));

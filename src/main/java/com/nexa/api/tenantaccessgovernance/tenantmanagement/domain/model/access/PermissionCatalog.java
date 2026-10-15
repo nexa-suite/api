@@ -117,6 +117,8 @@ public final class PermissionCatalog {
 					PermissionKey.DOCUMENT_READ, PermissionKey.DOCUMENT_UPLOAD,
 					PermissionKey.NOTIFICATION_READ);
 			case BUSINESS_OPERATIONS_MANAGER -> Set.of(
+					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PRODUCT_MANAGE,
+					PermissionKey.CATALOG_TAXONOMY_MANAGE, PermissionKey.CATALOG_PRICE_MANAGE,
 					PermissionKey.DELIVERY_EXCEPTION_READ, PermissionKey.DELIVERY_EXCEPTION_COORDINATE,
 					PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE,
 					PermissionKey.PAYMENT_RECONCILE,

@@ -8,6 +8,7 @@ import java.util.UUID;
 
 public interface CatalogProductPort {
     CatalogManagementModels.Page<CatalogManagementModels.ProductView> products(CatalogScope scope, int page, int size, String search, String status);
+    CatalogManagementModels.Page<CatalogManagementModels.ProductView> products(CatalogScope scope, int page, int size, String search, String status, String brand, String category);
     Optional<CatalogManagementModels.ProductView> product(CatalogScope scope, UUID id);
     CatalogManagementModels.ProductView createProduct(CatalogScope scope, String catalogItemId, String productCode, String slug, String name, String description,
             UUID categoryId, UUID brandId, String storageTemperature, String presentation, String unitOfMeasure, boolean buyerVisible, String imagePath);

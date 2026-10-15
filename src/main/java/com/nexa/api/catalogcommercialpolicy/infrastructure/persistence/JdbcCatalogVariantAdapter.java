@@ -36,7 +36,7 @@ public class JdbcCatalogVariantAdapter implements CatalogVariantPort {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         String term = like(search);
-        String where = "v.tenant_id=? and v.workspace_id=? and (? is null or v.family_id=?) and (? is null or lower(v.name) like lower(?) or lower(v.variant_code) like lower(?) or lower(f.name) like lower(?))";
+        String where = "v.tenant_id=? and v.workspace_id=? and (cast(? as uuid) is null or v.family_id=?) and (cast(? as text) is null or lower(v.name) like lower(?) or lower(v.variant_code) like lower(?) or lower(f.name) like lower(?))";
         Object[] args = {scope.tenantId(), scope.workspaceId(), familyId, familyId, term, term, term, term};
         long total = jdbc.queryForObject("select count(*) from catalog_management.product_variant v join catalog_management.product_family f on f.tenant_id=v.tenant_id and f.workspace_id=v.workspace_id and f.id=v.family_id where " + where, Long.class, args);
         List<CatalogVariantModels.VariantView> items = jdbc.query(sql(where) + " order by v.name,v.id limit ? offset ?", (rs, row) -> variant(rs), concat(args, safeSize, safePage * safeSize));

@@ -138,10 +138,11 @@ public final class CatalogManagementController {
     @GetMapping("/products")
     public CatalogManagementModels.Page<CatalogManagementModels.ProductView> productList(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) String search, @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String search, @RequestParam(required = false) String status,
+            @RequestParam(required = false) String brand, @RequestParam(required = false) String category) {
         return CatalogHttpSupport.tenantRequest(context, tenantRequests,
-                () -> products.products(CatalogHttpSupport.scope(context), page, size, search, status),
-                request -> request.products().products(request.scope(), page, size, search, status));
+                () -> products.products(CatalogHttpSupport.scope(context), page, size, search, status, brand, category),
+                request -> request.products().products(request.scope(), page, size, search, status, brand, category));
     }
 
     @GetMapping("/products/{id}")

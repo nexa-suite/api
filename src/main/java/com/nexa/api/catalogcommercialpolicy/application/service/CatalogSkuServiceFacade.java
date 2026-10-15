@@ -40,6 +40,12 @@ public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
     }
 
     @Override
+    public CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(CatalogScope scope, int page, int size, String search, String brand, String category) {
+        authorization.require(CatalogPermissions.READ);
+        return port.families(scope, page, size, search, brand, category);
+    }
+
+    @Override
     public CatalogSkuModels.FamilyView family(CatalogScope scope, UUID id) {
         authorization.require(CatalogPermissions.READ);
         return port.family(scope, id);

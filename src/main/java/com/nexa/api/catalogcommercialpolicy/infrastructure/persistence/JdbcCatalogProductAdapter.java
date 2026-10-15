@@ -38,6 +38,11 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
 
     @Override
     public CatalogManagementModels.Page<CatalogManagementModels.ProductView> products(CatalogScope scope, int page, int size, String search, String status) {
+        return products(scope, page, size, search, status, null, null);
+    }
+
+    @Override
+    public CatalogManagementModels.Page<CatalogManagementModels.ProductView> products(CatalogScope scope, int page, int size, String search, String status, String brand, String category) {
         pageCheck(page, size);
         List<Object> args = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
         StringBuilder where = new StringBuilder(" where p.tenant_id=? and p.workspace_id=?");
@@ -54,12 +59,20 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
             where.append(" and p.status=?");
             args.add(normalized);
         }
+        if (brand != null && !brand.isBlank()) {
+            where.append(" and lower(b.name) like lower(?)");
+            args.add("%" + brand.strip() + "%");
+        }
+        if (category != null && !category.isBlank()) {
+            where.append(" and lower(c.name) like lower(?)");
+            args.add("%" + category.strip() + "%");
+        }
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);
         pageArgs.add((long) page * size);
         List<CatalogManagementModels.ProductView> items = jdbc.query(selectProductSql() + where + " order by p.name,p.id limit ? offset ?",
                 (rs, row) -> product(rs), pageArgs.toArray());
-        Long total = jdbc.queryForObject("select count(*) from catalog_management.product p" + where, Long.class, args.toArray());
+        Long total = jdbc.queryForObject("select count(*) from catalog_management.product p join catalog_management.brand b on b.tenant_id=p.tenant_id and b.workspace_id=p.workspace_id and b.id=p.brand_id join catalog_management.category c on c.tenant_id=p.tenant_id and c.workspace_id=p.workspace_id and c.id=p.category_id" + where, Long.class, args.toArray());
         return new CatalogManagementModels.Page<>(items, page, size, total == null ? 0 : total);
     }
 
