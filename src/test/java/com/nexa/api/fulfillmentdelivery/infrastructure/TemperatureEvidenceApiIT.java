@@ -503,7 +503,7 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
                         .file(new MockMultipartFile("file", "temperature-photo.png", "image/png",
                                 Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/g5sAAAAASUVORK5CYII=")))
                         .param("subjectType", "WAREHOUSE").param("subjectId", warehouseId.toString())
-                        .header("Authorization", "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM"))
+                        .header("Authorization", "Bearer " + accessToken(WAREHOUSE_EMAIL, "PLATFORM"))
                         .header("Idempotency-Key", key))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         return jsonText(response, "id");

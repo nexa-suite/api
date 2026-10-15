@@ -21,6 +21,7 @@ import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
@@ -49,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** Persistence adapter for business documents, storage boundary and bounded generation worker. */
@@ -69,15 +71,18 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private final DocumentProjectionLookupPort projections;
     private final CustomerAccountQuery customerAccounts;
     private final WorkspaceDirectory workspaces;
+    private final WarehouseObjectAccess warehouseAccess;
     private final TransactionTemplate transactionTemplate;
     private final JdbcBusinessDocumentCommands paymentReceiptCommands;
 
     public BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner, DocumentRendererPort renderer,
             DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections,
             CustomerAccountQuery customerAccounts, WorkspaceDirectory workspaces,
-            PlatformTransactionManager transactionManager, CanonicalOutboxPort canonicalOutbox) {
+            WarehouseObjectAccess warehouseAccess, PlatformTransactionManager transactionManager,
+            CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc; this.storage = storage; this.scanner = scanner; this.renderer = renderer; this.subjects = subjects; this.projections = projections;
         this.customerAccounts = customerAccounts; this.workspaces = workspaces;
+        this.warehouseAccess = warehouseAccess;
         this.canonicalOutbox = canonicalOutbox;
         this.paymentReceiptCommands = new JdbcBusinessDocumentCommands(jdbc, canonicalOutbox);
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
@@ -97,8 +102,10 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
             throw new IllegalArgumentException("Issued documents are unavailable for receiving discrepancies");
         }
         if (!renderer.supports(type, output)) throw new IllegalArgumentException("Document format is not supported for this document type");
-        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
-                context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
+        DocumentSubjectSnapshot snapshot = subject == DocumentSubjectType.WAREHOUSE
+                ? requireAccessibleWarehouse(context, subjectId)
+                : subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
         if (!snapshot.subjectExists()) throw new IllegalArgumentException("Document subject not found");
         authorizeClientScope(context, snapshot.clientAccountId());
         String requestPayload = subject.name() + subjectId + type.name() + output.name();
@@ -144,6 +151,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         if (type != null) { whereBuilder.append(" and d.document_type=?"); params.add(type); }
         if (state != null) { whereBuilder.append(" and d.status=?"); params.add(state); }
         appendBuyerAccountFilter(whereBuilder, params, context, "d");
+        appendWarehouseGrantFilter(whereBuilder, params, context, "d");
         String where = whereBuilder.toString();
         long total = jdbc.queryForObject("select count(*) from business_documents.business_document d where " + where, Long.class, params.toArray());
         params.add(safeSize); params.add(safePage * safeSize);
@@ -154,7 +162,14 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     @Transactional(readOnly = true)
     public BusinessDocumentModels.DocumentView get(CurrentAccessContext context, UUID documentId) {
         read(context);
-        return jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().filter(value -> authorizedDocument(context, value.clientAccountId())).findFirst().orElseThrow(() -> new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document"));
+        BusinessDocumentModels.DocumentView document = jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().findFirst().orElseThrow(() -> new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document"));
+        if (!authorizedDocument(context, document.clientAccountId())) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document");
+        }
+        if (DocumentSubjectType.WAREHOUSE.name().equals(document.subjectType())) {
+            requireAccessibleWarehouse(context, uuid(document.subjectId()));
+        }
+        return document;
     }
 
     @Transactional(readOnly = true)
@@ -213,9 +228,16 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         requireIdempotencyKey(idempotencyKey);
         String filename = sanitizedRequiredFilename(originalFilename);
         String contentType = requiredContentType(declaredContentType);
-        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
-                context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
-        if (!snapshot.subjectExists()) throw new IllegalArgumentException("Evidence subject not found");
+        DocumentSubjectSnapshot snapshot = subject == DocumentSubjectType.WAREHOUSE
+                ? requireAccessibleWarehouse(context, subjectId)
+                : subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
+        if (!snapshot.subjectExists()) {
+            if (subject == DocumentSubjectType.WAREHOUSE) {
+                throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+            }
+            throw new IllegalArgumentException("Evidence subject not found");
+        }
         if (subject == DocumentSubjectType.BUYER_RECEIPT) {
             snapshot = requireAccessibleBuyerReceipt(context, subjectId, uuid(snapshot.clientAccountId()));
         } else {
@@ -342,9 +364,13 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
                 params.add(DocumentSubjectType.BUYER_RECEIPT.name());
             }
         }
+        if (requestedType == DocumentSubjectType.WAREHOUSE && subjectId != null) {
+            requireAccessibleWarehouse(context, subjectId);
+        }
         if (requestedType != null) { where.append(" and e.subject_type=?"); params.add(requestedType.name()); }
         if (subjectId != null) { where.append(" and e.subject_id=?"); params.add(subjectId); }
         appendBuyerAccountFilter(where, params, context, "e");
+        appendWarehouseGrantFilter(where, params, context, "e");
         long total = jdbc.queryForObject("select count(*) from business_documents.evidence_object e where " + where, Long.class, params.toArray());
         params.add(safeSize); params.add(safePage * safeSize);
         List<BusinessDocumentModels.EvidenceView> rows = jdbc.query(evidenceSelect() + " where " + where + " order by e.created_at desc,e.id limit ? offset ?",
@@ -607,11 +633,14 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
                         (rs, n) -> evidenceRow(rs), tenant(context), workspace(context), evidenceId)
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
         DocumentSubjectType subject = parseSubject(row.subjectType());
-        if (subject == DocumentSubjectType.BUYER_RECEIPT) {
-            requireAccessibleBuyerReceipt(context, row.subjectId(), row.clientAccountId());
-        } else if (!authorizedDocument(context,
+        if (subject != DocumentSubjectType.BUYER_RECEIPT && !authorizedDocument(context,
                 row.clientAccountId() == null ? null : row.clientAccountId().toString())) {
             throw new IllegalArgumentException("Evidence not found");
+        }
+        if (subject == DocumentSubjectType.BUYER_RECEIPT) {
+            requireAccessibleBuyerReceipt(context, row.subjectId(), row.clientAccountId());
+        } else if (subject == DocumentSubjectType.WAREHOUSE) {
+            requireAccessibleWarehouse(context, row.subjectId());
         }
         if (subject == DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY) {
             requireAccessibleInboundSubject(context, row.subjectId());
@@ -636,6 +665,22 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         }
         if (context.hasRole(MembershipRole.BUYER)) {
             requireCurrentBuyerReceiptRelationship(context, snapshot.clientAccountId());
+        }
+        return snapshot;
+    }
+
+    private DocumentSubjectSnapshot requireAccessibleWarehouse(CurrentAccessContext context, UUID warehouseId) {
+        if (warehouseAccess == null || !warehouseAccess.hasActiveGrant(context, warehouseId)) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                context.membershipId().value().toString(), new DocumentSubjectReference(
+                        DocumentSubjectType.WAREHOUSE, warehouseId.toString()));
+        if (!snapshot.subjectExists() || snapshot.subjectType() != DocumentSubjectType.WAREHOUSE
+                || !tenant(context).toString().equals(snapshot.tenantId())
+                || !workspace(context).toString().equals(snapshot.workspaceId())
+                || !warehouseId.toString().equals(snapshot.subjectId())) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
         }
         return snapshot;
     }
@@ -783,6 +828,21 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         where.append(" and ").append(alias).append(".client_account_id in (")
                 .append(String.join(",", Collections.nCopies(accountIds.size(), "?"))).append(")");
         params.addAll(accountIds);
+    }
+
+    private void appendWarehouseGrantFilter(StringBuilder where, List<Object> params,
+            CurrentAccessContext context, String alias) {
+        Set<UUID> warehouseIds = warehouseAccess == null ? Set.of()
+                : Set.copyOf(warehouseAccess.activeWarehouseIds(context));
+        where.append(" and (").append(alias).append(".subject_type <> ? or ");
+        params.add(DocumentSubjectType.WAREHOUSE.name());
+        if (warehouseIds.isEmpty()) {
+            where.append("false)");
+            return;
+        }
+        where.append(alias).append(".subject_id in (")
+                .append(String.join(",", Collections.nCopies(warehouseIds.size(), "?"))).append("))");
+        params.addAll(warehouseIds);
     }
     private DocumentSubjectType parseSubject(String value) { try { return DocumentSubjectType.valueOf(value.trim().toUpperCase(Locale.ROOT)); } catch (Exception e) { throw new IllegalArgumentException("Document subject type is invalid", e); } }
     private BusinessDocumentType parseType(String value) { try { return BusinessDocumentType.valueOf(value.trim().toUpperCase(Locale.ROOT)); } catch (Exception e) { throw new IllegalArgumentException("Document type is invalid", e); } }
