@@ -26,19 +26,19 @@ public final class CatalogTaxonomyService implements CatalogTaxonomyUseCase {
     @Override public CatalogManagementModels.Page<CatalogManagementModels.CategoryView> categories(CatalogScope scope, int page, int size, String search) { authorization.require(CatalogPermissions.READ); return port.categories(scope, page, size, search); }
     @Override public CatalogManagementModels.CategoryView category(CatalogScope scope, UUID id) { authorization.require(CatalogPermissions.READ); return port.category(scope, id).orElseThrow(() -> new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException("category")); }
     @Override public CatalogManagementModels.CategoryView createCategory(CatalogScope scope, UUID parentId, String slug, String name, String description) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         Category category = Category.create(new CategoryId(UUID.randomUUID()), parentId == null ? null : new CategoryId(parentId), slug, name, description);
         category.activate();
         return port.createCategory(scope, parentId, category.slug(), category.name(), category.description());
     }
     @Override public CatalogManagementModels.CategoryView createCategory(CatalogScope scope, UUID parentId, String slug, String name, String description, String idempotencyKey) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         Category category = Category.create(new CategoryId(UUID.randomUUID()), parentId == null ? null : new CategoryId(parentId), slug, name, description);
         category.activate();
         return port.createCategory(scope, parentId, category.slug(), category.name(), category.description(), idempotencyKey);
     }
     @Override public CatalogManagementModels.CategoryView updateCategory(CatalogScope scope, UUID id, UUID parentId, String slug, String name, String description, long version) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         CatalogManagementModels.CategoryView current = port.category(scope, id).orElseThrow(() -> new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException("category"));
         if (port.categoryWouldCreateCycle(scope, id, parentId)) throw new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogConflictException("CATALOG_CATEGORY_CYCLE");
         Category category = Category.restore(new CategoryId(id), parentId == null ? null : new CategoryId(parentId), current.slug(), current.name(), current.description(), CategoryStatus.valueOf(current.status()));
@@ -48,7 +48,7 @@ public final class CatalogTaxonomyService implements CatalogTaxonomyUseCase {
         return port.updateCategory(scope, id, parentId, category.slug(), category.name(), category.description(), version);
     }
     @Override public CatalogManagementModels.CategoryView changeCategoryStatus(CatalogScope scope, UUID id, String status, long version) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         CatalogManagementModels.CategoryView current = port.category(scope, id).orElseThrow(() -> new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException("category"));
         Category category = Category.restore(new CategoryId(id), current.parentId() == null ? null : new CategoryId(UUID.fromString(current.parentId())), current.slug(), current.name(), current.description(), CategoryStatus.valueOf(current.status()));
         CategoryStatus target = CategoryStatus.valueOf(status.strip().toUpperCase(java.util.Locale.ROOT));
@@ -65,19 +65,19 @@ public final class CatalogTaxonomyService implements CatalogTaxonomyUseCase {
     @Override public CatalogManagementModels.Page<CatalogManagementModels.BrandView> brands(CatalogScope scope, int page, int size, String search) { authorization.require(CatalogPermissions.READ); return port.brands(scope, page, size, search); }
     @Override public CatalogManagementModels.BrandView brand(CatalogScope scope, UUID id) { authorization.require(CatalogPermissions.READ); return port.brand(scope, id).orElseThrow(() -> new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException("brand")); }
     @Override public CatalogManagementModels.BrandView createBrand(CatalogScope scope, String slug, String name, String description) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         Brand brand = Brand.create(new BrandId(UUID.randomUUID()), slug, name, description);
         brand.activate();
         return port.createBrand(scope, brand.slug(), brand.name(), brand.description());
     }
     @Override public CatalogManagementModels.BrandView createBrand(CatalogScope scope, String slug, String name, String description, String idempotencyKey) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         Brand brand = Brand.create(new BrandId(UUID.randomUUID()), slug, name, description);
         brand.activate();
         return port.createBrand(scope, brand.slug(), brand.name(), brand.description(), idempotencyKey);
     }
     @Override public CatalogManagementModels.BrandView updateBrand(CatalogScope scope, UUID id, String slug, String name, String description, long version) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         CatalogManagementModels.BrandView current = port.brand(scope, id).orElseThrow(() -> new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException("brand"));
         Brand brand = Brand.restore(new BrandId(id), current.slug(), current.name(), current.description(), BrandStatus.valueOf(current.status()));
         brand.changeSlug(slug);
@@ -86,7 +86,7 @@ public final class CatalogTaxonomyService implements CatalogTaxonomyUseCase {
         return port.updateBrand(scope, id, brand.slug(), brand.name(), brand.description(), version);
     }
     @Override public CatalogManagementModels.BrandView changeBrandStatus(CatalogScope scope, UUID id, String status, long version) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.TAXONOMY_MANAGE);
         CatalogManagementModels.BrandView current = port.brand(scope, id).orElseThrow(() -> new com.nexa.api.catalogcommercialpolicy.application.exception.CatalogResourceNotFoundException("brand"));
         Brand brand = Brand.restore(new BrandId(id), current.slug(), current.name(), current.description(), BrandStatus.valueOf(current.status()));
         BrandStatus target = BrandStatus.valueOf(status.strip().toUpperCase(java.util.Locale.ROOT));

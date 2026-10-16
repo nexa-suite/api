@@ -11,6 +11,7 @@ import java.util.UUID;
 /** Application boundary for Product Family, Sellable SKU and SKU pricing commands/queries. */
 public interface CatalogSkuUseCase {
     CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(CatalogScope scope, int page, int size, String search);
+    CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(CatalogScope scope, int page, int size, String search, String brand, String category);
     CatalogSkuModels.FamilyView family(CatalogScope scope, UUID id);
     CatalogSkuModels.FamilyView createFamily(CatalogScope scope, String code, String name, String description,
             UUID categoryId, UUID brandId, String country, String manufacturer, String supplier, String storageFamily);

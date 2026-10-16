@@ -33,7 +33,7 @@ class CatalogPermissionServiceTests {
 				UUID.randomUUID(), UUID.randomUUID(), "REFRIGERATED", "BOX 1", "UNIT", true, "/cheese.webp");
 
 		verify(authorization).require(CatalogPermissions.READ);
-		verify(authorization).require(CatalogPermissions.MANAGE);
+		verify(authorization).require(CatalogPermissions.PRODUCT_MANAGE);
 	}
 
 	@Test
@@ -45,7 +45,7 @@ class CatalogPermissionServiceTests {
 		service.createCategory(SCOPE, null, "dairy", "Dairy", null);
 
 		verify(authorization).require(CatalogPermissions.READ);
-		verify(authorization).require(CatalogPermissions.MANAGE);
+		verify(authorization).require(CatalogPermissions.TAXONOMY_MANAGE);
 	}
 
 	@Test

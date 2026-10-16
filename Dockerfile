@@ -33,6 +33,8 @@ COPY --from=build /workspace/target/api-*.jar /app/app.jar
 COPY ops/healthcheck.sh /usr/local/bin/nexa-healthcheck
 
 RUN chmod 0755 /usr/local/bin/nexa-healthcheck \
+    && mkdir -p /app/.local-object-storage \
+    && chmod 0700 /app/.local-object-storage \
     && chown -R 10001:10001 /app
 
 ENV SERVER_PORT=8080

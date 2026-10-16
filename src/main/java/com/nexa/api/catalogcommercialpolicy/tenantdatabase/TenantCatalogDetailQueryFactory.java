@@ -30,6 +30,10 @@ public interface TenantCatalogDetailQueryFactory {
 	}
 
 	interface TenantCatalogReadQuery {
+        default com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(UUID tenantId, UUID workspaceId, String kind, String search, int page, int size) {
+            throw new UnsupportedOperationException("Catalog filter choices are unavailable");
+        }
+
 		CatalogItemDetail getByCatalogItemId(UUID tenantId, UUID workspaceId, String catalogItemId);
 
 		CatalogPage<CatalogItemSummary> list(UUID tenantId, UUID workspaceId, CatalogSearchCriteria criteria);

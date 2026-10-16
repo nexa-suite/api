@@ -41,8 +41,9 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   Workday day;
   if("START".equals(r.action())){
    if(current(r.tenantId(),r.workspaceId(),r.actorMembershipId())!=null)throw error("DRIVER_WORKDAY_ALREADY_ACTIVE",false);
-   day=new Workday(UUID.randomUUID(),0,"ACTIVE",now,null,true);
-   jdbc.update("insert into logistics.driver_workday(id,tenant_id,workspace_id,actor_membership_id,version,status,started_at) values(?,?,?,?,0,'ACTIVE',?)",day.id(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),Timestamp.from(now));
+   String initialStatus=r.locationAvailableAtStart()?"ACTIVE":"LOCATION_UNAVAILABLE";
+   day=new Workday(UUID.randomUUID(),0,initialStatus,now,null,r.locationAvailableAtStart());
+   jdbc.update("insert into logistics.driver_workday(id,tenant_id,workspace_id,actor_membership_id,version,status,started_at) values(?,?,?,?,0,?,?)",day.id(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),initialStatus,Timestamp.from(now));
   }else{
    Workday old=lockDay(r.tenantId(),r.workspaceId(),r.actorMembershipId(),r.workdayId());
    if(old==null || "CLOSED".equals(old.status()))throw error("DRIVER_WORKDAY_NOT_FOUND",true);
@@ -59,6 +60,9 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   Workday day=lockDay(r.tenantId(),r.workspaceId(),r.actorMembershipId(),r.workdayId());
   if(day==null || !"ACTIVE".equals(day.status()))throw error("DRIVER_LOCATION_UNAVAILABLE",false);
   Coordinate c=r.coordinate();
+  var activeDeliveries=jdbc.queryForList("select d.id from logistics.delivery d join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? and d.status in ('DISPATCHED','IN_TRANSIT') and coalesce(d.dispatched_at,d.created_at)<=? order by d.id for share of d",
+          UUID.class,r.tenantId(),r.workspaceId(),r.actorMembershipId(),ts(c.capturedAt()));
+  if(activeDeliveries.isEmpty())throw error("DRIVER_LOCATION_NO_ACTIVE_DELIVERY",false);
   if(!DriverLocationPolicy.valid(c.latitude(),c.longitude(),c.accuracyMeters(),c.capturedAt(),day.startedAt(),r.now()))throw error("DRIVER_COORDINATE_INVALID",false);
   String requestHash=coordinateHash(r);
   var old=jdbc.query("select * from logistics.driver_coordinate where tenant_id=? and workspace_id=? and sample_id=? for update",
@@ -80,10 +84,10 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   return new Coordinate(c.sampleId(),c.latitude(),c.longitude(),c.accuracyMeters(),capturedAt,expiry);
  }
  @Override public Coordinate latest(UUID t,UUID w,UUID a,Instant now){
-  return jdbc.query("select p.* from logistics.driver_coordinate p join logistics.driver_workday d on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id and d.id=p.workday_id where p.tenant_id=? and p.workspace_id=? and p.actor_membership_id=? and d.status='ACTIVE' and p.expires_at>? order by p.captured_at desc,p.received_at desc limit 1",(rs,n)->coordinate(rs),t,w,a,ts(now)).stream().findFirst().orElse(null);
+  return jdbc.query("select p.* from logistics.driver_coordinate p join logistics.driver_workday d on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id and d.id=p.workday_id where p.tenant_id=? and p.workspace_id=? and p.actor_membership_id=? and d.status='ACTIVE' and p.expires_at>? and exists(select 1 from logistics.delivery ld join logistics.delivery_assignment la on la.tenant_id=ld.tenant_id and la.workspace_id=ld.workspace_id and la.delivery_id=ld.id where ld.tenant_id=p.tenant_id and ld.workspace_id=p.workspace_id and la.responsible_membership_id=p.actor_membership_id and ld.status in ('DISPATCHED','IN_TRANSIT') and p.captured_at>=coalesce(ld.dispatched_at,ld.created_at)) order by p.captured_at desc,p.received_at desc limit 1",(rs,n)->coordinate(rs),t,w,a,ts(now)).stream().findFirst().orElse(null);
  }
  @Override public DeliveryScope deliveryScope(UUID t,UUID w,UUID id){
-  return jdbc.query("select coalesce(f.sales_order_id,o.sales_order_id) sales_order_id,a.responsible_membership_id,d.status from logistics.delivery d left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id left join logistics.dispatch_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.dispatch_order_id join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id where d.tenant_id=? and d.workspace_id=? and d.id=?",(rs,n)->new DeliveryScope(rs.getObject("sales_order_id",UUID.class),rs.getObject("responsible_membership_id",UUID.class),rs.getString("status")),t,w,id).stream().findFirst().orElse(null);
+  return jdbc.query("select coalesce(f.sales_order_id,o.sales_order_id) sales_order_id,a.responsible_membership_id,d.status,coalesce(d.dispatched_at,d.created_at) tracking_started_at from logistics.delivery d left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id left join logistics.dispatch_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.dispatch_order_id join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id where d.tenant_id=? and d.workspace_id=? and d.id=?",(rs,n)->new DeliveryScope(rs.getObject("sales_order_id",UUID.class),rs.getObject("responsible_membership_id",UUID.class),rs.getString("status"),instant(rs,"tracking_started_at")),t,w,id).stream().findFirst().orElse(null);
  }
  @Override @Scheduled(fixedDelay=30000) public void purgeExpiredCoordinates(){jdbc.execute("select logistics.purge_expired_driver_coordinates()");}
  private Workday lockDay(UUID t,UUID w,UUID a,UUID id){return jdbc.query("select * from logistics.driver_workday where tenant_id=? and workspace_id=? and actor_membership_id=? and id=? for update",(rs,n)->day(rs),t,w,a,id).stream().findFirst().orElse(null);}

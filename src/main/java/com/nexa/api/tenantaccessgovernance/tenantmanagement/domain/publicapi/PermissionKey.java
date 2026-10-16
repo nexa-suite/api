@@ -93,6 +93,7 @@ public enum PermissionKey {
 	BUYER_SALES_WRITE("buyer.sales.write", PermissionGroup.SALES, "sales:buyer:write"),
 	BUYER_ORDER_READ("buyer.order.read", PermissionGroup.SALES, "orders:buyer:read"),
 	BUYER_TRACKING_READ("buyer.tracking.read", PermissionGroup.LOGISTICS, "tracking:buyer:read"),
+	BUYER_RECEIPT_EVIDENCE_ATTACH("buyer.receipt.evidence.attach", PermissionGroup.DOCUMENTS),
 	BUYER_PROFILE_WRITE("buyer.profile.write", PermissionGroup.MEMBERS_AND_ROLES, "profile:buyer:write");
 
 	private final String code;

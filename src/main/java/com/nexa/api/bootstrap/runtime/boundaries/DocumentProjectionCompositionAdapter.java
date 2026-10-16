@@ -74,6 +74,7 @@ public class DocumentProjectionCompositionAdapter implements DocumentProjectionL
             case RECEIVABLE -> receivableProjection(tenant, workspace, id);
             case INBOUND_RECEIVING_DISCREPANCY -> throw unsupported(documentType, subject.type());
             case WAREHOUSE -> throw unsupported(documentType, subject.type());
+            case BUYER_RECEIPT -> throw unsupported(documentType, subject.type());
         };
     }
 

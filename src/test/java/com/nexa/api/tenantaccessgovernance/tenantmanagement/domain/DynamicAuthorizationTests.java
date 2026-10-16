@@ -26,6 +26,11 @@ class DynamicAuthorizationTests {
 		assertThat(PermissionCatalog.require("catalog.read")).isEqualTo(PermissionKey.CATALOG_READ);
 		assertThat(PermissionCatalog.all()).contains(PermissionKey.TENANT_ROLE_ASSIGN_RESERVED,
 				PermissionKey.DISPATCH_COMPLETE, PermissionKey.ORDER_EXPORT_READ);
+		assertThat(PermissionCatalog.require("buyer.receipt.evidence.attach"))
+				.isEqualTo(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH);
+		assertThat(PermissionCatalog.forBuiltInRole(MembershipRole.BUYER))
+				.contains(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH)
+				.doesNotContain(PermissionKey.DOCUMENT_UPLOAD);
 		assertThat(PermissionCatalog.companyOwnerAssignableEnvelope())
 				.doesNotContain(PermissionKey.TENANT_SECURITY_MANAGE, PermissionKey.TENANT_ROLE_MANAGE,
 						PermissionKey.TENANT_ROLE_ASSIGN_RESERVED, PermissionKey.TENANT_AUDIT_READ);
@@ -49,6 +54,43 @@ class DynamicAuthorizationTests {
 			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface.PLATFORM)).isTrue();
 			assertThat(value.allowsSurface(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface.PORTAL)).isFalse();
 		});
+	}
+
+	@Test
+	void tenantAdministratorPresetCanReadCatalogAndClientsWithoutBusinessWritePermissions() {
+		EffectiveAuthorization authorization = EffectiveAuthorization.fixed(Set.of(MembershipRole.TENANT_ADMIN), 11);
+
+		assertThat(authorization.allows(PermissionKey.CATALOG_READ)).isTrue();
+		assertThat(authorization.allows(PermissionKey.CLIENT_READ)).isTrue();
+		assertThat(authorization.allows(PermissionKey.CATALOG_PRODUCT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CATALOG_TAXONOMY_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CATALOG_PRICE_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CATALOG_PROMOTION_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_ADDRESS_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_COMMERCIAL_TERMS_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE)).isFalse();
+	}
+
+	@Test
+	void salesPresetRetainsItsPersistedCommercialTermsAuthorityWithoutCreditAuthority() {
+		EffectiveAuthorization authorization = EffectiveAuthorization.fixed(Set.of(MembershipRole.SALES), 11);
+
+		assertThat(authorization.allows(PermissionKey.CLIENT_COMMERCIAL_TERMS_MANAGE)).isTrue();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE)).isFalse();
+	}
+
+	@Test
+	void logisticsPresetHasWarehouseReadButNoWarehouseObjectGrantOrInventoryWrites() {
+		EffectiveAuthorization authorization = EffectiveAuthorization.fixed(Set.of(MembershipRole.LOGISTICS), 11);
+
+		assertThat(authorization.allows(PermissionKey.WAREHOUSE_READ)).isTrue();
+		assertThat(authorization.allows(PermissionKey.WAREHOUSE_LOCATION_MANAGE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.INVENTORY_RECEIVE)).isFalse();
+		assertThat(authorization.allows(PermissionKey.INVENTORY_ADJUST)).isFalse();
+		assertThat(authorization.allows(PermissionKey.INVENTORY_RESERVE)).isFalse();
 	}
 
 	@Test

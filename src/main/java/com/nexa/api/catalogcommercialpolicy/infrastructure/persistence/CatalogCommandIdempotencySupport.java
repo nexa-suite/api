@@ -30,6 +30,20 @@ final class CatalogCommandIdempotencySupport {
         return existing.resourceId();
     }
 
+    /** Tagged lengths distinguish null, literal markers and embedded separators. */
+    static String structuredHash(Object... values) {
+        StringBuilder input = new StringBuilder();
+        for (Object value : values) {
+            if (value == null) {
+                input.append('N');
+            } else {
+                String text = value.toString();
+                input.append('V').append(text.length()).append(':').append(text);
+            }
+        }
+        return hash(input.toString());
+    }
+
     static String hash(Object... values) {
         StringBuilder input = new StringBuilder();
         for (Object value : values) input.append(value == null ? "<null>" : value).append('\u001f');

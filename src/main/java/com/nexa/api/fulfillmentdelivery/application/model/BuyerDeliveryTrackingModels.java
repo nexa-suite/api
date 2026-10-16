@@ -1,6 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.application.model;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,4 +26,13 @@ public final class BuyerDeliveryTrackingModels {
 
     /** Buyer-safe timeline fact with no actor, reason, evidence key, or driver assignment fields. */
     public record EventView(String type, Instant occurredAt) { }
+
+    /** Buyer-scoped immutable receipt fact; excludes handoff credentials and Driver execution identifiers. */
+    public record ReceiptRecord(UUID id, UUID deliveryId, UUID attemptId, UUID customerAccountId,
+                                UUID buyerMembershipId, String decision, BigDecimal driverDeliveredQuantity,
+                                BigDecimal acceptedQuantity, String reason, Instant occurredAt) { }
+
+    public record ReceiptView(String id, String deliveryId, String attemptId, String decision,
+                              BigDecimal driverDeliveredQuantity, BigDecimal acceptedQuantity, String reason,
+                              Instant occurredAt, String recordedByMembershipId) { }
 }

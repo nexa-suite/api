@@ -199,7 +199,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         if (status != null && !status.isBlank()) { from.append(" and status=?"); args.add(enumValue(status, "status", "AVAILABLE", "BLOCKED", "QUARANTINED", "HOLD", "EXPIRED", "DEPLETED")); }
         String scopedFrom = from.toString();
         String countSql = "select count(*)" + scopedFrom;
-        StringBuilder query = new StringBuilder("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
+        StringBuilder query = new StringBuilder("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,production_date,"
                 + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
                 + " temperature_held_quantity,unit,status,version" + scopedFrom);
         List<Object> pageArgs = new ArrayList<>(args);
@@ -240,9 +240,10 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         requireActiveWarehouse(context, warehouse);
         requireIdempotency(key);
         lockIdempotency(context, "inbound", key);
-        String hash = receipt.temperatureEvidenceObjectId() == null
+        String hash = receipt.productionDate() != null || receipt.receivedAt() != null ? requestHash("inbound-v3", receipt) : receipt.temperatureEvidenceObjectId() == null
                 ? requestHash("inbound", legacyReceiptHashValue(receipt))
-                : requestHash("inbound-v2", receipt);
+                : requestHash("inbound-v2", legacyReceiptHashValue(receipt).substring(0, legacyReceiptHashValue(receipt).length() - 1)
+                        + ", temperatureEvidenceObjectId=" + receipt.temperatureEvidenceObjectId() + "]");
         IdempotencyRecord prior = idempotent(context, "inbound", key);
         if (prior != null) { requireSamePayload(prior, hash); return loadLot(context, uuid(prior.resourceId()), false); }
         UUID zone = uuidRequired(receipt.zoneId(), "zoneId");
@@ -254,10 +255,18 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         String batch = bounded(receipt.batchNumber(), "batchNumber", 80);
         if (receipt.expirationDate() == null || !receipt.expirationDate().isAfter(LocalDate.now())) throw error("INVALID_REQUEST", false);
         if (receipt.quantity() == null || receipt.quantity().signum() <= 0) throw error("INVALID_REQUEST", false);
+        Instant recordedAt = Instant.now();
+        Instant receivedAt = receipt.receivedAt() == null ? recordedAt : receipt.receivedAt();
+        if (receivedAt.isAfter(recordedAt) || !receipt.expirationDate().isAfter(receivedAt.atZone(java.time.ZoneOffset.UTC).toLocalDate())) throw error("INVALID_REQUEST", false);
+        if (receipt.productionDate() != null && (receipt.productionDate().isAfter(receivedAt.atZone(java.time.ZoneOffset.UTC).toLocalDate())
+                || !receipt.productionDate().isBefore(receipt.expirationDate()))) throw error("INVALID_REQUEST", false);
+
         validateTemperature(receipt.temperatureReading());
         String notes = boundedNullable(receipt.notes(), "notes", 2000);
-        TemperatureRange skuRange = catalog.findPhysicalValidationPolicy(tenant(context), workspace(context), sku.id())
-                .map(policy -> new TemperatureRange(policy.temperatureMin(), policy.temperatureMax()))
+        var skuPolicy = catalog.findPhysicalValidationPolicy(tenant(context), workspace(context), sku.id());
+        if (skuPolicy.isPresent() && skuPolicy.get().unitOfMeasure() != null
+                && !unit.equals(normalizedUnit(skuPolicy.get().unitOfMeasure()))) throw error("WRONG_UNIT", false);
+        TemperatureRange skuRange = skuPolicy.map(policy -> new TemperatureRange(policy.temperatureMin(), policy.temperatureMax()))
                 .orElse(new TemperatureRange(null, null));
         if (skuRange.hasBounds() && receipt.temperatureReading() == null) throw error("TEMPERATURE_REQUIRED", false);
         TemperatureRange range = jdbc.query("select temperature_min,temperature_max from warehouse.storage_zone where tenant_id=? and workspace_id=? and id=?",
@@ -283,7 +292,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         UUID id = UUID.randomUUID();
         Timestamp occurred = now();
         checkUpdated(jdbc.update("insert into warehouse.inventory_lot(id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,stock_quantity,reserved_quantity,unit,status,temperature_range_snapshot,temperature_value,temperature_evidence_object_id,temperature_recorded_by_membership_id,temperature_recorded_at) values (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)",
-                id, tenant(context), workspace(context), warehouse, zone, catalogItemId, sku.id(), batch, receipt.expirationDate(), occurred, receipt.quantity(), unit,
+                id, tenant(context), workspace(context), warehouse, zone, catalogItemId, sku.id(), batch, receipt.expirationDate(), Timestamp.from(receivedAt), receipt.quantity(), unit,
                 temperatureExcursion ? "HOLD" : "AVAILABLE", range.snapshot(), receipt.temperatureReading(), temperatureEvidenceId,
                 receipt.temperatureReading() == null ? null : context.membershipId().value(),
                 receipt.temperatureReading() == null ? null : occurred), "lot insert");
@@ -295,6 +304,8 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         insertMovement(context, warehouse, zone, id, catalogItemId, sku.id(), "INBOUND_RECEIPT", receipt.quantity(), unit,
                 BigDecimal.ZERO, receipt.quantity(), BigDecimal.ZERO, receipt.quantity(), notes, correlation, occurred);
         appendEvent(context, id, temperatureExcursion ? "warehouse.lot.temperature-hold" : "warehouse.lot.received", "lot", temperatureExcursion ? "HOLD" : "ACTIVE", occurred);
+        if (receipt.productionDate() != null) jdbc.update("update warehouse.inventory_lot set production_date=? where tenant_id=? and workspace_id=? and id=?",
+                receipt.productionDate(), tenant(context), workspace(context), id);
         saveIdempotency(context, "inbound", key, hash, id.toString());
         return loadLot(context, id, false);
     }

@@ -268,7 +268,7 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         .file(new MockMultipartFile("file", "receiving-photo.png", "image/png",
                                 java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/g5sAAAAASUVORK5CYII=")))
                         .param("subjectType", "WAREHOUSE").param("subjectId", warehouseId)
-                        .header("Authorization", "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM"))
+                        .header("Authorization", "Bearer " + token)
                         .header("Idempotency-Key", "receiving-photo-" + suffix))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         String evidenceId = tools.jackson.databind.json.JsonMapper.shared().readTree(evidence).get("id").asText();

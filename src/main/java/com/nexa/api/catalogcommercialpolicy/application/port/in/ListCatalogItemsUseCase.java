@@ -6,6 +6,10 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSearchCrite
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 
 public interface ListCatalogItemsUseCase {
+    default com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CatalogScope scope, String kind, String search, int page, int size) {
+        throw new UnsupportedOperationException("Catalog filter choices are unavailable");
+    }
+
 	CatalogPage<CatalogItemSummary> list(CatalogSearchCriteria criteria);
 	default CatalogPage<CatalogItemSummary> list(CatalogScope scope, CatalogSearchCriteria criteria) { return list(criteria); }
 }

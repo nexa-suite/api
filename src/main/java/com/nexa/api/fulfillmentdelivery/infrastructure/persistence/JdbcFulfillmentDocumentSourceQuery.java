@@ -37,6 +37,36 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
 
     @Override
     public Optional<ProofOfDelivery> findPod(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId) {
+        return findPod(tenantId, workspaceId, proofOfDeliveryId, false);
+    }
+
+    @Override
+    public Optional<ProofOfDelivery> findPodEvidenceSubject(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId,
+                                                             UUID actorMembershipId, UUID actorUserId) {
+        return findPod(tenantId, workspaceId, proofOfDeliveryId, true, actorMembershipId, actorUserId);
+    }
+
+    private Optional<ProofOfDelivery> findPod(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId,
+                                              boolean includeEvidenceCaptureStates) {
+        return findPod(tenantId, workspaceId, proofOfDeliveryId, includeEvidenceCaptureStates, null, null);
+    }
+
+    private Optional<ProofOfDelivery> findPod(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId,
+                                              boolean includeEvidenceCaptureStates, UUID actorMembershipId,
+                                              UUID actorUserId) {
+        String allowedStatuses = includeEvidenceCaptureStates
+                ? "p.status in ('PENDING','CAPTURED')"
+                : "p.status in ('SEALED','COMPLETED')";
+        String assignmentScope = includeEvidenceCaptureStates
+                ? "and (exists(select 1 from logistics.delivery_assignment assignment where assignment.tenant_id=p.tenant_id "
+                + "and assignment.workspace_id=p.workspace_id and assignment.delivery_id=p.delivery_id "
+                + "and (assignment.responsible_membership_id=? or assignment.operator_id=?)) "
+                + "or exists(select 1 from logistics.dispatch_order assigned_dispatch where assigned_dispatch.tenant_id=p.tenant_id "
+                + "and assigned_dispatch.workspace_id=p.workspace_id and assigned_dispatch.id=p.dispatch_order_id "
+                + "and assigned_dispatch.responsible_membership_id=?)) " : "";
+        Object[] parameters = includeEvidenceCaptureStates
+                ? new Object[]{tenantId, workspaceId, proofOfDeliveryId, actorMembershipId, actorUserId, actorMembershipId}
+                : new Object[]{tenantId, workspaceId, proofOfDeliveryId};
         return jdbc.query("select p.id,d.client_account_id,p.receiver_name,coalesce(p.sealed_at,p.completed_at) completed_at,"
                         + "p.notes,p.status,p.photo_evidence_declared,p.signature_evidence_declared,d.id dispatch_id,"
                         + "delivery.id delivery_id,coalesce(d.sales_order_id,fulfillment.sales_order_id) sales_order_id,"
@@ -56,7 +86,8 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
                         + "and delivery.workspace_id=p.workspace_id and delivery.id=p.delivery_id "
                         + "left join logistics.fulfillment fulfillment on fulfillment.tenant_id=delivery.tenant_id "
                         + "and fulfillment.workspace_id=delivery.workspace_id and fulfillment.id=delivery.fulfillment_id "
-                        + "where p.tenant_id=? and p.workspace_id=? and p.id=? and p.status in ('SEALED','COMPLETED') "
+                        + "where p.tenant_id=? and p.workspace_id=? and p.id=? and " + allowedStatuses + " "
+                        + assignmentScope
                         + "and (d.id is not null or fulfillment.sales_order_id is not null)",
                 (rs, row) -> new ProofOfDelivery(rs.getObject("id", UUID.class),
                         rs.getObject("client_account_id", UUID.class), rs.getString("receiver_name"),
@@ -65,7 +96,7 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
                         rs.getObject("dispatch_id", UUID.class), rs.getObject("delivery_id", UUID.class),
                         rs.getObject("sales_order_id", UUID.class), rs.getString("destination_snapshot"),
                         rs.getString("temperature_status"),
-                        rs.getString("temperature_summary")), tenantId, workspaceId, proofOfDeliveryId)
+                        rs.getString("temperature_summary")), parameters)
                 .stream().findFirst();
     }
 
@@ -110,6 +141,24 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
                         rs.getObject("customer_account_id", UUID.class), rs.getString("status"),
                         rs.getObject("sales_order_id", UUID.class)),
                 tenantId, workspaceId, incidentId).stream().findFirst();
+    }
+
+    @Override
+    public Optional<BuyerReceiptSubject> findBuyerReceipt(UUID tenantId, UUID workspaceId, UUID receiptId) {
+        return jdbc.query("select receipt.id,receipt.delivery_id,receipt.delivery_attempt_id,receipt.customer_account_id,"
+                        + "receipt.buyer_membership_id,receipt.decision,receipt.occurred_at "
+                        + "from logistics.buyer_receipt_fact receipt "
+                        + "join logistics.delivery delivery on delivery.tenant_id=receipt.tenant_id "
+                        + "and delivery.workspace_id=receipt.workspace_id and delivery.id=receipt.delivery_id "
+                        + "join logistics.delivery_attempt attempt on attempt.tenant_id=receipt.tenant_id "
+                        + "and attempt.workspace_id=receipt.workspace_id and attempt.id=receipt.delivery_attempt_id "
+                        + "and attempt.delivery_id=receipt.delivery_id "
+                        + "where receipt.tenant_id=? and receipt.workspace_id=? and receipt.id=?",
+                (rs, row) -> new BuyerReceiptSubject(rs.getObject("id", UUID.class),
+                        rs.getObject("delivery_id", UUID.class), rs.getObject("delivery_attempt_id", UUID.class),
+                        rs.getObject("customer_account_id", UUID.class), rs.getObject("buyer_membership_id", UUID.class),
+                        rs.getString("decision"), instant(rs, "occurred_at")),
+                tenantId, workspaceId, receiptId).stream().findFirst();
     }
 
     private String temperatureSummary(UUID tenantId, UUID workspaceId, UUID dispatchId) {

@@ -2,6 +2,8 @@ package com.nexa.api.inventoryavailability.application;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 
+import com.nexa.api.inventoryavailability.domain.model.warehouse.WarehouseAddressDetails;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -85,14 +87,31 @@ public interface WarehouseOperationsService {
     public record OperationalProfile(String id, String code, String name, String address, String status,
                                      LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                      boolean serviceable, String selectionPolicy, long version,
-                                     long settingsVersion, BigDecimal latitude, BigDecimal longitude) { }
+                                     long settingsVersion, BigDecimal latitude, BigDecimal longitude, WarehouseAddressDetails addressDetails) {
+        public OperationalProfile(String id, String code, String name, String address, String status,
+                                  LocalTime operatingHoursStart, LocalTime operatingHoursEnd, boolean serviceable,
+                                  String selectionPolicy, long version, long settingsVersion, BigDecimal latitude, BigDecimal longitude) {
+            this(id, code, name, address, status, operatingHoursStart, operatingHoursEnd, serviceable,
+                    selectionPolicy, version, settingsVersion, latitude, longitude, null);
+        }
+        public OperationalProfile withAddressDetails(WarehouseAddressDetails details) {
+            return new OperationalProfile(id, code, name, address, status, operatingHoursStart, operatingHoursEnd,
+                    serviceable, selectionPolicy, version, settingsVersion, latitude, longitude, details);
+        }
+    }
     public record BuyerWarehouse(String id, String code, String name, String address,
                                  LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                  boolean serviceable, long version,
                                  BigDecimal latitude, BigDecimal longitude) { }
     public record OperationalPatch(String name, String address, String status, String selectionPolicy,
                                    LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
-                                   Boolean serviceable, BigDecimal latitude, BigDecimal longitude) {
+                                   Boolean serviceable, BigDecimal latitude, BigDecimal longitude, WarehouseAddressDetails addressDetails) {
+        public OperationalPatch(String name, String address, String status, String selectionPolicy,
+                                LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
+                                Boolean serviceable, BigDecimal latitude, BigDecimal longitude) {
+            this(name, address, status, selectionPolicy, operatingHoursStart, operatingHoursEnd, serviceable,
+                    latitude, longitude, null);
+        }
         public OperationalPatch(String name, String address, String status, String selectionPolicy,
                                 LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                 Boolean serviceable) {
@@ -100,7 +119,10 @@ public interface WarehouseOperationsService {
         }
     }
     public record ZoneSummary(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
-    public record LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId) {
+    public record LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId, LocalDate productionDate) {
+        public LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId) {
+            this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, skuId, null);
+        }
         public LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version) {
             this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, null);
         }
@@ -151,7 +173,11 @@ public interface WarehouseOperationsService {
             this(id, lotId, catalogItemId, type, quantity, unit, quantityBefore, quantityAfter, reservedBefore, reservedAfter, reason, occurredAt, null);
         }
     }
-    public record Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId, String temperatureEvidenceObjectId) {
+    public record Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId, String temperatureEvidenceObjectId, LocalDate productionDate, Instant receivedAt) {
+        public Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate,
+                       BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId, String temperatureEvidenceObjectId) {
+            this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit, temperatureReading, notes, skuId, temperatureEvidenceObjectId, null, null);
+        }
         public Receipt(String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, BigDecimal quantity, String unit, BigDecimal temperatureReading, String notes, String skuId) {
             this(warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, quantity, unit,
                     temperatureReading, notes, skuId, null);

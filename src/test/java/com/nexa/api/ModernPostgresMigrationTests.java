@@ -47,6 +47,31 @@ class ModernPostgresMigrationTests {
 				assertThat(result.next()).isTrue();
 				assertThat(result.getLong(1)).as("Company Owner must not receive operational permissions by default").isZero();
 			}
+			try (var statement = connection.createStatement(); var result = statement.executeQuery(
+					"select count(*) from tenant_management.role_permission rp join tenant_management.role_definition r on r.id=rp.role_id where r.tenant_id is null and r.workspace_id is null and r.code='tenant_admin' and r.role_type='SYSTEM_RESERVED' and r.status='ACTIVE' and rp.permission_key in ('catalog.read','client.read')")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).as("Tenant Administrator must receive both accepted business query grants").isEqualTo(2);
+			}
+			try (var statement = connection.createStatement(); var result = statement.executeQuery(
+					"select count(*) from tenant_management.role_permission rp join tenant_management.role_definition r on r.id=rp.role_id where r.tenant_id is null and r.workspace_id is null and r.code='tenant_admin' and rp.permission_key in ('catalog.product.manage','catalog.taxonomy.manage','catalog.price.manage','catalog.promotion.manage','client.manage','client.address.manage','client.commercial_terms.manage','client.credit.manage','client.credit.configuration.manage')")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).as("Tenant Administrator query grants must not include catalog or client writes").isZero();
+			}
+			try (var statement = connection.createStatement(); var result = statement.executeQuery(
+					"select count(*) from tenant_management.role_permission rp join tenant_management.role_definition r on r.id=rp.role_id where r.tenant_id is null and r.workspace_id is null and r.code='logistics' and r.role_type='SYSTEM_TEMPLATE' and r.status='ACTIVE' and rp.permission_key='warehouse.read'")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).as("Logistics must retain the fixed role's read permission").isEqualTo(1);
+			}
+			try (var statement = connection.createStatement(); var result = statement.executeQuery(
+					"select count(*) from tenant_management.warehouse_access_grant")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).as("A read permission must not create explicit Warehouse object grants").isZero();
+			}
+			try (var statement = connection.createStatement(); var result = statement.executeQuery(
+					"select count(*) from tenant_management.role_permission rp join tenant_management.role_definition r on r.id=rp.role_id where r.tenant_id is null and r.workspace_id is null and r.code='sales' and r.status='ACTIVE' and rp.permission_key='client.commercial_terms.manage'")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).as("Persisted Sales preset retains its existing commercial terms grant").isEqualTo(1);
+			}
 			assertThat(schemas(connection)).containsExactlyInAnyOrder("iam", "tenant_management", "sales", "integration", "warehouse", "logistics", "catalog_management", "reference_data", "notifications", "audit", "business_documents", "payments");
 			assertThat(tables(connection, "iam")).containsExactlyInAnyOrder("user_account", "password_credential", "refresh_session", "authentication_failure", "password_reset_request", "security_audit_event", "password_reset_throttle_bucket", "security_notification_outbox", "system_operator_throttle_bucket", "workspace_preview_throttle_bucket", "public_contact_request", "public_contact_throttle_bucket", "access_context_selection_ticket", "internal_support_request", "internal_support_audit_event");
 			assertThat(tables(connection, "tenant_management")).containsExactlyInAnyOrder("tenant", "workspace", "workspace_membership", "membership_admin_event", "membership_role_assignment", "organization_registration", "organization_settings", "workspace_settings", "regional_settings", "unit_preferences", "operational_settings", "notification_preference", "tenant_security_settings", "custom_field_definition", "reference_plan_assignment", "organization_invitation", "organization_invitation_role", "organization_invitation_idempotency", "warehouse_access_grant", "workspace_creation_idempotency", "permission_definition", "role_definition", "role_permission", "membership_role_definition", "membership_authorization_state", "organization_registration_draft_idempotency", "tenant_business_database_binding", "wallet_recharge_provider_route", "tenant_business_database_provisioning_task", "tenant_business_database_workspace_anchor_task", "payment_provider_route");
