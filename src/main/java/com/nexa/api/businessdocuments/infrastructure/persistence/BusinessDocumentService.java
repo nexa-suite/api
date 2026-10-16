@@ -228,10 +228,22 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         requireIdempotencyKey(idempotencyKey);
         String filename = sanitizedRequiredFilename(originalFilename);
         String contentType = requiredContentType(declaredContentType);
-        DocumentSubjectSnapshot snapshot = subject == DocumentSubjectType.WAREHOUSE
-                ? requireAccessibleWarehouse(context, subjectId)
-                : subjects.lookup(tenant(context).toString(), workspace(context).toString(),
-                        context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
+        DocumentSubjectReference reference = new DocumentSubjectReference(subject, subjectId.toString());
+        DocumentSubjectSnapshot snapshot;
+        if (subject == DocumentSubjectType.WAREHOUSE) {
+            snapshot = requireAccessibleWarehouse(context, subjectId);
+        } else if (subject == DocumentSubjectType.PROOF_OF_DELIVERY) {
+            snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                    context.membershipId().value().toString(), reference);
+            if (!snapshot.subjectExists()) {
+                context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
+                snapshot = subjects.lookupForEvidence(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString(), context.userId().value().toString(), reference);
+            }
+        } else {
+            snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                    context.membershipId().value().toString(), reference);
+        }
         if (!snapshot.subjectExists()) {
             if (subject == DocumentSubjectType.WAREHOUSE) {
                 throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");

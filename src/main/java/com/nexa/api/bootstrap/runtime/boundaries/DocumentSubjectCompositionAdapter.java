@@ -63,6 +63,22 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
         };
     }
 
+    @Override
+    public DocumentSubjectSnapshot lookupForEvidence(String tenantId, String workspaceId, String actorMembershipId,
+                                                      String actorUserId, DocumentSubjectReference subject) {
+        if (subject.type() != DocumentSubjectType.PROOF_OF_DELIVERY) {
+            return lookup(tenantId, workspaceId, actorMembershipId, subject);
+        }
+        UUID tenant = uuid(tenantId, "tenantId");
+        UUID workspace = uuid(workspaceId, "workspaceId");
+        UUID actor = uuid(actorMembershipId, "actorMembershipId");
+        UUID user = uuid(actorUserId, "actorUserId");
+        UUID id = uuid(subject.subjectId(), "subjectId");
+        return fulfillment.findPodEvidenceSubject(tenant, workspace, id, actor, user)
+                .map(value -> proofOfDeliverySnapshot(tenant, workspace, value, subject))
+                .orElseGet(() -> absent(tenant, workspace, subject));
+    }
+
     private DocumentSubjectSnapshot resolveBuyerReceipt(UUID tenant, UUID workspace, UUID id,
                                                         DocumentSubjectReference subject) {
         return fulfillment.findBuyerReceipt(tenant, workspace, id)
@@ -123,7 +139,12 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
     private DocumentSubjectSnapshot resolveProofOfDelivery(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {
         var pod = fulfillment.findPod(tenant, workspace, id);
         if (pod.isEmpty()) return absent(tenant, workspace, subject);
-        var value = pod.get();
+        return proofOfDeliverySnapshot(tenant, workspace, pod.get(), subject);
+    }
+
+    private DocumentSubjectSnapshot proofOfDeliverySnapshot(UUID tenant, UUID workspace,
+                                                             FulfillmentDocumentSourceQuery.ProofOfDelivery value,
+                                                             DocumentSubjectReference subject) {
         if (value.customerAccountId() != null) {
             return snapshot(tenant, workspace, subject.type(), value.id().toString(),
                     value.customerAccountId().toString(), value.status(), true);

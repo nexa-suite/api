@@ -1115,6 +1115,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
         UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
         DriverDeliveryFixture fixture = createDriverDelivery(
@@ -1179,7 +1180,65 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         + "join sales.sales_order sales_order on sales_order.id=fulfillment.sales_order_id where delivery.id=?",
                 UUID.class, fixture.deliveryId());
         UUID wrongSubjectEvidence = seedAvailablePodEvidence(clientAccountId, UUID.randomUUID(), driverMembership);
-        UUID matchingEvidence = seedAvailablePodEvidence(clientAccountId, podId, driverMembership);
+        UUID driverUser = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
+                UUID.class, driverMembership);
+        JdbcFulfillmentDocumentSourceQuery documentSource = new JdbcFulfillmentDocumentSourceQuery(tenantJdbc());
+        assertThat(documentSource.findPod(UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId)).isEmpty();
+        assertThat(documentSource.findPodEvidenceSubject(UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                podId, driverMembership, driverUser).map(
+                com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentDocumentSourceQuery.ProofOfDelivery::status))
+                .contains("PENDING");
+
+        int generationRequestsBefore = tenantJdbc().queryForObject("select count(*) from business_documents.document_generation_request "
+                + "where tenant_id=? and workspace_id=? and subject_type='PROOF_OF_DELIVERY' and subject_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId);
+        int documentsBefore = tenantJdbc().queryForObject("select count(*) from business_documents.business_document "
+                + "where tenant_id=? and workspace_id=? and subject_type='PROOF_OF_DELIVERY' and subject_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId);
+        mockMvc.perform(post("/api/v1/business-document-generation-requests")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("Idempotency-Key", "driver-proof-draft-report-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"subjectType\":\"PROOF_OF_DELIVERY\",\"subjectId\":\"" + podId
+                                + "\",\"documentType\":\"POD_REPORT\",\"format\":\"PDF\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        assertThat(tenantJdbc().queryForObject("select count(*) from business_documents.document_generation_request "
+                + "where tenant_id=? and workspace_id=? and subject_type='PROOF_OF_DELIVERY' and subject_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId))
+                .isEqualTo(generationRequestsBefore);
+        assertThat(tenantJdbc().queryForObject("select count(*) from business_documents.business_document "
+                + "where tenant_id=? and workspace_id=? and subject_type='PROOF_OF_DELIVERY' and subject_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId))
+                .isEqualTo(documentsBefore);
+
+        byte[] podPhoto = new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 1, 2, 3, 4};
+        String otherDriverEmail = createOtherLogisticsDriver();
+        String otherDriver = accessToken(otherDriverEmail, "PLATFORM");
+        mockMvc.perform(multipart("/api/v1/business-document-evidence")
+                        .file(new org.springframework.mock.web.MockMultipartFile("file", "other-driver-proof.png", "image/png", podPhoto))
+                        .param("subjectType", "PROOF_OF_DELIVERY")
+                        .param("subjectId", podId.toString())
+                        .header("Authorization", "Bearer " + otherDriver)
+                        .header("Idempotency-Key", "other-driver-proof-upload-" + uuid()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        assertThat(tenantJdbc().queryForObject("select count(*) from business_documents.evidence_object "
+                + "where tenant_id=? and workspace_id=? and subject_type='PROOF_OF_DELIVERY' and subject_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId)).isZero();
+
+        MvcResult uploadedPodEvidence = mockMvc.perform(multipart("/api/v1/business-document-evidence")
+                        .file(new org.springframework.mock.web.MockMultipartFile("file", "driver-proof.png", "image/png", podPhoto))
+                        .param("subjectType", "PROOF_OF_DELIVERY")
+                        .param("subjectId", podId.toString())
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", "driver-proof-upload-" + uuid()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.subjectType").value("PROOF_OF_DELIVERY"))
+                .andExpect(jsonPath("$.subjectId").value(podId.toString()))
+                .andExpect(jsonPath("$.requestedByMembershipId").value(driverMembership.toString()))
+                .andExpect(jsonPath("$.lifecycleStatus").value("AVAILABLE")).andReturn();
+        UUID matchingEvidence = UUID.fromString(json(uploadedPodEvidence).get("id").asText());
         String evidencePath = createPath + "/" + podId + "/evidence";
         mockMvc.perform(post(evidencePath).header("Authorization", "Bearer " + logistics)
                         .header("If-Match", pendingEtag).header("Idempotency-Key", "driver-proof-wrong-subject-" + uuid())
@@ -1222,7 +1281,6 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_event where delivery_id=? "
                         + "and attempt_id=? and event_type='POD_CAPTURED' and actor_membership_id=?",
                 Integer.class, fixture.deliveryId(), UUID.fromString(terminal.attemptId()), driverMembership)).isEqualTo(1);
-        JdbcFulfillmentDocumentSourceQuery documentSource = new JdbcFulfillmentDocumentSourceQuery(tenantJdbc());
         assertThat(documentSource.findSealedPodForDelivery(UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), fixture.deliveryId())).isEmpty();
         assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? "

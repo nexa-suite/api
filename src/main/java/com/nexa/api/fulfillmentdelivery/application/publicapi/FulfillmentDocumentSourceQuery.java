@@ -10,6 +10,10 @@ public interface FulfillmentDocumentSourceQuery {
 
     Optional<ProofOfDelivery> findPod(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId);
 
+    /** Minimal POD fact lookup for binding uploaded evidence before the POD is sealed. */
+    Optional<ProofOfDelivery> findPodEvidenceSubject(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId,
+                                                      UUID actorMembershipId, UUID actorUserId);
+
     Optional<ProofOfDelivery> findSealedPodForDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId);
 
     Optional<Incident> findIncident(UUID tenantId, UUID workspaceId, UUID incidentId);

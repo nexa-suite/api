@@ -7,10 +7,22 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const base = 'http://127.0.0.1:8080/api/v1';
 if (!process.argv.includes('--apply')) {
-  console.error('Usage: node ops/scripts/seed-functional-demo.mjs --apply [--simulate-gps] [--receive-stock]');
+  console.error('Usage: node ops/scripts/seed-functional-demo.mjs --apply [--simulate-gps] [--receive-stock] [--exercise-delivery UUID] [--resume-evidence UUID]');
   process.exit(2);
 }
 function stop(message) { throw new Error(message); }
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const exerciseIndex = process.argv.indexOf('--exercise-delivery');
+const exerciseDeliveryId = exerciseIndex < 0 ? null : process.argv[exerciseIndex + 1];
+if (exerciseIndex >= 0 && !uuidPattern.test(exerciseDeliveryId ?? '')) {
+  stop('Delivery exercise requires an explicit delivery UUID.');
+}
+const resumeIndex = process.argv.indexOf('--resume-evidence');
+const resumeDeliveryId = resumeIndex < 0 ? null : process.argv[resumeIndex + 1];
+if (resumeIndex >= 0 && (!uuidPattern.test(resumeDeliveryId ?? '') || exerciseIndex >= 0
+  || process.argv.includes('--simulate-gps') || process.argv.includes('--receive-stock'))) {
+  stop('Evidence recovery requires one explicit delivery UUID and cannot be combined with other fixture actions.');
+}
 const configuration = spawnSync('docker', ['compose', '--env-file', '.env.local', '-f', 'ops/compose/modern.compose.yml', 'config', '--format', 'json'], { cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
 if (configuration.status !== 0) stop('Local Compose configuration is unavailable.');
 const env = JSON.parse(configuration.stdout).services?.['modern-api']?.environment;
@@ -37,6 +49,131 @@ async function signIn(kind, surface = 'PLATFORM') {
   if (!/@[^@]+\.(?:test|local)$/.test(identifier)) stop('Only synthetic .test/.local identities may be enriched.');
   const result = await request('/authentication/sign-in', { method: 'POST', body: { identifier, password, workspaceSlug, surface } });
   return result.body.accessToken;
+}
+
+const syntheticPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==', 'base64');
+async function problemSummary(response) {
+  let problem = {};
+  try { problem = await response.json(); } catch { /* keep the HTTP status only */ }
+  const safePart = (value) => typeof value === 'string' ? value.replace(/[\r\n\t]+/g, ' ').slice(0, 180) : '';
+  const code = safePart(problem.code);
+  const detail = safePart(problem.detail);
+  return `HTTP ${response.status}${code ? ` ${code}` : ''}${detail ? `: ${detail}` : ''}`;
+}
+async function uploadEvidence(token, subjectType, subjectId, { key = crypto.randomUUID(), filename = 'synthetic-evidence.png' } = {}) {
+  const form = new FormData();
+  form.set('subjectType', subjectType);
+  form.set('subjectId', subjectId);
+  form.set('file', new Blob([syntheticPng], { type: 'image/png' }), filename);
+  const response = await fetch(base + '/business-document-evidence', {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000), body: form,
+    headers: { Authorization: `Bearer ${token}`, 'X-Nexa-Client': 'NATIVE', 'Idempotency-Key': key },
+  });
+  if (!response.ok) stop(`Synthetic ${subjectType} upload failed: ${await problemSummary(response)}.`);
+  let evidence = await response.json();
+  for (let poll = 0; evidence.lifecycleStatus !== 'AVAILABLE' && poll < 30; poll++) {
+    if (['REJECTED', 'DELETED', 'QUARANTINED'].includes(evidence.lifecycleStatus)) stop('Synthetic evidence was rejected; scanner controls were preserved.');
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    evidence = (await request(`/business-document-evidence/${evidence.id}`, { token })).body;
+  }
+  if (evidence.lifecycleStatus !== 'AVAILABLE' || evidence.subjectType !== subjectType || evidence.subjectId !== subjectId
+    || evidence.detectedContentType !== 'image/png') stop('Synthetic evidence did not reach the expected scanned subject and MIME state.');
+  return evidence;
+}
+
+if (resumeDeliveryId) {
+  const driver = await signIn('LOGISTICS');
+  const buyer = await signIn('BUYER', 'PORTAL');
+  if (!driver || !buyer) stop('Configured local Driver and Buyer identities are required for evidence recovery.');
+
+  const deliveryPath = `/driver/deliveries/${resumeDeliveryId}`;
+  const delivery = (await request(deliveryPath, { token: driver })).body;
+  const buyerDelivery = (await request(`/buyer/deliveries/${resumeDeliveryId}`, { token: buyer })).body;
+  if (delivery.id !== resumeDeliveryId || delivery.status !== 'DELIVERED'
+    || buyerDelivery.id !== resumeDeliveryId || buyerDelivery.status !== 'DELIVERED') {
+    stop('Evidence recovery requires the same terminal DELIVERED fact in assigned Driver and related Buyer scopes.');
+  }
+  const fulfillmentDelivery = (await request(`/deliveries/${resumeDeliveryId}`, { token: driver })).body;
+  const deliveredAttempts = (fulfillmentDelivery.attempts ?? []).filter((attempt) => attempt.outcome === 'DELIVERED');
+  if (fulfillmentDelivery.id !== resumeDeliveryId || fulfillmentDelivery.status !== 'DELIVERED'
+    || deliveredAttempts.length !== 1 || !deliveredAttempts[0].id) {
+    stop('Evidence recovery requires one unambiguous delivered attempt in the scoped Fulfillment read.');
+  }
+  const attemptId = deliveredAttempts[0].id;
+
+  const podResult = await request(`/deliveries/${resumeDeliveryId}/pod`, { token: driver });
+  const pod = podResult.body;
+  if (!pod?.id || pod.deliveryId && pod.deliveryId !== resumeDeliveryId
+    || !['PENDING', 'CAPTURED', 'SEALED'].includes(pod.status)
+    || pod.status === 'SEALED' && !pod.photoEvidenceObjectId) {
+    stop('Evidence recovery requires the existing attachable POD for this terminal delivery.');
+  }
+  const receipts = (await request(`/buyer/deliveries/${resumeDeliveryId}/buyer-receipts`, { token: buyer })).body;
+  const disputed = (Array.isArray(receipts) ? receipts : []).filter((item) => item.decision === 'DISPUTED');
+  if (disputed.length !== 1) stop('Evidence recovery requires one unambiguous existing disputed Buyer receipt.');
+  const receipt = disputed[0];
+  const receiptEvidence = (await request(`/business-document-evidence?subjectType=BUYER_RECEIPT&subjectId=${receipt.id}`, { token: buyer })).body;
+  const availableReceiptEvidence = receiptEvidence.items?.filter((item) => item.lifecycleStatus === 'AVAILABLE') ?? [];
+  if (availableReceiptEvidence.length === 0) stop('The existing disputed receipt has no scanned attachment; no replacement receipt or attachment was created.');
+  for (const item of availableReceiptEvidence) {
+    const evidence = (await request(`/business-document-evidence/${item.id}`, { token: buyer })).body;
+    if (evidence.subjectType !== 'BUYER_RECEIPT' || evidence.subjectId !== receipt.id || evidence.lifecycleStatus !== 'AVAILABLE') {
+      stop('Existing Buyer receipt evidence did not retain its scanned subject binding.');
+    }
+  }
+
+  const stableFilename = `synthetic-driver-pod-photo-${resumeDeliveryId}.png`;
+  const podEvidence = (await request(`/business-document-evidence?subjectType=PROOF_OF_DELIVERY&subjectId=${pod.id}`, { token: driver })).body;
+  let photoId = pod.photoEvidenceObjectId;
+  let photo;
+  if (photoId) {
+    photo = (await request(`/business-document-evidence/${photoId}`, { token: driver })).body;
+    if (photo.subjectType !== 'PROOF_OF_DELIVERY' || photo.subjectId !== pod.id || photo.lifecycleStatus !== 'AVAILABLE') {
+      stop('Existing POD photo is not an available scanned object bound to this POD.');
+    }
+  } else {
+    if (pod.status === 'SEALED') stop('Sealed POD has no photo to recover; the existing fact was left unchanged.');
+    const priorPhoto = podEvidence.items?.filter((item) => item.originalFilename === stableFilename) ?? [];
+    if (priorPhoto.length > 1) stop('Multiple prior POD uploads match the recovery filename; inspect the evidence before retrying.');
+    if (priorPhoto.length === 1) {
+      photo = (await request(`/business-document-evidence/${priorPhoto[0].id}`, { token: driver })).body;
+      if (photo.lifecycleStatus !== 'AVAILABLE' || photo.subjectType !== 'PROOF_OF_DELIVERY' || photo.subjectId !== pod.id) {
+        stop('Prior POD upload is not available for attachment; scanner controls were preserved.');
+      }
+    } else {
+      photo = await uploadEvidence(driver, 'PROOF_OF_DELIVERY', pod.id, {
+        key: `synthetic-driver-pod-photo-${resumeDeliveryId}`, filename: stableFilename,
+      });
+    }
+    photoId = photo.id;
+  }
+
+  if (!pod.photoEvidenceObjectId) {
+    const currentPodResult = await request(`/deliveries/${resumeDeliveryId}/pod`, { token: driver });
+    const currentPod = currentPodResult.body;
+    if (currentPod.id !== pod.id || !['PENDING', 'CAPTURED', 'SEALED'].includes(currentPod.status)
+      || currentPod.photoEvidenceObjectId && currentPod.photoEvidenceObjectId !== photoId
+      || currentPod.status === 'SEALED' && currentPod.photoEvidenceObjectId !== photoId) {
+      stop('POD changed during evidence recovery; inspect its current photo before retrying.');
+    }
+    if (!currentPod.photoEvidenceObjectId) {
+      const attached = await request(`${deliveryPath}/attempts/${attemptId}/proof-of-delivery/${currentPod.id}/evidence`, {
+        token: driver, method: 'POST', key: `synthetic-driver-pod-attach-${resumeDeliveryId}`,
+        etag: currentPodResult.etag, body: { kind: 'PHOTO', evidenceObjectId: photoId },
+      });
+      if (attached.body.photoEvidenceObjectId !== photoId) stop('Driver POD did not retain the recovered scanned photo.');
+    }
+  }
+
+  const verifiedPod = (await request(`/deliveries/${resumeDeliveryId}/pod`, { token: driver })).body;
+  if (verifiedPod.id !== pod.id || verifiedPod.photoEvidenceObjectId !== photoId
+    || !['CAPTURED', 'SEALED'].includes(verifiedPod.status)) stop('POD evidence attachment was not confirmed by a scoped read.');
+  const verifiedReceiptHistory = (await request(`/buyer/deliveries/${resumeDeliveryId}/buyer-receipts`, { token: buyer })).body;
+  if (!(Array.isArray(verifiedReceiptHistory) ? verifiedReceiptHistory : []).some((item) => item.id === receipt.id && item.decision === 'DISPUTED')) {
+    stop('Buyer receipt history did not preserve the existing dispute.');
+  }
+  console.log(`Existing disputed Buyer receipt and scanned attachment verified; existing POD photo ${photoId} attached and confirmed. No delivery or receipt was created.`);
+  process.exit(0);
 }
 
 const tokens = {};
@@ -177,4 +314,91 @@ if (process.argv.includes('--simulate-gps')) {
     console.log(`Synthetic GPS sample ${index + 1} accepted by Driver API and visible to the related Buyer.`);
     if (index < 5) await new Promise((resolve) => setTimeout(resolve, 2000));
   }
+}
+
+if (exerciseDeliveryId) {
+  if (!tokens.LOGISTICS) stop('The local Driver identity is required.');
+  const driver = tokens.LOGISTICS;
+  const buyer = tokens.BUYER;
+  const deliveryPath = `/driver/deliveries/${exerciseDeliveryId}`;
+  let current = await request(deliveryPath, { token: driver });
+  await request(`/buyer/deliveries/${exerciseDeliveryId}`, { token: buyer });
+  if (current.body.status !== 'DISPATCHED' || current.body.activeAttempt) {
+    stop('Delivery exercise requires an untouched assigned DISPATCHED delivery visible to this Buyer. Review any interrupted run before selecting another delivery.');
+  }
+  const initialLines = current.body.outcomeLines;
+  if (!Array.isArray(initialLines) || initialLines.length === 0 || initialLines.some((line) =>
+    !line.fulfillmentLineId || !line.skuId || !line.unit || !(Number(line.remainingQuantity) > 0))) {
+    stop('Assigned delivery lines are unavailable for the synthetic exercise.');
+  }
+  // Exercise only exact integer quantities; do not silently round business decimals.
+  if (initialLines.some((line) => !Number.isSafeInteger(Number(line.remainingQuantity)) || Number(line.remainingQuantity) < 2)) {
+    stop('Delivery exercise requires each remaining quantity to be an integer of at least two units.');
+  }
+  await request(`/deliveries/${exerciseDeliveryId}/transit-starts`, {
+    token: driver, method: 'POST', key: crypto.randomUUID(), etag: current.etag,
+  });
+  async function completeAttempt(outcome, partial) {
+    current = await request(deliveryPath, { token: driver });
+    const started = await request(`${deliveryPath}/attempts`, {
+      token: driver, method: 'POST', key: crypto.randomUUID(), etag: current.etag,
+    });
+    const attemptId = started.body.attempt.id;
+    const lines = current.body.outcomeLines.filter((line) => Number(line.remainingQuantity) > 0).map((line) => {
+      const quantity = partial ? 1 : Number(line.remainingQuantity);
+      if (!Number.isSafeInteger(quantity) || quantity <= 0) stop('Remaining quantities are not suitable for an exact synthetic attempt.');
+      return { fulfillmentLineId: line.fulfillmentLineId, skuId: line.skuId,
+        attemptedQuantity: quantity, deliveredQuantity: quantity, rejectedQuantity: 0,
+        cancelledQuantity: 0, unit: line.unit };
+    });
+    const result = await request(`${deliveryPath}/attempts/${attemptId}/outcomes`, {
+      token: driver, method: 'POST', key: crypto.randomUUID(), etag: started.etag,
+      body: { outcome, lines, attemptedAt: new Date().toISOString(), notes: 'Resultado sintético de prueba; no representa entrega física' },
+    });
+    if (result.body.delivery.status !== outcome) stop('The server did not confirm the expected synthetic delivery outcome.');
+    return { attemptId, etag: result.etag };
+  }
+  const partial = await completeAttempt('PARTIAL', true);
+  const handoff = await request(`/deliveries/${exerciseDeliveryId}/handoff-tokens`, {
+    token: driver, method: 'POST', key: crypto.randomUUID(), body: { attemptId: partial.attemptId },
+  });
+  if (!handoff.body.token) stop('A fresh Buyer handoff token was not issued.');
+  const validation = await request('/delivery-handoff/validations', {
+    token: buyer, method: 'POST', body: { token: handoff.body.token },
+  });
+  if (validation.body.deliveryId !== exerciseDeliveryId) stop('Buyer handoff did not resolve the selected delivery.');
+  const receiptKey = crypto.randomUUID();
+  const receiptBody = { token: handoff.body.token, decision: 'DISPUTED', acceptedQuantity: 0,
+    reason: 'Discrepancia sintética para verificar adjuntos; no representa reclamo real' };
+  const receipt = await request(`/deliveries/${exerciseDeliveryId}/buyer-receipts`, {
+    token: buyer, method: 'POST', key: receiptKey, body: receiptBody,
+  });
+  const replay = await request(`/deliveries/${exerciseDeliveryId}/buyer-receipts`, {
+    token: buyer, method: 'POST', key: receiptKey, body: receiptBody,
+  });
+  if (receipt.body.id !== replay.body.id || receipt.body.decision !== 'DISPUTED') stop('Buyer receipt replay changed its immutable identity.');
+  console.log('Synthetic partial attempt, Buyer handoff and disputed receipt same-key replay verified.');
+
+  const completed = await completeAttempt('DELIVERED', false);
+  const closedTracking = await fetch(base + `/buyer/deliveries/${exerciseDeliveryId}/live-location`, {
+    redirect: 'error', signal: AbortSignal.timeout(15000),
+    headers: { Authorization: `Bearer ${buyer}`, 'X-Nexa-Client': 'NATIVE' },
+  });
+  if (closedTracking.status !== 404) stop('Completed delivery still exposes Buyer live tracking.');
+  const pod = await request(`${deliveryPath}/attempts/${completed.attemptId}/proof-of-delivery`, {
+    token: driver, method: 'POST', key: crypto.randomUUID(), etag: completed.etag,
+    body: { receiverName: 'Receptor sintético de pruebas', capturedAt: new Date().toISOString(), notes: 'Prueba de entrega sintética; sin entrega física' },
+  });
+  const photo = await uploadEvidence(driver, 'PROOF_OF_DELIVERY', pod.body.id);
+  const attached = await request(`${deliveryPath}/attempts/${completed.attemptId}/proof-of-delivery/${pod.body.id}/evidence`, {
+    token: driver, method: 'POST', key: crypto.randomUUID(), etag: pod.etag,
+    body: { kind: 'PHOTO', evidenceObjectId: photo.id },
+  });
+  if (attached.body.photoEvidenceObjectId !== photo.id) stop('Driver POD did not retain the scanned synthetic photo.');
+  const buyerPhoto = await uploadEvidence(buyer, 'BUYER_RECEIPT', receipt.body.id);
+  const records = (await request(`/buyer/deliveries/${exerciseDeliveryId}/buyer-receipts`, { token: buyer })).body;
+  if (!records.some((item) => item.id === receipt.body.id && item.decision === 'DISPUTED')) stop('Buyer receipt history did not retain the dispute after delivery completion.');
+  const listed = (await request(`/business-document-evidence?subjectType=BUYER_RECEIPT&subjectId=${receipt.body.id}`, { token: buyer })).body;
+  if (!listed.items.some((item) => item.id === buyerPhoto.id && item.lifecycleStatus === 'AVAILABLE')) stop('Buyer could not read the scanned receipt attachment.');
+  console.log('Synthetic delivery completed; Driver POD photo and terminal-delivery Buyer receipt attachment passed real scanner and scoped API reads. Catalog unchanged.');
 }
