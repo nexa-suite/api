@@ -13,16 +13,34 @@ public final class BuyerDeliveryTrackingModels {
     }
 
     /** Internal delivery fact; salesOrderId is used only for owner-contract authorization. */
-    public record DeliveryRecord(UUID id, UUID salesOrderId, String salesOrderNumber, String status,
+    public record DeliveryRecord(UUID id, UUID salesOrderId, String salesOrderNumber, String salesOrderStatus,
+                                 String status,
                                  String destination, Instant scheduledAt, Instant dispatchedAt,
                                  Instant deliveredAt, String proofOfDeliveryStatus, long version,
-                                 Instant createdAt, Instant updatedAt) { }
+                                 Instant createdAt, Instant updatedAt) {
+        public DeliveryRecord(UUID id, UUID salesOrderId, String salesOrderNumber, String status,
+                              String destination, Instant scheduledAt, Instant dispatchedAt,
+                              Instant deliveredAt, String proofOfDeliveryStatus, long version,
+                              Instant createdAt, Instant updatedAt) {
+            this(id, salesOrderId, salesOrderNumber, null, status, destination, scheduledAt, dispatchedAt,
+                    deliveredAt, proofOfDeliveryStatus, version, createdAt, updatedAt);
+        }
+    }
 
     /** Buyer-safe delivery projection. Internal relationship and driver identifiers are omitted. */
-    public record DeliveryView(String id, String salesOrderNumber, String status, String destination,
+    public record DeliveryView(String id, String salesOrderNumber, String salesOrderStatus,
+                               String status, String destination,
                                Instant scheduledAt, Instant dispatchedAt, Instant deliveredAt,
                                String proofOfDeliveryStatus, long version, Instant createdAt,
-                               Instant updatedAt) { }
+                               Instant updatedAt) {
+        public DeliveryView(String id, String salesOrderNumber, String status, String destination,
+                            Instant scheduledAt, Instant dispatchedAt, Instant deliveredAt,
+                            String proofOfDeliveryStatus, long version, Instant createdAt,
+                            Instant updatedAt) {
+            this(id, salesOrderNumber, null, status, destination, scheduledAt, dispatchedAt, deliveredAt,
+                    proofOfDeliveryStatus, version, createdAt, updatedAt);
+        }
+    }
 
     /** Buyer-safe timeline fact with no actor, reason, evidence key, or driver assignment fields. */
     public record EventView(String type, Instant occurredAt) { }

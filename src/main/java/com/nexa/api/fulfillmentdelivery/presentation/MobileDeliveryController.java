@@ -13,7 +13,6 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -77,7 +76,7 @@ public final class MobileDeliveryController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID deliveryId,
             @Parameter(name = "Idempotency-Key", required = true, description = "Stable key for retry-safe handoff issuance")
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(name = "Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody IssueHandoffRequest request) {
         if ("DISPATCH_HANDOFF".equals(request.purpose())) {
             if (request.attemptId() != null || request.assignmentId() == null) throw invalidHandoffRequest();
@@ -138,13 +137,35 @@ public final class MobileDeliveryController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID deliveryId,
             @Parameter(name = "Idempotency-Key", required = true, description = "Stable key for retry-safe buyer receipt")
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(name = "Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody BuyerReceiptRequest request) {
         MobileDeliveryContractOperations.BuyerReceipt result = requests.execute(context,
                 FulfillmentDeliveryRequestRunner.Requirements.none(),
                 composition -> composition.mobileDeliveryContracts().recordReceipt(context, deliveryId,
                         request.token(), request.decision(), request.acceptedQuantity(), request.reason(),
                         idempotencyKey));
+        return ResponseEntity.status(result.replayed() ? 200 : 201).body(result);
+    }
+
+    @PostMapping("/delivery-handoff/receipts")
+    @Operation(operationId = "acceptBuyerDeliveryHandoff",
+            description = "An authenticated Buyer's one-time QR scan records receipt and finalizes the linked Proof of Delivery in one server-authoritative handoff. Delivery, attempt and Buyer relationship are resolved and validated by the server; no second confirmation is required.",
+            responses = {
+                    @ApiResponse(responseCode = "201", description = "Buyer receipt accepted and linked Proof of Delivery finalized",
+                            content = @Content(schema = @Schema(implementation = MobileDeliveryContractOperations.BuyerReceiptAcceptance.class))),
+                    @ApiResponse(responseCode = "200", description = "Idempotent replay of Buyer acceptance",
+                            content = @Content(schema = @Schema(implementation = MobileDeliveryContractOperations.BuyerReceiptAcceptance.class)))
+            })
+    public ResponseEntity<MobileDeliveryContractOperations.BuyerReceiptAcceptance> acceptReceipt(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @Parameter(name = "Idempotency-Key", required = true,
+                    description = "Stable key for retry-safe Buyer acceptance")
+            @RequestHeader(name = "Idempotency-Key") String idempotencyKey,
+            @Valid @RequestBody BuyerReceiptAcceptanceRequest request) {
+        MobileDeliveryContractOperations.BuyerReceiptAcceptance result = requests.execute(context,
+                FulfillmentDeliveryRequestRunner.Requirements.none(),
+                composition -> composition.mobileDeliveryContracts().acceptReceipt(
+                        context, request.token(), request.expectedDeliveryId(), idempotencyKey));
         return ResponseEntity.status(result.replayed() ? 200 : 201).body(result);
     }
 
@@ -157,9 +178,11 @@ public final class MobileDeliveryController {
                                            @Size(max = 32) String purpose,
                                            UUID deliveryId, UUID assignmentId) { }
     public record BuyerReceiptRequest(@NotBlank @Size(max = 400) String token,
-                                      @NotBlank @Size(max = 16) String decision,
-                                      @NotNull @PositiveOrZero BigDecimal acceptedQuantity,
+                                      @NotBlank @Size(max = 16) @Schema(allowableValues = {"ACCEPTED", "DISPUTED"}) String decision,
+                                      @PositiveOrZero BigDecimal acceptedQuantity,
                                       @Size(max = 2000) String reason) { }
+    public record BuyerReceiptAcceptanceRequest(@NotBlank @Size(max = 400) String token,
+                                                UUID expectedDeliveryId) { }
     public record IssuedHandoffResponse(UUID handoffId, UUID deliveryId, UUID attemptId,
                                         Instant expiresAt, String status, String token) { }
     @Schema(name = "IssuedDispatchHandoffResponse")

@@ -571,10 +571,10 @@ public class FulfillmentLifecycleService implements com.nexa.api.fulfillmentdeli
                     hash("final-adjustment-v1|" + result.attemptId() + "|" + result.finalAdjustmentAmount() + "|" + result.adjustmentCurrency()),
                     "CUSTOMER_CREDIT", null, now()));
         }
-        if (result.allCommercialQuantityResolved()) {
+        if (result.allCommercialQuantityResolved() && !driverCanonical) {
             salesOrderCommands.markCompleted(tenant(context), workspace(context), result.salesOrderId(), actor(context), now(),
                     "Delivery quantities commercially resolved", BigDecimal.ZERO);
-        } else if (result.partial() && command.outcome() != DeliveryAttemptOutcome.FAILED) {
+        } else if (!driverCanonical && result.partial() && command.outcome() != DeliveryAttemptOutcome.FAILED) {
             salesOrderCommands.markPartiallyDelivered(tenant(context), workspace(context), result.salesOrderId(), actor(context), now(),
                     "Partial delivery recorded");
         }
