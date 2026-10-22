@@ -1,6 +1,8 @@
 package com.nexa.api.salescommitment.application.salesorder.service;
 
 import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTime;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTimePolicyProvider;
 import com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
@@ -21,19 +23,39 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.Clock;
 
 /** Application use case for the four-step, resumable Sales manual-order workflow. */
 public class ManualSalesOrderDraftService implements ManualSalesOrderDraftUseCase {
     private final ManualSalesOrderDraftPersistencePort persistence;
     private final ManualSalesOrderUseCase manualOrders;
     private final ManualSalesOrderPersistencePort orderPersistence;
+    private final MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies;
+    private final Clock clock;
 
     public ManualSalesOrderDraftService(ManualSalesOrderDraftPersistencePort persistence,
                                         ManualSalesOrderUseCase manualOrders,
                                         ManualSalesOrderPersistencePort orderPersistence) {
+        this(persistence, manualOrders, orderPersistence, new MinimumDeliveryLeadTime(3), Clock.systemUTC());
+    }
+
+    public ManualSalesOrderDraftService(ManualSalesOrderDraftPersistencePort persistence,
+                                        ManualSalesOrderUseCase manualOrders,
+                                        ManualSalesOrderPersistencePort orderPersistence,
+                                        MinimumDeliveryLeadTime minimumDeliveryLeadTime, Clock clock) {
+        this(persistence, manualOrders, orderPersistence,
+                MinimumDeliveryLeadTimePolicyProvider.fixed(minimumDeliveryLeadTime), clock);
+    }
+
+    public ManualSalesOrderDraftService(ManualSalesOrderDraftPersistencePort persistence,
+                                        ManualSalesOrderUseCase manualOrders,
+                                        ManualSalesOrderPersistencePort orderPersistence,
+                                        MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies, Clock clock) {
         this.persistence = persistence;
         this.manualOrders = manualOrders;
         this.orderPersistence = orderPersistence;
+        this.deliveryLeadTimePolicies = java.util.Objects.requireNonNull(deliveryLeadTimePolicies);
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     @Override
@@ -57,6 +79,7 @@ public class ManualSalesOrderDraftService implements ManualSalesOrderDraftUseCas
                                                               ManualSalesOrderDraftModels.ClientCommand command) {
         write(context);
         if (command == null) throw new IllegalArgumentException("Manual order client conditions are required");
+        deliveryLeadTimePolicies.forWorkspace(context).validate(command.requestedDeliveryDate(), clock);
         return persistence.updateClient(context, draftId, version, command);
     }
 
@@ -119,6 +142,7 @@ public class ManualSalesOrderDraftService implements ManualSalesOrderDraftUseCas
         ManualSalesOrderDraftModels.ReviewView review = reviewForLockedDraft(draft);
         if (!review.readyToCreate()) throw new IllegalArgumentException("Manual sales order draft is not ready to create");
         ManualSalesOrderDraftModels.DeliveryView delivery = draft.delivery();
+        deliveryLeadTimePolicies.forWorkspace(context).validate(draft.requestedDeliveryDate(), clock);
         CreateManualSalesOrderCommand command = new CreateManualSalesOrderCommand(
                 draft.client().id(),
                 delivery.addressId(),

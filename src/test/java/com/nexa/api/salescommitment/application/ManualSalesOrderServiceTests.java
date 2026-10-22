@@ -7,6 +7,7 @@ import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderLineV
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderPersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOrderSnapshotViewMapper;
 import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOrderService;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTime;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrder;
@@ -15,9 +16,13 @@ import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderNumber;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -25,14 +30,18 @@ class ManualSalesOrderServiceTests {
     @Test
     void manualOrderUsesIdempotencyBeforeAllocatingASecondIdentity() {
         CapturingPersistence persistence = new CapturingPersistence();
-        ManualSalesOrderService service = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence);
+        AtomicReference<MinimumDeliveryLeadTime> leadTime = new AtomicReference<>(new MinimumDeliveryLeadTime(3));
+        Clock clock = Clock.fixed(Instant.parse("2026-10-22T00:00:00Z"), ZoneOffset.UTC);
+        ManualSalesOrderService service = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence,
+                context -> leadTime.get(), clock);
         CreateManualSalesOrderCommand command = new CreateManualSalesOrderCommand(SalesTestFixtures.ACCOUNT,
-                SalesTestFixtures.ADDRESS.toString(), null, java.time.LocalDate.now().plusDays(1), "Dock 2",
+                SalesTestFixtures.ADDRESS.toString(), null, LocalDate.of(2026, 10, 25), "Dock 2",
                 SalesTestFixtures.WAREHOUSE.toString(), "LOCAL", PaymentOption.CREDIT_LINE,
                 PurchaseRequestPriority.HIGH, "PEN", "Call before loading",
                 List.of(new CreateManualSalesOrderCommand.Line("ITEM-001", BigDecimal.valueOf(3), "bag", null)));
 
         ManualSalesOrderView first = service.create(SalesTestFixtures.salesContext(), command, "manual-key-1");
+        leadTime.set(new MinimumDeliveryLeadTime(10));
         ManualSalesOrderView replay = service.create(SalesTestFixtures.salesContext(), command, "manual-key-1");
 
         assertThat(replay.id()).isEqualTo(first.id());

@@ -7,6 +7,8 @@ import com.nexa.api.salescommitment.application.exception.PurchaseRequestTransit
 import com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestExpiredException;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTime;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTimePolicyProvider;
 import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestFilter;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestLineView;
@@ -70,6 +72,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	private final ObjectMapper objectMapper;
 	private final MaterialChangePersistencePort materialChanges;
 	private final boolean walletTenderEnabled;
+	private final MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies;
 
 	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts) {
@@ -112,6 +115,24 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments, Clock clock, ObjectMapper objectMapper,
 			MaterialChangePersistencePort materialChanges, boolean walletTenderEnabled) {
+		this(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, objectMapper,
+				materialChanges, walletTenderEnabled, new MinimumDeliveryLeadTime(3));
+	}
+
+	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
+			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments, Clock clock, ObjectMapper objectMapper,
+			MaterialChangePersistencePort materialChanges, boolean walletTenderEnabled,
+			MinimumDeliveryLeadTime minimumDeliveryLeadTime) {
+		this(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, objectMapper,
+				materialChanges, walletTenderEnabled, MinimumDeliveryLeadTimePolicyProvider.fixed(minimumDeliveryLeadTime));
+	}
+
+	public PurchaseRequestService(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
+			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
+			ChangeEventPersistencePort changeFeed, CommercialCommitmentPort commitments, Clock clock, ObjectMapper objectMapper,
+			MaterialChangePersistencePort materialChanges, boolean walletTenderEnabled,
+			MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies) {
 		this.persistence = persistence;
 		this.events = events;
 		this.idempotency = idempotency;
@@ -123,6 +144,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
 		this.materialChanges = materialChanges;
 		this.walletTenderEnabled = walletTenderEnabled;
+		this.deliveryLeadTimePolicies = java.util.Objects.requireNonNull(deliveryLeadTimePolicies);
 	}
 
 	@Override
@@ -213,6 +235,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PurchaseRequest aggregate = rehydrate(current);
 		aggregate.acceptProposedChanges();
 			MaterialChangeTerms accepted = revalidateProposal(context, current.clientAccountId(), proposal.proposedTerms());
+		deliveryLeadTimePolicies.forWorkspace(context).validate(accepted.requestedDeliveryDate(), clock);
 		if (PaymentOption.WALLET.name().equals(accepted.paymentOption())) requireWalletTenderEnabled();
 		PurchaseRequestView result = materialChanges().accept(scope(context), workspace(context), buyerAccount(context),
 				id, proposalId, version, actor, accepted,
@@ -288,6 +311,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PaymentOption paymentValue = PaymentOption.from(paymentOption);
 		if (paymentValue == PaymentOption.WALLET) requireWalletTenderBuyer(context);
 		new RequestedDeliveryDate(deliveryDate);
+		deliveryLeadTimePolicies.forWorkspace(context).validate(deliveryDate, clock);
 		new DeliveryProfileSnapshot(deliveryProfile);
 		new RequestComment(comment);
 
@@ -324,6 +348,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			String deliveryProfile, String paymentOption, String comment, long version) {
 		PurchaseRequestView current = canEdit(context, id);
 		PurchaseRequest aggregate = rehydrate(current);
+		deliveryLeadTimePolicies.forWorkspace(context).validate(
+				deliveryDate == null ? current.requestedDeliveryDate() : deliveryDate, clock);
 		PaymentOption selectedPayment = paymentOption == null ? aggregate.paymentOption() : PaymentOption.from(paymentOption);
 		if (selectedPayment == PaymentOption.WALLET) {
 			requireWalletTenderEnabled();
@@ -439,7 +465,10 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			// Review and approval are workflow actions, not persisted Purchase Request states.
 			return current;
 		}
-		if ("submit".equals(normalized)) assertCurrentPrices(context, current);
+		if ("submit".equals(normalized)) {
+			assertCurrentPrices(context, current);
+			deliveryLeadTimePolicies.forWorkspace(context).validate(current.requestedDeliveryDate(), clock);
+		}
 		PurchaseRequest aggregate = rehydrate(current);
 		String target = switch (normalized) {
 			case "submit" -> { aggregate.submit(); yield PurchaseRequestStatus.SUBMITTED.name(); }
@@ -499,6 +528,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			String comment, List<RequestedLine> requestedLines) {
 		String normalizedPriority = priority == null ? current.priority() : PurchaseRequestPriority.from(priority).name();
 		LocalDate normalizedDate = deliveryDate == null ? current.requestedDeliveryDate() : new RequestedDeliveryDate(deliveryDate).value();
+		deliveryLeadTimePolicies.forWorkspace(context).validate(normalizedDate, clock);
 		String normalizedDelivery = deliveryProfile == null ? current.deliveryProfileSnapshot()
 				: new DeliveryProfileSnapshot(deliveryProfile).value();
 		String normalizedPayment = paymentOption == null ? current.paymentOption()

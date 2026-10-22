@@ -1,13 +1,18 @@
 package com.nexa.api.salescommitment.infrastructure.purchaserequestdraft;
 
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTime;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTimePolicyProvider;
 import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
 import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CustomerTermsQuery;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CustomerTermsQuery.CustomerTermsSnapshot;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAddressQuery;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAddressReference;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
+import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery.CreditExposureSnapshot;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftDestinationNotGeocodedException;
@@ -35,6 +40,7 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,46 +64,83 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private final CommercialCommitmentPort commitments;
     private final MapRoutingPort maps;
     private final CustomerAccountQuery customers;
+    private final CustomerTermsQuery customerTerms;
     private final CustomerAddressQuery addresses;
     private final CreditExposureQuery creditExposure;
     private final SellableSkuQuery sellableSkus;
     private final WarehouseSelectionQuery warehouses;
     private final boolean walletTenderEnabled;
+    private final MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies;
+    private final Clock clock;
 
     @Autowired
     public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                                        CommercialCommitmentPort commitments, MapRoutingPort maps,
-                                       CustomerAccountQuery customers, CustomerAddressQuery addresses,
+                                       CustomerAccountQuery customers, CustomerTermsQuery customerTerms,
+                                       CustomerAddressQuery addresses,
                                        CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
-                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox) {
-        this(jdbc, objectMapper, commitments, maps, customers, addresses, creditExposure,
-                sellableSkus, warehouses, canonicalOutbox, false);
+                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
+                                       MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies) {
+        this(jdbc, objectMapper, commitments, maps, customers, customerTerms, addresses, creditExposure,
+                sellableSkus, warehouses, canonicalOutbox, false, deliveryLeadTimePolicies, Clock.systemUTC());
     }
 
     /** Tenant composition opts in only after every local dependency is bound to this JDBC session. */
     public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                                        CommercialCommitmentPort commitments, MapRoutingPort maps,
-                                       CustomerAccountQuery customers, CustomerAddressQuery addresses,
+                                       CustomerAccountQuery customers, CustomerTermsQuery customerTerms,
+                                       CustomerAddressQuery addresses,
                                        CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
                                        WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
                                        boolean walletTenderEnabled) {
+        this(jdbc, objectMapper, commitments, maps, customers, customerTerms, addresses, creditExposure,
+                sellableSkus, warehouses, canonicalOutbox, walletTenderEnabled,
+                new MinimumDeliveryLeadTime(3), Clock.systemUTC());
+    }
+
+    public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                       CommercialCommitmentPort commitments, MapRoutingPort maps,
+                                       CustomerAccountQuery customers, CustomerTermsQuery customerTerms,
+                                       CustomerAddressQuery addresses,
+                                       CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
+                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
+                                       boolean walletTenderEnabled, MinimumDeliveryLeadTime minimumDeliveryLeadTime,
+                                       Clock clock) {
+        this(jdbc, objectMapper, commitments, maps, customers, customerTerms, addresses, creditExposure,
+                sellableSkus, warehouses, canonicalOutbox, walletTenderEnabled,
+                MinimumDeliveryLeadTimePolicyProvider.fixed(minimumDeliveryLeadTime), clock);
+    }
+
+    public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                       CommercialCommitmentPort commitments, MapRoutingPort maps,
+                                       CustomerAccountQuery customers, CustomerTermsQuery customerTerms,
+                                       CustomerAddressQuery addresses,
+                                       CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
+                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
+                                       boolean walletTenderEnabled,
+                                       MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies,
+                                       Clock clock) {
         this.jdbc = jdbc;
         this.canonicalOutbox = canonicalOutbox;
         this.objectMapper = objectMapper;
         this.commitments = commitments;
         this.maps = maps == null ? new com.nexa.api.salescommitment.infrastructure.maps.LocalDeterministicMapAdapter() : maps;
         this.customers = customers;
+        this.customerTerms = customerTerms;
         this.addresses = addresses;
         this.creditExposure = creditExposure;
         this.sellableSkus = sellableSkus;
         this.warehouses = warehouses;
         this.walletTenderEnabled = walletTenderEnabled;
+        this.deliveryLeadTimePolicies = java.util.Objects.requireNonNull(deliveryLeadTimePolicies);
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     @Transactional
     public PurchaseRequestDraftModels.DraftView create(CurrentAccessContext context, UUID clientAccountId, LocalDate requestedDeliveryDate) {
         buyerWrite(context);
-        if (clientAccountId == null || requestedDeliveryDate == null || requestedDeliveryDate.isBefore(LocalDate.now())) throw new IllegalArgumentException("Client account and future delivery date are required");
+        if (clientAccountId == null || requestedDeliveryDate == null) throw new IllegalArgumentException("Client account and delivery date are required");
+        deliveryLeadTimePolicies.forWorkspace(context).validate(requestedDeliveryDate, clock);
         requireBuyerClient(context, clientAccountId);
         Instant now = Instant.now();
         UUID id = UUID.randomUUID();
@@ -231,7 +274,8 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         String normalizedPayment = paymentPreference == null ? null : paymentPreference.trim().toUpperCase(java.util.Locale.ROOT);
         if ("WALLET".equals(normalizedPayment)) requireWalletTenderEnabled();
         if (normalizedPayment == null || !Set.of("CREDIT_LINE", "BANK_TRANSFER", "CARD_STRIPE", "CASH", "CASH_ON_DELIVERY", "WALLET").contains(normalizedPayment)) throw new IllegalArgumentException("Payment preference is invalid");
-        if (requestedDeliveryDate == null || requestedDeliveryDate.isBefore(LocalDate.now())) throw new IllegalArgumentException("Requested delivery date is invalid");
+        if (requestedDeliveryDate == null) throw new IllegalArgumentException("Requested delivery date is required");
+        deliveryLeadTimePolicies.forWorkspace(context).validate(requestedDeliveryDate, clock);
         jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", normalizedPayment, requestedDeliveryDate, creditResult(context, draftId, draft.clientAccountId, normalizedPayment), tenant(context), workspace(context), draftId, expectedVersion);
         updateStatus(context, draftId, expectedVersion + 1, hasLines(draftId, context), hasDestination(draftId, context), hasRoute(draftId, context), true);
         return get(context, draftId);
@@ -262,6 +306,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         if ("WALLET".equals(draft.paymentPreference())) requireWalletTenderEnabled();
         PurchaseRequestDraftModels.ReviewView review = review(context, draftId);
         if (!review.readyToSubmit()) throw new PurchaseRequestDraftInvariantException("Purchase request draft is not ready to submit");
+        deliveryLeadTimePolicies.forWorkspace(context).validate(draft.requestedDeliveryDate(), clock);
         int idempotencyClaimed = jdbc.update("insert into sales.purchase_request_draft_idempotency (tenant_id,workspace_id,buyer_membership_id,idempotency_key,request_hash,draft_id,created_at) values (?,?,?,?,?,?,current_timestamp) on conflict do nothing", tenant(context), workspace(context), context.membershipId().value(), idempotencyKey, requestHash, draftId);
         if (idempotencyClaimed == 0) {
             var claim = jdbc.query("select request_hash,draft_id from sales.purchase_request_draft_idempotency where tenant_id=? and workspace_id=? and buyer_membership_id=? and idempotency_key=?", (rs, n) -> new IdempotencyClaim(rs.getString(1), rs.getObject(2, UUID.class)), tenant(context), workspace(context), context.membershipId().value(), idempotencyKey).stream().findFirst().orElseThrow();
@@ -302,16 +347,27 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         if (!"CREDIT_LINE".equalsIgnoreCase(payment)) return "NOT_APPLICABLE";
         customers.findReference(tenant(context).toString(), workspace(context).toString(), clientId.toString())
                 .orElseThrow(() -> new IllegalArgumentException("Client account is not active"));
+        CustomerTermsSnapshot terms = customerTerms.findTerms(tenant(context).toString(), workspace(context).toString(),
+                clientId.toString()).orElse(null);
+        if (terms == null || !terms.creditAllowed()) return "UNAVAILABLE";
         String currency = jdbc.queryForObject("select case when count(distinct currency)=1 then max(currency) else null end "
                         + "from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?",
                 String.class, tenant(context), workspace(context), draftId);
         if (currency == null) throw new IllegalStateException("Credit evaluation requires one draft currency");
-        var exposure = creditExposure.find(tenant(context).toString(), workspace(context).toString(),
+        CreditExposureSnapshot exposure = creditExposure.find(tenant(context).toString(), workspace(context).toString(),
                 clientId.toString(), currency);
         BigDecimal total = jdbc.queryForObject("select coalesce(sum(quantity * effective_unit_price),0) from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=?", BigDecimal.class,
                 tenant(context), workspace(context), draftId);
+        return creditResult(true, terms, exposure, total);
+    }
+
+    static String creditResult(boolean creditPayment, CustomerTermsSnapshot terms,
+                               CreditExposureSnapshot exposure, BigDecimal pricedTotal) {
+        if (!creditPayment) return "NOT_APPLICABLE";
+        if (terms == null || !terms.creditAllowed() || exposure == null || !exposure.active()
+                || pricedTotal == null || pricedTotal.signum() <= 0) return "UNAVAILABLE";
         BigDecimal available = exposure.availableCredit();
-        return available.compareTo(total == null ? BigDecimal.ZERO : total) >= 0 && available.signum() > 0 ? "AVAILABLE" : "UNAVAILABLE";
+        return available.signum() > 0 && available.compareTo(pricedTotal) >= 0 ? "AVAILABLE" : "UNAVAILABLE";
     }
     private WarehouseRow selectWarehouse(CurrentAccessContext context, UUID draftId) {
         Map<UUID, BigDecimal> requested = jdbc.query("select sku_id,quantity from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=? order by sku_id", (rs, n) -> Map.entry(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), draftId).stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));

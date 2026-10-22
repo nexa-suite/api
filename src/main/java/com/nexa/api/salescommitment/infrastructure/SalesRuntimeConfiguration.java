@@ -8,6 +8,7 @@ import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.salescommitment.application.port.out.WarehouseReferencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.*;
 import com.nexa.api.salescommitment.application.purchaserequest.service.PurchaseRequestService;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTimePolicyProvider;
 import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase;
 import com.nexa.api.salescommitment.application.directorder.service.DirectOrderService;
 import com.nexa.api.salescommitment.application.reference.port.PeruGeographyPersistencePort;
@@ -47,22 +48,29 @@ public class SalesRuntimeConfiguration {
 		return new SalesSnapshotAssembler(accounts, addresses, warehouses, geography, maps, catalog, sellableSkus);
 	}
 	@Bean ManualSalesOrderUseCase manualSalesOrderUseCase(SalesSnapshotAssembler snapshots,
-			ManualSalesOrderPersistencePort persistence) { return new ManualSalesOrderService(snapshots, persistence); }
+			ManualSalesOrderPersistencePort persistence,
+			MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies) {
+		return new ManualSalesOrderService(snapshots, persistence, deliveryLeadTimePolicies, Clock.systemUTC());
+	}
 	@Bean ManualSalesOrderDraftUseCase manualSalesOrderDraftUseCase(ManualSalesOrderDraftPersistencePort drafts,
 			@Qualifier("manualSalesOrderUseCase") ManualSalesOrderUseCase manualOrders,
-			ManualSalesOrderPersistencePort orders) {
-		return new ManualSalesOrderDraftService(drafts, manualOrders, orders);
+			ManualSalesOrderPersistencePort orders,
+			MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies) {
+		return new ManualSalesOrderDraftService(drafts, manualOrders, orders, deliveryLeadTimePolicies, Clock.systemUTC());
 	}
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,
 				ChangeEventPersistencePort changeFeed, com.nexa.api.salescommitment.application.port.CommercialCommitmentPort commitments,
-				Clock clock, ObjectMapper objectMapper, com.nexa.api.salescommitment.application.purchaserequest.port.MaterialChangePersistencePort materialChanges) {
-		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments, clock, objectMapper, materialChanges);
+				Clock clock, ObjectMapper objectMapper, com.nexa.api.salescommitment.application.purchaserequest.port.MaterialChangePersistencePort materialChanges,
+				MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies) {
+		return new PurchaseRequestService(persistence, events, idempotency, catalog, accounts, changeFeed, commitments,
+				clock, objectMapper, materialChanges, false, deliveryLeadTimePolicies);
 	}
 	@Bean SalesOrderUseCase salesOrderUseCase(SalesOrderPersistencePort persistence, SalesOrderAggregatePersistencePort aggregatePersistence, SalesOrderConversionPersistencePort conversionPersistence, CustomerAccountQuery accounts, IdempotencyPersistencePort idempotency, ObjectMapper objectMapper) { return new SalesOrderService(persistence, accounts, aggregatePersistence, conversionPersistence, idempotency, objectMapper); }
 	@Bean DirectOrderUseCase directOrderUseCase(com.nexa.api.salescommitment.application.port.CommercialCommitmentPort commitments,
 			SalesOrderPersistencePort orders, Clock clock, IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
-			SellableSkuQuery sellableSkus) {
-		return new DirectOrderService(commitments, orders, clock, idempotency, objectMapper, sellableSkus);
+			SellableSkuQuery sellableSkus, MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies) {
+		return new DirectOrderService(commitments, orders, clock, idempotency, objectMapper, sellableSkus,
+				deliveryLeadTimePolicies);
 	}
 }

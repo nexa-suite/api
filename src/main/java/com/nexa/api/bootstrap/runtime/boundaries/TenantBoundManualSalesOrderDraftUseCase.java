@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderDraftUseCase;
@@ -15,10 +16,18 @@ import java.util.function.Function;
 public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSalesOrderDraftUseCase {
     private final TenantBusinessDatabaseRouter router;
     private final TenantSalesCommitmentCompositionProvider compositions;
+    private final TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes;
 
     public TenantBoundManualSalesOrderDraftUseCase(TenantBusinessDatabaseRouter router,
             TenantSalesCommitmentCompositionProvider compositions) {
+        this(router, null, compositions);
+    }
+
+    public TenantBoundManualSalesOrderDraftUseCase(TenantBusinessDatabaseRouter router,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
+            TenantSalesCommitmentCompositionProvider compositions) {
         this.router = Objects.requireNonNull(router, "Tenant business database router is required");
+        this.deliveryLeadTimes = deliveryLeadTimes;
         this.compositions = Objects.requireNonNull(compositions, "Tenant Sales composition provider is required");
     }
 
@@ -35,7 +44,7 @@ public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSale
     @Override
     public ManualSalesOrderDraftModels.DraftView updateClient(CurrentAccessContext context, UUID draftId,
             long version, ManualSalesOrderDraftModels.ClientCommand command) {
-        return call(context, drafts -> drafts.updateClient(context, draftId, version, command));
+        return callWithDeliveryLeadTime(context, drafts -> drafts.updateClient(context, draftId, version, command));
     }
 
     @Override
@@ -58,7 +67,7 @@ public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSale
     @Override
     public ManualSalesOrderView submit(CurrentAccessContext context, UUID draftId, long version,
             String idempotencyKey) {
-        return call(context, drafts -> drafts.submit(context, draftId, version, idempotencyKey));
+        return callWithDeliveryLeadTime(context, drafts -> drafts.submit(context, draftId, version, idempotencyKey));
     }
 
     @Override
@@ -69,5 +78,12 @@ public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSale
     private <T> T call(CurrentAccessContext context, Function<ManualSalesOrderDraftUseCase, T> action) {
         return router.inTransaction(context,
                 jdbc -> action.apply(compositions.bindTo(jdbc).manualSalesOrderDrafts()));
+    }
+
+    private <T> T callWithDeliveryLeadTime(CurrentAccessContext context,
+            Function<ManualSalesOrderDraftUseCase, T> action) {
+        int minimumDays = deliveryLeadTimes == null ? 3 : deliveryLeadTimes.minimumDeliveryLeadDays(context);
+        return router.inTransaction(context,
+                jdbc -> action.apply(compositions.bindTo(jdbc, minimumDays).manualSalesOrderDrafts()));
     }
 }

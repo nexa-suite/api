@@ -44,7 +44,8 @@ public interface TenantSalesCommitmentCompositionFactory {
                     FinancialAdjustmentCommands financialAdjustments,
                     CanonicalOutboxPort canonicalOutbox, ChangeEventPersistencePort changeFeed,
                     MapRoutingPort maps, Clock clock, ObjectMapper objectMapper,
-                    boolean walletTenderEnabled, BuyerWalletRefundBalanceQuery walletRefundBalances) {
+                    boolean walletTenderEnabled, BuyerWalletRefundBalanceQuery walletRefundBalances,
+                    int minimumDeliveryLeadDays) {
         public Bindings(CustomerAccountQuery customerAccounts, CustomerAddressQuery customerAddresses,
                 SellableSkuQuery sellableSkus, CreditExposureQuery creditExposure,
                 CatalogItemSnapshotLookupPort catalogItemSnapshots,
@@ -57,7 +58,21 @@ public interface TenantSalesCommitmentCompositionFactory {
             this(customerAccounts, customerAddresses, sellableSkus, creditExposure, catalogItemSnapshots,
                     creditReservations, warehouses, inventoryBacking, walletReservations, paymentConfirmations,
                     receivables, financialAdjustments, canonicalOutbox, changeFeed, maps, clock, objectMapper,
-                    walletTenderEnabled, null);
+                    walletTenderEnabled, null, 3);
+        }
+        public Bindings(CustomerAccountQuery customerAccounts, CustomerAddressQuery customerAddresses,
+                SellableSkuQuery sellableSkus, CreditExposureQuery creditExposure,
+                CatalogItemSnapshotLookupPort catalogItemSnapshots,
+                CreditReservationCommands creditReservations, WarehouseSelectionQuery warehouses,
+                InventoryBackingCommands inventoryBacking, BuyerWalletReservationCommands walletReservations,
+                PaymentConfirmationQuery paymentConfirmations, ReceivableCommands receivables,
+                FinancialAdjustmentCommands financialAdjustments, CanonicalOutboxPort canonicalOutbox,
+                ChangeEventPersistencePort changeFeed, MapRoutingPort maps, Clock clock, ObjectMapper objectMapper,
+                boolean walletTenderEnabled, BuyerWalletRefundBalanceQuery walletRefundBalances) {
+            this(customerAccounts, customerAddresses, sellableSkus, creditExposure, catalogItemSnapshots,
+                    creditReservations, warehouses, inventoryBacking, walletReservations, paymentConfirmations,
+                    receivables, financialAdjustments, canonicalOutbox, changeFeed, maps, clock, objectMapper,
+                    walletTenderEnabled, walletRefundBalances, 3);
         }
         public Bindings {
             if (customerAccounts == null || customerAddresses == null || sellableSkus == null
@@ -65,6 +80,9 @@ public interface TenantSalesCommitmentCompositionFactory {
                     || inventoryBacking == null || canonicalOutbox == null || changeFeed == null
                     || clock == null || objectMapper == null) {
                 throw new IllegalArgumentException("Tenant Sales Commitment bindings are incomplete");
+            }
+            if (minimumDeliveryLeadDays < 0) {
+                throw new IllegalArgumentException("Minimum delivery lead time cannot be negative");
             }
             if (walletTenderEnabled && walletReservations == null) {
                 throw new IllegalArgumentException("Tenant Buyer wallet commands are required when wallet tender is enabled");

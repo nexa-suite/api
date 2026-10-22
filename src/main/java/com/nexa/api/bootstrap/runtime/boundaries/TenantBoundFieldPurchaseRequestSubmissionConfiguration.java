@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.salescommitment.application.purchaserequest.port.FieldPurchaseRequestSubmissionUseCase;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -18,7 +19,8 @@ public class TenantBoundFieldPurchaseRequestSubmissionConfiguration {
     @Primary
     FieldPurchaseRequestSubmissionUseCase tenantBoundFieldPurchaseRequestSubmissionUseCase(
             TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
             TenantSalesCommitmentCompositionProvider compositions) {
-        return new TenantBoundFieldPurchaseRequestSubmissionUseCase(expiryPolicies, compositions);
+        return new TenantBoundFieldPurchaseRequestSubmissionUseCase(expiryPolicies, deliveryLeadTimes, compositions);
     }
 }
