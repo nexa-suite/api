@@ -78,10 +78,8 @@ public class CatalogQueryController {
 	public CatalogPageResponse list(@RequestAttribute(value = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext", required = false) CurrentAccessContext context,
 			@Valid @ModelAttribute CatalogQueryParameters parameters) {
 		if (context == null) throw new AccessDeniedException("Catalog access context is required");
-		TenantCatalogHttpReadPort tenantRead = tenantCatalogReads == null ? null : tenantCatalogReads.getIfAvailable();
-		if (tenantRead != null) return responseMapper.toPage(tenantRead.list(context, parameters.toCriteria()));
-		CatalogScope scope = scope(context);
-		return responseMapper.toPage(listCatalogItems.list(scope, parameters.toCriteria()));
+		return CatalogHttpSupport.tenantCatalogReadRequest(context, tenantCatalogReads,
+				tenantRead -> responseMapper.toPage(tenantRead.list(context, parameters.toCriteria())));
 	}
 
     public record FilterOptionResponse(String id, String name) { }
@@ -90,14 +88,14 @@ public class CatalogQueryController {
     @GetMapping("/filter-options")
     @Operation(operationId = "listVisibleCatalogFilterOptions", summary = "List active taxonomy choices from the authorized catalog")
     public FilterOptionsResponse filterOptions(@RequestAttribute(value = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
-            @org.springframework.web.bind.annotation.RequestParam @Pattern(regexp = "brand|category") String kind,
+            @org.springframework.web.bind.annotation.RequestParam @Pattern(regexp = "brand|category|family|variant") String kind,
             @org.springframework.web.bind.annotation.RequestParam(required = false) @jakarta.validation.constraints.Size(max = 120) String search,
             @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
-            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "100") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(100) int size) {
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "100") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(100) int size,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) java.util.UUID familyId) {
         if (context == null) throw new AccessDeniedException("Catalog access context is required");
-        TenantCatalogHttpReadPort tenantRead = tenantCatalogReads == null ? null : tenantCatalogReads.getIfAvailable();
-        var choices = tenantRead == null ? listCatalogItems.filterOptions(scope(context), kind, search, page, size)
-                : tenantRead.filterOptions(context, kind, search, page, size);
+		var choices = CatalogHttpSupport.tenantCatalogReadRequest(context, tenantCatalogReads,
+				tenantRead -> tenantRead.filterOptions(context, kind, search, page, size, familyId));
         return new FilterOptionsResponse(choices.items().stream().map(value -> new FilterOptionResponse(value.id(), value.name())).toList(), choices.page(), choices.size(), choices.total());
     }
 
@@ -113,10 +111,8 @@ public class CatalogQueryController {
 			@PathVariable @Pattern(regexp = CATALOG_ITEM_ID_PATTERN) String catalogItemId) {
 		try {
 			if (context == null) throw new AccessDeniedException("Catalog access context is required");
-			TenantCatalogHttpReadPort tenantRead = tenantCatalogReads == null ? null : tenantCatalogReads.getIfAvailable();
-			if (tenantRead != null) return responseMapper.toDetail(tenantRead.getByCatalogItemId(context, catalogItemId));
-			CatalogScope scope = scope(context);
-			return responseMapper.toDetail(getCatalogItem.getByCatalogItemId(scope, catalogItemId));
+			return CatalogHttpSupport.tenantCatalogReadRequest(context, tenantCatalogReads,
+					tenantRead -> responseMapper.toDetail(tenantRead.getByCatalogItemId(context, catalogItemId)));
 		} catch (CatalogItemNotFoundException exception) {
 			throw new ApiResourceNotFoundException("catalog item");
 		}

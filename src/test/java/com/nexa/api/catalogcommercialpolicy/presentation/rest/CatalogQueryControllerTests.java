@@ -39,6 +39,35 @@ class CatalogQueryControllerTests {
 	}
 
 	@Test
+	void preservesSelectedTaxonomyIdsAsExactCatalogFilters() {
+		var brandId = java.util.UUID.randomUUID();
+		var categoryId = java.util.UUID.randomUUID();
+		CatalogQueryParameters parameters = new CatalogQueryParameters();
+		parameters.setQ("queso");
+		parameters.setBrandId(brandId);
+		parameters.setCategoryId(categoryId);
+
+		var criteria = parameters.toCriteria();
+
+		assertThat(criteria.query()).isEqualTo("queso");
+		assertThat(criteria.brandId()).isEqualTo(brandId);
+		assertThat(criteria.categoryId()).isEqualTo(categoryId);
+		assertThat(criteria.brand()).isNull();
+		assertThat(criteria.category()).isNull();
+	}
+
+	@Test
+	void rejectsAmbiguousTaxonomyIdAndNameFilters() {
+		CatalogQueryParameters parameters = new CatalogQueryParameters();
+		parameters.setBrand("Marca");
+		parameters.setBrandId(java.util.UUID.randomUUID());
+
+		assertThatThrownBy(parameters::toCriteria)
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessageContaining("either brandId or brand");
+	}
+
+	@Test
 	void translatesApplicationNotFoundToSharedApiNotFound() {
 		ListCatalogItemsUseCase listUseCase = mock(ListCatalogItemsUseCase.class);
 		GetCatalogItemUseCase getUseCase = mock(GetCatalogItemUseCase.class);

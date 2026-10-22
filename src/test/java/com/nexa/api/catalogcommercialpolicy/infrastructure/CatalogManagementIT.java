@@ -136,8 +136,46 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 						.andExpect(status().isOk()).andExpect(jsonPath(totalPath).value(0))
 						.andExpect(jsonPath("$.items").isEmpty());
 			}
+            for (String filter : new String[] {"brand", "category"}) {
+                String value = filter.equals("brand") ? brand : category;
+                mockMvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                                .param(filter, strictTaxonomySubstring(filter, value)))
+                        .andExpect(status().isOk()).andExpect(jsonPath(totalPath).value(0))
+                        .andExpect(jsonPath("$.items").isEmpty());
+            }
 		}
+
+        for (String kind : new String[] {"brand", "category"}) {
+            MvcResult options = mockMvc.perform(get("/api/v1/catalog-items/filter-options")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer)
+                            .param("kind", kind).param("size", "1"))
+                    .andExpect(status().isOk()).andReturn();
+            JsonNode option = JSON.readTree(options.getResponse().getContentAsString()).get("items").get(0);
+            String idParameter = kind + "Id";
+            mockMvc.perform(get("/api/v1/catalog-items")
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer)
+                            .param(idParameter, option.get("id").asText()))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.totalItems", greaterThan(0)));
+        }
 	}
+
+    private String strictTaxonomySubstring(String kind, String name) {
+        String table = switch (kind) {
+            case "brand" -> "brand";
+            case "category" -> "category";
+            default -> throw new IllegalArgumentException("Unsupported catalog taxonomy kind");
+        };
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        for (int length = name.length() - 1; length > 0; length--) {
+            String candidate = name.substring(0, length);
+            Integer exactMatches = tenantJdbc().queryForObject("select count(*) from catalog_management." + table
+                            + " where tenant_id=? and workspace_id=? and lower(name)=lower(?)",
+                    Integer.class, tenant, workspace, candidate);
+            if (exactMatches != null && exactMatches == 0) return candidate;
+        }
+        throw new AssertionError("Expected a strict taxonomy substring that is not another exact name");
+    }
 
 	@Test
 	void ownerReplaysVariantCreationAndRejectsDifferentPayloadForTheSameKey() throws Exception {
@@ -346,17 +384,17 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 		UUID tenant = UUID.fromString(tenantId());
 		UUID workspace = UUID.fromString(workspaceId());
 
-		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id like 'CAT-%'",
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product where tenant_id=? and workspace_id=? and catalog_item_id ~ '^CAT-[0-9]{4}$'",
 				Integer.class, tenant, workspace)).isEqualTo(102);
 		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product_visibility pv "
 				+ "join catalog_management.product p on p.id=pv.product_id and p.tenant_id=pv.tenant_id and p.workspace_id=pv.workspace_id "
-				+ "where pv.tenant_id=? and pv.workspace_id=? and p.catalog_item_id like 'CAT-%' and pv.buyer_visible=false",
+				+ "where pv.tenant_id=? and pv.workspace_id=? and p.catalog_item_id ~ '^CAT-[0-9]{4}$' and pv.buyer_visible=false",
 				Integer.class, tenant, workspace)).isEqualTo(52);
 		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product_price pp "
 				+ "join catalog_management.product p on p.id=pp.product_id and p.tenant_id=pp.tenant_id and p.workspace_id=pp.workspace_id "
-				+ "where pp.tenant_id=? and pp.workspace_id=? and p.catalog_item_id like 'CAT-%' and pp.source_code='PROVISIONAL_REFERENCE'",
+				+ "where pp.tenant_id=? and pp.workspace_id=? and p.catalog_item_id ~ '^CAT-[0-9]{4}$' and pp.source_code='PROVISIONAL_REFERENCE'",
 				Integer.class, tenant, workspace)).isEqualTo(52);
-		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id like 'CAT-%'",
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and legacy_catalog_item_id ~ '^CAT-[0-9]{4}$'",
 				Integer.class, tenant, workspace)).isEqualTo(102);
 		assertThat(tenantJdbc().queryForObject("select pf.family_code from catalog_management.sellable_sku sku "
 				+ "join catalog_management.product_family pf on pf.id=sku.family_id and pf.tenant_id=sku.tenant_id and pf.workspace_id=sku.workspace_id "
