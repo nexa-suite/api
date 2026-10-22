@@ -5,6 +5,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 /** Outbound payment use-case persistence/provider boundary. */
 public interface PaymentPersistencePort {
@@ -23,6 +24,16 @@ public interface PaymentPersistencePort {
                                                  String transferReference, UUID proofEvidenceId);
     PaymentModels.PaymentView reviewBankTransfer(CurrentAccessContext context, UUID paymentId, String action,
                                                  String reason, String idempotencyKey);
+    default List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext context) {
+        throw new UnsupportedOperationException("Buyer saved payment methods are unavailable");
+    }
+    default PaymentModels.BuyerPaymentMethodSetupView createBuyerPaymentMethodSetup(CurrentAccessContext context,
+            String idempotencyKey) { throw new UnsupportedOperationException("Buyer saved payment methods are unavailable"); }
+    default PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext context,
+            UUID paymentMethodId) { throw new UnsupportedOperationException("Buyer saved payment methods are unavailable"); }
+    default void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId) {
+        throw new UnsupportedOperationException("Buyer saved payment methods are unavailable");
+    }
     PaymentModels.WebhookReceipt receiveStripeWebhook(String payload, String signature);
     void processStripeWebhookInbox();
 

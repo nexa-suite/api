@@ -19,6 +19,15 @@ public final class PaymentModels {
                                     String currency, String clientSecret, String publishableKey,
                                     String providerPaymentIntentId, Instant createdAt) { }
 
+    /** Safe card summary only. Provider identifiers and cardholder data stay server-side. */
+    public record BuyerSavedPaymentMethodView(String id, String type, String brand, String last4,
+                                              int expiryMonth, int expiryYear, boolean defaultMethod,
+                                              Instant createdAt) { }
+
+    /** SetupIntent secret is returned only so Stripe.js/native SDK can tokenize card data directly with Stripe. */
+    public record BuyerPaymentMethodSetupView(String setupIntentId, String clientSecret, String status,
+                                              String publishableKey) { }
+
     public record PaymentView(String id, String receivableId, String method, String status, BigDecimal amount,
                               String currency, Instant createdAt, Instant completedAt) { }
 

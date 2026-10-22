@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
+import java.util.List;
 
 /** Application use-case boundary. Financial persistence stays behind the outbound port. */
 @Profile("!test")
@@ -93,6 +94,11 @@ public class PaymentApplicationService implements PaymentPort, PaymentUseCases {
                                                         String reason, String idempotencyKey) {
         return persistence.reviewBankTransfer(context, paymentId, action, reason, idempotencyKey);
     }
+
+    @Override public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext context) { return persistence.listBuyerSavedPaymentMethods(context); }
+    @Override public PaymentModels.BuyerPaymentMethodSetupView createBuyerPaymentMethodSetup(CurrentAccessContext context, String idempotencyKey) { return persistence.createBuyerPaymentMethodSetup(context, idempotencyKey); }
+    @Override public PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext context, UUID paymentMethodId) { return persistence.setBuyerSavedPaymentMethodDefault(context, paymentMethodId); }
+    @Override public void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId) { persistence.removeBuyerSavedPaymentMethod(context, paymentMethodId); }
 
     @Override
     public PaymentModels.WebhookReceipt receiveStripeWebhook(String payload, String signature) {

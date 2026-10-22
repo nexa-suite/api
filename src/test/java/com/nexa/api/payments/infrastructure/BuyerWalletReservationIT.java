@@ -874,9 +874,9 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
 
     private void provisionTenantRoles() throws SQLException {
         try (Connection connection = tenantAdminConnection(); Statement statement = connection.createStatement()) {
-            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN PASSWORD '" + MIGRATOR_PASSWORD
+            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN NOINHERIT PASSWORD '" + MIGRATOR_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
-            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN PASSWORD '" + RUNTIME_PASSWORD
+            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN NOINHERIT PASSWORD '" + RUNTIME_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("CREATE ROLE " + POLICY_WRITER + " LOGIN PASSWORD '" + POLICY_WRITER_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");

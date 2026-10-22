@@ -25,6 +25,7 @@ public final class StripePaymentWebhookSignatureVerifierAdapter implements Payme
         StripePaymentProvider.StripeWebhookEvent event = provider.verifyWebhook(payload, signature);
         return event == null ? null : new VerifiedEvent(event.eventId(), event.eventType(), event.paymentIntentId(),
                 event.paymentStatus(), event.amountMinor(), event.currency(), event.metadata().get(PAYMENT_ROUTE),
-                event.metadata().get(WALLET_RECHARGE));
+                event.metadata().get(WALLET_RECHARGE), event.setupIntentId(), event.providerCustomerId(),
+                event.providerPaymentMethodId(), event.metadata());
     }
 }
