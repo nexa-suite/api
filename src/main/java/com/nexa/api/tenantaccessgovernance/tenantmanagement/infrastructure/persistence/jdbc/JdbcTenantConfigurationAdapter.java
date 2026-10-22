@@ -6,6 +6,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantExternalConfigurationSource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationLegalAddress;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationProfile;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.ReferencePlanAssignment;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.RegionalSettings;
@@ -20,6 +21,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.LocalTime;
@@ -46,14 +49,42 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<OrganizationProfile> findOrganizationProfile(String tenantId) {
 		ensureTenantDefaults(tenantId);
-		return jdbc.query("select legal_name,display_name,business_identifier,operation_category,version from tenant_management.organization_settings where tenant_id=?",
-				(rs, row) -> new OrganizationProfile(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getLong(5)), uuid(tenantId)).stream().findFirst();
+		return jdbc.query("select legal_name,display_name,business_identifier,operation_category,version,ruc,"
+				+ "legal_address_country_code,legal_address_line,legal_address_department_code,legal_address_province_code,"
+				+ "legal_address_district_code,legal_address_road_type,legal_address_street_name,legal_address_street_number,"
+				+ "legal_address_interior,legal_address_postal_code,legal_address_reference "
+				+ "from tenant_management.organization_settings where tenant_id=?",
+				(rs, row) -> new OrganizationProfile(rs.getString("legal_name"), rs.getString("display_name"),
+						rs.getString("business_identifier"), rs.getString("operation_category"), rs.getLong("version"),
+						rs.getString("ruc"), legalAddress(rs)), uuid(tenantId)).stream().findFirst();
 	}
 
 	@Override
 	public int updateOrganizationProfile(String tenantId, OrganizationProfile profile) {
-		return jdbc.update("update tenant_management.organization_settings set legal_name=?,display_name=?,business_identifier=?,operation_category=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and version=?",
-				profile.legalName(), profile.displayName(), profile.businessIdentifier(), profile.operationCategory(), uuid(tenantId), profile.version());
+		OrganizationLegalAddress address = profile.legalAddress();
+		return jdbc.update("update tenant_management.organization_settings set legal_name=?,display_name=?,business_identifier=?,operation_category=?,ruc=?,"
+				+ "legal_address_country_code=?,legal_address_line=?,legal_address_department_code=?,legal_address_province_code=?,"
+				+ "legal_address_district_code=?,legal_address_road_type=?,legal_address_street_name=?,legal_address_street_number=?,"
+				+ "legal_address_interior=?,legal_address_postal_code=?,legal_address_reference=?,updated_at=current_timestamp,version=version+1 "
+				+ "where tenant_id=? and version=?",
+				profile.legalName(), profile.displayName(), profile.businessIdentifier(), profile.operationCategory(), profile.ruc(),
+				address == null ? null : address.countryCode(), address == null ? null : address.addressLine(),
+				address == null ? null : address.departmentCode(), address == null ? null : address.provinceCode(),
+				address == null ? null : address.districtCode(), address == null ? null : address.roadType(),
+				address == null ? null : address.streetName(), address == null ? null : address.streetNumber(),
+				address == null ? null : address.interior(), address == null ? null : address.postalCode(),
+				address == null ? null : address.reference(), uuid(tenantId), profile.version());
+	}
+
+	private static OrganizationLegalAddress legalAddress(ResultSet rs) throws SQLException {
+		String countryCode = rs.getString("legal_address_country_code");
+		if (countryCode == null) return null;
+		return new OrganizationLegalAddress(countryCode, rs.getString("legal_address_line"),
+				rs.getString("legal_address_department_code"), rs.getString("legal_address_province_code"),
+				rs.getString("legal_address_district_code"), rs.getString("legal_address_road_type"),
+				rs.getString("legal_address_street_name"), rs.getString("legal_address_street_number"),
+				rs.getString("legal_address_interior"), rs.getString("legal_address_postal_code"),
+				rs.getString("legal_address_reference"));
 	}
 
 	@Override
@@ -88,8 +119,8 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<OperationalSettings> findOperationalSettings(String workspaceId) {
 		ensureWorkspaceDefaults(workspaceId);
-		return jdbc.query("select warehouse_preference_strategy,order_cutoff_policy,fulfillment_defaults,inventory_visibility_policy,buyer_availability_policy,operating_hours_start,operating_hours_end,order_cutoff_minutes,thermal_log_required,version from tenant_management.operational_settings where workspace_id=?",
-				(rs, row) -> new OperationalSettings(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getTime(6).toLocalTime(), rs.getTime(7).toLocalTime(), rs.getInt(8), rs.getBoolean(9), rs.getLong(10)), uuid(workspaceId)).stream().findFirst();
+		return jdbc.query("select warehouse_preference_strategy,order_cutoff_policy,fulfillment_defaults,inventory_visibility_policy,buyer_availability_policy,operating_hours_start,operating_hours_end,order_cutoff_minutes,thermal_log_required,minimum_delivery_lead_days,version from tenant_management.operational_settings where workspace_id=?",
+				(rs, row) -> new OperationalSettings(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getTime(6).toLocalTime(), rs.getTime(7).toLocalTime(), rs.getInt(8), rs.getBoolean(9), rs.getInt(10), rs.getLong(11)), uuid(workspaceId)).stream().findFirst();
 	}
 
 	@Override
@@ -115,9 +146,33 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	}
 
 	@Override
+	@Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+	public Optional<OperationalSettingsAccess.DeliveryLeadTimePolicySource> findDeliveryLeadTimePolicy(
+			String tenantId, String workspaceId) {
+		return jdbc.query("select workspace.id as workspace_id, workspace.tenant_id as tenant_id, "
+				+ "settings.workspace_id as settings_workspace_id, settings.minimum_delivery_lead_days as lead_days, "
+				+ "settings.version as source_version "
+				+ "from tenant_management.workspace workspace "
+				+ "left join tenant_management.operational_settings settings on settings.workspace_id=workspace.id "
+				+ "where workspace.tenant_id=? and workspace.id=?",
+				(rs, row) -> {
+					boolean present = rs.getObject("settings_workspace_id") != null;
+					return new OperationalSettingsAccess.DeliveryLeadTimePolicySource(
+							new TenantId(rs.getObject("tenant_id", UUID.class)),
+							new WorkspaceId(rs.getObject("workspace_id", UUID.class)),
+							present ? OperationalSettingsAccess.SourceState.PRESENT
+									: OperationalSettingsAccess.SourceState.CONFIRMED_ABSENT,
+							present ? rs.getLong("source_version") : null,
+							present ? rs.getInt("lead_days")
+									: OperationalSettings.DEFAULT_MINIMUM_DELIVERY_LEAD_DAYS);
+
+				}, uuid(tenantId), uuid(workspaceId)).stream().findFirst();
+	}
+
+	@Override
 	public int updateOperationalSettings(String workspaceId, OperationalSettings settings) {
-		return jdbc.update("update tenant_management.operational_settings set warehouse_preference_strategy=?,order_cutoff_policy=?,fulfillment_defaults=?,inventory_visibility_policy=?,buyer_availability_policy=?,operating_hours_start=?,operating_hours_end=?,order_cutoff_minutes=?,thermal_log_required=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
-				settings.defaultWarehouseSelectionPolicy(), settings.orderCutoffPolicy(), settings.fulfillmentDefaults(), settings.inventoryVisibilityPolicy(), settings.buyerAvailabilityPolicy(), Time.valueOf(settings.operatingHoursStart()), Time.valueOf(settings.operatingHoursEnd()), settings.orderCutoffMinutes(), settings.thermalLogRequired(), uuid(workspaceId), settings.version());
+		return jdbc.update("update tenant_management.operational_settings set warehouse_preference_strategy=?,order_cutoff_policy=?,fulfillment_defaults=?,inventory_visibility_policy=?,buyer_availability_policy=?,operating_hours_start=?,operating_hours_end=?,order_cutoff_minutes=?,thermal_log_required=?,minimum_delivery_lead_days=?,updated_at=current_timestamp,version=version+1 where workspace_id=? and version=?",
+				settings.defaultWarehouseSelectionPolicy(), settings.orderCutoffPolicy(), settings.fulfillmentDefaults(), settings.inventoryVisibilityPolicy(), settings.buyerAvailabilityPolicy(), Time.valueOf(settings.operatingHoursStart()), Time.valueOf(settings.operatingHoursEnd()), settings.orderCutoffMinutes(), settings.thermalLogRequired(), settings.minimumDeliveryLeadDays(), uuid(workspaceId), settings.version());
 	}
 
 	@Override

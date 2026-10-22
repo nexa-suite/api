@@ -82,7 +82,19 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         mockMvc.perform(get("/api/v1/settings/regional").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/settings/units").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/settings/security").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/access-matrix").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
+        tools.jackson.databind.JsonNode accessMatrix = json(mockMvc.perform(get("/api/v1/access-matrix")
+                        .header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn());
+        tools.jackson.databind.JsonNode operationsManager = null;
+        for (tools.jackson.databind.JsonNode entry : accessMatrix) {
+            if ("BUSINESS_OPERATIONS_MANAGER".equals(entry.path("role").asText())) {
+                operationsManager = entry;
+                break;
+            }
+        }
+        assertThat(operationsManager).isNotNull();
+        assertThat(operationsManager.path("permissions").size()).isZero();
+        assertThat(operationsManager.path("permissionKeys").toString())
+                .contains("catalog.read", "client.credit.configuration.manage", "payment.reconcile");
         mockMvc.perform(get("/api/v1/plan-usage").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
         mockMvc.perform(patch("/api/v1/settings/regional").header("Authorization", "Bearer " + owner).header("If-Match", "\"0\"")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"timezone\":\"UTC\",\"language\":\"xx\",\"currency\":\"USD\",\"countryRegion\":\"PE\",\"dateTimePolicy\":\"LOCALE\",\"locale\":\"en-US\"}"))

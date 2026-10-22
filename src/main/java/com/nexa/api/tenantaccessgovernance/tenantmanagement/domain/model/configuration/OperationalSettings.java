@@ -10,7 +10,18 @@ import java.util.Set;
 public record OperationalSettings(String defaultWarehouseSelectionPolicy, String orderCutoffPolicy,
 		String fulfillmentDefaults, String inventoryVisibilityPolicy, String buyerAvailabilityPolicy,
 		LocalTime operatingHoursStart, LocalTime operatingHoursEnd, int orderCutoffMinutes,
-		boolean thermalLogRequired, long version) {
+		boolean thermalLogRequired, int minimumDeliveryLeadDays, long version) {
+	public static final int DEFAULT_MINIMUM_DELIVERY_LEAD_DAYS = 3;
+
+	public OperationalSettings(String defaultWarehouseSelectionPolicy, String orderCutoffPolicy,
+			String fulfillmentDefaults, String inventoryVisibilityPolicy, String buyerAvailabilityPolicy,
+			LocalTime operatingHoursStart, LocalTime operatingHoursEnd, int orderCutoffMinutes,
+			boolean thermalLogRequired, long version) {
+		this(defaultWarehouseSelectionPolicy, orderCutoffPolicy, fulfillmentDefaults, inventoryVisibilityPolicy,
+				buyerAvailabilityPolicy, operatingHoursStart, operatingHoursEnd, orderCutoffMinutes,
+				thermalLogRequired, DEFAULT_MINIMUM_DELIVERY_LEAD_DAYS, version);
+	}
+
 	public OperationalSettings {
 		defaultWarehouseSelectionPolicy = normalized(defaultWarehouseSelectionPolicy, Set.of("MANUAL", "PREFERRED"), "warehouse selection policy");
 		orderCutoffPolicy = normalized(orderCutoffPolicy, Set.of("WORKSPACE_HOURS", "FIXED_TIME"), "order cutoff policy");
@@ -21,6 +32,9 @@ public record OperationalSettings(String defaultWarehouseSelectionPolicy, String
 		operatingHoursEnd = Objects.requireNonNull(operatingHoursEnd, "Operating end is required");
 		if (!operatingHoursEnd.isAfter(operatingHoursStart)) throw new TenantManagementInvariantViolation("Operating hours are invalid");
 		if (orderCutoffMinutes < 0 || orderCutoffMinutes > 1440) throw new TenantManagementInvariantViolation("Order cutoff is invalid");
+		if (minimumDeliveryLeadDays < 0) {
+			throw new TenantManagementInvariantViolation("Minimum delivery lead days are invalid");
+		}
 	}
 
 	private static String normalized(String value, Set<String> allowed, String label) {

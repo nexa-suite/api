@@ -5,12 +5,37 @@ import java.time.LocalTime;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 public final class TenantConfigurationModels {
 	private TenantConfigurationModels() { }
 
-	public record OrganizationProfileView(String legalName, String displayName, String businessIdentifier,
-			String operationCategory, long version) { }
+	public record OrganizationProfileView(String legalName, String displayName,
+			@Schema(description = "Legacy free-form identifier retained for existing clients; it is not interpreted as a RUC.")
+			String businessIdentifier,
+			String operationCategory, long version,
+			@Schema(description = "Peruvian RUC syntax: exactly 11 digits. Format only; no legal or tax registry verification is performed.", example = "20123456789")
+			String ruc,
+			@Schema(description = "Structured company legal address. Null when not configured.")
+			OrganizationLegalAddressView legalAddress) {
+		public OrganizationProfileView(String legalName, String displayName, String businessIdentifier,
+				String operationCategory, long version) {
+			this(legalName, displayName, businessIdentifier, operationCategory, version, null, null);
+		}
+	}
+
+	@Schema(description = "Structured Tenant company legal address. Peru geography codes are checked for format and hierarchy only; no legal or registry verification is performed.")
+	public record OrganizationLegalAddressView(
+			@Schema(description = "Two-letter country code.", example = "PE") String countryCode,
+			@Schema(description = "Primary address line.", example = "Av. Ejemplo 123") String addressLine,
+			@Schema(description = "Optional two-digit Peru department code.", example = "15") String departmentCode,
+			@Schema(description = "Optional four-digit Peru province code beginning with departmentCode.", example = "1501") String provinceCode,
+			@Schema(description = "Optional six-digit Peru district code beginning with provinceCode.", example = "150101") String districtCode,
+			String roadType, String streetName, String streetNumber, String interior, String postalCode, String reference) { }
+
+	public record OrganizationProfileUpdate(String legalName, String displayName, String businessIdentifier,
+			String operationCategory, boolean rucProvided, String ruc, boolean legalAddressProvided,
+			OrganizationLegalAddressView legalAddress) { }
 
 	public record WorkspaceSettingsView(String workspaceId, String defaultWorkspaceBehavior,
 			String warehousePreferenceStrategy, long version) { }
@@ -24,7 +49,20 @@ public final class TenantConfigurationModels {
 	public record OperationalSettingsView(String workspaceId, String defaultWarehouseSelectionPolicy,
 			String orderCutoffPolicy, String fulfillmentDefaults, String inventoryVisibilityPolicy,
 			String buyerAvailabilityPolicy, LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
-			int orderCutoffMinutes, boolean thermalLogRequired, long version) { }
+			int orderCutoffMinutes, boolean thermalLogRequired,
+			@Schema(description = "Minimum calendar days between order placement and requested delivery. Non-negative; default 3.")
+			int minimumDeliveryLeadDays, long version) {
+		public OperationalSettingsView(String workspaceId, String defaultWarehouseSelectionPolicy,
+				String orderCutoffPolicy, String fulfillmentDefaults, String inventoryVisibilityPolicy,
+				String buyerAvailabilityPolicy, LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
+				int orderCutoffMinutes, boolean thermalLogRequired, long version) {
+			this(workspaceId, defaultWarehouseSelectionPolicy, orderCutoffPolicy, fulfillmentDefaults,
+					inventoryVisibilityPolicy, buyerAvailabilityPolicy, operatingHoursStart, operatingHoursEnd,
+					orderCutoffMinutes, thermalLogRequired,
+					com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings.DEFAULT_MINIMUM_DELIVERY_LEAD_DAYS,
+					version);
+		}
+	}
 
 	public record NotificationPreferenceView(String eventCategory, String channel, boolean enabled, long version) { }
 
@@ -44,7 +82,16 @@ public final class TenantConfigurationModels {
 	public record PlanOptionView(String planCode, BigDecimal monthlyPrice, int seatLimit, int workspaceLimit,
 			int transactionLimit, boolean current) { }
 
-	public record AccessMatrixEntry(String role, Set<String> permissions) {
-		public AccessMatrixEntry { permissions = Set.copyOf(permissions); }
+	public record AccessMatrixEntry(
+			@Schema(description = "Built-in membership role. This list does not include tenant-defined role definitions.")
+			String role,
+			@Schema(deprecated = true, description = "Legacy permission codes retained for compatibility. They may differ from typed permission keys and must not be used as an effective-access decision.")
+			Set<String> permissions,
+			@Schema(description = "Canonical PermissionKey codes declared by the built-in role. Informational template only; effective access also depends on membership, surface, tenant/workspace, object relationship, grants, and legacy guards.")
+			Set<String> permissionKeys) {
+		public AccessMatrixEntry {
+			permissions = Set.copyOf(permissions);
+			permissionKeys = Set.copyOf(permissionKeys);
+		}
 	}
 }
