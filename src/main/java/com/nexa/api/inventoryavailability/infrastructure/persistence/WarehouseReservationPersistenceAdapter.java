@@ -5,6 +5,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommerc
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
+import com.nexa.api.shared.application.port.out.TenantBusinessDataBindingGuard;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
@@ -38,6 +39,7 @@ import static com.nexa.api.inventoryavailability.infrastructure.persistence.Ware
 public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         implements WarehouseReservationPersistencePort {
     private final WorkspaceDirectory workspaces;
+    private final TenantBusinessDataBindingGuard databaseBindings;
     private static final Logger LOGGER = LoggerFactory.getLogger(WarehouseReservationPersistenceAdapter.class);
 
     @Autowired
@@ -48,10 +50,32 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
             org.springframework.transaction.PlatformTransactionManager transactionManager,
             WarehouseOperationalSettingsPort operationalSettings,
             InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
-            WorkspaceDirectory workspaces, WarehouseObjectAccess warehouseAccess) {
+            WorkspaceDirectory workspaces, WarehouseObjectAccess warehouseAccess,
+            TenantBusinessDataBindingGuard databaseBindings) {
         super(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource, fulfillmentSource,
                 warehouseAccess);
         this.workspaces = workspaces;
+        this.databaseBindings = databaseBindings;
+    }
+
+    public WarehouseReservationPersistenceAdapter(
+            JdbcTemplate jdbc,
+            ChangeEventPersistencePort changeFeed,
+            SellableSkuQuery catalog,
+            org.springframework.transaction.PlatformTransactionManager transactionManager,
+            WarehouseOperationalSettingsPort operationalSettings,
+            InventoryCommercialSource commercialSource, InventoryFulfillmentSource fulfillmentSource,
+            WorkspaceDirectory workspaces, WarehouseObjectAccess warehouseAccess) {
+        this(jdbc, changeFeed, catalog, transactionManager, operationalSettings, commercialSource,
+                fulfillmentSource, workspaces, warehouseAccess, null);
+    }
+
+    /** Minimal composition used only while the verified Tenant expiry worker is routed. */
+    public WarehouseReservationPersistenceAdapter(JdbcTemplate jdbc, ChangeEventPersistencePort changeFeed,
+            org.springframework.transaction.PlatformTransactionManager transactionManager) {
+        super(jdbc, changeFeed, null, transactionManager, null, null, null, null);
+        this.workspaces = null;
+        this.databaseBindings = null;
     }
 
     @Transactional(readOnly = true)
@@ -203,8 +227,8 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     public void expireReservations() {
-        if (transactionTemplate == null) {
-            throw new IllegalStateException("Workspace enumeration requires a transaction manager");
+        if (transactionTemplate == null || workspaces == null || databaseBindings == null) {
+            throw new IllegalStateException("Central reservation expiry requires scope and binding readers");
         }
         try {
             UUID afterTenantId = null;
@@ -224,14 +248,14 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
                 for (WorkspaceDirectory.Scope scope : scopes) {
                     RlsRequestScope.set(scope.tenantId(), scope.workspaceId());
                     try {
-                        // Do not retain lot locks from one reservation while the batch
-                        // advances to another. Each candidate claims its reservation
-                        // row and releases every lot lock at the end of its own tx.
-                        List<ScopeId> expired = jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100",
-                                (rs, row) -> new ScopeId(scope.tenantId(), scope.workspaceId(), rs.getObject(1, UUID.class)), scope.tenantId(), scope.workspaceId());
-                        for (ScopeId candidate : expired) {
-                            transactionTemplate.executeWithoutResult(status -> expireOne(candidate));
+                        // Any binding, including a suspended or incomplete one, owns this
+                        // Tenant's business route. Never fall back to central business data.
+                        if (databaseBindings.hasAnyBinding(scope.tenantId())) {
+                            LOGGER.debug("Central reservation expiry skipped bound Tenant scope tenantId={} workspaceId={}",
+                                    scope.tenantId(), scope.workspaceId());
+                            continue;
                         }
+                        expireLegacyCentralScope(scope.tenantId(), scope.workspaceId());
                     } catch (RuntimeException exception) {
                         LOGGER.error("Warehouse reservation expiration failed tenantId={} workspaceId={}", scope.tenantId(), scope.workspaceId(), exception);
                     } finally {
@@ -246,6 +270,48 @@ public class WarehouseReservationPersistenceAdapter extends WarehouseJdbcSupport
         } finally {
             RlsRequestScope.clear();
         }
+    }
+
+    /** Expires at most one bounded batch inside an already verified Tenant/Workspace route. */
+    public void expireReservationsForScope(UUID tenantId, UUID workspaceId) {
+        if (transactionTemplate == null) {
+            throw new IllegalStateException("Tenant reservation expiry requires a transaction manager");
+        }
+        if (tenantId == null || workspaceId == null) {
+            throw new IllegalArgumentException("Exact Tenant and Workspace scope are required");
+        }
+        RlsRequestScope.Scope scope = RlsRequestScope.current();
+        if (scope == null || !tenantId.equals(scope.tenantId()) || !workspaceId.equals(scope.workspaceId())) {
+            throw new IllegalStateException("Tenant reservation expiry requires its exact routed RLS scope");
+        }
+        expireScope(tenantId, workspaceId);
+    }
+
+    private void expireScope(UUID tenantId, UUID workspaceId) {
+        // Do not retain lot locks from one reservation while the batch advances to
+        // another. Each candidate claims its reservation row and releases all lot
+        // locks at the end of its own transaction.
+        List<ScopeId> expired = expiredReservationCandidates(tenantId, workspaceId);
+        for (ScopeId candidate : expired) {
+            transactionTemplate.executeWithoutResult(status -> expireOne(candidate));
+        }
+    }
+
+    private void expireLegacyCentralScope(UUID tenantId, UUID workspaceId) {
+        for (ScopeId candidate : expiredReservationCandidates(tenantId, workspaceId)) {
+            transactionTemplate.executeWithoutResult(status -> {
+                // Binding creation references tenant.id, so its FK key-share lock
+                // conflicts with this lock. Keep the absence check and central
+                // mutation in the same transaction to close the provisioning race.
+                if (!databaseBindings.lockAndCheckNoBinding(tenantId)) return;
+                expireOne(candidate);
+            });
+        }
+    }
+
+    private List<ScopeId> expiredReservationCandidates(UUID tenantId, UUID workspaceId) {
+        return jdbc.query("select id from warehouse.inventory_reservation where tenant_id=? and workspace_id=? and status='RESERVED' and expires_at<current_timestamp order by expires_at,id limit 100",
+                (rs, row) -> new ScopeId(tenantId, workspaceId, rs.getObject(1, UUID.class)), tenantId, workspaceId);
     }
 
     private void expireOne(ScopeId candidate) {
