@@ -12,6 +12,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurity
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
@@ -197,6 +198,13 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(AccessDeniedException.class)
 	public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
+	}
+
+	@ExceptionHandler(TenantBusinessDatabaseUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleTenantBusinessDatabaseUnavailable(
+			TenantBusinessDatabaseUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant business data is temporarily unavailable", request);
 	}
 
 	@ExceptionHandler(OrganizationPreconditionRequiredException.class)
