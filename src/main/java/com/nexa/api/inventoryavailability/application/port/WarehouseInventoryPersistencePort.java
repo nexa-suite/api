@@ -11,6 +11,8 @@ public interface WarehouseInventoryPersistencePort {
     WarehouseOperationsService.Page<WarehouseOperationsService.LotSummary> lots(CurrentAccessContext context, String catalogItemId, String warehouseId, String zoneId, String status, int page, int size, String sort);
     WarehouseOperationsService.Page<WarehouseOperationsService.MovementSummary> movements(CurrentAccessContext context, String lotId, int page, int size, String sort);
     WarehouseOperationsService.LotSummary lot(CurrentAccessContext context, String id);
+    WarehouseOperationsService.TemperatureReadingsSummary temperatureReadings(CurrentAccessContext context,
+            String lotId, int page, int size);
     WarehouseOperationsService.LotSummary receive(CurrentAccessContext context, WarehouseOperationsService.Receipt receipt, String key, String correlation);
     WarehouseOperationsService.LotSummary adjust(CurrentAccessContext context, String lotId, BigDecimal quantity, boolean inbound, String reason, long expected, String key, String correlation);
     WarehouseOperationsService.LotSummary waste(CurrentAccessContext context, String lotId, BigDecimal quantity, String reason, long expected, String key, String correlation);
