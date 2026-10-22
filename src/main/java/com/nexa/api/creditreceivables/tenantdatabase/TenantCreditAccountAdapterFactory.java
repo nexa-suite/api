@@ -5,6 +5,7 @@ import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigu
 import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigurationQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
+import com.nexa.api.creditreceivables.application.publicapi.CreditEligibilitySource;
 import com.nexa.api.creditreceivables.application.publicapi.CreditPaymentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.CreditReservationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
@@ -27,6 +28,7 @@ public interface TenantCreditAccountAdapterFactory {
                                                 BusinessTraceabilityCommands tenantTraceability);
 
     Bindings bindTo(JdbcTemplate tenantJdbc, CustomerAccountQuery tenantCustomerAccounts,
+                    CreditEligibilitySource tenantCreditEligibility,
                     ReceivablePaymentAccess tenantReceivablePaymentAccess,
                     BusinessTraceabilityCommands tenantTraceability, CanonicalOutboxPort tenantCanonicalOutbox,
                     FinancialAdjustmentSource tenantFinancialAdjustmentSource);
@@ -34,7 +36,7 @@ public interface TenantCreditAccountAdapterFactory {
     default CreditExposureUseCase createCreditExposureUseCase(Bindings bindings) {
         if (bindings == null) throw new IllegalArgumentException("Tenant Credit bindings are required");
         return new com.nexa.api.creditreceivables.application.service.CreditExposureApplicationService(
-                bindings.customerAccounts(), bindings.creditExposure());
+                bindings.customerAccounts(), bindings.creditEligibility(), bindings.creditExposure());
     }
 
     default FinancialAdjustmentUseCase createFinancialAdjustmentUseCase(Bindings bindings, Clock clock) {
@@ -54,7 +56,8 @@ public interface TenantCreditAccountAdapterFactory {
         }
     }
 
-    record Bindings(CustomerAccountQuery customerAccounts, CreditExposureQuery creditExposure,
+    record Bindings(CustomerAccountQuery customerAccounts, CreditEligibilitySource creditEligibility,
+                    CreditExposureQuery creditExposure,
                     CreditReservationCommands creditReservations,
                     ReceivableCommands receivables, ReceivablePaymentAccess receivablePaymentAccess,
                     ReceivableApplicationCommands receivableApplications, CreditPaymentCommands creditPayments,
@@ -62,7 +65,8 @@ public interface TenantCreditAccountAdapterFactory {
                     CreditAccountConfigurationQuery creditAccountConfigurations,
                     CreditAccountConfigurationCommands creditAccountConfigurationCommands) {
         public Bindings {
-            if (customerAccounts == null || creditExposure == null || creditReservations == null || receivables == null
+            if (customerAccounts == null || creditEligibility == null || creditExposure == null
+                    || creditReservations == null || receivables == null
                     || receivablePaymentAccess == null || receivableApplications == null || creditPayments == null
                     || financialAdjustments == null
                     || creditAccountConfigurations == null || creditAccountConfigurationCommands == null) {

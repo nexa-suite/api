@@ -2,7 +2,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivablesUnavailableException;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
@@ -20,6 +20,7 @@ import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -64,7 +65,7 @@ public final class TenantBoundCreditReceivablesUseCase
     public CreditExposureUseCase.CreditExposureView read(CurrentAccessContext context, String clientAccountId,
             String currency) {
         requireScope(context);
-        context.requirePermission(PermissionKey.CLIENT_READ);
+        requireWorkforceCreditRead(context);
         return inTenant(context, bindings -> creditAdapters.createCreditExposureUseCase(bindings)
                 .read(context, clientAccountId, currency));
     }
@@ -109,7 +110,8 @@ public final class TenantBoundCreditReceivablesUseCase
         PaymentConfirmationQuery payments = Objects.requireNonNull(paymentConfirmations.bindTo(jdbc, receivables),
                 "Tenant Payment factory returned no confirmation query");
         TenantBusinessTraceabilityBindingsFactory.Bindings traceability = traceabilityBindings.bindTo(jdbc);
-        return Objects.requireNonNull(creditAdapters.bindTo(jdbc, accounts, receivables,
+        return Objects.requireNonNull(creditAdapters.bindTo(jdbc, accounts,
+                TenantCreditEligibilitySourceFactory.bindTo(accounts), receivables,
                 traceability.commands(), traceability.canonicalOutbox(), adjustmentSource(sales, payments)),
                 "Tenant Credit factory returned no bindings");
     }
@@ -137,6 +139,22 @@ public final class TenantBoundCreditReceivablesUseCase
         RlsRequestScope.Scope current = RlsRequestScope.current();
         if (current == null || !tenantId.equals(current.tenantId()) || !workspaceId.equals(current.workspaceId())) {
             throw new AccessPolicyViolation("Credit and receivables require the matching verified Tenant and Workspace scope");
+        }
+    }
+
+    private static void requireWorkforceCreditRead(CurrentAccessContext context) {
+        context.requireSurface(Surface.PLATFORM);
+        if (context.hasRole(MembershipRole.BUYER)) {
+            throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
+        }
+        if (context.hasRole(MembershipRole.TENANT_ADMIN)
+                && !context.hasRole(MembershipRole.COMPANY_OWNER)
+                && !context.hasRole(MembershipRole.SALES)
+                && !context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER)) {
+            throw new AccessPolicyViolation("Tenant administration does not grant access to Buyer account data");
+        }
+        if (!context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER)) {
+            context.requirePermission(PermissionKey.CLIENT_READ);
         }
     }
 }
