@@ -45,7 +45,7 @@ public class SystemWorkflowActorBootstrap {
                 String workspace = scope.workspaceId().toString();
                 String tenant = scope.tenantId().toString();
                 String membership = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid", String.class, workspace);
-                int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,?::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, workspace, ACTOR);
+                int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,?::uuid,?::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, tenant, workspace, ACTOR);
                 if (inserted == 1) {
                     jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?::uuid,?::uuid,?::uuid,?::uuid,current_timestamp) on conflict do nothing", membership, tenant, workspace, ROLE);
                     jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?::uuid,?::uuid,?::uuid,0,current_timestamp) on conflict (membership_id) do nothing", membership, tenant, workspace);

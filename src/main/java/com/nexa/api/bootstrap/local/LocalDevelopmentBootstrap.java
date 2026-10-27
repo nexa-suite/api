@@ -81,9 +81,10 @@ public class LocalDevelopmentBootstrap {
 				UUID userId = user(user, now);
 				if (user.roles().contains("BUYER")) buyerUserId = userId;
 				jdbc.update("insert into tenant_management.workspace_membership "
-						+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
+						+ "(id, tenant_id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
 						+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
-						LocalIdentityIds.forMembership(workspaceId, userId), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
+						LocalIdentityIds.forMembership(workspaceId, userId), tenantId, workspaceId, userId,
+						user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
 				UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
 				jdbc.update("delete from tenant_management.membership_role_definition a using tenant_management.role_definition r where a.role_id=r.id and a.membership_id=? and r.tenant_id is null", membershipId);
 				for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) select ?,?,?,r.id,? from tenant_management.role_definition r where r.tenant_id is null and r.code=lower(?) on conflict do nothing", membershipId, tenantId, workspaceId, timestamp(now), role);
@@ -266,9 +267,9 @@ public class LocalDevelopmentBootstrap {
 		UUID membershipId = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid",
 				UUID.class, workspaceId);
 		int inserted = jdbc.update("insert into tenant_management.workspace_membership "
-				+ "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-				+ "values (?,?,?,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) "
-				+ "on conflict (workspace_id,user_id) do nothing", membershipId, workspaceId,
+				+ "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+				+ "values (?,?,?,?,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) "
+				+ "on conflict (workspace_id,user_id) do nothing", membershipId, tenantId, workspaceId,
 				UUID.fromString(SYSTEM_WORKFLOW_ACTOR));
 		if (inserted == 1) {
 			jdbc.update("insert into tenant_management.membership_role_definition "
