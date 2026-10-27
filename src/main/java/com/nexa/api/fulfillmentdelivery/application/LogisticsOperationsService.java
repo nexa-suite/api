@@ -78,7 +78,7 @@ public class LogisticsOperationsService implements com.nexa.api.fulfillmentdeliv
 
     private String readScope(CurrentAccessContext c) {
         if (c.hasRole(MembershipRole.BUYER)) { c.requirePermission(Permission.TRACKING_BUYER_READ); return accounts.findBuyerReference(tenant(c), workspace(c), actor(c)).map(CustomerAccountReference::id).orElseThrow(() -> error("RESOURCE_NOT_FOUND", true)); }
-        /* Company Owner is a governance/commercial role. A legacy sales-read
+        /* Company Owner is a governance/commercial role. Sales order read
          * capability must not widen into the operational dispatch board; only
          * an explicit logistics/fulfillment grant (fixed or custom) can do so. */
         boolean operationalRead = c.allows(PermissionKey.LOGISTICS_READ)
@@ -87,7 +87,7 @@ public class LogisticsOperationsService implements com.nexa.api.fulfillmentdeliv
         if (c.hasRole(MembershipRole.COMPANY_OWNER) && !operationalRead) {
             throw new AccessPolicyViolation("Company Owner does not have operational logistics access");
         }
-        if (c.allows(Permission.SALES_READ) || c.allows(Permission.FULFILLMENT_READ) || c.allows(Permission.LOGISTICS_READ)) return null;
+        if (c.allows(PermissionKey.SALES_ORDER_READ) || c.allows(Permission.FULFILLMENT_READ) || c.allows(Permission.LOGISTICS_READ)) return null;
         throw new AccessPolicyViolation("Logistics access is not available");
     }
     private static void logisticsRead(CurrentAccessContext c) { c.requirePermission(Permission.LOGISTICS_READ); }
@@ -113,12 +113,12 @@ public class LogisticsOperationsService implements com.nexa.api.fulfillmentdeliv
 
     private static DispatchView safe(CurrentAccessContext context, DispatchView value) {
         if (context.hasRole(MembershipRole.BUYER)) return value.buyerSafe();
-        if (context.hasRole(MembershipRole.SALES) || (context.allows(Permission.SALES_READ) && !context.allows(Permission.LOGISTICS_READ) && !context.allows(Permission.FULFILLMENT_READ))) return value.salesSafe();
+        if (context.hasRole(MembershipRole.SALES) || (context.allows(PermissionKey.SALES_ORDER_READ) && !context.allows(Permission.LOGISTICS_READ) && !context.allows(Permission.FULFILLMENT_READ))) return value.salesSafe();
         if ((context.hasRole(MembershipRole.WAREHOUSE) || context.allows(Permission.FULFILLMENT_READ)) && !context.allows(Permission.LOGISTICS_READ)) return value.warehouseSafe();
         return value;
     }
     private static DispatchEventView safeEvent(CurrentAccessContext context, DispatchEventView value) {
-        if (context.hasRole(MembershipRole.BUYER) || context.hasRole(MembershipRole.SALES) || (context.allows(Permission.SALES_READ) && !context.allows(Permission.LOGISTICS_READ) && !context.allows(Permission.FULFILLMENT_READ))) {
+        if (context.hasRole(MembershipRole.BUYER) || context.hasRole(MembershipRole.SALES) || (context.allows(PermissionKey.SALES_ORDER_READ) && !context.allows(Permission.LOGISTICS_READ) && !context.allows(Permission.FULFILLMENT_READ))) {
             String publicType = switch (value.type()) {
                 case "logistics.dispatch.scheduled", "logistics.dispatch.reprogrammed", "DELIVERY_SCHEDULED" -> "DELIVERY_SCHEDULED";
                 case "logistics.dispatch.route-started", "IN_TRANSIT" -> "IN_TRANSIT";

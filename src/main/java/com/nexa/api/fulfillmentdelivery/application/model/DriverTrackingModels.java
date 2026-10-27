@@ -12,8 +12,17 @@ public final class DriverTrackingModels {
     public record DeliveryTracking(UUID deliveryId, Coordinate location) { }
     public record WorkdayCommand(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
                                  UUID workdayId, Long expectedVersion, String action,
-                                 String idempotencyKey, String requestHash, Instant now) { }
+                                 String idempotencyKey, String requestHash, Instant now, boolean locationAvailableAtStart) {
+        public WorkdayCommand(UUID tenantId, UUID workspaceId, UUID actorMembershipId, UUID workdayId,
+                              Long expectedVersion, String action, String idempotencyKey, String requestHash, Instant now) {
+            this(tenantId, workspaceId, actorMembershipId, workdayId, expectedVersion, action, idempotencyKey, requestHash, now, true);
+        }
+    }
     public record SampleCommand(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
                                 UUID workdayId, Coordinate coordinate, Instant now) { }
-    public record DeliveryScope(UUID salesOrderId, UUID driverMembershipId, String status) { }
+    public record DeliveryScope(UUID salesOrderId, UUID driverMembershipId, String status, Instant trackingStartedAt) {
+        public DeliveryScope(UUID salesOrderId, UUID driverMembershipId, String status) {
+            this(salesOrderId, driverMembershipId, status, null);
+        }
+    }
 }

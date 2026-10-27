@@ -34,8 +34,14 @@ public final class CatalogVariantService implements CatalogVariantUseCase {
 
     @Override
     public CatalogVariantModels.VariantView create(CatalogScope scope, UUID familyId, String code, String name, String description) {
-        authorization.require(CatalogPermissions.MANAGE);
+        authorization.require(CatalogPermissions.PRODUCT_MANAGE);
         return port.insert(scope, familyId, code, name, description);
+    }
+
+    @Override
+    public CatalogVariantModels.VariantView create(CatalogScope scope, UUID familyId, String code, String name, String description, String idempotencyKey) {
+        authorization.require(CatalogPermissions.PRODUCT_MANAGE);
+        return port.insert(scope, familyId, code, name, description, idempotencyKey);
     }
 
     @Override

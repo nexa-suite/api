@@ -51,6 +51,11 @@ public final class JdbcTenantCatalogDetailQueryFactory implements TenantCatalogD
 		var itemQuery = new JdbcCatalogItemQueryAdapter(jdbc, availability, offers, clock);
 		CatalogQueryService catalog = new CatalogQueryService(itemQuery, authorization);
 		return new TenantCatalogReadQuery() {
+            @Override
+            public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(UUID tenantId, UUID workspaceId, String kind, String search, int page, int size) {
+                return catalog.filterOptions(scope(tenantId, workspaceId), kind, search, page, size);
+            }
+
 			@Override
 			public CatalogItemDetail getByCatalogItemId(UUID tenantId, UUID workspaceId, String catalogItemId) {
 				return catalog.getByCatalogItemId(scope(tenantId, workspaceId), catalogItemId);

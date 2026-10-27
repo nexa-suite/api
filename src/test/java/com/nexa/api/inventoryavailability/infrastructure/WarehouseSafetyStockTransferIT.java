@@ -28,6 +28,51 @@ class WarehouseSafetyStockTransferIT extends PostgresIntegrationSupport {
     @MockitoBean
     CommercialCommitmentPort commercialCommitmentPort;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"MATCH", "EXPIRY", "PRODUCTION", "UNKNOWN"})
+    void transferMergePreservesLotChronology(String scenario) throws Exception {
+        String suffix = suffix();
+        String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        WarehouseLocation source = warehouse(token, "WH-DATE-S-" + suffix, "Synthetic source");
+        WarehouseLocation destination = warehouse(source.token(), "WH-DATE-D-" + suffix, "Synthetic destination");
+        token = destination.token();
+        String sourceZone = zone(token, source.warehouseId(), "Z-S-" + suffix, "Ambient");
+        String destinationZone = zone(token, destination.warehouseId(), "Z-D-" + suffix, "Ambient");
+        MvcResult sourceReceipt = receive(token, source, "B-DATE-" + suffix, "10", "date-source-" + suffix);
+        MvcResult destinationReceipt = receive(token, destination, "B-DATE-" + suffix, "2", "date-destination-" + suffix);
+        UUID sourceLot = UUID.fromString(json(sourceReceipt).get("id").asText());
+        UUID destinationLot = UUID.fromString(json(destinationReceipt).get("id").asText());
+        tenantJdbc().update("update warehouse.inventory_lot set production_date=date '2020-01-01' where id=?", sourceLot);
+        if (!"UNKNOWN".equals(scenario)) {
+            tenantJdbc().update("update warehouse.inventory_lot set production_date=?::date where id=?",
+                    "PRODUCTION".equals(scenario) ? "2020-01-02" : "2020-01-01", destinationLot);
+        }
+        if ("EXPIRY".equals(scenario)) {
+            tenantJdbc().update("update warehouse.inventory_lot set expiration_date=date '2099-01-02' where id=?", destinationLot);
+        }
+        MvcResult created = createTransfer(token, source, sourceZone, destination, destinationZone, sourceReceipt, "date-transfer-" + suffix);
+        String transferId = json(created).get("id").asText();
+        MvcResult dispatched = mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/dispatches")
+                        .header("Authorization", "Bearer " + token).header("If-Match", created.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "date-dispatch-" + suffix))
+                .andExpect(status().isOk()).andReturn();
+        var receipt = mockMvc.perform(post("/api/v1/inventory/transfers/" + transferId + "/receipts")
+                .header("Authorization", "Bearer " + token).header("If-Match", dispatched.getResponse().getHeader("ETag"))
+                .header("Idempotency-Key", "date-receive-" + suffix));
+        if ("MATCH".equals(scenario)) {
+            receipt.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("RECEIVED"));
+            assertThat(stock(destinationLot.toString())).isEqualByComparingTo("6");
+        } else {
+            receipt.andExpect(status().isBadRequest());
+            assertThat(stock(destinationLot.toString())).isEqualByComparingTo("2");
+            assertThat(tenantJdbc().queryForObject("select status from warehouse.inventory_transfer where id=?",
+                    String.class, UUID.fromString(transferId))).isEqualTo("IN_TRANSIT");
+        }
+        assertThat(stock(sourceLot.toString())).isEqualByComparingTo("6");
+        assertThat(tenantJdbc().queryForObject("select production_date::text from warehouse.inventory_lot where id=?",
+                String.class, destinationLot)).isEqualTo("UNKNOWN".equals(scenario) ? null : "PRODUCTION".equals(scenario) ? "2020-01-02" : "2020-01-01");
+    }
+
     @Test
     void safetyStockIsVersionedAndExcludedFromSellableAvailability() throws Exception {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");

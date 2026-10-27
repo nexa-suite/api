@@ -3,6 +3,7 @@ package com.nexa.api.fulfillmentdelivery.infrastructure.persistence;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.DeliveryRecord;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.EventView;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.Page;
+import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.ReceiptRecord;
 import com.nexa.api.fulfillmentdelivery.application.port.BuyerDeliveryTrackingQueryPort;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import org.springframework.context.annotation.Profile;
@@ -119,6 +120,32 @@ public class JdbcBuyerDeliveryTrackingQueryAdapter implements BuyerDeliveryTrack
                 tenantId, workspaceId, deliveryId));
         events.sort(Comparator.comparing(EventView::occurredAt).thenComparing(EventView::type));
         return List.copyOf(events);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReceiptRecord> receipts(UUID tenantId, UUID workspaceId, UUID deliveryId,
+                                        UUID customerAccountId) {
+        if (tenantId == null || workspaceId == null || deliveryId == null || customerAccountId == null) {
+            return List.of();
+        }
+        return jdbc.query("select receipt.id,receipt.delivery_id,receipt.delivery_attempt_id,"
+                        + "receipt.customer_account_id,receipt.buyer_membership_id,receipt.decision,"
+                        + "receipt.driver_delivered_quantity,receipt.accepted_quantity,receipt.reason,receipt.occurred_at "
+                        + "from logistics.buyer_receipt_fact receipt "
+                        + "join logistics.delivery delivery on delivery.tenant_id=receipt.tenant_id "
+                        + "and delivery.workspace_id=receipt.workspace_id and delivery.id=receipt.delivery_id "
+                        + "join logistics.delivery_attempt attempt on attempt.tenant_id=receipt.tenant_id "
+                        + "and attempt.workspace_id=receipt.workspace_id and attempt.id=receipt.delivery_attempt_id "
+                        + "and attempt.delivery_id=receipt.delivery_id "
+                        + "where receipt.tenant_id=? and receipt.workspace_id=? and receipt.delivery_id=? "
+                        + "and receipt.customer_account_id=? order by receipt.occurred_at,receipt.id",
+                (rs, row) -> new ReceiptRecord(rs.getObject("id", UUID.class),
+                        rs.getObject("delivery_id", UUID.class), rs.getObject("delivery_attempt_id", UUID.class),
+                        rs.getObject("customer_account_id", UUID.class), rs.getObject("buyer_membership_id", UUID.class),
+                        rs.getString("decision"), rs.getBigDecimal("driver_delivered_quantity"),
+                        rs.getBigDecimal("accepted_quantity"), rs.getString("reason"), instant(rs, "occurred_at")),
+                tenantId, workspaceId, deliveryId, customerAccountId);
     }
 
     private Map<UUID, List<DeliveryRecord>> queryDeliveries(UUID tenantId, UUID workspaceId,

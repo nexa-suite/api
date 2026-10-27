@@ -57,10 +57,11 @@ public final class CatalogSkuController {
     @GetMapping("/product-families")
     @Operation(operationId = "listProductFamilies")
     public CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(@RequestAttribute(ACCESS) CurrentAccessContext context,
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search) {
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search,
+            @RequestParam(required = false) String brand, @RequestParam(required = false) String category) {
         return CatalogHttpSupport.tenantRequest(context, tenantRequests,
-                () -> service.families(readScope(context), page, size, search),
-                request -> request.skus().families(request.readScope(), page, size, search));
+                () -> service.families(readScope(context), page, size, search, brand, category),
+                request -> request.skus().families(request.readScope(), page, size, search, brand, category));
     }
     @GetMapping("/product-families/{familyId}")
     @Operation(operationId = "getProductFamily")
@@ -107,8 +108,8 @@ public final class CatalogSkuController {
             @RequestBody VariantRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
         CatalogVariantModels.VariantView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
-                () -> variants.create(CatalogHttpSupport.scope(context), familyId, request.code(), request.name(), request.description()),
-                scoped -> scoped.variants().create(scoped.scope(), familyId, request.code(), request.name(), request.description()));
+                () -> variants.create(CatalogHttpSupport.scope(context), familyId, request.code(), request.name(), request.description(), idempotencyKey),
+                scoped -> scoped.variants().create(scoped.scope(), familyId, request.code(), request.name(), request.description(), idempotencyKey));
         return ResponseEntity.created(URI.create("/api/v1/product-variants/" + value.id())).body(value);
     }
     @GetMapping("/product-variants/{variantId}")

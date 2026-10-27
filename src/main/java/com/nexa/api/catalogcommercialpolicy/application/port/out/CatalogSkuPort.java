@@ -12,6 +12,7 @@ import java.util.UUID;
 
 public interface CatalogSkuPort {
     CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(CatalogScope scope, int page, int size, String search);
+    CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(CatalogScope scope, int page, int size, String search, String brand, String category);
     CatalogSkuModels.FamilyView family(CatalogScope scope, UUID id);
     CatalogSkuModels.FamilyView insertFamily(CatalogScope scope, ProductFamily family);
     CatalogSkuModels.FamilyView changeFamilyStatus(CatalogScope scope, UUID id, String status, long expectedVersion);

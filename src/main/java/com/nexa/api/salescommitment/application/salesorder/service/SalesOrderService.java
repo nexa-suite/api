@@ -248,9 +248,10 @@ public class SalesOrderService implements SalesOrderUseCase, SalesOrderApprovedW
 
 	private String buyerAccount(CurrentAccessContext context) {
 		if (!context.hasRole(MembershipRole.BUYER)) {
-			context.requirePermission(Permission.SALES_READ);
+			context.requirePermission(PermissionKey.SALES_ORDER_READ);
 			return null;
 		}
+		context.requirePermission(PermissionKey.BUYER_ORDER_READ);
 		return accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString())
 				.map(CustomerAccountReference::id).orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("client-account"));
 	}

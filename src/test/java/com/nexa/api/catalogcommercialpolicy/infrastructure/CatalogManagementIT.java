@@ -35,6 +35,7 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 	private UUID buyerPriceList;
 	private UUID buyerPriceListItem;
 	private UUID buyerCustomerTerms;
+	private UUID createdSkuId;
 
 	@AfterEach
 	void removePreviewFixture() {
@@ -54,6 +55,153 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 			tenantJdbc().update("delete from catalog_management.product_visibility where product_id=?", previewProduct);
 			tenantJdbc().update("delete from catalog_management.product where id=?", previewProduct);
 		}
+		if (createdSkuId != null) {
+			UUID tenant = UUID.fromString(tenantId());
+			UUID workspace = UUID.fromString(workspaceId());
+			UUID productId = tenantJdbc().query(
+					"select legacy_product_id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
+					rs -> rs.next() ? rs.getObject("legacy_product_id", UUID.class) : null,
+					tenant, workspace, createdSkuId);
+			tenantJdbc().update("delete from catalog_management.sku_price where tenant_id=? and workspace_id=? and sku_id=?",
+					tenant, workspace, createdSkuId);
+			tenantJdbc().update("delete from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
+					tenant, workspace, createdSkuId);
+			if (productId != null) {
+				tenantJdbc().update("delete from catalog_management.product_price where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product_presentation where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product_visibility where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product_asset_reference where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product where tenant_id=? and workspace_id=? and id=?",
+						tenant, workspace, productId);
+				assertThat(tenantJdbc().queryForObject(
+						"select count(*) from catalog_management.product where tenant_id=? and workspace_id=? and id=?",
+						Integer.class, tenant, workspace, productId)).isZero();
+			}
+			assertThat(tenantJdbc().queryForObject(
+					"select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
+					Integer.class, tenant, workspace, createdSkuId)).isZero();
+			createdSkuId = null;
+		}
+	}
+
+	@Test
+	void newlyCreatedSkuCanBeReadByBuyerOnlyAfterExplicitActivation() throws Exception {
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        var families = mockMvc.perform(get("/api/v1/product-families").param("size", "100")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + owner))
+                .andExpect(status().isOk()).andReturn();
+        String familyId = null;
+        for (JsonNode family : JSON.readTree(families.getResponse().getContentAsString()).get("items")) {
+            if ("ACTIVE".equals(family.get("status").asText())) { familyId = family.get("id").asText(); break; }
+        }
+        assertThat(familyId).isNotNull();
+        var created = mockMvc.perform(post("/api/v1/product-families/" + familyId + "/skus")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skuCode\":\"IT-" + UUID.randomUUID() + "\",\"presentation\":\"Synthetic unit\",\"packagingType\":\"UNIT\",\"unitOfMeasure\":\"UNIT\",\"packQuantity\":1,\"shelfLifeDays\":30,\"minimumRemainingShelfLifeDays\":0,\"lotTrackingRequired\":true,\"expiryTrackingRequired\":true,\"taxCategory\":\"STANDARD\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String skuId = JSON.readTree(created.getResponse().getContentAsString()).get("id").asText();
+		createdSkuId = UUID.fromString(skuId);
+        String catalogId = "CAT-SKU-" + skuId.replace("-", "").toUpperCase(java.util.Locale.ROOT);
+        mockMvc.perform(get("/api/v1/catalog-items/" + catalogId).header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post("/api/v1/skus/" + skuId + "/prices")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + owner).header("Idempotency-Key", "new-sku-price-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":10,\"currency\":\"PEN\",\"validFrom\":\"2020-01-01T00:00:00Z\",\"sourceCode\":\"TEST\",\"sourceDescription\":\"Synthetic test price\"}"))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/v1/skus/" + skuId + "/activations")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + owner)
+                        .header(HttpHeaders.IF_MATCH, created.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/catalog-items/" + catalogId).header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.catalogItemId").value(catalogId))
+                .andExpect(jsonPath("$.brandName").isNotEmpty()).andExpect(jsonPath("$.categoryName").isNotEmpty());
+    }
+
+	@Test
+	void catalogFiltersComposeBeforePaginationAndKeepTaxonomyMetadata() throws Exception {
+		String token = accessToken(OWNER_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        for (String kind : new String[] {"brand", "category"}) {
+            mockMvc.perform(get("/api/v1/catalog-items/filter-options").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer)
+                            .param("kind", kind).param("size", "1"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].id").isNotEmpty())
+                    .andExpect(jsonPath("$.items[0].name").isNotEmpty()).andExpect(jsonPath("$.size").value(1));
+            mockMvc.perform(get("/api/v1/catalog-items/filter-options").header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer)
+                            .param("kind", kind).param("search", "missing-" + UUID.randomUUID()))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty()).andExpect(jsonPath("$.total").value(0));
+        }
+
+		String tenant = tenantId();
+		String workspace = workspaceId();
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.sellable_sku s "
+				+ "left join catalog_management.product_family f on f.tenant_id=s.tenant_id and f.workspace_id=s.workspace_id and f.id=s.family_id "
+				+ "left join catalog_management.brand b on b.tenant_id=f.tenant_id and b.workspace_id=f.workspace_id and b.id=f.brand_id "
+				+ "left join catalog_management.category c on c.tenant_id=f.tenant_id and c.workspace_id=f.workspace_id and c.id=f.category_id "
+				+ "where s.tenant_id=? and s.workspace_id=? and (f.id is null or b.id is null or c.id is null or btrim(f.name)='' or btrim(b.name)='' or btrim(c.name)='')",
+				Integer.class, UUID.fromString(tenant), UUID.fromString(workspace))).isZero();
+
+		for (String path : new String[] {"/api/v1/catalog-items", "/api/v1/catalog/products", "/api/v1/product-families"}) {
+			MvcResult result = mockMvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+					.param("size", "1")).andExpect(status().isOk()).andReturn();
+			JsonNode item = JSON.readTree(result.getResponse().getContentAsString()).get("items").get(0);
+			String brand = item.get("brandName").asText();
+			String category = item.get("categoryName").asText();
+			String name = item.get(path.equals("/api/v1/catalog-items") ? "itemName" : "name").asText();
+			assertThat(brand).isNotBlank();
+			assertThat(category).isNotBlank();
+			assertThat(name).isNotBlank();
+			String queryKey = path.equals("/api/v1/catalog-items") ? "q" : "search";
+			String totalPath = path.equals("/api/v1/catalog-items") ? "$.totalItems" : "$.total";
+			mockMvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+					.param(queryKey, name).param("brand", brand.toUpperCase(java.util.Locale.ROOT))
+					.param("category", category.toUpperCase(java.util.Locale.ROOT)).param("size", "1"))
+					.andExpect(status().isOk()).andExpect(jsonPath(totalPath).value(greaterThan(0)))
+					.andExpect(jsonPath("$.items[0].brandName").value(brand))
+					.andExpect(jsonPath("$.items[0].categoryName").value(category));
+			for (String filter : new String[] {"brand", "category"}) {
+				mockMvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+						.param(queryKey, name).param(filter, "missing-" + UUID.randomUUID()))
+						.andExpect(status().isOk()).andExpect(jsonPath(totalPath).value(0))
+						.andExpect(jsonPath("$.items").isEmpty());
+			}
+		}
+	}
+
+	@Test
+	void ownerReplaysVariantCreationAndRejectsDifferentPayloadForTheSameKey() throws Exception {
+		String token = accessToken(OWNER_EMAIL, "PLATFORM");
+		MvcResult families = mockMvc.perform(get("/api/v1/product-families")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+				.andExpect(status().isOk()).andReturn();
+		String familyId = JSON.readTree(families.getResponse().getContentAsString()).get("items").get(0).get("id").asText();
+		mockMvc.perform(get("/api/v1/product-families/" + familyId + "/variants")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+				.andExpect(status().isOk());
+		String code = "variant-" + UUID.randomUUID();
+		String key = "variant-create-" + UUID.randomUUID();
+		String body = "{\"code\":\"" + code + "\",\"name\":\"Replay variant\",\"description\":null}";
+		String path = "/api/v1/product-families/" + familyId + "/variants";
+		MvcResult first = mockMvc.perform(post(path)
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isCreated()).andReturn();
+		String id = JSON.readTree(first.getResponse().getContentAsString()).get("id").asText();
+		mockMvc.perform(post(path)
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isCreated()).andExpect(jsonPath("$.id").value(id));
+		mockMvc.perform(post(path)
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+				.header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
+				.content(body.replace("\"description\":null", "\"description\":\"<null>\"")))
+				.andExpect(status().isConflict());
+		assertThat(tenantJdbc().queryForObject("select count(*) from catalog_management.product_variant where variant_code=?", Integer.class, code))
+				.isEqualTo(1);
 	}
 
 	@Test

@@ -49,14 +49,14 @@ public final class TenantBoundCustomerRelationshipsUseCase
     @Override
     public CustomerAccountPage<ClientAccountView> list(CurrentAccessContext context, String search, String status,
                                                         int page, int size) {
-        requireAdministrativePermission(context, Permission.SALES_READ);
+        requireAdministrativePermission(context, PermissionKey.CLIENT_READ);
         return inTenant(context, List.of(), useCases -> useCases.clientAccounts()
                 .list(context, search, status, page, size));
     }
 
     @Override
     public ClientAccountView detail(CurrentAccessContext context, String id) {
-        requireAdministrativePermission(context, Permission.SALES_READ);
+        requireAdministrativePermission(context, PermissionKey.CLIENT_READ);
         return inTenant(context, List.of(), useCases -> useCases.clientAccounts().detail(context, id));
     }
 
@@ -69,7 +69,7 @@ public final class TenantBoundCustomerRelationshipsUseCase
 
     @Override
     public List<BuyerMembershipCandidate> buyerMembershipCandidates(CurrentAccessContext context) {
-        requireAdministrativePermission(context, Permission.SALES_READ);
+        requireAdministrativePermission(context, PermissionKey.CLIENT_READ);
         List<BuyerMembershipReference> snapshot = preflightBuyerMemberships(context,
                 () -> buyerMemberships.findActiveBuyers(context.tenantId().toString(), context.workspaceId().toString()));
         return inTenant(context, snapshot, useCases -> useCases.clientAccounts().buyerMembershipCandidates(context));
@@ -180,11 +180,20 @@ public final class TenantBoundCustomerRelationshipsUseCase
     }
 
     private static void requireAdministrativePermission(CurrentAccessContext context, Permission permission) {
+        requireAdministrativeScope(context);
+        context.requirePermission(permission);
+    }
+
+    private static void requireAdministrativePermission(CurrentAccessContext context, PermissionKey permission) {
+        requireAdministrativeScope(context);
+        context.requirePermission(permission);
+    }
+
+    private static void requireAdministrativeScope(CurrentAccessContext context) {
         requireScope(context);
         if (context.hasRole(MembershipRole.BUYER)) {
             throw new AccessPolicyViolation("Administrative sales access is not available to buyers");
         }
-        context.requirePermission(permission);
     }
 
     private static void authorizeAddress(CurrentAccessContext context, boolean write) {
@@ -192,7 +201,7 @@ public final class TenantBoundCustomerRelationshipsUseCase
         if (context.hasRole(MembershipRole.BUYER)) {
             context.requirePermission(write ? Permission.SALES_BUYER_WRITE : Permission.SALES_BUYER_READ);
         } else {
-            context.requirePermission(write ? Permission.SALES_WRITE : Permission.SALES_READ);
+            context.requirePermission(write ? PermissionKey.CLIENT_ADDRESS_MANAGE : PermissionKey.CLIENT_READ);
         }
     }
 

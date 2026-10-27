@@ -84,6 +84,23 @@ public class CatalogQueryController {
 		return responseMapper.toPage(listCatalogItems.list(scope, parameters.toCriteria()));
 	}
 
+    public record FilterOptionResponse(String id, String name) { }
+    public record FilterOptionsResponse(java.util.List<FilterOptionResponse> items, int page, int size, long total) { }
+
+    @GetMapping("/filter-options")
+    @Operation(operationId = "listVisibleCatalogFilterOptions", summary = "List active taxonomy choices from the authorized catalog")
+    public FilterOptionsResponse filterOptions(@RequestAttribute(value = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext") CurrentAccessContext context,
+            @org.springframework.web.bind.annotation.RequestParam @Pattern(regexp = "brand|category") String kind,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) @jakarta.validation.constraints.Size(max = 120) String search,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "100") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(100) int size) {
+        if (context == null) throw new AccessDeniedException("Catalog access context is required");
+        TenantCatalogHttpReadPort tenantRead = tenantCatalogReads == null ? null : tenantCatalogReads.getIfAvailable();
+        var choices = tenantRead == null ? listCatalogItems.filterOptions(scope(context), kind, search, page, size)
+                : tenantRead.filterOptions(context, kind, search, page, size);
+        return new FilterOptionsResponse(choices.items().stream().map(value -> new FilterOptionResponse(value.id(), value.name())).toList(), choices.page(), choices.size(), choices.total());
+    }
+
 	@GetMapping("/{catalogItemId}")
 	@Operation(operationId = "getCatalogItem", summary = "Get an active catalog item")
 	@SecurityRequirement(name = "bearerAuth")

@@ -15,6 +15,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.nexa.api.inventoryavailability.domain.model.warehouse.WarehouseAddressDetails;
+
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalTime;
@@ -110,7 +112,8 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
     public WarehouseOperationsService.OperationalProfile operationalProfile(CurrentAccessContext context, String id) {
         requireRead(context);
         WarehouseOperationsService.WarehouseSummary summary = warehouse(context, id);
-        return operationalProfile(summary, settings(context), coordinates(context, uuid(id)));
+        return operationalProfile(summary, settings(context), coordinates(context, uuid(id)))
+                .withAddressDetails(addressDetails(context, uuid(id)));
     }
 
     public WarehouseOperationsService.OperationalProfile updateOperationalProfile(
@@ -144,7 +147,11 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
                 || !startsAt.equals(currentSettings.startsAt()) || !endsAt.equals(currentSettings.endsAt());
         boolean coordinatesChanged = !java.util.Objects.equals(latitude, currentCoordinates.latitude())
                 || !java.util.Objects.equals(longitude, currentCoordinates.longitude());
-        if (!warehouseChanged && !settingsChanged && !coordinatesChanged) return operationalProfile(current, currentSettings, currentCoordinates);
+        if (patch.addressDetails() != null) validateAddressReferences(patch.addressDetails());
+        WarehouseAddressDetails currentAddressDetails = addressDetails(context, warehouseId);
+        boolean addressDetailsChanged = patch.addressDetails() != null && !java.util.Objects.equals(patch.addressDetails(), currentAddressDetails);
+        if (!warehouseChanged && !settingsChanged && !coordinatesChanged && !addressDetailsChanged)
+            return operationalProfile(current, currentSettings, currentCoordinates).withAddressDetails(currentAddressDetails);
         Timestamp changedAt = now();
         checkUpdated(jdbc.update("update warehouse.warehouse set name=?,address=?,status=?,updated_at=?,version=version+1 "
                         + "where tenant_id=? and workspace_id=? and id=? and version=?", name, address, status, changedAt,
@@ -155,8 +162,33 @@ public class WarehouseConfigurationPersistenceAdapter extends WarehouseJdbcSuppo
                     startsAt, endsAt, currentSettings.version()) != 1) throw error("CONCURRENCY_CONFLICT", false);
         }
         if (coordinatesChanged) upsertCoordinates(context, warehouseId, latitude, longitude, changedAt);
+        if (addressDetailsChanged) {
+            WarehouseAddressDetails d = patch.addressDetails();
+            jdbc.update("update warehouse.warehouse set address_country_code=?,address_department_code=?,address_province_code=?,address_district_code=?,address_city=?,address_road_type=?,address_street_name=?,address_street_number=?,address_interior=?,address_postal_code=?,address_reference=? where tenant_id=? and workspace_id=? and id=?",
+                    d.countryCode(), d.departmentCode(), d.provinceCode(), d.districtCode(), d.city(), d.roadType(), d.streetName(),
+                    d.streetNumber(), d.interior(), d.postalCode(), d.reference(), tenant(context), workspace(context), warehouseId);
+        }
         appendEvent(context, warehouseId, "warehouse.operational-profile.updated", "warehouse");
         return operationalProfile(context, id);
+    }
+
+    private void validateAddressReferences(WarehouseAddressDetails details) {
+        Integer roads = jdbc.queryForObject("select count(*) from reference_data.road_type where code=?", Integer.class, details.roadType());
+        if (roads == null || roads != 1) throw error("INVALID_REQUEST", false);
+        if ("PE".equals(details.countryCode())) {
+            Integer districts = jdbc.queryForObject("select count(*) from reference_data.district where department_code=? and province_code=? and code=?",
+                    Integer.class, details.departmentCode(), details.provinceCode(), details.districtCode());
+            if (districts == null || districts != 1) throw error("INVALID_REQUEST", false);
+        }
+    }
+
+    private WarehouseAddressDetails addressDetails(CurrentAccessContext context, UUID warehouseId) {
+        return jdbc.queryForObject("select address_country_code,address_department_code,address_province_code,address_district_code,address_city,address_road_type,address_street_name,address_street_number,address_interior,address_postal_code,address_reference from warehouse.warehouse where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> rs.getString("address_country_code") == null ? null : new WarehouseAddressDetails(
+                        rs.getString("address_country_code"), rs.getString("address_department_code"), rs.getString("address_province_code"),
+                        rs.getString("address_district_code"), rs.getString("address_city"), rs.getString("address_road_type"),
+                        rs.getString("address_street_name"), rs.getString("address_street_number"), rs.getString("address_interior"),
+                        rs.getString("address_postal_code"), rs.getString("address_reference")), tenant(context), workspace(context), warehouseId);
     }
 
     @Transactional(readOnly = true)

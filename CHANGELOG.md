@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Honor the required variant-creation idempotency key through the application
+  and persistence boundary, using the existing scoped catalog command ledger.
+- Separate catalog product and taxonomy command permissions, preventing their
+  shared legacy alias from authorizing unrelated mutations.
+
+- Require feature-specific permissions for customer mutations, addresses,
+  purchase requests, sales orders, manual drafts and logistics reads, preventing
+  broad legacy sales aliases from granting unrelated operations.
+- Require `buyer.order.read` for Buyer order projections while retaining the
+  active customer-account scope.
+- Align built-in Tenant Administrator client/catalog query permissions through
+  an additive migration, and align the fixed Sales commercial-terms preset with
+  its existing persisted grant. Warehouse object grants remain explicit.
+
 ## [1.1.0-alpha.1] - 2026-10-10
 
 Source checkpoint prerelease; incomplete integration and distribution gates. See [checkpoint notes](docs/releases/v1.1.0-alpha.1.md).

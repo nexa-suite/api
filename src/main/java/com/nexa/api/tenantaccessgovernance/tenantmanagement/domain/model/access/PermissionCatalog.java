@@ -60,6 +60,7 @@ public final class PermissionCatalog {
 	public static Set<PermissionKey> forBuiltInRole(MembershipRole role) {
 		return switch (Objects.requireNonNull(role, "Membership role is required")) {
 			case TENANT_ADMIN -> Set.of(
+					PermissionKey.CATALOG_READ, PermissionKey.CLIENT_READ,
 					PermissionKey.TENANT_ORGANIZATION_READ, PermissionKey.TENANT_ORGANIZATION_MANAGE,
 					PermissionKey.TENANT_WORKSPACE_READ, PermissionKey.TENANT_WORKSPACE_MANAGE,
 					PermissionKey.TENANT_MEMBER_READ, PermissionKey.TENANT_MEMBER_INVITE,
@@ -93,7 +94,8 @@ public final class PermissionCatalog {
 					PermissionKey.SALES_PURCHASE_REQUEST_READ, PermissionKey.SALES_PURCHASE_REQUEST_REVIEW,
 					PermissionKey.SALES_ORDER_READ, PermissionKey.SALES_ORDER_CREATE_MANUAL,
 					PermissionKey.SALES_ORDER_MANAGE, PermissionKey.CLIENT_READ, PermissionKey.CLIENT_MANAGE,
-					PermissionKey.CLIENT_ADDRESS_MANAGE, PermissionKey.ORDER_EXPORT_READ,
+					PermissionKey.CLIENT_ADDRESS_MANAGE, PermissionKey.CLIENT_COMMERCIAL_TERMS_MANAGE,
+					PermissionKey.ORDER_EXPORT_READ,
 					PermissionKey.DOCUMENT_READ, PermissionKey.DOCUMENT_DOWNLOAD,
 					PermissionKey.PAYMENT_READ, PermissionKey.NOTIFICATION_READ);
 			case WAREHOUSE -> Set.of(
@@ -115,6 +117,8 @@ public final class PermissionCatalog {
 					PermissionKey.DOCUMENT_READ, PermissionKey.DOCUMENT_UPLOAD,
 					PermissionKey.NOTIFICATION_READ);
 			case BUSINESS_OPERATIONS_MANAGER -> Set.of(
+					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PRODUCT_MANAGE,
+					PermissionKey.CATALOG_TAXONOMY_MANAGE, PermissionKey.CATALOG_PRICE_MANAGE,
 					PermissionKey.DELIVERY_EXCEPTION_READ, PermissionKey.DELIVERY_EXCEPTION_COORDINATE,
 					PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE,
 					PermissionKey.PAYMENT_RECONCILE,
@@ -124,7 +128,8 @@ public final class PermissionCatalog {
 					PermissionKey.BUYER_SALES_READ, PermissionKey.BUYER_SALES_WRITE,
 					PermissionKey.BUYER_ORDER_READ, PermissionKey.BUYER_TRACKING_READ, PermissionKey.NOTIFICATION_READ,
 					PermissionKey.BUYER_PROFILE_WRITE, PermissionKey.DOCUMENT_READ,
-					PermissionKey.DOCUMENT_DOWNLOAD, PermissionKey.PAYMENT_READ,
+					PermissionKey.DOCUMENT_DOWNLOAD, PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH,
+					PermissionKey.PAYMENT_READ,
 					PermissionKey.PAYMENT_CREATE);
 		};
 	}

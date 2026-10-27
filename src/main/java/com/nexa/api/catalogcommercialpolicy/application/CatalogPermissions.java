@@ -4,6 +4,8 @@ package com.nexa.api.catalogcommercialpolicy.application;
 public final class CatalogPermissions {
     public static final String READ = "catalog:read";
     public static final String MANAGE = "catalog:manage";
+    public static final String PRODUCT_MANAGE = "catalog.product.manage";
+    public static final String TAXONOMY_MANAGE = "catalog.taxonomy.manage";
     public static final String PRICE_MANAGE = "catalog:price:manage";
     public static final String PROMOTION_READ = "promotion:read";
     public static final String PROMOTION_MANAGE = "promotion:manage";

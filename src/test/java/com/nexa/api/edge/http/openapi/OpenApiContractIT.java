@@ -211,6 +211,12 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         }));
 
         assertThat(document.get("paths").has("/api/v1/warehouses/{warehouseId}/inventory-availability")).isTrue();
+		assertThat(document.at("/components/schemas/StreamingResponseBody/type").asText()).isEqualTo("string");
+		assertThat(document.at("/components/schemas/StreamingResponseBody/format").asText()).isEqualTo("binary");
+		assertResponseSchemaRef(document, "/api/v1/business-documents/{documentId}/downloads", "get", "200",
+				"#/components/schemas/StreamingResponseBody");
+		assertResponseSchemaRef(document, "/api/v1/business-document-evidence/{evidenceId}/downloads", "get", "200",
+				"#/components/schemas/StreamingResponseBody");
 
         if (Boolean.getBoolean("nexa.openapi.write-snapshot")) {
             Files.writeString(snapshotPath, document.toString() + System.lineSeparator());

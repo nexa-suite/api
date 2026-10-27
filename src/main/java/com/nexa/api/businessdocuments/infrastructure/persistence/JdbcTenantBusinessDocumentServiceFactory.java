@@ -11,6 +11,7 @@ import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentServi
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerPort;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -36,13 +37,15 @@ public final class JdbcTenantBusinessDocumentServiceFactory implements TenantBus
     public BusinessDocumentUseCase bindTo(JdbcTemplate tenantJdbc, DocumentSubjectLookupPort tenantSubjects,
                            DocumentProjectionLookupPort tenantProjections,
                            CustomerAccountQuery tenantCustomerAccounts,
+                           WarehouseObjectAccess tenantWarehouseAccess,
                            CanonicalOutboxPort tenantCanonicalOutbox) {
         BusinessDocumentService service = new BusinessDocumentService(
                 Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required"), storage, scanner, renderer,
                 Objects.requireNonNull(tenantSubjects, "Tenant document subject query is required"),
                 Objects.requireNonNull(tenantProjections, "Tenant document projection query is required"),
                 Objects.requireNonNull(tenantCustomerAccounts, "Tenant customer account query is required"),
-                null, null, Objects.requireNonNull(tenantCanonicalOutbox, "Tenant canonical outbox is required"));
+                null, Objects.requireNonNull(tenantWarehouseAccess, "Tenant Warehouse access snapshot is required"),
+                null, Objects.requireNonNull(tenantCanonicalOutbox, "Tenant canonical outbox is required"));
         return service;
     }
 
@@ -66,6 +69,6 @@ public final class JdbcTenantBusinessDocumentServiceFactory implements TenantBus
                 noHumanSubjectLookup,
                 Objects.requireNonNull(tenantProjections, "Tenant document projection query is required"),
                 Objects.requireNonNull(tenantCustomerAccounts, "Tenant customer account query is required"),
-                null, null, Objects.requireNonNull(tenantCanonicalOutbox, "Tenant canonical outbox is required"));
+                null, null, null, Objects.requireNonNull(tenantCanonicalOutbox, "Tenant canonical outbox is required"));
     }
 }

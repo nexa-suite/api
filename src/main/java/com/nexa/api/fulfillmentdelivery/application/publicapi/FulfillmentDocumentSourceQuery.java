@@ -10,12 +10,19 @@ public interface FulfillmentDocumentSourceQuery {
 
     Optional<ProofOfDelivery> findPod(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId);
 
+    /** Minimal POD fact lookup for binding uploaded evidence before the POD is sealed. */
+    Optional<ProofOfDelivery> findPodEvidenceSubject(UUID tenantId, UUID workspaceId, UUID proofOfDeliveryId,
+                                                      UUID actorMembershipId, UUID actorUserId);
+
     Optional<ProofOfDelivery> findSealedPodForDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId);
 
     Optional<Incident> findIncident(UUID tenantId, UUID workspaceId, UUID incidentId);
 
     /** Minimal customer-scoped projection used only to bind BC-09 incident evidence to its subject. */
     Optional<IncidentSubject> findIncidentSubject(UUID tenantId, UUID workspaceId, UUID incidentId);
+
+    /** Buyer receipt fact joined to its actual Delivery and attempt before it can own BC-09 evidence. */
+    Optional<BuyerReceiptSubject> findBuyerReceipt(UUID tenantId, UUID workspaceId, UUID receiptId);
 
     record Dispatch(UUID id, UUID customerAccountId, String dispatchNumber, String status,
                     String destinationSnapshot, Instant deliveryWindowStart, Instant eta,
@@ -35,4 +42,7 @@ public interface FulfillmentDocumentSourceQuery {
                     UUID dispatchId) { }
 
     record IncidentSubject(UUID id, UUID customerAccountId, String status, UUID salesOrderId) { }
+
+    record BuyerReceiptSubject(UUID id, UUID deliveryId, UUID deliveryAttemptId, UUID customerAccountId,
+                               UUID buyerMembershipId, String decision, Instant occurredAt) { }
 }

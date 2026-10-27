@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.ZoneId;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -36,20 +37,63 @@ public class OwnProfileService implements GetOwnProfileQuery, UpdateOwnProfileCo
     @Transactional
     public Profile update(Actor actor, ProfilePatch patch) {
         Objects.requireNonNull(actor, "Verified actor is required");
-        validate(patch);
-        Profile updated = profiles.updateOwn(actor, patch);
+        ProfilePatch normalized = validateAndNormalize(patch);
+        Profile updated = profiles.updateOwn(actor, normalized);
         audit.append(new SecurityAuditPort.Event("PROFILE_UPDATED", actor.userId(), actor.userId(), actor.tenantId(), actor.workspaceId(),
                 actor.surface(), value(actor.correlationId()), value(actor.traceId()), clock.instant(), Map.of("version", updated.version())));
         return updated;
     }
 
-    private static void validate(ProfilePatch patch) {
+    private static ProfilePatch validateAndNormalize(ProfilePatch patch) {
         if (patch == null || patch.displayName() == null || patch.displayName().isBlank() || patch.displayName().trim().length() > 160
                 || patch.preferredLanguage() == null || !java.util.Set.of("es", "en").contains(patch.preferredLanguage())
                 || patch.timezone() == null || !validTimezone(patch.timezone())
                 || patch.phone() != null && !patch.phone().isBlank() && !patch.phone().matches("\\+[1-9][0-9]{6,14}")) {
             throw new IamSecurityException("PROFILE_INVALID");
         }
+        String firstName = optionalName(patch.firstName(), patch.firstNameProvided());
+        String lastName = optionalName(patch.lastName(), patch.lastNameProvided());
+
+        boolean anyDocumentField = patch.documentTypeProvided() || patch.documentNumberProvided()
+                || patch.documentCountryCodeProvided();
+        String documentType = patch.documentType();
+        String documentNumber = patch.documentNumber();
+        String documentCountryCode = patch.documentCountryCode();
+        if (anyDocumentField) {
+            if (!patch.documentTypeProvided() || !patch.documentNumberProvided() || !patch.documentCountryCodeProvided()) {
+                throw new IamSecurityException("PROFILE_INVALID");
+            }
+            boolean allCleared = documentType == null && documentNumber == null && documentCountryCode == null;
+            if (!allCleared) {
+                documentType = normalizedRequired(documentType).toUpperCase(Locale.ROOT);
+                documentNumber = normalizedRequired(documentNumber).toUpperCase(Locale.ROOT);
+                documentCountryCode = normalizedRequired(documentCountryCode).toUpperCase(Locale.ROOT);
+                if (!java.util.Set.of("DNI", "CE", "PASSPORT", "OTHER").contains(documentType)
+                        || !documentNumber.matches("[A-Z0-9]{1,32}")
+                        || !documentCountryCode.matches("[A-Z]{2}")
+                        || "DNI".equals(documentType) && "PE".equals(documentCountryCode)
+                                && !documentNumber.matches("[0-9]{8}")) {
+                    throw new IamSecurityException("PROFILE_INVALID");
+                }
+            }
+        }
+        return new ProfilePatch(patch.displayName().trim(), patch.phone() == null || patch.phone().isBlank() ? null : patch.phone().trim(),
+                patch.preferredLanguage(), patch.timezone(), firstName, patch.firstNameProvided(), lastName, patch.lastNameProvided(),
+                documentType, patch.documentTypeProvided(), documentNumber, patch.documentNumberProvided(),
+                documentCountryCode, patch.documentCountryCodeProvided(), patch.version());
+    }
+
+    private static String optionalName(String value, boolean provided) {
+        if (!provided) return value;
+        if (value == null) return null;
+        String normalized = value.trim();
+        if (normalized.isEmpty() || normalized.length() > 100) throw new IamSecurityException("PROFILE_INVALID");
+        return normalized;
+    }
+
+    private static String normalizedRequired(String value) {
+        if (value == null || value.isBlank()) throw new IamSecurityException("PROFILE_INVALID");
+        return value.trim();
     }
 
     private static boolean validTimezone(String value) {
