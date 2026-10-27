@@ -31,10 +31,10 @@ class TenantBusinessIntegrationTestConfiguration {
 	@Primary
 	@ConditionalOnProperty(name = "nexa.tenant-business.payments.enabled", havingValue = "true")
 	TenantBusinessDatabasePaymentCallbackRouter integrationTenantPaymentCallbackRouter(
-			JdbcPaymentProviderRouteRegistry routes,
+			JdbcPaymentProviderRouteRegistry routes, TenantBusinessDatabaseBindingRegistry bindings,
 			@Value("${nexa.tenant-business.router.maximum-cached-pools:8}") int maximumCachedPools,
 			@Value("${nexa.tenant-business.router.maximum-pool-size:4}") int maximumPoolSize) {
-		return new TenantBusinessDatabasePaymentCallbackRouter(routes,
+		return new TenantBusinessDatabasePaymentCallbackRouter(routes, bindings,
 				new HikariTenantBusinessDatabaseDataSourceFactory(
 						TenantBusinessIntegrationFixture::paymentCallbackWorkerCredentials, maximumPoolSize),
 				maximumCachedPools);

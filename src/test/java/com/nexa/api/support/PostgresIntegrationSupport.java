@@ -3,6 +3,7 @@ package com.nexa.api.support;
 import com.nexa.api.bootstrap.local.LocalTenantBusinessFixtureSeeder;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceBootstrap;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogSkuPersistenceBootstrap;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -25,6 +26,10 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -71,6 +76,10 @@ public abstract class PostgresIntegrationSupport {
 	protected static final String TEST_PASSWORD = "integration-test-password";
 	protected static final String MIGRATOR_USERNAME = "nexa";
 	protected static final String MIGRATOR_PASSWORD = "test-only-password";
+	private static final String FLYWAY_MIGRATOR_USERNAME = "nexa_migrator";
+	private static final String FLYWAY_MIGRATOR_PASSWORD = "integration-migrator-" + UUID.randomUUID();
+	private static final String WORKSPACE_SCOPE_READER_PASSWORD = "integration-scope-reader-" + UUID.randomUUID();
+	private static final String INTERNAL_OPERATOR_PASSWORD = "integration-internal-operator-" + UUID.randomUUID();
 	protected static final String RUNTIME_USERNAME = "nexa_runtime";
 	protected static final String RUNTIME_PASSWORD = "test-only-runtime-password";
 	protected static final String TEST_DATABASE_USERNAME = "nexa_test";
@@ -95,6 +104,7 @@ public abstract class PostgresIntegrationSupport {
 			createRuntimeRole();
 			createTestRole();
 			createBusinessDocumentScopeReaderRole();
+			bootstrapCentralMigrations();
 		}
 	}
 
@@ -123,9 +133,11 @@ public abstract class PostgresIntegrationSupport {
 		registry.add("NEXA_DATABASE_PASSWORD", () -> TEST_DATABASE_PASSWORD);
 		registry.add("NEXA_DATABASE_RUNTIME_USERNAME", () -> TEST_DATABASE_USERNAME);
 		registry.add("NEXA_DATABASE_RUNTIME_PASSWORD", () -> TEST_DATABASE_PASSWORD);
-		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", POSTGRES::getUsername);
-		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", POSTGRES::getPassword);
+		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", () -> FLYWAY_MIGRATOR_USERNAME);
+		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", () -> FLYWAY_MIGRATOR_PASSWORD);
 		registry.add("NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD", () -> BUSINESS_DOCUMENT_SCOPE_READER_PASSWORD);
+		registry.add("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", () -> WORKSPACE_SCOPE_READER_PASSWORD);
+		registry.add("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD", () -> INTERNAL_OPERATOR_PASSWORD);
 		registry.add("nexa.tenant-business.local-credentials-directory", TenantBusinessIntegrationFixture::credentialDirectory);
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", () -> TEST_DATABASE_USERNAME);
@@ -308,11 +320,90 @@ public abstract class PostgresIntegrationSupport {
 					    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_runtime') THEN
 					        EXECUTE 'CREATE ROLE nexa_runtime LOGIN PASSWORD ''test-only-runtime-password''';
 					    END IF;
-					    EXECUTE 'ALTER ROLE nexa_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ''test-only-runtime-password''';
+					    EXECUTE 'ALTER ROLE nexa_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ''test-only-runtime-password''';
 					END
 					$$;
 					""");
 		} catch (SQLException exception) {
+			throw new ExceptionInInitializerError(exception);
+		}
+	}
+
+	/**
+	 * Rehearses the production direct-login migration boundary on the disposable
+	 * Testcontainers database. V169's checked-in preparation script transfers
+	 * only the reviewed ownership and grants before Flyway switches identities.
+	 */
+	private static void bootstrapCentralMigrations() {
+		try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(),
+				MIGRATOR_USERNAME, MIGRATOR_PASSWORD);
+			Statement statement = connection.createStatement()) {
+			statement.execute("CREATE ROLE " + FLYWAY_MIGRATOR_USERNAME
+					+ " LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '"
+					+ FLYWAY_MIGRATOR_PASSWORD + "'");
+			statement.execute("CREATE ROLE nexa_tenant_database_provisioner LOGIN NOINHERIT NOSUPERUSER "
+					+ "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_workspace_scope_reader NOLOGIN NOINHERIT NOSUPERUSER "
+					+ "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_workspace_scope_reader_login LOGIN NOINHERIT NOSUPERUSER "
+					+ "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '"
+					+ WORKSPACE_SCOPE_READER_PASSWORD + "'");
+			statement.execute("GRANT nexa_workspace_scope_reader TO nexa_workspace_scope_reader_login "
+					+ "WITH INHERIT FALSE, SET TRUE, ADMIN FALSE");
+			statement.execute("CREATE ROLE nexa_internal_operator NOLOGIN NOINHERIT NOSUPERUSER "
+					+ "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_internal_operator_login LOGIN NOINHERIT NOSUPERUSER "
+					+ "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '"
+					+ INTERNAL_OPERATOR_PASSWORD + "'");
+			statement.execute("GRANT nexa_internal_operator TO nexa_internal_operator_login "
+					+ "WITH INHERIT FALSE, SET TRUE, ADMIN FALSE");
+		} catch (SQLException exception) {
+			throw new ExceptionInInitializerError(exception);
+		}
+
+		Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), MIGRATOR_USERNAME, MIGRATOR_PASSWORD)
+				.locations("classpath:db/migration").target("168").load().migrate();
+
+		List<Path> preparations;
+		try (var scripts = Files.list(Path.of("ops/database"))) {
+			preparations = scripts.filter(path -> path.getFileName().toString().matches("prepare-v[0-9]+-.+\\.sql"))
+					.filter(path -> preparationVersion(path) > 168)
+					.sorted(Comparator.comparingInt(PostgresIntegrationSupport::preparationVersion))
+					.toList();
+		} catch (Exception exception) {
+			throw new ExceptionInInitializerError(exception);
+		}
+
+		int appliedVersion = 168;
+		for (Path preparation : preparations) {
+			int version = preparationVersion(preparation);
+			if (version - 1 > appliedVersion) migrateCentralThrough(version - 1);
+			applyMigrationPreparation(preparation);
+			migrateCentralThrough(version);
+			appliedVersion = version;
+		}
+		Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), FLYWAY_MIGRATOR_USERNAME, FLYWAY_MIGRATOR_PASSWORD)
+				.locations("classpath:db/migration").load().migrate();
+		ensureTestRolePrivileges();
+	}
+
+	private static int preparationVersion(Path preparation) {
+		String name = preparation.getFileName().toString();
+		int separator = name.indexOf('-', "prepare-v".length());
+		return Integer.parseInt(name.substring("prepare-v".length(), separator));
+	}
+
+	private static void migrateCentralThrough(int version) {
+		Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), FLYWAY_MIGRATOR_USERNAME, FLYWAY_MIGRATOR_PASSWORD)
+				.locations("classpath:db/migration").target(Integer.toString(version)).load().migrate();
+	}
+
+	private static void applyMigrationPreparation(Path preparation) {
+		try (Connection connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(),
+				MIGRATOR_USERNAME, MIGRATOR_PASSWORD);
+			Statement statement = connection.createStatement()) {
+			statement.execute(Files.readString(preparation));
+		} catch (Exception exception) {
 			throw new ExceptionInInitializerError(exception);
 		}
 	}

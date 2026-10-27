@@ -38,9 +38,9 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         + "select ?,password_hash,algorithm,changed_at from iam.password_credential where user_id=?",
                 user, sourceUser);
         jdbc.update("insert into tenant_management.workspace_membership "
-                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "values (?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
-                membership, workspace, user);
+                        + "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+                membership, tenant, workspace, user);
         int assigned = jdbc.update("insert into tenant_management.membership_role_definition "
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
                         + "select ?,?,?,r.id,?,current_timestamp from tenant_management.role_definition r "
