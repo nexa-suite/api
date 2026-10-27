@@ -15,6 +15,51 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Real HTTP workflow fixture shared by TASK-008 and TASK-010 integration gates. */
 public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegrationSupport {
+    protected SyntheticWorkspaceIdentity createSyntheticWorkspaceIdentity(String sourceEmail, String roleCode,
+            String displayPrefix) {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID user = UUID.randomUUID();
+        UUID membership = UUID.randomUUID();
+        UUID sourceMembership = UUID.fromString(membershipId(sourceEmail));
+        UUID sourceUser = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
+                UUID.class, sourceMembership);
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        String localPrefix = displayPrefix.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-").replaceAll("(^-|-$)", "");
+        String email = localPrefix + "-" + suffix + "@icisa-test.local";
+        String username = localPrefix.replace('-', '_') + "_" + suffix;
+
+        jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,"
+                        + "display_name,preferred_language,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,?,?,'es','ACTIVE',current_timestamp,current_timestamp,0)",
+                user, email, email, username, username, displayPrefix + " " + suffix);
+        jdbc.update("insert into iam.password_credential (user_id,password_hash,algorithm,changed_at) "
+                        + "select ?,password_hash,algorithm,changed_at from iam.password_credential where user_id=?",
+                user, sourceUser);
+        jdbc.update("insert into tenant_management.workspace_membership "
+                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "values (?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+                membership, workspace, user);
+        int assigned = jdbc.update("insert into tenant_management.membership_role_definition "
+                        + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
+                        + "select ?,?,?,r.id,?,current_timestamp from tenant_management.role_definition r "
+                        + "where r.tenant_id is null and r.workspace_id is null and r.code=?",
+                membership, tenant, workspace, UUID.fromString(membershipId(OWNER_EMAIL)), roleCode);
+        if (assigned != 1) throw new IllegalStateException("Synthetic identity must receive exactly one existing role");
+        return new SyntheticWorkspaceIdentity(user, membership, email);
+    }
+
+    protected void retireSyntheticWorkspaceIdentity(SyntheticWorkspaceIdentity identity) {
+        jdbc.update("delete from iam.access_context_selection_ticket where user_id=?", identity.userId());
+        jdbc.update("update iam.refresh_session set replaced_by_session_id=null where user_id=?", identity.userId());
+        jdbc.update("delete from iam.refresh_session where user_id=?", identity.userId());
+        jdbc.update("update tenant_management.workspace_membership set status='DISABLED',updated_at=current_timestamp,"
+                        + "version=version+1 where id=? and status='ACTIVE'", identity.membershipId());
+    }
+
+    protected record SyntheticWorkspaceIdentity(UUID userId, UUID membershipId, String email) { }
+
     protected PurchaseRequestResource createApprovedPurchaseRequest() throws Exception {
         return createApprovedPurchaseRequest("CAT-0002");
     }

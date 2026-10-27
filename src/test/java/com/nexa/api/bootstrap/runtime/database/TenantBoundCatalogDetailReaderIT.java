@@ -105,6 +105,8 @@ class TenantBoundCatalogDetailReaderIT {
 	private static final String RUNTIME_PASSWORD_A = "tenant-runtime-a-test-password";
 	private static final String RUNTIME_PASSWORD_B = "tenant-runtime-b-test-password";
 	private static final String POLICY_WRITER_PASSWORD = "tenant-policy-writer-test-password";
+	private static final List<String> TENANT_WORKER_ROLES = List.of("nexa_wallet_recharge_worker",
+			"nexa_business_documents_worker", "nexa_payments_worker", "nexa_business_traceability_worker");
 	private static final String CATALOG_ITEM_ID = "CAT-0001";
 	private static final Path REPOSITORY_ROOT = Path.of("").toAbsolutePath().normalize();
 
@@ -311,6 +313,10 @@ class TenantBoundCatalogDetailReaderIT {
 					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("CREATE ROLE nexa_policy_snapshot_writer LOGIN PASSWORD '" + POLICY_WRITER_PASSWORD
 					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			for (String role : TENANT_WORKER_ROLES) {
+				statement.execute("CREATE ROLE " + role
+						+ " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			}
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + tenant.getDatabaseName() + "\" TO nexa_migrator");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + tenant.getDatabaseName() + "\" TO nexa_runtime");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + tenant.getDatabaseName()
@@ -321,7 +327,7 @@ class TenantBoundCatalogDetailReaderIT {
 
 	private static void migrateTenant(PostgreSQLContainer tenant) {
 		Flyway.configure().dataSource(tenant.getJdbcUrl(), "nexa_migrator", MIGRATOR_PASSWORD)
-				.locations("classpath:db/tenant-migration").target("4").load().migrate();
+				.locations("classpath:db/tenant-migration").load().migrate();
 	}
 
 	private static TenantFixture seedCentralAuthority(String suffix, PostgreSQLContainer tenantDatabase,
