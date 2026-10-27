@@ -113,6 +113,8 @@ public class OpenApiConfiguration {
 	 * Keeps streamed document downloads on a reusable binary response schema.
 	 * Springdoc currently inlines the controller's InputStreamResource as a string;
 	 * this runtime contract mapping preserves the public StreamingResponseBody component.
+	 * Narrow OpenAPI test contexts may omit these controllers; OpenApiContractIT verifies both
+	 * routes in the complete runtime contract.
 	 */
 	@Bean
 	GlobalOpenApiCustomizer streamedBusinessDocumentDownloadSchema() {
@@ -127,7 +129,8 @@ public class OpenApiConfiguration {
 					"/api/v1/business-documents/{documentId}/downloads",
 					"/api/v1/business-document-evidence/{evidenceId}/downloads")) {
 				var pathItem = openAPI.getPaths() == null ? null : openAPI.getPaths().get(path);
-				var operation = pathItem == null ? null : pathItem.getGet();
+				if (pathItem == null) continue;
+				var operation = pathItem.getGet();
 				ApiResponse response = operation == null || operation.getResponses() == null
 						? null : operation.getResponses().get("200");
 				if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
