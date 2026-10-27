@@ -53,6 +53,7 @@ import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftCo
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftDestinationNotGeocodedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftPreconditionRequiredException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftWarehouseSelectionUnavailableException;
 import com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipConflictException;
 import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipPreconditionRequiredException;
@@ -525,6 +526,8 @@ public final class GlobalExceptionHandler {
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftConcurrency(PurchaseRequestDraftConcurrencyException exception, HttpServletRequest request) { return response(HttpStatus.PRECONDITION_FAILED, ApiErrorCode.PRECONDITION_FAILED, "Purchase request draft version is stale", request); }
 	@ExceptionHandler(PurchaseRequestDraftInvariantException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftInvariant(PurchaseRequestDraftInvariantException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.INVALID_TRANSITION, "Purchase request draft is not ready to submit", request); }
+	@ExceptionHandler(PurchaseRequestDraftWarehouseSelectionUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftWarehouseSelectionUnavailable(PurchaseRequestDraftWarehouseSelectionUnavailableException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.WAREHOUSE_SELECTION_UNAVAILABLE, "No single operational Warehouse can fulfill this Purchase Request draft", request); }
 	@ExceptionHandler(PurchaseRequestDraftDestinationNotGeocodedException.class)
 	public ResponseEntity<ProblemDetail> handlePurchaseRequestDraftDestinationNotGeocoded(PurchaseRequestDraftDestinationNotGeocodedException exception, HttpServletRequest request) { return response(HttpStatus.CONFLICT, ApiErrorCode.PURCHASE_REQUEST_DRAFT_DESTINATION_NOT_GEOCODED, exception.getMessage(), request); }
 	@ExceptionHandler(SalesIdempotencyPayloadConflictException.class)
