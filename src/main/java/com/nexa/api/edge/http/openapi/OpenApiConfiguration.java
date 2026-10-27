@@ -109,6 +109,36 @@ public class OpenApiConfiguration {
 							.description("Opaque, short-lived pre-context credential; pair with X-Nexa-Client: NATIVE")));
 	}
 
+	/**
+	 * Keeps streamed document downloads on a reusable binary response schema.
+	 * Springdoc currently inlines the controller's InputStreamResource as a string;
+	 * this runtime contract mapping preserves the public StreamingResponseBody component.
+	 */
+	@Bean
+	GlobalOpenApiCustomizer streamedBusinessDocumentDownloadSchema() {
+		return openAPI -> {
+			Components components = openAPI.getComponents() == null ? new Components() : openAPI.getComponents();
+			openAPI.setComponents(components);
+			components.addSchemas("StreamingResponseBody", new StringSchema()
+					.format("binary")
+					.description("Binary content streamed by an authorized business-document download."));
+
+			for (String path : List.of(
+					"/api/v1/business-documents/{documentId}/downloads",
+					"/api/v1/business-document-evidence/{evidenceId}/downloads")) {
+				var pathItem = openAPI.getPaths() == null ? null : openAPI.getPaths().get(path);
+				var operation = pathItem == null ? null : pathItem.getGet();
+				ApiResponse response = operation == null || operation.getResponses() == null
+						? null : operation.getResponses().get("200");
+				if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+					throw new IllegalStateException("Business-document download response is unavailable: " + path);
+				}
+				response.getContent().values().forEach(mediaType ->
+						mediaType.setSchema(new Schema<>().$ref("#/components/schemas/StreamingResponseBody")));
+			}
+		};
+	}
+
 	@Bean
 	GlobalOpenApiCustomizer nexaTechnicalErrorContract() {
 		return openAPI -> {

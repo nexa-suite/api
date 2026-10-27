@@ -18,6 +18,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.UpdateOwnProf
 import com.nexa.api.shared.context.ClientAddressResolver;
 import com.nexa.api.shared.context.RequestMetadata;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import com.fasterxml.jackson.annotation.JsonSetter;
@@ -243,9 +244,13 @@ public final class IamSecurityController {
 		public boolean documentNumberProvided() { return documentNumberProvided; }
 		public boolean documentCountryCodeProvided() { return documentCountryCodeProvided; }
 
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minLength = 0, maxLength = 160)
 		public void setDisplayName(String value) { displayName = value; }
+		@Schema(minLength = 0, maxLength = 64)
 		public void setPhone(String value) { phone = value; }
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minLength = 1, pattern = "es|en")
 		public void setPreferredLanguage(String value) { preferredLanguage = value; }
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minLength = 0, maxLength = 64)
 		public void setTimezone(String value) { timezone = value; }
 		@JsonSetter("firstName") public void setFirstName(String value) { firstNameProvided = true; firstName = value; }
 		@JsonSetter("lastName") public void setLastName(String value) { lastNameProvided = true; lastName = value; }
