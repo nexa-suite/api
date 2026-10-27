@@ -35,6 +35,7 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 	private UUID buyerPriceList;
 	private UUID buyerPriceListItem;
 	private UUID buyerCustomerTerms;
+	private UUID createdSkuId;
 
 	@AfterEach
 	void removePreviewFixture() {
@@ -53,6 +54,37 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
 			tenantJdbc().update("delete from catalog_management.product_presentation where product_id=?", previewProduct);
 			tenantJdbc().update("delete from catalog_management.product_visibility where product_id=?", previewProduct);
 			tenantJdbc().update("delete from catalog_management.product where id=?", previewProduct);
+		}
+		if (createdSkuId != null) {
+			UUID tenant = UUID.fromString(tenantId());
+			UUID workspace = UUID.fromString(workspaceId());
+			UUID productId = tenantJdbc().query(
+					"select legacy_product_id from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
+					rs -> rs.next() ? rs.getObject("legacy_product_id", UUID.class) : null,
+					tenant, workspace, createdSkuId);
+			tenantJdbc().update("delete from catalog_management.sku_price where tenant_id=? and workspace_id=? and sku_id=?",
+					tenant, workspace, createdSkuId);
+			tenantJdbc().update("delete from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
+					tenant, workspace, createdSkuId);
+			if (productId != null) {
+				tenantJdbc().update("delete from catalog_management.product_price where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product_presentation where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product_visibility where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product_asset_reference where tenant_id=? and workspace_id=? and product_id=?",
+						tenant, workspace, productId);
+				tenantJdbc().update("delete from catalog_management.product where tenant_id=? and workspace_id=? and id=?",
+						tenant, workspace, productId);
+				assertThat(tenantJdbc().queryForObject(
+						"select count(*) from catalog_management.product where tenant_id=? and workspace_id=? and id=?",
+						Integer.class, tenant, workspace, productId)).isZero();
+			}
+			assertThat(tenantJdbc().queryForObject(
+					"select count(*) from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and id=?",
+					Integer.class, tenant, workspace, createdSkuId)).isZero();
+			createdSkuId = null;
 		}
 	}
 
@@ -73,6 +105,7 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
                         .content("{\"skuCode\":\"IT-" + UUID.randomUUID() + "\",\"presentation\":\"Synthetic unit\",\"packagingType\":\"UNIT\",\"unitOfMeasure\":\"UNIT\",\"packQuantity\":1,\"shelfLifeDays\":30,\"minimumRemainingShelfLifeDays\":0,\"lotTrackingRequired\":true,\"expiryTrackingRequired\":true,\"taxCategory\":\"STANDARD\"}"))
                 .andExpect(status().isCreated()).andReturn();
         String skuId = JSON.readTree(created.getResponse().getContentAsString()).get("id").asText();
+		createdSkuId = UUID.fromString(skuId);
         String catalogId = "CAT-SKU-" + skuId.replace("-", "").toUpperCase(java.util.Locale.ROOT);
         mockMvc.perform(get("/api/v1/catalog-items/" + catalogId).header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer))
                 .andExpect(status().isNotFound());

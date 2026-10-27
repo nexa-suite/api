@@ -47,11 +47,12 @@ public class SalesOrderFulfillmentPersistenceAdapter
         args.add(workspaceId);
         args.addAll(salesOrderIds);
         Map<UUID, Header> headers = new LinkedHashMap<>();
-        jdbc.query("select id,number,client_account_id,priority from sales.sales_order "
+        jdbc.query("select id,number,client_account_id,priority,status from sales.sales_order "
                         + "where tenant_id=? and workspace_id=? and id in (" + placeholders + ")",
                 (rs, row) -> {
                     Header header = new Header(rs.getObject("id", UUID.class), rs.getString("number"),
-                            rs.getObject("client_account_id", UUID.class), rs.getString("priority"));
+                            rs.getObject("client_account_id", UUID.class), rs.getString("priority"),
+                            rs.getString("status"));
                     headers.put(header.id(), header);
                     return null;
                 }, args.toArray());
@@ -68,11 +69,11 @@ public class SalesOrderFulfillmentPersistenceAdapter
         }
         long offset = Math.multiplyExact((long) page, size);
         List<OrderReference> selected = jdbc.query(
-                "select id,number,created_at from sales.sales_order "
+                "select id,number,created_at,status from sales.sales_order "
                         + "where tenant_id=? and workspace_id=? and client_account_id=? "
                         + "order by created_at desc,id asc limit ? offset ?",
                 (rs, row) -> new OrderReference(rs.getObject("id", UUID.class), rs.getString("number"),
-                        rs.getTimestamp("created_at").toInstant()),
+                        rs.getTimestamp("created_at").toInstant(), rs.getString("status")),
                 tenantId, workspaceId, clientAccountId, size + 1, offset);
         boolean hasMore = selected.size() > size;
         List<OrderReference> items = hasMore ? selected.subList(0, size) : selected;

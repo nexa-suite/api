@@ -1,6 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure;
 
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.http.MediaType;
@@ -18,19 +19,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Real Tenant persistence with a synthetic delivery and simulated GPS samples. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class DriverLiveLocationIT extends NexaWorkflowIntegrationSupport {
+    private SyntheticWorkspaceIdentity driverIdentity;
+
+    @AfterEach
+    void retireSyntheticDriver() {
+        if (driverIdentity != null) retireSyntheticWorkspaceIdentity(driverIdentity);
+    }
+
     @Test
     void locationIsVisibleOnlyForTheAuthorizedActiveDelivery() throws Exception {
+        driverIdentity = createSyntheticWorkspaceIdentity(LOGISTICS_EMAIL, "logistics", "GPS Driver");
         var dispatch = createReservedDispatch();
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
-        UUID driver = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        UUID driver = driverIdentity.membershipId();
         UUID delivery = UUID.randomUUID();
         Instant dispatchStart = Instant.now().minusSeconds(2);
         tenantJdbc().update("insert into logistics.delivery(id,tenant_id,workspace_id,dispatch_order_id,status,destination_snapshot,dispatched_at,created_at,updated_at) values(?,?,?,?,'DISPATCHED','Synthetic GPS destination',?,?,?)",
                 delivery, tenant, workspace, UUID.fromString(dispatch.id()), Timestamp.from(dispatchStart), Timestamp.from(dispatchStart), Timestamp.from(dispatchStart));
         tenantJdbc().update("insert into logistics.delivery_assignment(id,tenant_id,workspace_id,delivery_id,responsible_membership_id,operator_id,assigned_at,actor_membership_id) values(?,?,?,?,?,?,?,?)",
                 UUID.randomUUID(), tenant, workspace, delivery, driver, UUID.randomUUID(), Timestamp.from(dispatchStart), driver);
-        String driverAuth = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String driverAuth = "Bearer " + accessToken(driverIdentity.email(), "PLATFORM");
         String buyerAuth = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
         var started = mockMvc.perform(post("/api/v1/driver/workdays")
                         .header("Authorization", driverAuth).header("Idempotency-Key", "gps-start-" + UUID.randomUUID())

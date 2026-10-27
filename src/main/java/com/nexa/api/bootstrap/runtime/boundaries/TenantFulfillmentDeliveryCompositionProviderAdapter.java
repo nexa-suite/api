@@ -156,7 +156,8 @@ public final class TenantFulfillmentDeliveryCompositionProviderAdapter {
         var paymentStatus = Objects.requireNonNull(paymentConfirmations.bindTo(jdbc, receivableAccess),
                 "Tenant Payments factory returned no confirmation query");
         FinancialAdjustmentSource adjustmentSource = financialAdjustmentSource(orders, paymentStatus);
-        var credit = Objects.requireNonNull(creditAccounts.bindTo(jdbc, accounts, receivableAccess,
+        var credit = Objects.requireNonNull(creditAccounts.bindTo(jdbc, accounts,
+                TenantCreditEligibilitySourceFactory.bindTo(accounts), receivableAccess,
                 traceability.commands(), traceability.canonicalOutbox(), adjustmentSource),
                 "Tenant Credit factory returned no bindings");
 

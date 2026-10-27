@@ -6,6 +6,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabase
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseBindingRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseAuthority;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentialsProvider;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
@@ -35,6 +36,7 @@ import java.nio.file.Path;
                 + "'${nexa.tenant-business.buyer-wallet-recharge.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.purchase-request.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.catalog-detail-read.enabled:false}' == 'true' or "
+                + "'${nexa.tenant-business.catalog-favorites.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.catalog-management.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.payments.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.fulfillment-delivery.enabled:false}' == 'true' or "
@@ -117,5 +119,11 @@ public class LocalTenantBusinessDatabaseRouterConfiguration {
             TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory writerDataSources) {
         return new TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver(
                 centralSettings, router, authority, writerDataSources);
+    }
+
+    @Bean
+    TenantBusinessDatabaseDeliveryLeadTimePolicyResolver localTenantDeliveryLeadTimePolicyResolver(
+            OperationalSettingsAccess centralSettings) {
+        return new TenantBusinessDatabaseDeliveryLeadTimePolicyResolver(centralSettings);
     }
 }

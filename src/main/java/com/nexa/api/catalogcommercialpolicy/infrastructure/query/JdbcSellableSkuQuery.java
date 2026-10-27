@@ -133,6 +133,13 @@ public class JdbcSellableSkuQuery implements SellableSkuQuery {
         return query(tenantId, workspaceId, customerAccountId, "s.legacy_catalog_item_id=?", legacyCatalogItemId, BigDecimal.ONE);
     }
 
+    @Override
+    public Optional<SellableSkuReference> findActiveByLegacyCatalogItemId(UUID tenantId, UUID workspaceId,
+            UUID customerAccountId, String legacyCatalogItemId, BigDecimal quantity) {
+        return query(tenantId, workspaceId, customerAccountId, "s.legacy_catalog_item_id=?", legacyCatalogItemId,
+                quantity);
+    }
+
     private Optional<SellableSkuReference> query(UUID tenantId, UUID workspaceId, UUID customerAccountId,
                                                   String selector, Object value, BigDecimal quantity) {
         List<SkuRow> rows = jdbc.query(SELECT + selector, (rs, ignored) -> row(rs), tenantId, workspaceId, value);

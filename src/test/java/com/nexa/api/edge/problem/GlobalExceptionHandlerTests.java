@@ -1,6 +1,7 @@
 package com.nexa.api.edge.problem;
 
 import com.nexa.api.edge.http.CorrelationIdFilter;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftWarehouseSelectionUnavailableException;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.InvalidAccessContextTicketException;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
@@ -78,6 +79,13 @@ class GlobalExceptionHandlerTests {
 	}
 
 	@Test
+	void mapsUnavailableSingleWarehouseToConflict() throws Exception {
+		mockMvc.perform(get("/warehouse-selection-unavailable"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("WAREHOUSE_SELECTION_UNAVAILABLE"));
+	}
+
+	@Test
 	void exposesSafeTechnicalFailureContract() throws Exception {
 		mockMvc.perform(get("/technical-failure"))
 				.andExpect(status().isBadGateway())
@@ -144,6 +152,11 @@ class GlobalExceptionHandlerTests {
 
 	@RestController
 	public static class TestController {
+		@GetMapping("/warehouse-selection-unavailable")
+		void unavailableWarehouse() {
+			throw new PurchaseRequestDraftWarehouseSelectionUnavailableException();
+		}
+
 		@PostMapping("/test")
 		void validate(@Valid @RequestBody Payload payload) {
 		}
