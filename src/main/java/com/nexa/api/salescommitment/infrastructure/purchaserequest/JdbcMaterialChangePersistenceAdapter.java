@@ -1,5 +1,6 @@
 package com.nexa.api.salescommitment.infrastructure.purchaserequest;
 
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.salescommitment.application.exception.SalesConcurrencyConflictException;
 import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
@@ -28,12 +29,14 @@ public class JdbcMaterialChangePersistenceAdapter implements MaterialChangePersi
     private final JdbcTemplate jdbc;
     private final PurchaseRequestPersistencePort requests;
     private final ObjectMapper mapper;
+    private final MaterialChangeLineSnapshotResolver lineSnapshots;
 
     public JdbcMaterialChangePersistenceAdapter(JdbcTemplate jdbc, PurchaseRequestPersistencePort requests,
-            ObjectMapper mapper) {
+            ObjectMapper mapper, SellableSkuQuery sellableSkus) {
         this.jdbc = jdbc;
         this.requests = requests;
         this.mapper = mapper;
+        this.lineSnapshots = new MaterialChangeLineSnapshotResolver(sellableSkus);
     }
 
     @Override
@@ -104,6 +107,8 @@ public class JdbcMaterialChangePersistenceAdapter implements MaterialChangePersi
 			MaterialChangeTerms acceptedTerms, String walletBeneficiaryIdentityId, long nowEpochMillis) {
         LockedProposal proposal = lockProposal(tenantId, workspaceId, buyerAccountId, purchaseRequestId,
                 proposalId, expectedVersion);
+        List<MaterialChangeLineSnapshotResolver.ResolvedLine> resolvedLines = lineSnapshots.resolve(
+                tenantId, workspaceId, buyerAccountId, acceptedTerms.lines());
         Timestamp now = timestamp(nowEpochMillis);
         UUID tenant = uuid(tenantId), workspace = uuid(workspaceId), request = uuid(purchaseRequestId);
         if (jdbc.update("update sales.purchase_request set status='SUBMITTED',priority=?,requested_delivery_date=?,delivery_profile_snapshot=?,payment_option=?,comments=?,buyer_wallet_beneficiary_identity_id=?,review_note=null,reviewed_by_membership_id=?,reviewed_at=?,updated_at=?,version=version+1 "
@@ -116,11 +121,14 @@ public class JdbcMaterialChangePersistenceAdapter implements MaterialChangePersi
         }
         jdbc.update("update sales.purchase_request_line set superseded_at=?,updated_at=?,version=version+1 where purchase_request_id=? and superseded_at is null",
                 now, now, request);
-        for (var line : acceptedTerms.lines()) {
-            jdbc.update("insert into sales.purchase_request_line (id,purchase_request_id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,created_at,updated_at,version) "
-                            + "values (?,?,?,?,?,?,?,?,?,?,?,?,0)",
-                    uuid(line.id()), request, line.catalogItemId(), line.itemName(), line.presentation(), line.quantity(),
-                    line.unit(), line.unitPriceAmount(), line.unitPriceCurrency(), line.notes(), now, now);
+        for (var resolved : resolvedLines) {
+            var line = resolved.line();
+            var sku = resolved.sku();
+            jdbc.update("insert into sales.purchase_request_line (id,purchase_request_id,catalog_item_id,product_family_id,product_family_code_snapshot,sku_id,sku_code_snapshot,item_name_snapshot,presentation_snapshot,quantity,unit,unit_price_amount,unit_price_currency,notes,created_at,updated_at,version) "
+                            + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
+                    uuid(line.id()), request, line.catalogItemId(), sku.familyId(), sku.familyCode(), sku.skuId(),
+                    sku.skuCode(), line.itemName(), line.presentation(), line.quantity(), line.unit(),
+                    line.unitPriceAmount(), line.unitPriceCurrency(), line.notes(), now, now);
         }
         long resultVersion = expectedVersion + 1;
         if (jdbc.update("update sales.purchase_request_material_change set status='ACCEPTED',resolved_by_membership_id=?,resolved_at=?,resolved_request_version=? "
