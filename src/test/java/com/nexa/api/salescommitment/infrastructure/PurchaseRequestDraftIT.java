@@ -70,6 +70,129 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
     }
 
     @Test
+    void routePreviewRejectsEmptyDraftWithoutWritingSnapshotsOrChangingVersion() throws Exception {
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String accountId = buyerClientAccountId();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID addressId = UUID.randomUUID();
+        int insertedAddress = tenantJdbc().update("insert into sales.client_account_address "
+                        + "(id,tenant_id,workspace_id,client_account_id,label,recipient_name,address_line,"
+                        + "department_code,province_code,district_code,source,default_address,status,version,"
+                        + "created_at,updated_at,latitude,longitude) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,'MANUAL',false,'ACTIVE',0,current_timestamp,current_timestamp,?,?)",
+                addressId, tenant, workspace, UUID.fromString(accountId), "Empty draft destination", "Buyer recipient",
+                "Av. Sucre 1992", "15", "1501", "150121", -12.0464, -77.0428);
+        assertThat(insertedAddress).isEqualTo(1);
+
+        MvcResult created = mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts")
+                        .header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientAccountId\":\"" + accountId + "\",\"requestedDeliveryDate\":\"2099-12-31\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        UUID draftId = UUID.fromString(json(created).get("id").asText());
+        MvcResult destination = mockMvc.perform(put("/api/v1/buyer/purchase-request-drafts/" + draftId + "/destination")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressId\":\"" + addressId + "\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String statusAfterDestination = tenantJdbc().queryForObject("select status from sales.purchase_request_draft "
+                        + "where tenant_id=? and workspace_id=? and id=?", String.class, tenant, workspace, draftId);
+        Integer versionAfterDestination = tenantJdbc().queryForObject("select version from sales.purchase_request_draft "
+                        + "where tenant_id=? and workspace_id=? and id=?", Integer.class, tenant, workspace, draftId);
+
+        mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/route-previews")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", destination.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\":\"LOCAL_ESTIMATE\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INVALID_TRANSITION"));
+
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request_draft "
+                        + "where tenant_id=? and workspace_id=? and id=?", String.class, tenant, workspace, draftId))
+                .isEqualTo(statusAfterDestination);
+        assertThat(tenantJdbc().queryForObject("select version from sales.purchase_request_draft "
+                        + "where tenant_id=? and workspace_id=? and id=?", Integer.class, tenant, workspace, draftId))
+                .isEqualTo(versionAfterDestination);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_line "
+                + "where tenant_id=? and workspace_id=? and draft_id=?", Integer.class, tenant, workspace, draftId)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_route "
+                + "where tenant_id=? and workspace_id=? and draft_id=?", Integer.class, tenant, workspace, draftId)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_warehouse_selection "
+                + "where tenant_id=? and workspace_id=? and draft_id=?", Integer.class, tenant, workspace, draftId)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request where id=?",
+                Integer.class, draftId)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment where purchase_request_id=?",
+                Integer.class, draftId)).isZero();
+    }
+
+    @Test
+    void routePreviewReportsAggregateStockShortageWithoutChangingDraftOrWritingSnapshots() throws Exception {
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String accountId = buyerClientAccountId();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID addressId = UUID.randomUUID();
+        UUID skuId = tenantJdbc().queryForObject("select id from catalog_management.sellable_sku "
+                        + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0002' "
+                        + "and status='ACTIVE' and visible",
+                UUID.class, tenant, workspace);
+        tenantJdbc().update("insert into sales.client_account_address "
+                        + "(id,tenant_id,workspace_id,client_account_id,label,recipient_name,address_line,"
+                        + "department_code,province_code,district_code,source,default_address,status,version,"
+                        + "created_at,updated_at,latitude,longitude) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,'MANUAL',false,'ACTIVE',0,current_timestamp,current_timestamp,?,?)",
+                addressId, tenant, workspace, UUID.fromString(accountId), "Stock shortage destination", "Buyer recipient",
+                "Av. Sucre 1992", "15", "1501", "150121", -12.0464, -77.0428);
+
+        MvcResult created = mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts")
+                        .header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientAccountId\":\"" + accountId + "\",\"requestedDeliveryDate\":\"2099-12-31\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        UUID draftId = UUID.fromString(json(created).get("id").asText());
+        MvcResult lines = mockMvc.perform(put("/api/v1/buyer/purchase-request-drafts/" + draftId + "/lines")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[{\"skuId\":\"" + skuId + "\",\"quantity\":1000000,\"unit\":\"UNIT\"}]}"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult destination = mockMvc.perform(put("/api/v1/buyer/purchase-request-drafts/" + draftId + "/destination")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", lines.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"addressId\":\"" + addressId + "\"}"))
+                .andExpect(status().isOk()).andReturn();
+
+        String statusBefore = tenantJdbc().queryForObject("select status from sales.purchase_request_draft where id=?",
+                String.class, draftId);
+        Long versionBefore = tenantJdbc().queryForObject("select version from sales.purchase_request_draft where id=?",
+                Long.class, draftId);
+        mockMvc.perform(post("/api/v1/buyer/purchase-request-drafts/" + draftId + "/route-previews")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", destination.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\":\"LOCAL_ESTIMATE\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INSUFFICIENT_SELLABLE_AVAILABILITY"));
+
+        assertThat(tenantJdbc().queryForObject("select status from sales.purchase_request_draft where id=?",
+                String.class, draftId)).isEqualTo(statusBefore);
+        assertThat(tenantJdbc().queryForObject("select version from sales.purchase_request_draft where id=?",
+                Long.class, draftId)).isEqualTo(versionBefore);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_route where draft_id=?",
+                Integer.class, draftId)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request_draft_warehouse_selection where draft_id=?",
+                Integer.class, draftId)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.purchase_request where id=?",
+                Integer.class, draftId)).isZero();
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.commercial_commitment where purchase_request_id=?",
+                Integer.class, draftId)).isZero();
+    }
+
+    @Test
     void buyerCannotReadOrChangeDraftAfterAccountBecomesInactive() throws Exception {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String accountId = buyerClientAccountId();
