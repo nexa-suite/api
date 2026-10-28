@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -66,6 +67,7 @@ class ModernPostgresUpgradeMigrationTests {
             }
         }
 
+        CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
         Flyway currentMigrations = Flyway.configure()
                 .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration").load();
@@ -75,8 +77,6 @@ class ModernPostgresUpgradeMigrationTests {
                 .max(Comparator.naturalOrder())
                 .orElseThrow(() -> new IllegalStateException("No resolved versioned migrations were found"))
                 .getVersion();
-        currentMigrations.migrate();
-
         try (var connection = POSTGRES.createConnection("")) {
             try (var statement = connection.createStatement(); var version = statement.executeQuery("select version from flyway_schema_history order by installed_rank desc limit 1")) {
                 assertThat(version.next()).isTrue();

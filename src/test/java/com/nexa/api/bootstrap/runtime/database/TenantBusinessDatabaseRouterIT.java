@@ -40,6 +40,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import tools.jackson.databind.json.JsonMapper;
 
 import javax.sql.DataSource;
@@ -74,6 +75,7 @@ class TenantBusinessDatabaseRouterIT {
 	private static final String DOCUMENTS_WORKER_PASSWORD = "tenant-documents-worker-only-test-password";
 	private static final String PAYMENTS_WORKER_PASSWORD = "tenant-payments-worker-only-test-password";
 	private static final String TRACEABILITY_WORKER_PASSWORD = "tenant-traceability-worker-only-test-password";
+	private static final String RESERVATION_EXPIRY_WORKER_PASSWORD = "tenant-reservation-expiry-worker-only-test-password";
 	private static final String RUNTIME_USERNAME = "nexa_runtime";
 
 	@Container
@@ -99,8 +101,7 @@ class TenantBusinessDatabaseRouterIT {
 		configureWorkerRoles(TENANT_A);
 		configureWorkerRoles(TENANT_B);
 
-		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
-				.locations("classpath:db/migration").load().migrate();
+		CentralMigrationTestBootstrap.migrateLatest(CENTRAL);
 		Flyway.configure().dataSource(TENANT_A.getJdbcUrl(), TENANT_A.getUsername(), TENANT_A.getPassword())
 				.locations("classpath:db/tenant-migration").load().migrate();
 		Flyway.configure().dataSource(TENANT_B.getJdbcUrl(), TENANT_B.getUsername(), TENANT_B.getPassword())
@@ -494,6 +495,12 @@ class TenantBusinessDatabaseRouterIT {
 				centralAdmin.update("UPDATE tenant_management.tenant_business_database_binding SET credential_secret_reference=? WHERE tenant_id=?",
 						rotatedSecret, fixture.tenantA().tenantId().value());
 				setRequestScope(fixture.tenantA());
+				assertThat(centralAdmin.queryForObject(
+						"SELECT credential_secret_reference FROM tenant_management.tenant_business_database_binding WHERE tenant_id=?",
+						String.class, fixture.tenantA().tenantId().value())).isEqualTo(rotatedSecret);
+				assertThat(centralRuntime.queryForObject(
+						"SELECT credential_secret_reference FROM tenant_management.tenant_business_database_binding WHERE tenant_id=?",
+						String.class, fixture.tenantA().tenantId().value())).isEqualTo(rotatedSecret);
 				assertThatThrownBy(() -> insertProbe(router, tenantA, "retired-binding-denied"))
 						.isInstanceOf(TenantBusinessDatabaseUnavailableException.class)
 						.hasMessageContaining("capacity is occupied by active transactions");
@@ -701,8 +708,8 @@ class TenantBusinessDatabaseRouterIT {
 				tenantId.value(), tenantName, tenantSlug + "-" + tenantId, "ACTIVE", now, now);
 		central.update("INSERT INTO tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
 				workspaceId.value(), tenantId.value(), tenantName + " Workspace", "primary", "ACTIVE", now, now);
-		central.update("INSERT INTO tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-				membershipId.value(), workspaceId.value(), userId.value(), "INTERNAL", "ACTIVE", now, now);
+		central.update("INSERT INTO tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+				membershipId.value(), tenantId.value(), workspaceId.value(), userId.value(), "INTERNAL", "ACTIVE", now, now);
 		central.update("""
 				INSERT INTO tenant_management.membership_role_definition
 				    (membership_id,tenant_id,workspace_id,role_id,assigned_at)
@@ -864,8 +871,11 @@ class TenantBusinessDatabaseRouterIT {
 			statement.execute("CREATE ROLE nexa_business_traceability_worker LOGIN PASSWORD '"
 					+ TRACEABILITY_WORKER_PASSWORD
 					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker LOGIN PASSWORD '"
+					+ RESERVATION_EXPIRY_WORKER_PASSWORD
+					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + container.getDatabaseName()
-					+ "\" TO nexa_business_documents_worker, nexa_payments_worker, nexa_business_traceability_worker");
+					+ "\" TO nexa_business_documents_worker, nexa_payments_worker, nexa_business_traceability_worker, nexa_warehouse_reservation_expiry_worker");
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not create Tenant worker roles required by current migrations", exception);
 		}

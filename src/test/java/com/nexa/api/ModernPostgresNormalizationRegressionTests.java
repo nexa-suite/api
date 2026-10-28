@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -26,8 +27,7 @@ class ModernPostgresNormalizationRegressionTests {
 	void centralAndTenantMigrationsRemoveOnlyMutableGeneratedBusinessValues() throws Exception {
 		createTenantMigrationRolesAndDatabase();
 
-		Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-				.locations("classpath:db/migration").load().migrate();
+		CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
 		try (var connection = POSTGRES.createConnection("")) {
 			assertDerivedColumnsAbsent(connection);
 			assertThat(generatedColumns(connection, "payments", "financial_adjustment"))
@@ -47,7 +47,8 @@ class ModernPostgresNormalizationRegressionTests {
 	private static void createTenantMigrationRolesAndDatabase() throws SQLException {
 		try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement()) {
 			for (String role : Set.of("nexa_runtime", "nexa_policy_snapshot_writer", "nexa_business_documents_worker",
-					"nexa_payments_worker", "nexa_business_traceability_worker")) {
+					"nexa_payments_worker", "nexa_business_traceability_worker",
+					"nexa_warehouse_reservation_expiry_worker")) {
 				statement.execute("create role " + role);
 			}
 			statement.execute("create database nexa_tenant");

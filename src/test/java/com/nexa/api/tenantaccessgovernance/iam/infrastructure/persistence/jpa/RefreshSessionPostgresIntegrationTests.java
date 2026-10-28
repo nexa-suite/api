@@ -6,9 +6,15 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.SignInCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessionUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignInUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
+import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseBindingRegistry;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -24,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
+@Import(RefreshSessionPostgresIntegrationTests.TestBindingConfiguration.class)
 @ActiveProfiles("local")
 @TestPropertySource(properties = {
 		"spring.autoconfigure.exclude=",
@@ -34,6 +41,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers(disabledWithoutDocker = true)
 class RefreshSessionPostgresIntegrationTests {
 	private static final String PASSWORD = "refresh-test-password";
+
+	@TestConfiguration(proxyBeanMethods = false)
+	static class TestBindingConfiguration {
+		@Bean
+		TenantBusinessDatabaseBindingRegistry integrationTenantBusinessDatabaseBindingRegistry(JdbcTemplate jdbc) {
+			return new JdbcTenantBusinessDatabaseBindingRegistry(jdbc);
+		}
+	}
 
 	@Container
 	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
@@ -52,9 +67,15 @@ class RefreshSessionPostgresIntegrationTests {
 
 	@DynamicPropertySource
 	static void databaseProperties(DynamicPropertyRegistry registry) {
+		CentralMigrationTestBootstrap.MigrationCredentials migration = CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
 		registry.add("NEXA_DATABASE_URL", POSTGRES::getJdbcUrl);
 		registry.add("NEXA_DATABASE_USERNAME", POSTGRES::getUsername);
 		registry.add("NEXA_DATABASE_PASSWORD", POSTGRES::getPassword);
+		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", () -> "nexa_migrator");
+		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", migration::migratorPassword);
+		registry.add("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", migration::workspaceScopeReaderPassword);
+		registry.add("NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD", migration::businessDocumentsScopeReaderPassword);
+		registry.add("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD", migration::internalOperatorPassword);
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);

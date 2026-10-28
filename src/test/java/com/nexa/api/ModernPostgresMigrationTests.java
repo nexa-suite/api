@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 
 import java.sql.SQLException;
 import java.nio.file.Files;
@@ -22,6 +23,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers(disabledWithoutDocker = true)
 class ModernPostgresMigrationTests {
+	private static final Map<String, List<String>> POST_V161_RLS_OVERRIDES = Map.ofEntries(
+			Map.entry("integration.change_event", List.of("t", "t", "t", "t")),
+			Map.entry("integration.inbox_event", List.of("t", "t", "t", "t")),
+			Map.entry("sales.purchase_request_line", List.of("f", "f", "t", "t")),
+			Map.entry("sales.sales_order_line", List.of("f", "f", "t", "t")),
+			Map.entry("tenant_management.notification_preference", List.of("f", "t", "t", "t")),
+			Map.entry("tenant_management.operational_settings", List.of("f", "t", "t", "t")),
+			Map.entry("tenant_management.organization_invitation_role", List.of("f", "f", "t", "t")),
+			Map.entry("tenant_management.role_permission", List.of("f", "f", "t", "t")),
+			Map.entry("tenant_management.workspace_membership", List.of("t", "t", "t", "t")),
+			Map.entry("tenant_management.workspace_settings", List.of("f", "t", "t", "t")),
+			Map.entry("warehouse.inventory_reservation_allocation", List.of("f", "f", "t", "t")),
+			Map.entry("warehouse.inventory_reservation_line", List.of("f", "f", "t", "t")),
+			Map.entry("warehouse.reservation_shortage", List.of("f", "f", "t", "t")));
+
 	@Container
 	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
 			.withDatabaseName("nexa")
@@ -30,11 +46,7 @@ class ModernPostgresMigrationTests {
 
 	@Test
 	void flywayCreatesOnlyTheModernIdentityAndTenantSchemasWithRequiredTables() throws Exception {
-		try (var connection = POSTGRES.createConnection(""); var statement = connection.createStatement()) {
-			statement.execute("create role nexa_runtime");
-		}
-		Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-				.locations("classpath:db/migration").cleanDisabled(false).load().migrate();
+		CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
 
 		try (var connection = POSTGRES.createConnection("")) {
 			try (var statement = connection.createStatement(); var result = statement.executeQuery(
@@ -123,7 +135,8 @@ class ModernPostgresMigrationTests {
 			assertThat(columns(connection, "tenant_management", "operational_settings")).containsExactlyInAnyOrder(
 				"workspace_id", "warehouse_preference_strategy", "order_cutoff_policy", "fulfillment_defaults",
 				"inventory_visibility_policy", "buyer_availability_policy", "operating_hours_start",
-				"operating_hours_end", "order_cutoff_minutes", "thermal_log_required", "purchase_request_expiry_days", "version", "updated_at");
+				"operating_hours_end", "order_cutoff_minutes", "thermal_log_required", "purchase_request_expiry_days",
+				"minimum_delivery_lead_days", "version", "updated_at");
 			assertThat(columns(connection, "sales", "purchase_request")).contains("expires_at");
 			assertThat(columns(connection, "catalog_management", "promotion")).contains("priority");
 			assertThat(indexColumns(connection, "sales", "uq_client_account_one_buyer"))
@@ -155,6 +168,9 @@ class ModernPostgresMigrationTests {
 			assertThat(expected.put(fields[0], List.of(fields[2], fields[3], fields[4], fields[5])))
 					.as("each table appears once: %s", fields[0]).isNull();
 		}
+		POST_V161_RLS_OVERRIDES.forEach((table, scopeAndRls) ->
+				assertThat(expected.put(table, scopeAndRls))
+						.as("post-V161 migration override refers to a V161 table: %s", table).isNotNull());
 		Map<String, List<String>> actual = new LinkedHashMap<>();
 		try (var statement = connection.createStatement(); var result = statement.executeQuery("""
 				select n.nspname || '.' || c.relname, bool_or(a.attname='tenant_id'),
@@ -171,16 +187,37 @@ class ModernPostgresMigrationTests {
 						result.getBoolean(4) ? "t" : "f", result.getBoolean(5) ? "t" : "f"));
 			}
 		}
-		assertThat(actual).as("every current PostgreSQL table must be classified with accurate scope and RLS flags")
+		assertThat(actual).as("every current PostgreSQL table must match expected scope and RLS flags")
 				.isEqualTo(expected);
+		// V177 splits inbox reads and appends into separate command policies;
+		// check both exact policies below instead of requiring one policy for both.
 		try (var statement = connection.createStatement(); var result = statement.executeQuery("""
 				select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
 				where c.relkind='r' and c.relrowsecurity
+				  and n.nspname || '.' || c.relname <> 'integration.inbox_event'
 				  and not exists (select 1 from pg_policies p where p.schemaname=n.nspname
 				      and p.tablename=c.relname and p.qual is not null and p.with_check is not null)
 				""")) {
 			assertThat(result.next()).isTrue();
 			assertThat(result.getLong(1)).as("protected tables require USING and WITH CHECK policies").isZero();
+		}
+		try (var statement = connection.createStatement(); var result = statement.executeQuery("""
+				select exists (
+				    select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
+				    where n.nspname='integration' and c.relname='inbox_event'
+				      and c.relrowsecurity and c.relforcerowsecurity
+				      and exists (select 1 from pg_policies p where p.schemaname=n.nspname
+				          and p.tablename=c.relname and p.policyname='inbox_event_direct_scope_select'
+				          and p.cmd='SELECT' and p.qual like '%app.current_tenant_id%'
+				          and p.qual like '%app.current_workspace_id%')
+				      and exists (select 1 from pg_policies p where p.schemaname=n.nspname
+				          and p.tablename=c.relname and p.policyname='inbox_event_direct_scope_insert'
+				          and p.cmd='INSERT' and p.with_check like '%app.current_tenant_id%'
+				          and p.with_check like '%app.current_workspace_id%')
+				)
+				""")) {
+			assertThat(result.next()).isTrue();
+			assertThat(result.getBoolean(1)).as("inbox event has separate Tenant/Workspace read and append policies").isTrue();
 		}
 	}
 
@@ -298,6 +335,8 @@ class ModernPostgresMigrationTests {
 	private static void assertTenantWorkspaceRls(java.sql.Connection connection) throws Exception {
 		Set<String> expectedTables = new java.util.HashSet<>();
 		Set<String> expectedTenantWorkspaceTables = new java.util.HashSet<>();
+		// V161 is a point-in-time inventory. Later migrations force RLS on these
+		// tables without rewriting that historical evidence.
 		var inventory = Files.readAllLines(Path.of("docs/security/rls-table-inventory-v161.tsv"));
 		for (String line : inventory.subList(1, inventory.size())) {
 			String[] fields = line.split("\\t", -1);
@@ -309,6 +348,9 @@ class ModernPostgresMigrationTests {
 				if (fields[2].equals("t") && fields[3].equals("t")) expectedTenantWorkspaceTables.add(fields[0]);
 			}
 		}
+		expectedTables.addAll(POST_V161_RLS_OVERRIDES.keySet());
+		expectedTenantWorkspaceTables.addAll(Set.of("integration.change_event", "integration.inbox_event",
+				"tenant_management.workspace_membership"));
 		assertThat(expectedTables).as("V161 classifies stock-temperature exceptions as forced RLS")
 				.contains("logistics.stock_temperature_exception");
 		assertThat(expectedTenantWorkspaceTables)
@@ -316,6 +358,12 @@ class ModernPostgresMigrationTests {
 				.contains("logistics.stock_temperature_exception");
 		Set<String> expectedSinglePolicyTenantWorkspaceTables = new java.util.HashSet<>(expectedTenantWorkspaceTables);
 		expectedSinglePolicyTenantWorkspaceTables.remove("iam.internal_support_audit_event");
+		expectedSinglePolicyTenantWorkspaceTables.remove("integration.change_event");
+		expectedSinglePolicyTenantWorkspaceTables.remove("integration.inbox_event");
+		// These two provisioning queues use separate operation/worker policies;
+		// V169 and V178 validate their restricted scope and role grants directly.
+		expectedSinglePolicyTenantWorkspaceTables.remove("tenant_management.tenant_business_database_provisioning_task");
+		expectedSinglePolicyTenantWorkspaceTables.remove("tenant_management.tenant_business_database_workspace_anchor_task");
 		Set<String> actualTables = new java.util.HashSet<>();
 		Set<String> policyTables = new java.util.HashSet<>();
 		Set<String> scopedPolicyTables = new java.util.HashSet<>();
@@ -356,11 +404,11 @@ class ModernPostgresMigrationTests {
 				}
 			}
 		}
-		assertThat(actualTables).as("forced RLS tables exactly match the V161 direct-scope inventory")
+		assertThat(actualTables).as("forced RLS tables match the V161 baseline plus later hardening migrations")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
-		assertThat(policyTables).as("every forced direct-scope table has an explicit policy")
+		assertThat(policyTables).as("every forced RLS table has an explicit policy")
 				.containsExactlyInAnyOrderElementsOf(expectedTables);
-		assertThat(scopedPolicyTables).as("every two-key table has USING and WITH CHECK for both Tenant and Workspace")
+		assertThat(scopedPolicyTables).as("single-policy two-key tables have USING and WITH CHECK for both Tenant and Workspace")
 				.containsExactlyInAnyOrderElementsOf(expectedSinglePolicyTenantWorkspaceTables);
 		assertThat(supportAuditPolicyNames).as("support audit keeps only its owner insert and verified operator policies")
 				.containsExactlyInAnyOrder("internal_support_audit_owner_insert_scope",
