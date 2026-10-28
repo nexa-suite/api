@@ -264,39 +264,19 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                             .header("Authorization", "Bearer " + bomToken))
                     .andExpect(status().isNotFound());
 
-            WorkspaceScope sameTenantWorkspace = createWorkspaceMembership(WAREHOUSE_EMAIL,
-                    UUID.fromString(tenantId()), "w4-rec-same-tenant-" + suffix.toLowerCase(java.util.Locale.ROOT));
-            UUID sameTenantId = UUID.fromString(sameTenantWorkspace.tenantId());
-            UUID sameWorkspaceId = UUID.fromString(sameTenantWorkspace.workspaceId());
-            provisionTenantBusinessDatabase(sameTenantId, sameWorkspaceId);
-            seedTenantCatalogFixture(sameTenantId, sameWorkspaceId);
-            String sameTenantWarehouseToken = accessTokenForWorkspace(WAREHOUSE_EMAIL, "PLATFORM",
-                    sameTenantWorkspace.slug());
-            String sameTenantOwnerToken = accessTokenForWorkspace(OWNER_EMAIL, "PLATFORM",
-                    sameTenantWorkspace.slug());
-            String sameTenantWarehouse = createWarehouse(sameTenantWarehouseToken,
-                    "WH-TEMP-SAME-TENANT-" + suffix, sameTenantOwnerToken,
-                    sameTenantWorkspace.warehouseMembershipId());
-            sameTenantWarehouseToken = accessTokenForWorkspace(WAREHOUSE_EMAIL, "PLATFORM",
-                    sameTenantWorkspace.slug());
-            String sameTenantZoneResponse = mockMvc.perform(post("/api/v1/warehouses/" + sameTenantWarehouse + "/zones")
-                            .header("Authorization", "Bearer " + sameTenantWarehouseToken)
+            String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
+            Integer workspaceCountBefore = jdbc.queryForObject(
+                    "select count(*) from tenant_management.workspace where tenant_id=?",
+                    Integer.class, UUID.fromString(tenantId()));
+            mockMvc.perform(post("/api/v1/workspaces")
+                            .header("Authorization", "Bearer " + ownerToken)
+                            .header("Idempotency-Key", "bom-audit-extra-workspace-" + suffix)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"code\":\"C-SAME-TENANT-" + suffix + "\",\"name\":\"Same tenant workspace\","
-                                    + "\"type\":\"CHILLED\",\"temperatureMin\":-999,\"temperatureMax\":999}"))
-                    .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
-            String sameTenantZone = tools.jackson.databind.json.JsonMapper.shared()
-                    .readTree(sameTenantZoneResponse).get("id").asText();
-            String sameTenantLotResponse = postReceipt(sameTenantWarehouseToken,
-                            "bom-audit-same-tenant-receipt-" + suffix,
-                            receiptBody(sameTenantWarehouse, sameTenantZone,
-                                    "B-TEMP-SAME-TENANT-" + suffix, "2", receivingValue))
-                    .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
-            String sameTenantLotId = tools.jackson.databind.json.JsonMapper.shared()
-                    .readTree(sameTenantLotResponse).get("id").asText();
-            mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", sameTenantLotId)
-                            .header("Authorization", "Bearer " + bomToken))
-                    .andExpect(status().isNotFound());
+                            .content("{\"name\":\"Unsupported second workspace\",\"slug\":\"w4-bom-extra-"
+                                    + suffix.toLowerCase(java.util.Locale.ROOT) + "\"}"))
+                    .andExpect(status().isConflict());
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace where tenant_id=?",
+                    Integer.class, UUID.fromString(tenantId()))).isEqualTo(workspaceCountBefore);
         } finally {
             cleanupAuditIdentity(bom);
         }

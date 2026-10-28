@@ -22,6 +22,10 @@ class ManualSalesOrderDraftIT extends PostgresIntegrationSupport {
     void manualOrderDraftPersistsEachStepUsesIfMatchAndReplaysFinalSubmission() throws Exception {
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         String clientId = buyerClientAccountId();
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=current_timestamp,"
+                        + "version=version+1 where tenant_id=? and workspace_id=? and id=?",
+                UUID.fromString(membershipId(SALES_EMAIL)), UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), UUID.fromString(clientId));
         String skuId = tenantJdbc().queryForObject("select s.id::text from catalog_management.sellable_sku s "
                 + "where s.tenant_id=? and s.workspace_id=? and s.legacy_catalog_item_id='CAT-0002' "
                 + "and s.status='ACTIVE' and s.visible and exists (select 1 from warehouse.inventory_lot l "

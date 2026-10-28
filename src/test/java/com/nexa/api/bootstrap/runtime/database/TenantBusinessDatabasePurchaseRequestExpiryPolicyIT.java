@@ -59,6 +59,7 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 	private static final String DOCUMENTS_WORKER_PASSWORD = "tenant-expiry-documents-worker-test-password";
 	private static final String PAYMENTS_WORKER_PASSWORD = "tenant-expiry-payments-worker-test-password";
 	private static final String TRACEABILITY_WORKER_PASSWORD = "tenant-expiry-traceability-worker-test-password";
+	private static final String RESERVATION_EXPIRY_WORKER_PASSWORD = "tenant-expiry-reservation-worker-test-password";
 	private static final UUID TENANT_A_DATABASE_ID = UUID.fromString("dd65ac46-47a8-4986-9ac1-00f80153dc4b");
 	private static final UUID TENANT_B_DATABASE_ID = UUID.fromString("e2dd4fd6-18cb-4a2b-9d2b-1207fdcb1c38");
 	private static final TenantRecord TENANT_A = new TenantRecord(
@@ -322,9 +323,13 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 			statement.execute("CREATE ROLE nexa_business_traceability_worker LOGIN PASSWORD '"
 					+ TRACEABILITY_WORKER_PASSWORD
 					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker LOGIN PASSWORD '"
+					+ RESERVATION_EXPIRY_WORKER_PASSWORD
+					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + container.getDatabaseName()
 					+ "\" TO nexa_runtime, nexa_policy_snapshot_writer, nexa_business_documents_worker, "
-					+ "nexa_payments_worker, nexa_business_traceability_worker");
+					+ "nexa_payments_worker, nexa_business_traceability_worker, "
+					+ "nexa_warehouse_reservation_expiry_worker");
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not provision distinct Tenant runtime, writer, and worker roles", exception);
 		}

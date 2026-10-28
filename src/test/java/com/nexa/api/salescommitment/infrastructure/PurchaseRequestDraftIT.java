@@ -226,6 +226,10 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String clientId = buyerClientAccountId();
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=current_timestamp,"
+                        + "version=version+1 where tenant_id=? and workspace_id=? and id=?",
+                UUID.fromString(membershipId(SALES_EMAIL)), UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), UUID.fromString(clientId));
         List<String> skuIds = tenantJdbc().query("""
                 select s.id::text
                 from catalog_management.sellable_sku s

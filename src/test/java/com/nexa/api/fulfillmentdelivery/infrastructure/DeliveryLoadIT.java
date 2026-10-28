@@ -483,9 +483,9 @@ class DeliveryLoadIT extends NexaWorkflowIntegrationSupport {
                         + "values (?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)", workspace, tenant,
                 "Delivery-load isolation workspace", workspaceSlug);
         jdbc.update("insert into tenant_management.workspace_membership "
-                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "select ?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
-                        + "from tenant_management.workspace_membership where id=?", membership, workspace, sourceMembership);
+                        + "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "select ?,?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
+                        + "from tenant_management.workspace_membership where id=?", membership, tenant, workspace, sourceMembership);
         jdbc.update("insert into tenant_management.membership_role_definition "
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition where membership_id=?",

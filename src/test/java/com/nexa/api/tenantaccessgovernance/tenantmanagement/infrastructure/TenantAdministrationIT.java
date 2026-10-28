@@ -2,7 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure;
 
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.notification.JdbcSecurityNotificationOutboxAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort;
-import com.nexa.api.support.PostgresIntegrationSupport;
+import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcInvitationPersistenceAdapter;
@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @TestPropertySource(properties = "nexa.security.notification-outbox.poll-delay=PT1H")
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-class TenantAdministrationIT extends PostgresIntegrationSupport {
+class TenantAdministrationIT extends NexaWorkflowIntegrationSupport {
     @Autowired
     private JdbcSecurityNotificationOutboxAdapter notificationOutbox;
 
@@ -162,17 +162,40 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         mockMvc.perform(patch("/api/v1/workspace-memberships/" + ownerMembership + "/roles").header("Authorization", "Bearer " + owner).header("If-Match", "\"" + ownerMembershipVersion + "\"")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"roles\":[\"COMPANY_OWNER\"]}"))
                 .andExpect(status().isConflict());
+
+        String suspendOwnerPath = "/api/v1/workspace-memberships/" + ownerMembership + "/suspensions";
+        mockMvc.perform(post(suspendOwnerPath).header("Authorization", "Bearer " + owner)
+                        .header("If-Match", "\"" + ownerMembershipVersion + "\""))
+                .andExpect(status().isConflict());
+
+        SyntheticWorkspaceIdentity extraAdmin = createSyntheticWorkspaceIdentity(OWNER_EMAIL, "tenant_admin",
+                "Final owner guard admin");
+        try {
+            mockMvc.perform(post(suspendOwnerPath).header("Authorization", "Bearer " + owner)
+                            .header("If-Match", "\"" + ownerMembershipVersion + "\""))
+                    .andExpect(status().isConflict());
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m "
+                            + "join tenant_management.membership_role_definition a on a.membership_id=m.id "
+                            + "join tenant_management.role_definition r on r.id=a.role_id "
+                            + "where m.workspace_id=? and m.status='ACTIVE' and r.code='company_owner'",
+                    Integer.class, UUID.fromString(workspaceId()))).isEqualTo(1);
+        } finally {
+            retireSyntheticWorkspaceIdentity(extraAdmin);
+        }
         mockMvc.perform(get("/api/v1/workspaces/" + UUID.randomUUID()).header("Authorization", "Bearer " + owner)).andExpect(status().isNotFound());
     }
 
     @Test
     void companyOwnerInvitationCannotCreateASecondActiveOwner() throws Exception {
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String email = "second-owner-" + uuid().substring(0, 8) + "@example.test";
         mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
                         .header("Idempotency-Key", "owner-invite-" + uuid()).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"second-owner-" + uuid().substring(0, 8) + "@example.test\",\"displayName\":\"Second Owner\",\"roles\":[\"COMPANY_OWNER\"]}"))
+                        .content("{\"email\":\"" + email + "\",\"displayName\":\"Second Owner\",\"roles\":[\"COMPANY_OWNER\"]}"))
                 .andExpect(status().isConflict());
         assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join tenant_management.membership_role_definition a on a.membership_id=m.id join tenant_management.role_definition r on r.id=a.role_id where w.tenant_id=? and m.status='ACTIVE' and r.code='company_owner'", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from tenant_management.organization_invitation where tenant_id=? and normalized_email=?",
+                Integer.class, UUID.fromString(tenantId()), email)).isZero();
     }
 
     @Test
@@ -427,7 +450,10 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
 
     @Test
     void workspaceSettingsHaveOneCanonicalWarehouseStrategyAndCustomFieldsHaveAFullLifecycle() throws Exception {
-        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        SyntheticWorkspaceIdentity tenantAdmin = createSyntheticWorkspaceIdentity(OWNER_EMAIL, "tenant_admin",
+                "Workspace configuration admin");
+        try {
+        String owner = accessToken(tenantAdmin.email(), "PLATFORM");
         String workspace = workspaceId();
         MvcResult workspaceSettings = mockMvc.perform(get("/api/v1/workspaces/" + workspace + "/settings").header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();
@@ -459,6 +485,9 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         assertThat(mockMvc.perform(get("/api/v1/custom-field-definitions?includeInactive=true").header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).contains(fieldId);
         mockMvc.perform(post("/api/v1/custom-field-definitions/" + fieldId + "/activations").header("Authorization", "Bearer " + owner)
                         .header("If-Match", deactivated.getResponse().getHeader("ETag"))).andExpect(status().isOk());
+        } finally {
+            retireSyntheticWorkspaceIdentity(tenantAdmin);
+        }
     }
 
     @Test
@@ -527,10 +556,6 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         return mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"" + token + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"" + displayName + "\"}"))
                 .andReturn().getResponse().getStatus();
-    }
-
-    private tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {
-        return tools.jackson.databind.json.JsonMapper.shared().readTree(result.getResponse().getContentAsString());
     }
 
 }
