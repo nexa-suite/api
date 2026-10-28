@@ -128,6 +128,7 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
                     .andExpect(status().isForbidden());
         } finally {
             jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", logisticsMembership);
+            jdbc.update("delete from tenant_management.role_permission where role_id=?", downloadOnlyRole);
             deleteTestRoleAsMigrationOwner(downloadOnlyRole);
             for (RoleAssignment assignment : existingRoles) {
                 jdbc.update("insert into tenant_management.membership_role_definition "

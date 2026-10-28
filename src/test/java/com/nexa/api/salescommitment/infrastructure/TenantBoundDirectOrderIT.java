@@ -3,6 +3,7 @@ package com.nexa.api.salescommitment.infrastructure;
 import com.nexa.api.bootstrap.local.LocalTenantBusinessFixtureSeeder;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -25,6 +26,16 @@ class TenantBoundDirectOrderIT extends NexaWorkflowIntegrationSupport {
 
     @Autowired
     private LocalTenantBusinessFixtureSeeder tenantFixtureSeeder;
+
+    private final java.util.List<UUID> fixtureTenants = new java.util.ArrayList<>();
+
+    @AfterEach
+    void retireAdditionalMemberships() {
+        for (UUID tenant : fixtureTenants) {
+            jdbc.update("update tenant_management.workspace_membership set status='DISABLED', "
+                    + "updated_at=current_timestamp, version=version+1 where tenant_id=? and status='ACTIVE'", tenant);
+        }
+    }
 
     @Test
     void directOrdersUseTheirPhysicalTenantDatabaseAndMissingBindingFailsClosed() throws Exception {
@@ -127,6 +138,7 @@ class TenantBoundDirectOrderIT extends NexaWorkflowIntegrationSupport {
     private TenantScope createTenantScope(String slugPrefix, List<String> emails) {
         UUID tenantId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
+        fixtureTenants.add(tenantId);
         String suffix = tenantId.toString().replace("-", "").substring(0, 10);
         String tenantSlug = slugPrefix + "-tenant-" + suffix;
         String workspaceSlug = slugPrefix + "-workspace-" + suffix;

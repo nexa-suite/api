@@ -286,7 +286,7 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 				     status,created_at,updated_at)
 				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 				""", accountId, tenant.tenantId(), tenant.workspaceId(), code, "Expiry Account", "Expiry Account",
-				"PE", "RUC", code, "WHOLESALE", "Test Contact", "expiry@example.test", "000000000",
+				"PE", "RUC", "20100070970", "WHOLESALE", "Test Contact", "expiry@example.test", "000000000",
 				"STANDARD", "CREDIT_30", "ACTIVE", now, now);
 	}
 
