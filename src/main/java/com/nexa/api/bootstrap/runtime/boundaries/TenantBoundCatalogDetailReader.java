@@ -49,6 +49,15 @@ public final class TenantBoundCatalogDetailReader implements TenantCatalogHttpRe
                 .filterOptions(context.tenantId().value(), context.workspaceId().value(), kind, search, page, size));
     }
 
+    @Override
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+            CurrentAccessContext context, String kind, String search, int page, int size, UUID familyId) {
+        Objects.requireNonNull(context, "Verified access context is required");
+        catalogDetails.requireCatalogRead();
+        return router.inTransaction(context, jdbc -> catalogReadQuery(context, jdbc)
+                .filterOptions(context.tenantId().value(), context.workspaceId().value(), kind, search, page, size, familyId));
+    }
+
 	@Override
 	public CatalogItemDetail getByCatalogItemId(CurrentAccessContext accessContext, String catalogItemId) {
 		Objects.requireNonNull(accessContext, "Verified access context is required");

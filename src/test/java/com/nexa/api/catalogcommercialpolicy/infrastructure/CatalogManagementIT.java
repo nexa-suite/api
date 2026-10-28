@@ -192,6 +192,39 @@ class CatalogManagementIT extends PostgresIntegrationSupport {
         }
 	}
 
+    @Test
+    void buyerFiltersCatalogByFamilyAndVariantOptions() throws Exception {
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+
+        MvcResult familyOptions = mockMvc.perform(get("/api/v1/catalog-items/filter-options")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer)
+                        .param("kind", "family").param("search", "QUESO GOUDA").param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.items[0].name").value("QUESO GOUDA"))
+                .andReturn();
+        JsonNode family = JSON.readTree(familyOptions.getResponse().getContentAsString()).get("items").get(0);
+        String familyId = family.get("id").asText();
+
+        MvcResult variantOptions = mockMvc.perform(get("/api/v1/catalog-items/filter-options")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer)
+                        .param("kind", "variant").param("familyId", familyId)
+                        .param("search", "Cabra").param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.items[0].name").value("Cabra"))
+                .andReturn();
+        JsonNode variant = JSON.readTree(variantOptions.getResponse().getContentAsString()).get("items").get(0);
+
+        mockMvc.perform(get("/api/v1/catalog-items")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + buyer)
+                        .param("familyId", familyId).param("variantId", variant.get("id").asText())
+                        .param("page", "0").param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalItems", greaterThan(0)))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].productFamilyId").value(familyId))
+                .andExpect(jsonPath("$.items[0].productVariantName").value("Cabra"));
+    }
+
     private String strictTaxonomySubstring(String kind, String name) {
         String table = switch (kind) {
             case "brand" -> "brand";
