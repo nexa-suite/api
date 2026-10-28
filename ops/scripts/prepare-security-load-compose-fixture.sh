@@ -21,6 +21,7 @@ done
 postgres_password="$(random_secret)"
 runtime_password="$(random_secret)"
 migrator_password="$(random_secret)"
+tenant_database_provisioner_password="$(random_secret)"
 documents_reader_password="$(random_secret)"
 workspace_scope_reader_password="$(random_secret)"
 internal_operator_database_password="$(random_secret)"
@@ -37,7 +38,7 @@ logistics_password="$(random_secret)"
 buyer_password="$(random_secret)"
 
 for secret in \
-	"$postgres_password" "$runtime_password" "$migrator_password" "$documents_reader_password" \
+	"$postgres_password" "$runtime_password" "$migrator_password" "$tenant_database_provisioner_password" "$documents_reader_password" \
 	"$workspace_scope_reader_password" "$internal_operator_database_password" "$reset_throttle_key" \
 	"$notification_outbox_key" "$system_operator_token" "$minio_root_user" "$minio_root_password" \
 	"$owner_password" "$tenant_admin_password" "$sales_password" \
@@ -69,6 +70,7 @@ NEXA_DATABASE_USERNAME=nexa_runtime
 NEXA_DATABASE_PASSWORD=$runtime_password
 NEXA_DATABASE_RUNTIME_PASSWORD=$runtime_password
 NEXA_DATABASE_MIGRATOR_PASSWORD=$migrator_password
+NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD=$tenant_database_provisioner_password
 NEXA_MODERN_POSTGRES_DB=nexa
 NEXA_MODERN_POSTGRES_USER=nexa
 NEXA_MODERN_POSTGRES_PASSWORD=$postgres_password

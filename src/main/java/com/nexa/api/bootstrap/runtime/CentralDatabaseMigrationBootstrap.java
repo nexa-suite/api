@@ -30,6 +30,7 @@ public final class CentralDatabaseMigrationBootstrap {
                     System.getenv().getOrDefault("NEXA_DATABASE_ADMIN_PASSWORD", ""),
                     System.getenv().getOrDefault("NEXA_DATABASE_RUNTIME_PASSWORD", ""),
                     System.getenv().getOrDefault("NEXA_DATABASE_MIGRATOR_PASSWORD", ""),
+                    System.getenv().getOrDefault("NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD", ""),
                     System.getenv().getOrDefault("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", ""),
                     System.getenv().getOrDefault("NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD", ""),
                     System.getenv().getOrDefault("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD", ""))) {
@@ -48,6 +49,7 @@ public final class CentralDatabaseMigrationBootstrap {
                 required(environment, "NEXA_DATABASE_ADMIN_PASSWORD"),
                 required(environment, "NEXA_DATABASE_RUNTIME_PASSWORD"),
                 required(environment, "NEXA_DATABASE_MIGRATOR_PASSWORD"),
+                required(environment, "NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD"),
                 required(environment, "NEXA_WORKSPACE_SCOPE_READER_PASSWORD"),
                 required(environment, "NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD"),
                 required(environment, "NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD"),
@@ -56,11 +58,12 @@ public final class CentralDatabaseMigrationBootstrap {
 
     public static void migrateLatest(String jdbcUrl, String adminUsername, String adminPassword,
                                      String runtimePassword, String migratorPassword,
+                                     String tenantDatabaseProvisionerPassword,
                                      String workspaceScopeReaderPassword,
                                      String businessDocumentsScopeReaderPassword,
                                      String internalOperatorPassword, Path preparationDirectory) throws Exception {
         new CentralDatabaseMigrationBootstrap(jdbcUrl, adminUsername, adminPassword, runtimePassword,
-                migratorPassword,
+                migratorPassword, tenantDatabaseProvisionerPassword,
                 workspaceScopeReaderPassword, businessDocumentsScopeReaderPassword,
                 internalOperatorPassword, preparationDirectory).migrateLatest();
     }
@@ -70,6 +73,7 @@ public final class CentralDatabaseMigrationBootstrap {
     private final String adminPassword;
     private final String runtimePassword;
     private final String migratorPassword;
+    private final String tenantDatabaseProvisionerPassword;
     private final String workspaceScopeReaderPassword;
     private final String businessDocumentsScopeReaderPassword;
     private final String internalOperatorPassword;
@@ -77,6 +81,7 @@ public final class CentralDatabaseMigrationBootstrap {
 
     CentralDatabaseMigrationBootstrap(String jdbcUrl, String adminUsername, String adminPassword,
                                       String runtimePassword, String migratorPassword,
+                                      String tenantDatabaseProvisionerPassword,
                                       String workspaceScopeReaderPassword,
                                       String businessDocumentsScopeReaderPassword,
                                       String internalOperatorPassword, Path preparationDirectory) {
@@ -85,6 +90,7 @@ public final class CentralDatabaseMigrationBootstrap {
         this.adminPassword = adminPassword;
         this.runtimePassword = runtimePassword;
         this.migratorPassword = migratorPassword;
+        this.tenantDatabaseProvisionerPassword = tenantDatabaseProvisionerPassword;
         this.workspaceScopeReaderPassword = workspaceScopeReaderPassword;
         this.businessDocumentsScopeReaderPassword = businessDocumentsScopeReaderPassword;
         this.internalOperatorPassword = internalOperatorPassword;
@@ -97,6 +103,11 @@ public final class CentralDatabaseMigrationBootstrap {
         }
         if (adminPassword.equals(runtimePassword) || migratorPassword.equals(runtimePassword)) {
             throw new IllegalArgumentException("Central database administrator, runtime, and migrator passwords must differ");
+        }
+        if (tenantDatabaseProvisionerPassword.equals(adminPassword)
+                || tenantDatabaseProvisionerPassword.equals(runtimePassword)
+                || tenantDatabaseProvisionerPassword.equals(migratorPassword)) {
+            throw new IllegalArgumentException("Tenant database provisioner password must be separate from administrator, runtime, and migrator passwords");
         }
     }
 
@@ -132,7 +143,8 @@ public final class CentralDatabaseMigrationBootstrap {
     private void prepareRestrictedRoles() throws SQLException {
         try (Connection connection = adminConnection(); Statement statement = connection.createStatement()) {
             ensureLoginRole(statement, "nexa_migrator", migratorPassword, null);
-            ensureLoginRole(statement, "nexa_tenant_database_provisioner", null, null);
+            ensureLoginRole(statement, "nexa_tenant_database_provisioner",
+                    tenantDatabaseProvisionerPassword, null);
             ensureRole(statement, "nexa_workspace_scope_reader", false, false);
             ensureLoginRole(statement, "nexa_workspace_scope_reader_login", workspaceScopeReaderPassword,
                     "nexa_workspace_scope_reader");

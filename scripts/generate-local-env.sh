@@ -30,6 +30,13 @@ if [ -z "${runtime_password}" ] || [ "${runtime_password}" = "${modern_postgres_
   || [ "${runtime_password}" = "${migrator_password}" ]; then
   runtime_password=$(random_password)
 fi
+tenant_database_provisioner_password=$(existing_value NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD)
+if [ -z "${tenant_database_provisioner_password}" ] \
+  || [ "${tenant_database_provisioner_password}" = "${modern_postgres_password}" ] \
+  || [ "${tenant_database_provisioner_password}" = "${runtime_password}" ] \
+  || [ "${tenant_database_provisioner_password}" = "${migrator_password}" ]; then
+  tenant_database_provisioner_password=$(random_password)
+fi
 demo_password="${NEXA_DEV_DEMO_PASSWORD:-NexaLocal!2026#}"
 minio_password=$(existing_value NEXA_MINIO_ROOT_PASSWORD)
 if [ -z "${minio_password}" ]; then
@@ -59,6 +66,7 @@ NEXA_DATABASE_USERNAME=nexa
 NEXA_DATABASE_PASSWORD=${modern_postgres_password}
 NEXA_DATABASE_RUNTIME_PASSWORD=${runtime_password}
 NEXA_DATABASE_MIGRATOR_PASSWORD=${migrator_password}
+NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD=${tenant_database_provisioner_password}
 NEXA_MODERN_POSTGRES_DB=nexa
 NEXA_MODERN_POSTGRES_USER=nexa
 NEXA_MODERN_POSTGRES_PASSWORD=${modern_postgres_password}
