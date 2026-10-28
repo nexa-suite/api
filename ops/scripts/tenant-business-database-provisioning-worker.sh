@@ -12,9 +12,10 @@ PID_FILE="$STATE_DIRECTORY/worker.pid"
 READY_FILE="$STATE_DIRECTORY/worker.ready"
 CENTRAL_CONFIG_FILE="$STATE_DIRECTORY/central-postgres.properties"
 PROVISIONER="$SCRIPT_DIRECTORY/provision-local-tenant-database.sh"
-STOPPING=0 ACTIVE_CHILD='' HEARTBEAT_PID=''
-
 fail() { printf '%s\n' "$1" >&2; exit 1; }
+STOPPING=0 ACTIVE_CHILD='' HEARTBEAT_PID=''
+RUNTIME_PASSWORD="$(awk -F= '$1 == "NEXA_DATABASE_RUNTIME_PASSWORD" { count++; value=substr($0, index($0, "=") + 1) } END { if (count != 1) exit 1; print value }' "$ENV_FILE")" \
+	|| fail 'Local runtime database password is unavailable.'
 private_mode() {
 	local path="$1" expected="$2" actual
 	[[ ! -L "$path" ]] || return 1
@@ -27,10 +28,9 @@ new_uuid() {
 	printf '%s-%s-%s-%s-%s\n' "${value:0:8}" "${value:8:4}" "${value:12:4}" "${value:16:4}" "${value:20:12}"
 }
 runtime_psql() {
-	docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T modern-postgres sh -ec '
-		export PGPASSWORD="$POSTGRES_PASSWORD"
-		exec psql -X -qAt -v ON_ERROR_STOP=1 -U nexa_runtime -d "$POSTGRES_DB"
-	' 2>/dev/null
+	docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T \
+		-e "PGPASSWORD=$RUNTIME_PASSWORD" modern-postgres \
+		psql -X -qAt -v ON_ERROR_STOP=1 -U nexa_runtime -d nexa 2>/dev/null
 }
 current_task_claimed() {
 	local task_id="$1" claim_token="$2" lease_seconds="$3"

@@ -31,7 +31,7 @@ class ModernPostgresUpgradeMigrationTests {
     @Test
     void publishedV0171BaselineUpgradesWithoutDroppingHistoricalRows() throws Exception {
         try (var connection = POSTGRES.createConnection("")) {
-            connection.createStatement().execute("create role nexa_runtime");
+            connection.createStatement().execute("create role nexa_runtime login noinherit");
         }
         Path releasedMigrationDirectory = extractPublishedV0171Migrations();
         Path extractedRepository = releasedMigrationDirectory.getParent().getParent().getParent().getParent().getParent();

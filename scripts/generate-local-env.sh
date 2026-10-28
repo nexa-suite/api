@@ -21,6 +21,15 @@ modern_postgres_password=$(existing_value NEXA_MODERN_POSTGRES_PASSWORD)
 if [ -z "${modern_postgres_password}" ]; then
   modern_postgres_password=$(random_password)
 fi
+migrator_password=$(existing_value NEXA_DATABASE_MIGRATOR_PASSWORD)
+if [ -z "${migrator_password}" ] || [ "${migrator_password}" = "${modern_postgres_password}" ]; then
+  migrator_password=$(random_password)
+fi
+runtime_password=$(existing_value NEXA_DATABASE_RUNTIME_PASSWORD)
+if [ -z "${runtime_password}" ] || [ "${runtime_password}" = "${modern_postgres_password}" ] \
+  || [ "${runtime_password}" = "${migrator_password}" ]; then
+  runtime_password=$(random_password)
+fi
 demo_password="${NEXA_DEV_DEMO_PASSWORD:-NexaLocal!2026#}"
 minio_password=$(existing_value NEXA_MINIO_ROOT_PASSWORD)
 if [ -z "${minio_password}" ]; then
@@ -29,6 +38,14 @@ fi
 business_documents_scope_reader_password=$(existing_value NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD)
 if [ -z "${business_documents_scope_reader_password}" ]; then
   business_documents_scope_reader_password=$(random_password)
+fi
+workspace_scope_reader_password=$(existing_value NEXA_WORKSPACE_SCOPE_READER_PASSWORD)
+if [ -z "${workspace_scope_reader_password}" ]; then
+  workspace_scope_reader_password=$(random_password)
+fi
+internal_operator_database_password=$(existing_value NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD)
+if [ -z "${internal_operator_database_password}" ]; then
+  internal_operator_database_password=$(random_password)
 fi
 internal_operator_allowlist=$(existing_value NEXA_INTERNAL_OPERATOR_ALLOWLIST)
 if [ -z "${internal_operator_allowlist}" ]; then
@@ -40,10 +57,14 @@ NEXA_SECURITY_JWT_SIGNING_KEY=$(random_password)
 NEXA_DATABASE_URL=jdbc:postgresql://localhost:5432/nexa
 NEXA_DATABASE_USERNAME=nexa
 NEXA_DATABASE_PASSWORD=${modern_postgres_password}
+NEXA_DATABASE_RUNTIME_PASSWORD=${runtime_password}
+NEXA_DATABASE_MIGRATOR_PASSWORD=${migrator_password}
 NEXA_MODERN_POSTGRES_DB=nexa
 NEXA_MODERN_POSTGRES_USER=nexa
 NEXA_MODERN_POSTGRES_PASSWORD=${modern_postgres_password}
 NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD=${business_documents_scope_reader_password}
+NEXA_WORKSPACE_SCOPE_READER_PASSWORD=${workspace_scope_reader_password}
+NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD=${internal_operator_database_password}
 NEXA_MINIO_ROOT_USER=nexa-minio
 NEXA_MINIO_ROOT_PASSWORD=${minio_password}
 NEXA_MODERN_SPRING_PROFILE=local,minio

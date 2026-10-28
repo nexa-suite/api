@@ -72,7 +72,7 @@ fi
 
 docker compose --env-file "$env_file" -f "$compose_file" exec -T \
 	modern-postgres psql -q -v ON_ERROR_STOP=1 -U "$NEXA_MODERN_POSTGRES_USER" -d "$NEXA_MODERN_POSTGRES_DB" \
-	-v runtime_password="$NEXA_MODERN_POSTGRES_PASSWORD" \
+	-v runtime_password="$NEXA_DATABASE_RUNTIME_PASSWORD" \
 	-v business_documents_scope_reader_password="$NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD" <<'SQL'
 SELECT set_config('nexa.runtime_database_password', :'runtime_password', false) AS _runtime_password \gset
 SELECT set_config('nexa.business_documents_scope_reader_password', :'business_documents_scope_reader_password', false) AS _business_documents_scope_reader_password \gset
@@ -81,9 +81,9 @@ DECLARE
 	scope_reader pg_roles%ROWTYPE;
 BEGIN
 	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_runtime') THEN
-	    EXECUTE format('CREATE ROLE nexa_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', current_setting('nexa.runtime_database_password'));
+		EXECUTE format('CREATE ROLE nexa_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', current_setting('nexa.runtime_database_password'));
 	ELSE
-	    EXECUTE format('ALTER ROLE nexa_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', current_setting('nexa.runtime_database_password'));
+		EXECUTE format('ALTER ROLE nexa_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', current_setting('nexa.runtime_database_password'));
 	END IF;
 
 	SELECT * INTO scope_reader FROM pg_roles WHERE rolname = 'nexa_business_documents_scope_reader';
@@ -126,6 +126,10 @@ case ",${spring_profile}," in
 		fi
 		;;
 esac
+
+docker compose --env-file "$env_file" -f "$compose_file" build modern-api
+docker compose --profile migration-bootstrap --env-file "$env_file" -f "$compose_file" \
+	run --rm --no-deps modern-migration-bootstrap
 
 if [ "$requested_mode" = "api-runtime" ]; then
 	# CI needs the API and its declared runtime dependencies, while the UI build

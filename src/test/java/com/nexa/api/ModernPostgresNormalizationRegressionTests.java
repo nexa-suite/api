@@ -49,7 +49,7 @@ class ModernPostgresNormalizationRegressionTests {
 			for (String role : Set.of("nexa_runtime", "nexa_policy_snapshot_writer", "nexa_business_documents_worker",
 					"nexa_payments_worker", "nexa_business_traceability_worker",
 					"nexa_warehouse_reservation_expiry_worker")) {
-				statement.execute("create role " + role);
+				statement.execute("create role " + role + (role.equals("nexa_runtime") ? " LOGIN NOINHERIT" : ""));
 			}
 			statement.execute("create database nexa_tenant");
 		}

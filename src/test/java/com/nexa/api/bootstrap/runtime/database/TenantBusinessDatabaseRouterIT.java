@@ -101,7 +101,7 @@ class TenantBusinessDatabaseRouterIT {
 		configureWorkerRoles(TENANT_A);
 		configureWorkerRoles(TENANT_B);
 
-		CentralMigrationTestBootstrap.migrateLatest(CENTRAL);
+		CentralMigrationTestBootstrap.migrateLatest(CENTRAL, CENTRAL_RUNTIME_PASSWORD);
 		Flyway.configure().dataSource(TENANT_A.getJdbcUrl(), TENANT_A.getUsername(), TENANT_A.getPassword())
 				.locations("classpath:db/tenant-migration").load().migrate();
 		Flyway.configure().dataSource(TENANT_B.getJdbcUrl(), TENANT_B.getUsername(), TENANT_B.getPassword())
@@ -842,7 +842,7 @@ class TenantBusinessDatabaseRouterIT {
 	private static void configureRuntimeRole(PostgreSQLContainer container, String runtimePassword) {
 		try (Connection connection = DriverManager.getConnection(container.getJdbcUrl(), container.getUsername(), container.getPassword());
 				var statement = connection.createStatement()) {
-			statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + runtimePassword + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT PASSWORD '" + runtimePassword + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not create the restricted runtime role for routing integration tests", exception);
 		}

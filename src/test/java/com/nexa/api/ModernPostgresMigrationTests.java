@@ -47,6 +47,7 @@ class ModernPostgresMigrationTests {
 	@Test
 	void flywayCreatesOnlyTheModernIdentityAndTenantSchemasWithRequiredTables() throws Exception {
 		CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
+		CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
 
 		try (var connection = POSTGRES.createConnection("")) {
 			try (var statement = connection.createStatement(); var result = statement.executeQuery(
