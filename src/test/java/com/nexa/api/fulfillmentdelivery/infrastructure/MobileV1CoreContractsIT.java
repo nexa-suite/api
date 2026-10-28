@@ -465,6 +465,114 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void buyerQrAcceptanceIsIdempotentForHandoffBoundToActiveAttempt() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        DriverDeliveryFixture fixture = createDriverDelivery(
+                warehouse, sales, driverMembership, "buyer-qr-acceptance-" + uuid());
+
+        MvcResult delivery = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", delivery.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "buyer-qr-transit-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult started = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", transit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "buyer-qr-attempt-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andReturn();
+        String attemptId = json(started).get("attempt").get("id").asText();
+
+        String issueKey = "buyer-qr-issue-" + uuid();
+        MvcResult issued = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", issueKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attemptId\":\"" + attemptId + "\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isNotEmpty()).andReturn();
+        String token = json(issued).get("token").asText();
+        UUID handoffId = UUID.fromString(json(issued).get("handoffId").asText());
+        assertThat(tenantJdbc().queryForObject("select delivery_active_attempt_id from logistics.delivery_handoff_token "
+                        + "where tenant_id=? and workspace_id=? and id=?", UUID.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), handoffId))
+                .isEqualTo(UUID.fromString(attemptId));
+
+        AttemptOutcomeLine line = tenantJdbc().queryForObject(
+                "select fl.id,fl.sku_id,fl.dispatched_quantity,fl.unit from logistics.fulfillment_line fl "
+                        + "join logistics.fulfillment f on f.tenant_id=fl.tenant_id and f.workspace_id=fl.workspace_id "
+                        + "and f.id=fl.fulfillment_id join logistics.delivery d on d.tenant_id=f.tenant_id "
+                        + "and d.workspace_id=f.workspace_id and d.fulfillment_id=f.id where d.id=?",
+                (rs, row) -> new AttemptOutcomeLine(rs.getObject("id", UUID.class),
+                        rs.getObject("sku_id", UUID.class), rs.getBigDecimal("dispatched_quantity"),
+                        rs.getString("unit")), fixture.deliveryId());
+        String attemptedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS).toString();
+        String outcome = "{\"outcome\":\"DELIVERED\",\"attemptedAt\":\"" + attemptedAt
+                + "\",\"lines\":[{\"fulfillmentLineId\":\"" + line.fulfillmentLineId()
+                + "\",\"skuId\":\"" + line.skuId() + "\",\"attemptedQuantity\":"
+                + line.quantity().toPlainString() + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
+                + ",\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\"" + line.unit() + "\"}]}";
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId()
+                        + "/attempts/" + attemptId + "/outcomes")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", started.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "buyer-qr-outcome-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(outcome))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.status").value("DELIVERED"));
+        assertThat(tenantJdbc().queryForObject("select delivery_attempt_id from logistics.delivery_handoff_token "
+                        + "where tenant_id=? and workspace_id=? and id=?", UUID.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), handoffId))
+                .isEqualTo(UUID.fromString(attemptId));
+        assertThat(tenantJdbc().queryForObject("select delivery_active_attempt_id from logistics.delivery_handoff_token "
+                        + "where tenant_id=? and workspace_id=? and id=?", UUID.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), handoffId)).isNull();
+
+        String acceptanceKey = "buyer-qr-acceptance-" + uuid();
+        String acceptanceBody = "{\"token\":\"" + token + "\",\"expectedDeliveryId\":\""
+                + fixture.deliveryId() + "\"}";
+        MvcResult accepted = mockMvc.perform(post("/api/v1/delivery-handoff/receipts")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("Idempotency-Key", acceptanceKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(acceptanceBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.deliveryId").value(fixture.deliveryId().toString()))
+                .andExpect(jsonPath("$.attemptId").value(attemptId))
+                .andExpect(jsonPath("$.podStatus").value("SEALED"))
+                .andExpect(jsonPath("$.replayed").value(false))
+                .andReturn();
+        String receiptId = json(accepted).get("receiptId").asText();
+        String podId = json(accepted).get("podId").asText();
+
+        mockMvc.perform(post("/api/v1/delivery-handoff/receipts")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("Idempotency-Key", acceptanceKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(acceptanceBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.receiptId").value(receiptId))
+                .andExpect(jsonPath("$.podId").value(podId))
+                .andExpect(jsonPath("$.attemptId").value(attemptId))
+                .andExpect(jsonPath("$.replayed").value(true));
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.buyer_receipt_fact "
+                        + "where tenant_id=? and workspace_id=? and id=? and delivery_id=? "
+                        + "and delivery_attempt_id=? and decision='ACCEPTED'", Integer.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(receiptId),
+                fixture.deliveryId(), UUID.fromString(attemptId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.proof_of_delivery "
+                        + "where tenant_id=? and workspace_id=? and id=? and status='SEALED' "
+                        + "and buyer_membership_id=? and buyer_receipt_fact_id=?", Integer.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(podId),
+                UUID.fromString(membershipId(BUYER_EMAIL)),
+                UUID.fromString(receiptId))).isEqualTo(1);
+    }
+
+    @Test
     void deliveryHandoffAndBuyerReceiptRemainSeparateAndRetrySafe() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
