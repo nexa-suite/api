@@ -388,7 +388,8 @@ class TenantBoundCreditAccountConfigurationIT {
                         + "tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,"
                         + "delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 accountId, tenantId, workspaceId, code, "Fixture Account", "Fixture Account", "PE", "RUC",
-                "20" + accountId.toString().replace("-", "").substring(0, 10), "B2B", "Fixture", "fixture@example.test",
+                "20" + String.format(java.util.Locale.ROOT, "%09d",
+                        Math.floorMod(accountId.getMostSignificantBits(), 1_000_000_000L)), "B2B", "Fixture", "fixture@example.test",
                 "+51999999999", "Fixture delivery", "CREDIT_30", now, now);
     }
 

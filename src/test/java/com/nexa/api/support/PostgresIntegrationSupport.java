@@ -21,6 +21,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -301,6 +303,18 @@ public abstract class PostgresIntegrationSupport {
 
 	public static String runtimeDatabasePassword() {
 		return RUNTIME_PASSWORD;
+	}
+
+	public static HikariDataSource workspaceScopeReaderPool() {
+		HikariConfig config = new HikariConfig();
+		config.setJdbcUrl(POSTGRES.getJdbcUrl());
+		config.setUsername("nexa_workspace_scope_reader_login");
+		config.setPassword(WORKSPACE_SCOPE_READER_PASSWORD);
+		config.setMaximumPoolSize(2);
+		config.setMinimumIdle(0);
+		config.setPoolName("workspace-scope-reader-it");
+		config.setReadOnly(true);
+		return new HikariDataSource(config);
 	}
 
 	public static String migratorDatabaseUsername() {

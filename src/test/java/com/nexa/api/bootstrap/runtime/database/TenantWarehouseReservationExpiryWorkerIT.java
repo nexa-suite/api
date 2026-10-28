@@ -252,7 +252,9 @@ class TenantWarehouseReservationExpiryWorkerIT extends PostgresIntegrationSuppor
 				+ "tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,"
 				+ "created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',current_timestamp,current_timestamp)",
 			accountId, tenantId, workspaceId, "EXP-" + suffix, "Expiry test account", "Expiry test account", "PE",
-			"RUC", "20" + suffix, "RETAIL", "Integration fixture", "expiry-" + suffix + "@example.test", "+51000000000",
+			"RUC", "20" + String.format(java.util.Locale.ROOT, "%09d",
+					Math.floorMod(accountId.getMostSignificantBits(), 1_000_000_000L)), "RETAIL", "Integration fixture",
+			"expiry-" + suffix + "@example.test", "+51000000000",
 			"STANDARD", "IMMEDIATE");
 		tenantJdbc.update("insert into sales.sales_order "
 				+ "(id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,priority,currency,total_amount,"

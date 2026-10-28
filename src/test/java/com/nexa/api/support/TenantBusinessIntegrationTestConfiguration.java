@@ -11,6 +11,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDataba
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentialsProvider;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDocumentWorkerRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseInventoryReservationExpiryWorkerRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseTraceabilityWorkerRouter;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceBootstrap;
@@ -18,6 +19,7 @@ import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogSkuPersis
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogTenantLocalFixtureProjection;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogFamilySkuMappingLoader;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogLocalFixtureProjection;
+import com.nexa.api.inventoryavailability.tenantdatabase.TenantInventoryReservationExpiryWorkerRouter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -76,6 +78,19 @@ class TenantBusinessIntegrationTestConfiguration {
 		return new TenantBusinessDatabaseTraceabilityWorkerRouter(bindings,
 				new HikariTenantBusinessDatabaseDataSourceFactory(
 						TenantBusinessIntegrationFixture::traceabilityWorkerCredentials, maximumPoolSize),
+				scopes, maximumCachedPools);
+	}
+
+	@Bean(destroyMethod = "close")
+	@Primary
+	@ConditionalOnProperty(name = "nexa.tenant-business.warehouse-operations.enabled", havingValue = "true")
+	TenantInventoryReservationExpiryWorkerRouter integrationTenantInventoryReservationExpiryWorkerRouter(
+			TenantBusinessDatabaseBindingRegistry bindings, TenantBusinessDocumentWorkerScopeQuery scopes,
+			@Value("${nexa.tenant-business.router.maximum-cached-pools:8}") int maximumCachedPools,
+			@Value("${nexa.tenant-business.router.maximum-pool-size:4}") int maximumPoolSize) {
+		return new TenantBusinessDatabaseInventoryReservationExpiryWorkerRouter(bindings,
+				new HikariTenantBusinessDatabaseDataSourceFactory(
+						TenantBusinessIntegrationFixture::reservationExpiryWorkerCredentials, maximumPoolSize),
 				scopes, maximumCachedPools);
 	}
 

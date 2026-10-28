@@ -184,7 +184,7 @@ class TenantBoundBuyerWalletReadIT {
         provisionRoles(database);
         migrate(database, "2");
         seedScope(database, tenantId, workspaceId, databaseIdentity);
-        migrate(database, "5");
+        migrate(database, "41");
         seedBuyerRelationship(database, tenantId, workspaceId, clientAccountId, membershipId);
         seedWallet(database, tenantId, workspaceId, buyerIdentityId, balance);
         return new TenantFixture(new TenantId(tenantId), new WorkspaceId(workspaceId), databaseIdentity,
@@ -209,6 +209,16 @@ class TenantBoundBuyerWalletReadIT {
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("CREATE ROLE " + POLICY_WRITER + " LOGIN PASSWORD '" + POLICY_WRITER_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_wallet_recharge_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_business_documents_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_payments_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_business_traceability_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + database.getDatabaseName() + "\" TO " + MIGRATOR);
             statement.execute("GRANT CONNECT ON DATABASE \"" + database.getDatabaseName() + "\" TO " + RUNTIME
                     + ", " + POLICY_WRITER);
@@ -247,7 +257,8 @@ class TenantBoundBuyerWalletReadIT {
                         + "tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,"
                         + "delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 accountId, tenantId, workspaceId, "WALLET-" + accountId.toString().substring(0, 8), "Fixture buyer",
-                "Fixture buyer", "PE", "RUC", "20" + accountId.toString().replace("-", "").substring(0, 10),
+                "Fixture buyer", "PE", "RUC", "20" + String.format(java.util.Locale.ROOT, "%09d",
+                        Math.floorMod(accountId.getMostSignificantBits(), 1_000_000_000L)),
                 "B2B", "Fixture contact", accountId + "@example.test", "+51999999999", "Fixture delivery",
                 "PREPAID", now, now);
         admin.update("insert into sales.client_account_membership "

@@ -1327,9 +1327,10 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         assertThat(sealedAt).isNotBlank();
         assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? "
                         + "and workspace_id=? and aggregate_type='Delivery' and aggregate_id=? "
-                        + "and event_type='DeliveryCompleted.v1' and payload->>'podId'=?", Integer.class,
-                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId(), podId.toString()))
-                .isEqualTo(1);
+                        + "and event_type='DeliveryCompleted.v1'", Integer.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId()))
+                .as("driver POD sealing alone does not publish completion without a Buyer receipt")
+                .isZero();
         var documentPod = documentSource.findPod(UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId)
                 .orElseThrow();
         assertThat(documentPod.status()).isEqualTo("SEALED");
@@ -1351,7 +1352,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? "
                         + "and workspace_id=? and aggregate_type='Delivery' and aggregate_id=? "
                         + "and event_type='DeliveryCompleted.v1'", Integer.class,
-                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId())).isEqualTo(1);
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId())).isZero();
     }
 
     private TerminalAttemptFixture completeDriverDelivery(DriverDeliveryFixture fixture, String logistics,

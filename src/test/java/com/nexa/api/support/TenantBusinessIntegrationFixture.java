@@ -105,6 +105,11 @@ final class TenantBusinessIntegrationFixture {
 				PAYMENTS_WORKER_USERNAME, PAYMENTS_WORKER_PASSWORD);
 	}
 
+	static TenantBusinessDatabaseCredentials reservationExpiryWorkerCredentials(String reference) {
+		return workerCredentials(reference, "local-tenant-inventory-reservation-expiry-worker:",
+				RESERVATION_EXPIRY_WORKER_USERNAME, RESERVATION_EXPIRY_WORKER_PASSWORD);
+	}
+
 	static DataSource policyWriterDataSource(TenantBusinessDatabaseBinding binding) {
 		if (binding == null) throw new IllegalArgumentException("Tenant database binding is required");
 		UUID tenantId = binding.tenantId().value();
