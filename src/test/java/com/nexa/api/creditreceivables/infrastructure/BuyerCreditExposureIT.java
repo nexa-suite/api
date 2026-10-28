@@ -13,6 +13,9 @@ class BuyerCreditExposureIT extends NexaWorkflowIntegrationSupport {
         String token = accessToken(BUYER_EMAIL, "PORTAL");
         var account = mockMvc.perform(get("/api/v1/client-accounts/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk()).andReturn();
+        assertThat(json(account).has("contactPerson")).isFalse();
+        assertThat(json(account).has("contactEmail")).isFalse();
+        assertThat(json(account).has("phone")).isFalse();
         var credit = mockMvc.perform(get("/api/v1/client-accounts/me/credit-exposure")
                         .param("clientAccountId", "foreign-account").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk()).andReturn();
