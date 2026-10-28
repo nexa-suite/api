@@ -6,15 +6,10 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.SignInCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessionUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignInUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
-import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseBindingRegistry;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry;
 import com.nexa.api.support.CentralMigrationTestBootstrap;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -30,7 +25,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
-@Import(RefreshSessionPostgresIntegrationTests.TestBindingConfiguration.class)
 @ActiveProfiles("local")
 @TestPropertySource(properties = {
 		"spring.autoconfigure.exclude=",
@@ -41,14 +35,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers(disabledWithoutDocker = true)
 class RefreshSessionPostgresIntegrationTests {
 	private static final String PASSWORD = "refresh-test-password";
-
-	@TestConfiguration(proxyBeanMethods = false)
-	static class TestBindingConfiguration {
-		@Bean
-		TenantBusinessDatabaseBindingRegistry integrationTenantBusinessDatabaseBindingRegistry(JdbcTemplate jdbc) {
-			return new JdbcTenantBusinessDatabaseBindingRegistry(jdbc);
-		}
-	}
 
 	@Container
 	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
