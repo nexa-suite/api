@@ -68,7 +68,7 @@ public class ClientAccountController {
 	@Operation(operationId = "getMyClientAccount")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Buyer client account returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Buyer client account not found")})
 	public ResponseEntity<BuyerClientAccountSelfResponse> buyerDetail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context) {
-		var value = sales.buyerDetail(context); return ResponseEntity.ok().eTag(CustomerRelationshipHttpHeaders.etag(value.version())).body(mapper.buyerSelf(value));
+		var value = sales.buyerDetail(context); return ResponseEntity.ok().eTag(CustomerRelationshipHttpHeaders.etag(value.version())).body(mapper.buyerSelf(value, context.membershipId().toString()));
 	}
 
 	@PostMapping("/me")

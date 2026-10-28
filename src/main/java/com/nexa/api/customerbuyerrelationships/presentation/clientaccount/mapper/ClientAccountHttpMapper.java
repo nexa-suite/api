@@ -29,10 +29,10 @@ public class ClientAccountHttpMapper {
 	}
 	public ClientAccountView update(UpdateClientAccountRequest request) { return new ClientAccountView(null, null, request.businessName(), request.commercialName(), null, null, null, null, request.contactPerson(), request.contactEmail(), request.phone(), request.deliveryProfile(), request.paymentCondition(), null, null, 0, null); }
 	public ClientAccountDetailResponse detail(ClientAccountView view) { return new ClientAccountDetailResponse(view.id(), view.code(), view.businessName(), view.commercialName(), view.countryCode(), view.taxType(), view.taxValue(), view.segment(), view.contactPerson(), view.contactEmail(), view.phone(), view.deliveryProfile(), view.paymentCondition(), view.status(), view.buyerMembershipId(), view.version(), view.accountType()); }
-	public BuyerClientAccountSelfResponse buyerSelf(ClientAccountView view) {
+	public BuyerClientAccountSelfResponse buyerSelf(ClientAccountView view, String authenticatedMembershipId) {
 		return new BuyerClientAccountSelfResponse(view.id(), view.code(), view.businessName(), view.commercialName(),
 				view.countryCode(), view.taxType(), view.taxValue(), view.segment(), view.deliveryProfile(),
-				view.paymentCondition(), view.status(), view.version(), view.accountType());
+				view.paymentCondition(), view.status(), authenticatedMembershipId, view.version(), view.accountType());
 	}
 	public ClientAccountSummaryResponse summary(ClientAccountView view) { return new ClientAccountSummaryResponse(view.id(), view.code(), view.businessName(), view.commercialName(), view.segment(), view.status(), view.buyerMembershipId(), view.version(), view.accountType(), view.salesOwnerMembershipId()); }
 	public ClientAccountSalesOwnerAssignmentResponse salesOwnerAssignment(ClientAccountSalesOwnerAssignment assignment) {
