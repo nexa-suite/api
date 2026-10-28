@@ -3,7 +3,6 @@ package com.nexa.api.bootstrap.runtime.database.tenant.local;
 import com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.DriverManagerTenantBusinessDatabasePolicySnapshotWriterDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseAuthority;
-import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseBindingRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseAuthority;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentialsProvider;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
@@ -24,7 +23,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.file.Path;
 
@@ -47,11 +45,6 @@ import java.nio.file.Path;
                 + "'${nexa.tenant-business.business-traceability.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.notifications.enabled:false}' == 'true'")
 public class LocalTenantBusinessDatabaseRouterConfiguration {
-    @Bean
-    TenantBusinessDatabaseBindingRegistry localTenantBusinessDatabaseBindingRegistry(JdbcTemplate centralJdbc) {
-        return new JdbcTenantBusinessDatabaseBindingRegistry(centralJdbc);
-    }
-
     @Bean
     TenantBusinessDatabaseAuthority localTenantBusinessDatabaseAuthority(
             ResolveCurrentAccessContextUseCase centralAccessContexts,
