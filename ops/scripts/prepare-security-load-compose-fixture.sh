@@ -229,8 +229,8 @@ for _ in $(seq 1 60); do
 		-v buyer_email=buyer@icisa.test <<'SQL'
 SET app.bootstrap_tenant_slug = :'tenant_slug';
 SET app.workspace_lookup_slug = :'workspace_slug';
-SELECT count(*)::text || '|' || min(tenant.id::text) || '|' || min(workspace.id::text)
-       || '|' || min(buyer.id::text) || '|' || min(membership.id::text)
+SELECT count(*)::text || '|' || coalesce(min(tenant.id::text), '') || '|' || coalesce(min(workspace.id::text), '')
+       || '|' || coalesce(min(buyer.id::text), '') || '|' || coalesce(min(membership.id::text), '')
   FROM tenant_management.tenant tenant
   JOIN tenant_management.workspace workspace ON workspace.tenant_id=tenant.id
   JOIN tenant_management.workspace_membership membership ON membership.workspace_id=workspace.id
