@@ -229,8 +229,21 @@ identity=''
 for _ in $(seq 1 60); do
 	if identity="$(central_psql -v tenant_slug=icisa -v workspace_slug=icisa \
 		-v buyer_email=buyer@icisa.test <<'SQL'
-SET app.bootstrap_tenant_slug = :'tenant_slug';
-SET app.workspace_lookup_slug = :'workspace_slug';
+BEGIN;
+SET LOCAL app.bootstrap_tenant_slug = :'tenant_slug';
+SET LOCAL app.workspace_lookup_slug = :'workspace_slug';
+-- V173 membership RLS permits identity discovery only for a trusted user ID.
+-- Resolve only this active CI Buyer, then keep the RLS read in this transaction.
+SELECT set_config(
+    'app.access_context_user_id',
+    coalesce((
+        SELECT min(buyer.id::text)
+          FROM iam.user_account buyer
+         WHERE buyer.normalized_email=lower(:'buyer_email') AND buyer.status='ACTIVE'
+        HAVING count(*) = 1
+    ), '00000000-0000-0000-0000-000000000000'),
+    true
+) AS _access_context_user_id \gset
 SELECT count(*)::text || '|' || coalesce(min(tenant.id::text), '') || '|' || coalesce(min(workspace.id::text), '')
        || '|' || coalesce(min(buyer.id::text), '') || '|' || coalesce(min(membership.id::text), '')
   FROM tenant_management.tenant tenant
@@ -241,6 +254,7 @@ SELECT count(*)::text || '|' || coalesce(min(tenant.id::text), '') || '|' || coa
    AND workspace.slug=:'workspace_slug' AND workspace.status='ACTIVE'
    AND buyer.normalized_email=lower(:'buyer_email') AND buyer.status='ACTIVE'
    AND membership.membership_type='BUYER' AND membership.status='ACTIVE';
+COMMIT;
 SQL
 	)"; then
 		IFS='|' read -r identity_count tenant_id workspace_id buyer_user_id buyer_membership_id <<< "$identity"
