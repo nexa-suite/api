@@ -188,6 +188,7 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
         requireScope(request.tenantId(), request.workspaceId(), request.deliveryId(), request.buyerMembershipId(),
                 request.customerAccountId(), request.tokenHash(), request.decision(), request.acceptedQuantity(),
                 request.idempotencyKey(), request.requestHash(), request.now());
+        if (!"DISPUTED".equals(request.decision())) throw error("BUYER_RECEIPT_DECISION_INVALID", false);
         lockCommand(request.tenantId(), request.workspaceId(), request.buyerMembershipId(), "BUYER_RECEIPT", request.idempotencyKey());
         BuyerReceiptRow prior = jdbc.query("select id,delivery_id,delivery_attempt_id,decision,driver_delivered_quantity,accepted_quantity,reason,occurred_at from logistics.buyer_receipt_fact where tenant_id=? and workspace_id=? and buyer_membership_id=? and idempotency_key=? for update",
                 (rs, row) -> new BuyerReceiptRow(rs.getObject("id", UUID.class), rs.getObject("delivery_id", UUID.class),
@@ -213,13 +214,16 @@ public class JdbcMobileDeliveryContractAdapter implements MobileDeliveryContract
         if (!request.customerAccountId().equals(customer)) throw error("DELIVERY_HANDOFF_TOKEN_INVALID", false);
         if (jdbc.queryForObject("select count(*) from logistics.buyer_receipt_fact where tenant_id=? and workspace_id=? and delivery_attempt_id=?", Integer.class,
                 request.tenantId(), request.workspaceId(), handoff.attemptId()) > 0) throw error("BUYER_RECEIPT_ALREADY_RECORDED", false);
-        if (!isActiveDelivery(delivery.status())) throw error("DELIVERY_HANDOFF_NOT_ACTIVE", false);
+        if (!"PARTIAL".equals(delivery.status())) throw error("DELIVERY_HANDOFF_NOT_ACTIVE", false);
         if (!handoff.expiresAt().isAfter(databaseNow())) throw error("DELIVERY_HANDOFF_EXPIRED", false);
         if (!"ACTIVE".equals(handoff.status())) throw error("DELIVERY_HANDOFF_TOKEN_INVALID", false);
-        AttemptRow attempt = jdbc.query("select id,status from logistics.delivery_attempt where tenant_id=? and workspace_id=? and id=? and delivery_id=? for update",
-                (rs, row) -> new AttemptRow(rs.getObject("id", UUID.class), rs.getString("status")), request.tenantId(), request.workspaceId(), handoff.attemptId(), request.deliveryId())
+        AttemptRow attempt = jdbc.query("select id,status,outcome from logistics.delivery_attempt where tenant_id=? and workspace_id=? and id=? and delivery_id=? for update",
+                (rs, row) -> new AttemptRow(rs.getObject("id", UUID.class), rs.getString("status"), rs.getString("outcome")),
+                request.tenantId(), request.workspaceId(), handoff.attemptId(), request.deliveryId())
                 .stream().findFirst().orElseThrow(() -> error("DELIVERY_ATTEMPT_NOT_FOUND", true));
-        if (isTerminalAttempt(attempt.status())) throw error("DELIVERY_HANDOFF_NOT_ACTIVE", false);
+        if (!"PARTIAL".equals(attempt.status()) || !"PARTIAL".equals(attempt.outcome())) {
+            throw error("DELIVERY_HANDOFF_NOT_ACTIVE", false);
+        }
         // The attempt lock can also wait. Recheck with wall-clock database time
         // after every lock that can delay acceptance of the ephemeral handoff.
         if (!handoff.expiresAt().isAfter(databaseNow())) throw error("DELIVERY_HANDOFF_EXPIRED", false);

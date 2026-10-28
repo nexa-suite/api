@@ -1,6 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.application;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.MobileDeliveryContractPort;
@@ -15,6 +16,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Wor
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
@@ -149,6 +151,52 @@ class MobileDeliveryContractServiceTests {
                 .isInstanceOf(FulfillmentOperationException.class)
                 .hasMessage("BUYER_RECEIPT_DECISION_INVALID");
         verify(persistence, never()).recordReceipt(any());
+    }
+
+    @Test
+    void disputedReceiptUsesScopedDisputePersistenceWithoutTakingAcceptancePath() {
+        MobileDeliveryContractPort persistence = mock(MobileDeliveryContractPort.class);
+        CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+        BusinessTraceabilityCommands traceability = mock(BusinessTraceabilityCommands.class);
+        CurrentAccessContext context = context();
+        UUID accountId = UUID.randomUUID();
+        UUID deliveryId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        UUID receiptId = UUID.randomUUID();
+        String token = "opaque-token";
+        String reason = "Missing crate";
+        String idempotencyKey = "disputed-receipt-1";
+        when(context.hasRole(com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole.BUYER))
+                .thenReturn(true);
+        when(accounts.findBuyerReference(TENANT.toString(), WORKSPACE.toString(), MEMBERSHIP.toString()))
+                .thenReturn(java.util.Optional.of(new CustomerAccountReference(accountId.toString(), "ACTIVE")));
+        when(persistence.recordReceipt(any())).thenAnswer(invocation -> {
+            MobileDeliveryContractPort.ReceiptRequest request = invocation.getArgument(0);
+            return new MobileDeliveryContractPort.BuyerReceipt(receiptId, request.deliveryId(), attemptId,
+                    request.decision(), BigDecimal.ONE, request.acceptedQuantity(), request.reason(), NOW, false);
+        });
+
+        var receipt = service(persistence, accounts, traceability).recordReceipt(context, deliveryId, token,
+                "DISPUTED", BigDecimal.ZERO, reason, idempotencyKey);
+
+        assertThat(receipt.id()).isEqualTo(receiptId);
+        assertThat(receipt.deliveryId()).isEqualTo(deliveryId);
+        assertThat(receipt.attemptId()).isEqualTo(attemptId);
+        assertThat(receipt.decision()).isEqualTo("DISPUTED");
+        assertThat(receipt.acceptedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+        var request = org.mockito.ArgumentCaptor.forClass(MobileDeliveryContractPort.ReceiptRequest.class);
+        verify(persistence).recordReceipt(request.capture());
+        assertThat(request.getValue().tenantId()).isEqualTo(TENANT);
+        assertThat(request.getValue().workspaceId()).isEqualTo(WORKSPACE);
+        assertThat(request.getValue().deliveryId()).isEqualTo(deliveryId);
+        assertThat(request.getValue().buyerMembershipId()).isEqualTo(MEMBERSHIP);
+        assertThat(request.getValue().customerAccountId()).isEqualTo(accountId);
+        assertThat(request.getValue().tokenHash()).isEqualTo(sha256(token));
+        assertThat(request.getValue().decision()).isEqualTo("DISPUTED");
+        assertThat(request.getValue().reason()).isEqualTo(reason);
+        assertThat(request.getValue().idempotencyKey()).isEqualTo(idempotencyKey);
+        verify(persistence, never()).recordAcceptance(any());
+        verify(traceability).record(any(BusinessTraceabilityCommands.TraceRequest.class));
     }
 
     private static MobileDeliveryContractService service(MobileDeliveryContractPort persistence,
