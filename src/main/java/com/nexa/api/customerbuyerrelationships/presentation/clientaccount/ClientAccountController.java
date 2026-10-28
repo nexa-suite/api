@@ -8,6 +8,7 @@ import com.nexa.api.customerbuyerrelationships.presentation.clientaccount.reques
 import com.nexa.api.customerbuyerrelationships.presentation.clientaccount.request.CreateClientAccountRequest;
 import com.nexa.api.customerbuyerrelationships.presentation.clientaccount.request.UpdateClientAccountRequest;
 import com.nexa.api.customerbuyerrelationships.presentation.clientaccount.response.ClientAccountDetailResponse;
+import com.nexa.api.customerbuyerrelationships.presentation.clientaccount.response.BuyerClientAccountSelfResponse;
 import com.nexa.api.customerbuyerrelationships.presentation.clientaccount.response.ClientAccountPageResponse;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import jakarta.validation.Valid;
@@ -57,8 +58,8 @@ public class ClientAccountController {
 	@GetMapping("/me")
 	@Operation(operationId = "getMyClientAccount")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Buyer client account returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Buyer client account not found")})
-	public ResponseEntity<ClientAccountDetailResponse> buyerDetail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context) {
-		var value = sales.buyerDetail(context); return ResponseEntity.ok().eTag(CustomerRelationshipHttpHeaders.etag(value.version())).body(mapper.detail(value));
+	public ResponseEntity<BuyerClientAccountSelfResponse> buyerDetail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context) {
+		var value = sales.buyerDetail(context); return ResponseEntity.ok().eTag(CustomerRelationshipHttpHeaders.etag(value.version())).body(mapper.buyerSelf(value, context.membershipId().toString()));
 	}
 
 	@GetMapping("/buyer-membership-candidates")
