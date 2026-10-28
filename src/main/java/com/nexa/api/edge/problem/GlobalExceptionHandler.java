@@ -12,6 +12,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurity
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
@@ -47,6 +48,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exceptio
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.CustomFieldConflictException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.OrganizationPreconditionRequiredException;
 import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.salescommitment.application.exception.MinimumDeliveryLeadTimeViolationException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestTransitionException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestAlreadyConvertedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
@@ -198,6 +200,13 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(AccessDeniedException.class)
 	public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
+	}
+
+	@ExceptionHandler(TenantBusinessDatabaseUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleTenantBusinessDatabaseUnavailable(
+			TenantBusinessDatabaseUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant business data is temporarily unavailable", request);
 	}
 
 	@ExceptionHandler(OrganizationPreconditionRequiredException.class)
@@ -692,6 +701,17 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(IllegalArgumentException.class)
 	public ResponseEntity<ProblemDetail> handleDomainValidation(RuntimeException exception, HttpServletRequest request) {
 		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.INVALID_REQUEST, "Request parameters are invalid", request);
+	}
+
+	@ExceptionHandler(MinimumDeliveryLeadTimeViolationException.class)
+	public ResponseEntity<ProblemDetail> handleMinimumDeliveryLeadTime(
+			MinimumDeliveryLeadTimeViolationException exception, HttpServletRequest request) {
+		ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR,
+				"Requested delivery date is earlier than the workspace minimum lead time", request);
+		problem.setProperty("requestedDeliveryDate", exception.requestedDate());
+		problem.setProperty("earliestAllowedDeliveryDate", exception.earliestAllowedDate());
+		problem.setProperty("minimumDeliveryLeadDays", exception.minimumCalendarDays());
+		return ResponseEntity.badRequest().contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
 	}
 
 	@ExceptionHandler(TechnicalFailureException.class)

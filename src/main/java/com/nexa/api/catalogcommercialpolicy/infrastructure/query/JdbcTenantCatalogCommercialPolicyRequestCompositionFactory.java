@@ -103,9 +103,9 @@ public final class JdbcTenantCatalogCommercialPolicyRequestCompositionFactory
         var promotions = new CatalogPromotionService(
                 new JdbcCatalogPromotionAdapter(jdbc, accounts), catalogAuthorization);
         CatalogSkuService catalogSkuPort = new CatalogSkuService(jdbc, availability);
-        var variants = new CatalogVariantService(
-                new JdbcCatalogVariantAdapter(jdbc, catalogSkuPort), catalogAuthorization);
-        var skus = new CatalogSkuServiceFacade(catalogSkuPort, catalogAuthorization, clock);
+        var catalogVariantPort = new JdbcCatalogVariantAdapter(jdbc, catalogSkuPort);
+        var variants = new CatalogVariantService(catalogVariantPort, catalogAuthorization);
+        var skus = new CatalogSkuServiceFacade(catalogSkuPort, catalogVariantPort, catalogAuthorization, clock);
         var skuIdentifiers = new SkuIdentifierResolutionService(
                 new JdbcSkuIdentifierResolutionQuery(jdbc), catalogAuthorization);
         GetCatalogItemSnapshotUseCase snapshots = Objects.requireNonNull(

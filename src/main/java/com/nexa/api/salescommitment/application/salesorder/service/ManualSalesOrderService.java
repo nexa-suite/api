@@ -1,6 +1,8 @@
 package com.nexa.api.salescommitment.application.salesorder.service;
 
 import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTime;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTimePolicyProvider;
 import com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderPersistencePort;
@@ -20,17 +22,34 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.util.HexFormat;
 
 /** Creates direct Sales orders after resolving every cross-context fact into snapshots. */
 public class ManualSalesOrderService implements ManualSalesOrderUseCase {
     private final SalesSnapshotAssembler snapshots;
     private final ManualSalesOrderPersistencePort persistence;
+    private final MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies;
+    private final Clock clock;
 
     public ManualSalesOrderService(SalesSnapshotAssembler snapshots,
                                    ManualSalesOrderPersistencePort persistence) {
+        this(snapshots, persistence, new MinimumDeliveryLeadTime(3), Clock.systemUTC());
+    }
+
+    public ManualSalesOrderService(SalesSnapshotAssembler snapshots,
+                                   ManualSalesOrderPersistencePort persistence,
+                                   MinimumDeliveryLeadTime minimumDeliveryLeadTime, Clock clock) {
+        this(snapshots, persistence, MinimumDeliveryLeadTimePolicyProvider.fixed(minimumDeliveryLeadTime), clock);
+    }
+
+    public ManualSalesOrderService(SalesSnapshotAssembler snapshots,
+                                   ManualSalesOrderPersistencePort persistence,
+                                   MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies, Clock clock) {
         this.snapshots = snapshots;
         this.persistence = persistence;
+        this.deliveryLeadTimePolicies = java.util.Objects.requireNonNull(deliveryLeadTimePolicies);
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     @Override
@@ -42,10 +61,6 @@ public class ManualSalesOrderService implements ManualSalesOrderUseCase {
             throw new IdempotencyKeyRequiredException();
         }
         if (command == null) throw new IllegalArgumentException("Manual sales order command is required");
-        if (command.paymentOption() == PaymentOption.WALLET) {
-            throw new com.nexa.api.salescommitment.application.exception.CommercialBusinessException(
-                    "WALLET_TENDER_PURCHASE_REQUEST_ONLY");
-        }
 
         String tenant = context.tenantId().toString();
         String workspace = context.workspaceId().toString();
@@ -53,6 +68,12 @@ public class ManualSalesOrderService implements ManualSalesOrderUseCase {
         String requestHash = requestHash(command);
         var replay = persistence.findByIdempotency(tenant, workspace, actor, idempotencyKey, requestHash);
         if (replay.isPresent()) return replay.get();
+
+        deliveryLeadTimePolicies.forWorkspace(context).validate(command.requestedDeliveryDate(), clock);
+        if (command.paymentOption() == PaymentOption.WALLET) {
+            throw new com.nexa.api.salescommitment.application.exception.CommercialBusinessException(
+                    "WALLET_TENDER_PURCHASE_REQUEST_ONLY");
+        }
 
         var assembled = snapshots.manual(context, command.clientAccountId(), command.addressId(), command.manualAddress(),
                 command.requestedDeliveryDate(), command.deliveryNotes(), command.notes(), command.warehouseId(), command.routeProvider(),

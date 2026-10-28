@@ -8,7 +8,9 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryTempera
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseInventoryPersistencePort;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLot;
@@ -231,6 +233,67 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         requireRead(context);
         return loadLot(context, uuid(id), false);
     }
+
+    @Transactional(readOnly = true)
+    public WarehouseOperationsService.TemperatureReadingsSummary temperatureReadings(
+            CurrentAccessContext context, String lotId, int page, int size) {
+        pageCheck(page, size);
+        boolean bomAuditReader = context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER);
+        if (bomAuditReader) {
+            context.requireSurface(Surface.PLATFORM);
+            context.requirePermission(PermissionKey.INVENTORY_TEMPERATURE_AUDIT_READ);
+        } else {
+            requireRead(context);
+        }
+
+        UUID id = uuid(lotId);
+        TemperatureLot lot = jdbc.query("select warehouse_id,temperature_value,temperature_recorded_at,"
+                        + "temperature_recorded_by_membership_id,temperature_evidence_object_id "
+                        + "from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> new TemperatureLot(rs.getObject("warehouse_id", UUID.class),
+                        rs.getBigDecimal("temperature_value"), instantNullable(rs, "temperature_recorded_at"),
+                        rs.getObject("temperature_recorded_by_membership_id", UUID.class),
+                        rs.getObject("temperature_evidence_object_id", UUID.class)),
+                tenant(context), workspace(context), id).stream().findFirst()
+                .orElseThrow(() -> error("INVENTORY_LOT_NOT_FOUND", true));
+        if (!bomAuditReader && !warehouseAccess.hasActiveGrant(context, lot.warehouseId())) {
+            // Hide whether a scoped lot exists from a reader without its Warehouse grant.
+            throw error("INVENTORY_LOT_NOT_FOUND", true);
+        }
+
+        List<Object> scope = List.of(tenant(context), workspace(context), id);
+        List<Object> pageArguments = new ArrayList<>(scope);
+        pageArguments.add(size);
+        pageArguments.add((long) page * size);
+        List<WarehouseOperationsService.TemperatureEvaluationSummary> evaluations = jdbc.query(
+                "select id,coalesce(observed_value,received_value) as value_celsius,source_type,expected_min,expected_max,"
+                        + "status,disposition,resolution_reason,created_at,resolved_at,evidence_object_id,affected_quantity,"
+                        + "actor_membership_id,blocks_committed_execution from warehouse.inventory_temperature_evaluation "
+                        + "where tenant_id=? and workspace_id=? and lot_id=? and source_type='RECEIVING' "
+                        + "order by created_at desc,id desc limit ? offset ?",
+                (rs, row) -> new WarehouseOperationsService.TemperatureEvaluationSummary(
+                        rs.getObject("id", UUID.class).toString(), rs.getBigDecimal("value_celsius"),
+                        rs.getString("source_type"), rs.getBigDecimal("expected_min"), rs.getBigDecimal("expected_max"),
+                        rs.getString("status"), rs.getString("disposition"), rs.getString("resolution_reason"),
+                        instant(rs, "created_at"), instantNullable(rs, "resolved_at"),
+                        rs.getObject("evidence_object_id", UUID.class) == null ? null
+                                : rs.getObject("evidence_object_id", UUID.class).toString(),
+                        rs.getBigDecimal("affected_quantity"),
+                        rs.getObject("actor_membership_id", UUID.class) == null ? null
+                                : rs.getObject("actor_membership_id", UUID.class).toString(),
+                        rs.getBoolean("blocks_committed_execution")), pageArguments.toArray());
+        long total = count("select count(*) from warehouse.inventory_temperature_evaluation "
+                + "where tenant_id=? and workspace_id=? and lot_id=? and source_type='RECEIVING'", scope.toArray());
+        WarehouseOperationsService.ReceivingTemperatureReading receiving = lot.valueCelsius() == null ? null
+                : new WarehouseOperationsService.ReceivingTemperatureReading(lot.valueCelsius(), lot.recordedAt(),
+                lot.recordedByMembershipId() == null ? null : lot.recordedByMembershipId().toString(),
+                lot.evidenceObjectId() == null ? null : lot.evidenceObjectId().toString());
+        return new WarehouseOperationsService.TemperatureReadingsSummary(lotId, lot.warehouseId().toString(),
+                receiving, new WarehouseOperationsService.Page<>(evaluations, page, size, total));
+    }
+
+    private record TemperatureLot(UUID warehouseId, BigDecimal valueCelsius, Instant recordedAt,
+                                  UUID recordedByMembershipId, UUID evidenceObjectId) { }
 
     public WarehouseOperationsService.LotSummary receive(CurrentAccessContext context, WarehouseOperationsService.Receipt receipt,
                                                           String key, String correlation) {

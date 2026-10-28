@@ -24,6 +24,8 @@ public interface TenantConfigurationPort {
 	Optional<OperationalSettings> findOperationalSettings(String workspaceId);
 	Optional<OperationalSettingsAccess.PurchaseRequestExpiryPolicySource> findPurchaseRequestExpiryPolicy(
 			String tenantId, String workspaceId);
+	Optional<OperationalSettingsAccess.DeliveryLeadTimePolicySource> findDeliveryLeadTimePolicy(
+			String tenantId, String workspaceId);
 	int updateOperationalSettings(String workspaceId, OperationalSettings settings);
 	Optional<TenantConfigurationModels.WorkspaceSettingsView> findWorkspaceSettings(String workspaceId);
 	int updateWorkspaceSettings(String workspaceId, String defaultBehavior, String warehouseStrategy, long expectedVersion);

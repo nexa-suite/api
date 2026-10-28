@@ -19,7 +19,12 @@ for path in .env.local .local-keys .local; do
 done
 
 postgres_password="$(random_secret)"
+runtime_password="$(random_secret)"
+migrator_password="$(random_secret)"
+tenant_database_provisioner_password="$(random_secret)"
 documents_reader_password="$(random_secret)"
+workspace_scope_reader_password="$(random_secret)"
+internal_operator_database_password="$(random_secret)"
 reset_throttle_key="$(random_secret)"
 notification_outbox_key="$(random_secret)"
 system_operator_token="$(random_secret)"
@@ -33,7 +38,8 @@ logistics_password="$(random_secret)"
 buyer_password="$(random_secret)"
 
 for secret in \
-	"$postgres_password" "$documents_reader_password" "$reset_throttle_key" \
+	"$postgres_password" "$runtime_password" "$migrator_password" "$tenant_database_provisioner_password" "$documents_reader_password" \
+	"$workspace_scope_reader_password" "$internal_operator_database_password" "$reset_throttle_key" \
 	"$notification_outbox_key" "$system_operator_token" "$minio_root_user" "$minio_root_password" \
 	"$owner_password" "$tenant_admin_password" "$sales_password" \
 	"$warehouse_password" "$logistics_password" "$buyer_password"; do
@@ -61,11 +67,16 @@ chmod 640 .local-keys/access-token-private.pem .local-keys/access-token-public.p
 cat > .env.local <<EOF
 NEXA_DATABASE_URL=jdbc:postgresql://localhost:5432/nexa
 NEXA_DATABASE_USERNAME=nexa_runtime
-NEXA_DATABASE_PASSWORD=$postgres_password
+NEXA_DATABASE_PASSWORD=$runtime_password
+NEXA_DATABASE_RUNTIME_PASSWORD=$runtime_password
+NEXA_DATABASE_MIGRATOR_PASSWORD=$migrator_password
+NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD=$tenant_database_provisioner_password
 NEXA_MODERN_POSTGRES_DB=nexa
 NEXA_MODERN_POSTGRES_USER=nexa
 NEXA_MODERN_POSTGRES_PASSWORD=$postgres_password
 NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD=$documents_reader_password
+NEXA_WORKSPACE_SCOPE_READER_PASSWORD=$workspace_scope_reader_password
+NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD=$internal_operator_database_password
 NEXA_MINIO_ROOT_USER=$minio_root_user
 NEXA_MINIO_ROOT_PASSWORD=$minio_root_password
 NEXA_OBJECT_STORAGE_BUCKET=nexa-private
@@ -138,7 +149,7 @@ done
 compose_file=ops/compose/modern.compose.yml
 compose() { docker compose --env-file .env.local -f "$compose_file" "$@"; }
 central_psql() {
-	compose exec -T -e "PGPASSWORD=$postgres_password" modern-postgres psql \
+	compose exec -T -e "PGPASSWORD=$runtime_password" modern-postgres psql \
 		-X -qAt -v ON_ERROR_STOP=1 -U nexa_runtime -d nexa "$@"
 }
 report_provisioning_failure() {
@@ -218,10 +229,23 @@ identity=''
 for _ in $(seq 1 60); do
 	if identity="$(central_psql -v tenant_slug=icisa -v workspace_slug=icisa \
 		-v buyer_email=buyer@icisa.test <<'SQL'
-SET app.bootstrap_tenant_slug = :'tenant_slug';
-SET app.workspace_lookup_slug = :'workspace_slug';
-SELECT count(*)::text || '|' || min(tenant.id::text) || '|' || min(workspace.id::text)
-       || '|' || min(buyer.id::text) || '|' || min(membership.id::text)
+BEGIN;
+SET LOCAL app.bootstrap_tenant_slug = :'tenant_slug';
+SET LOCAL app.workspace_lookup_slug = :'workspace_slug';
+-- V173 membership RLS permits identity discovery only for a trusted user ID.
+-- Resolve only this active CI Buyer, then keep the RLS read in this transaction.
+SELECT set_config(
+    'app.access_context_user_id',
+    coalesce((
+        SELECT min(buyer.id::text)
+          FROM iam.user_account buyer
+         WHERE buyer.normalized_email=lower(:'buyer_email') AND buyer.status='ACTIVE'
+        HAVING count(*) = 1
+    ), '00000000-0000-0000-0000-000000000000'),
+    true
+) AS _access_context_user_id \gset
+SELECT count(*)::text || '|' || coalesce(min(tenant.id::text), '') || '|' || coalesce(min(workspace.id::text), '')
+       || '|' || coalesce(min(buyer.id::text), '') || '|' || coalesce(min(membership.id::text), '')
   FROM tenant_management.tenant tenant
   JOIN tenant_management.workspace workspace ON workspace.tenant_id=tenant.id
   JOIN tenant_management.workspace_membership membership ON membership.workspace_id=workspace.id
@@ -230,6 +254,7 @@ SELECT count(*)::text || '|' || min(tenant.id::text) || '|' || min(workspace.id:
    AND workspace.slug=:'workspace_slug' AND workspace.status='ACTIVE'
    AND buyer.normalized_email=lower(:'buyer_email') AND buyer.status='ACTIVE'
    AND membership.membership_type='BUYER' AND membership.status='ACTIVE';
+COMMIT;
 SQL
 	)"; then
 		IFS='|' read -r identity_count tenant_id workspace_id buyer_user_id buyer_membership_id <<< "$identity"
@@ -289,9 +314,9 @@ docker run --rm --network container:nexa-modern-api --user "$(id -u):$(id -g)" \
 	--env-file "$API_DIRECTORY/.env.local" \
 	-e NEXA_DATABASE_URL=jdbc:postgresql://modern-postgres:5432/nexa \
 	-e NEXA_DATABASE_USERNAME=nexa_runtime \
-	-e "NEXA_DATABASE_PASSWORD=$postgres_password" \
+	-e "NEXA_DATABASE_PASSWORD=$runtime_password" \
 	-e NEXA_DATABASE_RUNTIME_USERNAME=nexa_runtime \
-	-e "NEXA_DATABASE_RUNTIME_PASSWORD=$postgres_password" \
+	-e "NEXA_DATABASE_RUNTIME_PASSWORD=$runtime_password" \
 	-e NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME=true \
 	-e NEXA_FLYWAY_ENABLED=false \
 	-e NEXA_TENANT_BUSINESS_LOCAL_CREDENTIALS_DIRECTORY=/workspace/.local/tenant-databases \

@@ -30,4 +30,17 @@ class CreditAccountConfigurationQueryTests {
         assertThat(snapshot.availableCredit()).isNull();
         assertThat(snapshot.version()).isNull();
     }
+
+    @Test
+    void inactiveAccountHasNoAvailableCreditEvenWhenLimitHasRoom() {
+        for (var status : java.util.List.of(CreditAccountConfigurationQuery.Status.SUSPENDED,
+                CreditAccountConfigurationQuery.Status.CLOSED)) {
+            var snapshot = new CreditAccountConfigurationQuery.Snapshot(UUID.randomUUID(), "PEN", status,
+                    new BigDecimal("1000.0000"), new BigDecimal("100.0000"),
+                    new BigDecimal("250.0000"), new BigDecimal("50.0000"), 4L);
+
+            assertThat(snapshot.used()).isEqualByComparingTo("400.0000");
+            assertThat(snapshot.availableCredit()).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+    }
 }

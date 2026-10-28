@@ -50,6 +50,78 @@ class CreditReservationConcurrencyIT extends PaymentIntegrationSupport {
         }
     }
 
+    @Test
+    void creditLinePaymentRejectsNonCreditTermsAndAllowsCreditTerms() throws Exception {
+        OpenReceivable receivable = createOpenReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        java.util.UUID accountId = java.util.UUID.fromString(buyerClientAccountId());
+        String originalTerms = tenantJdbc().queryForObject(
+                "select payment_condition from sales.client_account where tenant_id=? and workspace_id=? and id=?",
+                String.class, tenantUuid(), workspaceUuid(), accountId);
+        ensureBuyerCreditAccount(receivable.currency());
+        tenantJdbc().update("update payments.credit_account set status='ACTIVE',credit_limit=greatest(credit_limit,"
+                        + "credit_exposure+reserved_exposure+?),version=version+1,updated_at=current_timestamp "
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+                receivable.amount().add(new BigDecimal("100.00")), tenantUuid(), workspaceUuid(), accountId,
+                receivable.currency());
+        BigDecimal exposureBefore = tenantJdbc().queryForObject(
+                "select credit_exposure from payments.credit_account where tenant_id=? and workspace_id=? "
+                        + "and client_account_id=? and currency=?", BigDecimal.class,
+                tenantUuid(), workspaceUuid(), accountId, receivable.currency());
+        String cashKey = "cash-terms-credit-" + uuid();
+        String creditKey = "credit-terms-credit-" + uuid();
+
+        try {
+            tenantJdbc().update("update sales.client_account set payment_condition='CASH',version=version+1 "
+                            + "where tenant_id=? and workspace_id=? and id=?",
+                    tenantUuid(), workspaceUuid(), accountId);
+            MvcResult denied = creditPayment(buyer, receivable.id(), cashKey);
+            assertThat(denied.getResponse().getStatus()).isEqualTo(400);
+            assertThat(denied.getResponse().getContentAsString()).contains("INSUFFICIENT_CREDIT");
+            assertThat(tenantJdbc().queryForObject("select count(*) from payments.payment where tenant_id=? "
+                            + "and workspace_id=? and created_by_membership_id=? and idempotency_key=?",
+                    Integer.class, tenantUuid(), workspaceUuid(), java.util.UUID.fromString(membershipId(BUYER_EMAIL)),
+                    cashKey)).isZero();
+
+            for (String rejectedCondition : List.of("NO_CREDIT", "NOT_NET_30", "CASH_CREDIT", "credit_limit",
+                    "CREDIT_30_EXTRA")) {
+                tenantJdbc().update("update sales.client_account set payment_condition=?,version=version+1 "
+                                + "where tenant_id=? and workspace_id=? and id=?",
+                        rejectedCondition, tenantUuid(), workspaceUuid(), accountId);
+                String rejectedKey = "non-credit-terms-" + uuid();
+                MvcResult rejected = creditPayment(buyer, receivable.id(), rejectedKey);
+                assertThat(rejected.getResponse().getStatus()).as(rejectedCondition).isEqualTo(400);
+                assertThat(rejected.getResponse().getContentAsString()).as(rejectedCondition)
+                        .contains("INSUFFICIENT_CREDIT");
+                assertThat(tenantJdbc().queryForObject("select count(*) from payments.payment where tenant_id=? "
+                                + "and workspace_id=? and created_by_membership_id=? and idempotency_key=?",
+                        Integer.class, tenantUuid(), workspaceUuid(),
+                        java.util.UUID.fromString(membershipId(BUYER_EMAIL)), rejectedKey))
+                        .as(rejectedCondition)
+                        .isZero();
+                assertThat(tenantJdbc().queryForObject("select credit_exposure from payments.credit_account "
+                                + "where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+                        BigDecimal.class, tenantUuid(), workspaceUuid(), accountId, receivable.currency()))
+                        .as(rejectedCondition)
+                        .isEqualByComparingTo(exposureBefore);
+            }
+
+            tenantJdbc().update("update sales.client_account set payment_condition='CREDIT_30',version=version+1 "
+                            + "where tenant_id=? and workspace_id=? and id=?",
+                    tenantUuid(), workspaceUuid(), accountId);
+            MvcResult accepted = creditPayment(buyer, receivable.id(), creditKey);
+            assertThat(accepted.getResponse().getStatus()).isEqualTo(201);
+            assertThat(tenantJdbc().queryForObject("select credit_exposure from payments.credit_account "
+                            + "where tenant_id=? and workspace_id=? and client_account_id=? and currency=?",
+                    BigDecimal.class, tenantUuid(), workspaceUuid(), accountId, receivable.currency()))
+                    .isEqualByComparingTo(exposureBefore.add(receivable.amount()));
+        } finally {
+            tenantJdbc().update("update sales.client_account set payment_condition=?,version=version+1 "
+                            + "where tenant_id=? and workspace_id=? and id=?",
+                    originalTerms, tenantUuid(), workspaceUuid(), accountId);
+        }
+    }
+
     private MvcResult creditPayment(String buyer, java.util.UUID receivableId, String key) throws Exception {
         return mockMvc.perform(post("/api/v1/receivables/" + receivableId + "/credit-line-payments")
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", key)).andReturn();

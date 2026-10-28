@@ -2,6 +2,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
@@ -22,16 +23,18 @@ public class TenantBoundSalesCommitmentConfiguration {
     @Primary
     PurchaseRequestDraftPort tenantBoundPurchaseRequestDraftPort(TenantBusinessDatabaseRouter router,
             TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
             TenantSalesCommitmentCompositionProvider compositions) {
-        return new TenantBoundPurchaseRequestDraftPort(router, expiryPolicies, compositions);
+        return new TenantBoundPurchaseRequestDraftPort(router, expiryPolicies, deliveryLeadTimes, compositions);
     }
 
     @Bean
     @Primary
     PurchaseRequestUseCase tenantBoundPurchaseRequestUseCase(TenantBusinessDatabaseRouter router,
             TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
             TenantSalesCommitmentCompositionProvider compositions) {
-        return new TenantBoundPurchaseRequestUseCase(router, expiryPolicies, compositions);
+        return new TenantBoundPurchaseRequestUseCase(router, expiryPolicies, deliveryLeadTimes, compositions);
     }
 
     @Bean
@@ -45,7 +48,8 @@ public class TenantBoundSalesCommitmentConfiguration {
     @Bean
     @Primary
     DirectOrderUseCase tenantBoundDirectOrderUseCase(TenantBusinessDatabaseRouter router,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
             TenantSalesCommitmentCompositionProvider compositions) {
-        return new TenantBoundDirectOrderUseCase(router, compositions);
+        return new TenantBoundDirectOrderUseCase(router, deliveryLeadTimes, compositions);
     }
 }

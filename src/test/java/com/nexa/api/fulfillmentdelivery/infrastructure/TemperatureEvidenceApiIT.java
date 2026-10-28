@@ -344,7 +344,8 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
     @Test
     void marksLotTemperatureHoldAsExecutionBlockingWhenReservedQuantityIsAffected() throws Exception {
         ensureCommercialInventory();
-        TemperatureSubject subject = createTemperatureSubject(LocalDate.now().plusDays(1).toString(), "CAT-0003");
+        TemperatureSubject subject = createTemperatureSubject(LocalDate.now(java.time.ZoneOffset.UTC)
+                .plusDays(2).toString(), "CAT-0003");
         PurchaseRequestResource purchaseRequest = createApprovedPurchaseRequestForItem("CAT-0003");
         SalesOrderResource order = convert(purchaseRequest, "thermal-reserve-convert-" + uuid());
         MvcResult confirmed = mockMvc.perform(post("/api/v1/sales-orders/" + order.id() + "/confirmations")

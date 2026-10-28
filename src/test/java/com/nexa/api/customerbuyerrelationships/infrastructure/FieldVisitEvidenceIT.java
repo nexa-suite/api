@@ -14,6 +14,10 @@ class FieldVisitEvidenceIT extends NexaWorkflowIntegrationSupport {
     @Test void currentRelationshipEvidenceReplaysOnceAndCannotChangeBody() throws Exception {
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String customer = buyerClientAccountId();
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=current_timestamp,"
+                        + "version=version+1 where tenant_id=? and workspace_id=? and id=?",
+                UUID.fromString(membershipId(SALES_EMAIL)), UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), UUID.fromString(customer));
         var detail = mockMvc.perform(get("/api/v1/client-accounts/"+customer).header("Authorization","Bearer "+sales))
             .andExpect(status().isOk()).andReturn();
         String version = "\""+json(detail).get("version").asLong()+"\"";

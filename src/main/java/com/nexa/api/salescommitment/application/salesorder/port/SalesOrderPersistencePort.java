@@ -4,6 +4,7 @@ import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderEventView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderSalesOwnerScope;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 
 import java.util.List;
@@ -11,7 +12,13 @@ import java.util.Optional;
 
 public interface SalesOrderPersistencePort {
 	SalesPage<SalesOrderView> list(String tenantId, String workspaceId, String buyerAccountId, SalesOrderFilter filter);
+	SalesPage<SalesOrderView> listForSalesOwner(String tenantId, String workspaceId, SalesOrderSalesOwnerScope scope,
+			SalesOrderFilter filter);
 	Optional<SalesOrderView> find(String tenantId, String workspaceId, String buyerAccountId, String id);
+	Optional<SalesOrderView> findForSalesOwner(String tenantId, String workspaceId, SalesOrderSalesOwnerScope scope,
+			String id);
 	List<SalesOrderEventView> events(String tenantId, String workspaceId, String buyerAccountId, String id);
+	List<SalesOrderEventView> eventsForSalesOwner(String tenantId, String workspaceId,
+			SalesOrderSalesOwnerScope scope, String id);
 	SalesPage<FulfillmentCandidateView> fulfillmentCandidates(String tenantId, String workspaceId, SalesOrderFilter filter);
 }

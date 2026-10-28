@@ -12,9 +12,12 @@ PID_FILE="$STATE_DIRECTORY/worker.pid"
 READY_FILE="$STATE_DIRECTORY/worker.ready"
 CENTRAL_CONFIG_FILE="$STATE_DIRECTORY/central-postgres.properties"
 PROVISIONER="$SCRIPT_DIRECTORY/provision-local-tenant-database.sh"
-STOPPING=0 ACTIVE_CHILD='' HEARTBEAT_PID=''
-
 fail() { printf '%s\n' "$1" >&2; exit 1; }
+STOPPING=0 ACTIVE_CHILD='' HEARTBEAT_PID=''
+RUNTIME_PASSWORD="$(awk -F= '$1 == "NEXA_DATABASE_RUNTIME_PASSWORD" { count++; value=substr($0, index($0, "=") + 1) } END { if (count != 1) exit 1; print value }' "$ENV_FILE")" \
+	|| fail 'Local runtime database password is unavailable.'
+PROVISIONER_PASSWORD="$(awk -F= '$1 == "NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD" { count++; value=substr($0, index($0, "=") + 1) } END { if (count != 1) exit 1; print value }' "$ENV_FILE")" \
+	|| fail 'Local Tenant database provisioner password is unavailable.'
 private_mode() {
 	local path="$1" expected="$2" actual
 	[[ ! -L "$path" ]] || return 1
@@ -27,14 +30,18 @@ new_uuid() {
 	printf '%s-%s-%s-%s-%s\n' "${value:0:8}" "${value:8:4}" "${value:12:4}" "${value:16:4}" "${value:20:12}"
 }
 runtime_psql() {
-	docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T modern-postgres sh -ec '
-		export PGPASSWORD="$POSTGRES_PASSWORD"
-		exec psql -X -qAt -v ON_ERROR_STOP=1 -U nexa_runtime -d "$POSTGRES_DB"
-	' 2>/dev/null
+	docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T \
+		-e "PGPASSWORD=$RUNTIME_PASSWORD" modern-postgres \
+		psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U nexa_runtime -d nexa 2>/dev/null
+}
+provisioner_psql() {
+	docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T \
+		-e "PGPASSWORD=$PROVISIONER_PASSWORD" modern-postgres \
+		psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U nexa_tenant_database_provisioner -d nexa 2>/dev/null
 }
 current_task_claimed() {
 	local task_id="$1" claim_token="$2" lease_seconds="$3"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 UPDATE tenant_management.tenant_business_database_provisioning_task
    SET lease_until=current_timestamp + interval '$lease_seconds seconds'
@@ -45,7 +52,7 @@ SQL
 }
 current_workspace_anchor_claimed() {
 	local task_id="$1" claim_token="$2" lease_seconds="$3"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 UPDATE tenant_management.tenant_business_database_workspace_anchor_task
    SET lease_until=current_timestamp + interval '$lease_seconds seconds'
@@ -56,7 +63,7 @@ SQL
 }
 mark_task_ready() {
 	local task_id="$1" claim_token="$2" tenant_id="$3"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 SET app.current_tenant_id = '$tenant_id';
 UPDATE tenant_management.tenant_business_database_provisioning_task task
@@ -75,7 +82,7 @@ SQL
 }
 mark_task_failed() {
 	local task_id="$1" claim_token="$2"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 UPDATE tenant_management.tenant_business_database_provisioning_task
    SET status='FAILED', claim_token=NULL, lease_until=NULL, failure_code='PROVISIONER_FAILED',
@@ -88,7 +95,7 @@ SQL
 }
 claim_next_task() {
 	local candidate_port="$1" claim_token="$2"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 WITH candidate AS (
     SELECT task_id
@@ -116,7 +123,7 @@ SQL
 }
 claim_next_workspace_anchor_task() {
 	local claim_token="$1"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 WITH candidate AS (
     SELECT anchor.task_id,anchor.tenant_id,anchor.workspace_id,provisioning.database_port
@@ -145,7 +152,7 @@ SQL
 }
 mark_workspace_anchor_ready() {
 	local task_id="$1" claim_token="$2" tenant_id="$3"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 SET app.current_tenant_id = '$tenant_id';
 UPDATE tenant_management.tenant_business_database_workspace_anchor_task anchor
@@ -166,7 +173,7 @@ SQL
 }
 mark_workspace_anchor_failed() {
 	local task_id="$1" claim_token="$2"
-	runtime_psql <<SQL
+	provisioner_psql <<SQL
 SET app.cross_scope_workspace_scan = 'true';
 UPDATE tenant_management.tenant_business_database_workspace_anchor_task
    SET status='FAILED',claim_token=NULL,lease_until=NULL,failure_code='SCOPE_PROJECTION_FAILED',

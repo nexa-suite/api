@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
 import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView;
@@ -20,13 +21,22 @@ import java.util.function.Function;
 public final class TenantBoundPurchaseRequestUseCase implements PurchaseRequestUseCase {
     private final TenantBusinessDatabaseRouter router;
     private final TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies;
+    private final TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes;
     private final TenantSalesCommitmentCompositionProvider compositions;
 
     public TenantBoundPurchaseRequestUseCase(TenantBusinessDatabaseRouter router,
             TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
             TenantSalesCommitmentCompositionProvider compositions) {
+        this(router, expiryPolicies, null, compositions);
+    }
+
+    public TenantBoundPurchaseRequestUseCase(TenantBusinessDatabaseRouter router,
+            TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
+            TenantSalesCommitmentCompositionProvider compositions) {
         this.router = java.util.Objects.requireNonNull(router);
         this.expiryPolicies = java.util.Objects.requireNonNull(expiryPolicies);
+        this.deliveryLeadTimes = deliveryLeadTimes;
         this.compositions = java.util.Objects.requireNonNull(compositions);
     }
 
@@ -41,11 +51,11 @@ public final class TenantBoundPurchaseRequestUseCase implements PurchaseRequestU
     }
     @Override public PurchaseRequestView create(CurrentAccessContext c, String account, String priority,
             LocalDate date, String delivery, String payment, String comment, List<RequestedLine> lines) {
-        return call(c, useCase -> useCase.create(c, account, priority, date, delivery, payment, comment, lines));
+        return callWithDeliveryLeadTime(c, useCase -> useCase.create(c, account, priority, date, delivery, payment, comment, lines));
     }
     @Override public PurchaseRequestView update(CurrentAccessContext c, String id, String priority,
             LocalDate date, String delivery, String payment, String comment, long version) {
-        return call(c, useCase -> useCase.update(c, id, priority, date, delivery, payment, comment, version));
+        return callWithDeliveryLeadTime(c, useCase -> useCase.update(c, id, priority, date, delivery, payment, comment, version));
     }
     @Override public PurchaseRequestView addLine(CurrentAccessContext c, String id, String item,
             BigDecimal quantity, String unit, String notes, long version) {
@@ -60,7 +70,7 @@ public final class TenantBoundPurchaseRequestUseCase implements PurchaseRequestU
     }
     @Override public PurchaseRequestView transition(CurrentAccessContext c, String id, String action,
             String note, long version, String key) {
-        return callWithExpiryPolicy(c, useCase -> useCase.transition(c, id, action, note, version, key));
+        return callWithExpiryAndDeliveryLeadTime(c, useCase -> useCase.transition(c, id, action, note, version, key));
     }
     @Override public MaterialChangeProposalView currentMaterialChange(CurrentAccessContext c, String id) {
         return call(c, useCase -> useCase.currentMaterialChange(c, id));
@@ -71,12 +81,12 @@ public final class TenantBoundPurchaseRequestUseCase implements PurchaseRequestU
     @Override public MaterialChangeProposalView proposeMaterialChange(CurrentAccessContext c, String id,
             long version, String reason, String priority, LocalDate date, String delivery, String payment,
             String comment, List<RequestedLine> lines, String key) {
-        return callWithExpiryPolicy(c, useCase -> useCase.proposeMaterialChange(c, id, version, reason, priority, date,
+        return callWithExpiryAndDeliveryLeadTime(c, useCase -> useCase.proposeMaterialChange(c, id, version, reason, priority, date,
                 delivery, payment, comment, lines, key));
     }
     @Override public PurchaseRequestView acceptMaterialChange(CurrentAccessContext c, String id,
             String proposal, long version, String key) {
-        return callWithExpiryPolicy(c, useCase -> useCase.acceptMaterialChange(c, id, proposal, version, key));
+        return callWithExpiryAndDeliveryLeadTime(c, useCase -> useCase.acceptMaterialChange(c, id, proposal, version, key));
     }
     @Override public PurchaseRequestView rejectMaterialChange(CurrentAccessContext c, String id,
             String proposal, long version, String key) {
@@ -92,5 +102,19 @@ public final class TenantBoundPurchaseRequestUseCase implements PurchaseRequestU
             Function<PurchaseRequestUseCase, T> action) {
         return expiryPolicies.inTransaction(context,
                 jdbc -> action.apply(compositions.bindTo(jdbc).purchaseRequests()));
+    }
+
+    private <T> T callWithDeliveryLeadTime(CurrentAccessContext context,
+            Function<PurchaseRequestUseCase, T> action) {
+        int minimumDays = deliveryLeadTimes == null ? 3 : deliveryLeadTimes.minimumDeliveryLeadDays(context);
+        return router.inTransaction(context,
+                jdbc -> action.apply(compositions.bindTo(jdbc, minimumDays).purchaseRequests()));
+    }
+
+    private <T> T callWithExpiryAndDeliveryLeadTime(CurrentAccessContext context,
+            Function<PurchaseRequestUseCase, T> action) {
+        int minimumDays = deliveryLeadTimes == null ? 3 : deliveryLeadTimes.minimumDeliveryLeadDays(context);
+        return expiryPolicies.inTransaction(context,
+                jdbc -> action.apply(compositions.bindTo(jdbc, minimumDays).purchaseRequests()));
     }
 }

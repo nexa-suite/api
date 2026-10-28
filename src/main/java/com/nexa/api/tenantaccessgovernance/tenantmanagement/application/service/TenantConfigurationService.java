@@ -13,8 +13,10 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exceptio
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.TenantManagementInvariantViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationLegalAddress;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationProfile;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.RegionalSettings;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.TenantSecuritySettings;
@@ -50,14 +52,19 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 
 	@Override
 	public TenantConfigurationModels.OrganizationProfileView updateOrganizationProfile(CurrentAccessContext context,
-			TenantConfigurationModels.OrganizationProfileView request, long expectedVersion, String correlationId) {
+			TenantConfigurationModels.OrganizationProfileUpdate request, long expectedVersion, String correlationId) {
 		context.requirePermission(PermissionKey.TENANT_ORGANIZATION_MANAGE);
 		OrganizationProfile current = port.findOrganizationProfile(context.tenantId().toString())
 				.orElseThrow(() -> new ApiResourceNotFoundException("organization settings"));
-		OrganizationProfile profile = new OrganizationProfile(request.legalName(), request.displayName(), request.businessIdentifier(), request.operationCategory(), expectedVersion);
+		String ruc = request.rucProvided() ? request.ruc() : current.ruc();
+		OrganizationLegalAddress legalAddress = request.legalAddressProvided()
+				? legalAddress(request.legalAddress()) : current.legalAddress();
+		OrganizationProfile profile = new OrganizationProfile(request.legalName(), request.displayName(),
+				request.businessIdentifier(), request.operationCategory(), expectedVersion, ruc, legalAddress);
 		if (port.updateOrganizationProfile(context.tenantId().toString(), profile) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "ORGANIZATION_UPDATED", correlationId, organizationChangeMetadata(current, profile));
-		return view(new OrganizationProfile(profile.legalName(), profile.displayName(), profile.businessIdentifier(), profile.operationCategory(), expectedVersion + 1));
+		return view(new OrganizationProfile(profile.legalName(), profile.displayName(), profile.businessIdentifier(),
+				profile.operationCategory(), expectedVersion + 1, profile.ruc(), profile.legalAddress()));
 	}
 
 	@Override
@@ -118,12 +125,27 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 	@Override
 	public TenantConfigurationModels.OperationalSettingsView updateOperationalSettings(CurrentAccessContext context, String workspaceId,
 			TenantConfigurationModels.OperationalSettingsView request, long expectedVersion, String correlationId) {
-		context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
+		boolean canManageAll = context.allows(PermissionKey.TENANT_WORKSPACE_MANAGE);
+		boolean canManageLeadTime = context.allows(PermissionKey.TENANT_WORKSPACE_DELIVERY_LEAD_TIME_MANAGE);
+		if (!canManageAll && !canManageLeadTime) context.requirePermission(PermissionKey.TENANT_WORKSPACE_MANAGE);
 		String scopedWorkspace = requireWorkspace(context, workspaceId);
-		OperationalSettings settings = new OperationalSettings(request.defaultWarehouseSelectionPolicy(), request.orderCutoffPolicy(), request.fulfillmentDefaults(), request.inventoryVisibilityPolicy(), request.buyerAvailabilityPolicy(), request.operatingHoursStart(), request.operatingHoursEnd(), request.orderCutoffMinutes(), request.thermalLogRequired(), expectedVersion);
+		OperationalSettings current = port.findOperationalSettings(scopedWorkspace)
+				.orElseThrow(() -> new ApiResourceNotFoundException("operational settings"));
+		if (current.version() != expectedVersion) throw new ConcurrencyConflictException();
+		if (!canManageAll && !sameSettingsExceptLeadTime(current, request)) {
+			throw new AccessPolicyViolation("Membership may only change minimum delivery lead days");
+		}
+		OperationalSettings settings = new OperationalSettings(request.defaultWarehouseSelectionPolicy(),
+				request.orderCutoffPolicy(), request.fulfillmentDefaults(), request.inventoryVisibilityPolicy(),
+				request.buyerAvailabilityPolicy(), request.operatingHoursStart(), request.operatingHoursEnd(),
+				request.orderCutoffMinutes(), request.thermalLogRequired(), request.minimumDeliveryLeadDays(),
+				expectedVersion);
 		if (port.updateOperationalSettings(scopedWorkspace, settings) == 0) throw new ConcurrencyConflictException();
 		appendAudit(context, "OPERATIONAL_SETTINGS_CHANGED", correlationId, Map.of("section", "operational"));
-		return view(scopedWorkspace, new OperationalSettings(settings.defaultWarehouseSelectionPolicy(), settings.orderCutoffPolicy(), settings.fulfillmentDefaults(), settings.inventoryVisibilityPolicy(), settings.buyerAvailabilityPolicy(), settings.operatingHoursStart(), settings.operatingHoursEnd(), settings.orderCutoffMinutes(), settings.thermalLogRequired(), expectedVersion + 1));
+		return view(scopedWorkspace, new OperationalSettings(settings.defaultWarehouseSelectionPolicy(), settings.orderCutoffPolicy(),
+				settings.fulfillmentDefaults(), settings.inventoryVisibilityPolicy(), settings.buyerAvailabilityPolicy(),
+				settings.operatingHoursStart(), settings.operatingHoursEnd(), settings.orderCutoffMinutes(),
+				settings.thermalLogRequired(), settings.minimumDeliveryLeadDays(), expectedVersion + 1));
 	}
 
 	@Override
@@ -225,10 +247,38 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		return new CustomFieldDefinition(id, request.fieldKey(), request.label(), request.fieldKind(), request.scope(), request.required(), request.uniqueValue(), request.displayOrder(), request.active(), version);
 	}
 
-	private static TenantConfigurationModels.OrganizationProfileView view(OrganizationProfile value) { return new TenantConfigurationModels.OrganizationProfileView(value.legalName(), value.displayName(), value.businessIdentifier(), value.operationCategory(), value.version()); }
+	private static TenantConfigurationModels.OrganizationProfileView view(OrganizationProfile value) {
+		return new TenantConfigurationModels.OrganizationProfileView(value.legalName(), value.displayName(),
+				value.businessIdentifier(), value.operationCategory(), value.version(), value.ruc(), legalAddressView(value.legalAddress()));
+	}
+	private static TenantConfigurationModels.OrganizationLegalAddressView legalAddressView(OrganizationLegalAddress value) {
+		if (value == null) return null;
+		return new TenantConfigurationModels.OrganizationLegalAddressView(value.countryCode(), value.addressLine(),
+				value.departmentCode(), value.provinceCode(), value.districtCode(), value.roadType(), value.streetName(),
+				value.streetNumber(), value.interior(), value.postalCode(), value.reference());
+	}
+	private static OrganizationLegalAddress legalAddress(TenantConfigurationModels.OrganizationLegalAddressView value) {
+		if (value == null) return null;
+		return new OrganizationLegalAddress(value.countryCode(), value.addressLine(), value.departmentCode(),
+				value.provinceCode(), value.districtCode(), value.roadType(), value.streetName(), value.streetNumber(),
+				value.interior(), value.postalCode(), value.reference());
+	}
 	private static TenantConfigurationModels.RegionalSettingsView view(RegionalSettings value) { return new TenantConfigurationModels.RegionalSettingsView(value.timezone(), value.language(), value.currency(), value.countryRegion(), value.dateTimePolicy(), value.locale(), value.version()); }
 	private static TenantConfigurationModels.UnitPreferencesView view(UnitPreferences value) { return new TenantConfigurationModels.UnitPreferencesView(value.massUnit(), value.temperatureUnit(), value.distanceUnit(), value.volumeUnit(), value.version()); }
-	private static TenantConfigurationModels.OperationalSettingsView view(String workspaceId, OperationalSettings value) { return new TenantConfigurationModels.OperationalSettingsView(workspaceId, value.defaultWarehouseSelectionPolicy(), value.orderCutoffPolicy(), value.fulfillmentDefaults(), value.inventoryVisibilityPolicy(), value.buyerAvailabilityPolicy(), value.operatingHoursStart(), value.operatingHoursEnd(), value.orderCutoffMinutes(), value.thermalLogRequired(), value.version()); }
+	private static TenantConfigurationModels.OperationalSettingsView view(String workspaceId, OperationalSettings value) { return new TenantConfigurationModels.OperationalSettingsView(workspaceId, value.defaultWarehouseSelectionPolicy(), value.orderCutoffPolicy(), value.fulfillmentDefaults(), value.inventoryVisibilityPolicy(), value.buyerAvailabilityPolicy(), value.operatingHoursStart(), value.operatingHoursEnd(), value.orderCutoffMinutes(), value.thermalLogRequired(), value.minimumDeliveryLeadDays(), value.version()); }
+
+	private static boolean sameSettingsExceptLeadTime(OperationalSettings current,
+			TenantConfigurationModels.OperationalSettingsView request) {
+		return Objects.equals(current.defaultWarehouseSelectionPolicy(), request.defaultWarehouseSelectionPolicy())
+				&& Objects.equals(current.orderCutoffPolicy(), request.orderCutoffPolicy())
+				&& Objects.equals(current.fulfillmentDefaults(), request.fulfillmentDefaults())
+				&& Objects.equals(current.inventoryVisibilityPolicy(), request.inventoryVisibilityPolicy())
+				&& Objects.equals(current.buyerAvailabilityPolicy(), request.buyerAvailabilityPolicy())
+				&& Objects.equals(current.operatingHoursStart(), request.operatingHoursStart())
+				&& Objects.equals(current.operatingHoursEnd(), request.operatingHoursEnd())
+				&& current.orderCutoffMinutes() == request.orderCutoffMinutes()
+				&& current.thermalLogRequired() == request.thermalLogRequired();
+	}
 	private static TenantConfigurationModels.TenantSecuritySettingsView view(TenantSecuritySettings value) { return new TenantConfigurationModels.TenantSecuritySettingsView(value.passwordMinLength(), value.sessionDurationMinutes(), value.invitationExpirationHours(), value.requiredEmailDomain(), value.version()); }
 	private static Map<String, Object> organizationChangeMetadata(OrganizationProfile before, OrganizationProfile after) {
 		Map<String, Object> oldValues = new LinkedHashMap<>();
@@ -245,6 +295,8 @@ public class TenantConfigurationService implements TenantConfigurationUseCase {
 		metadata.put("section", "organization");
 		metadata.put("oldValues", oldValues);
 		metadata.put("newValues", newValues);
+		metadata.put("rucChanged", !Objects.equals(before.ruc(), after.ruc()));
+		metadata.put("legalAddressChanged", !Objects.equals(before.legalAddress(), after.legalAddress()));
 		return metadata;
 	}
 

@@ -24,6 +24,7 @@ public final class PermissionCatalog {
 	private static final Set<PermissionKey> COMPANY_OWNER_ENVELOPE = ALL.stream()
 			.filter(key -> !key.code().startsWith("tenant."))
 			.filter(key -> key != PermissionKey.TENANT_AUDIT_READ)
+			.filter(key -> key != PermissionKey.INVENTORY_TEMPERATURE_AUDIT_READ)
 			.collect(Collectors.toUnmodifiableSet());
 
 	private PermissionCatalog() { }
@@ -63,6 +64,7 @@ public final class PermissionCatalog {
 					PermissionKey.CATALOG_READ, PermissionKey.CLIENT_READ,
 					PermissionKey.TENANT_ORGANIZATION_READ, PermissionKey.TENANT_ORGANIZATION_MANAGE,
 					PermissionKey.TENANT_WORKSPACE_READ, PermissionKey.TENANT_WORKSPACE_MANAGE,
+					PermissionKey.TENANT_WORKSPACE_DELIVERY_LEAD_TIME_MANAGE,
 					PermissionKey.TENANT_MEMBER_READ, PermissionKey.TENANT_MEMBER_INVITE,
 					PermissionKey.TENANT_MEMBER_MANAGE, PermissionKey.TENANT_ROLE_READ,
 					PermissionKey.TENANT_ROLE_MANAGE, PermissionKey.TENANT_ROLE_ASSIGN,
@@ -72,6 +74,7 @@ public final class PermissionCatalog {
 			case COMPANY_OWNER -> Set.of(
 					PermissionKey.TENANT_ORGANIZATION_READ, PermissionKey.TENANT_ORGANIZATION_MANAGE,
 					PermissionKey.TENANT_WORKSPACE_READ, PermissionKey.TENANT_MEMBER_READ,
+					PermissionKey.TENANT_WORKSPACE_DELIVERY_LEAD_TIME_MANAGE,
 					PermissionKey.TENANT_MEMBER_INVITE, PermissionKey.TENANT_MEMBER_MANAGE,
 					PermissionKey.TENANT_ROLE_READ, PermissionKey.TENANT_ROLE_ASSIGN,
 					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PRODUCT_MANAGE,
@@ -120,6 +123,7 @@ public final class PermissionCatalog {
 					PermissionKey.CATALOG_READ, PermissionKey.CATALOG_PRODUCT_MANAGE,
 					PermissionKey.CATALOG_TAXONOMY_MANAGE, PermissionKey.CATALOG_PRICE_MANAGE,
 					PermissionKey.DELIVERY_EXCEPTION_READ, PermissionKey.DELIVERY_EXCEPTION_COORDINATE,
+					PermissionKey.INVENTORY_TEMPERATURE_AUDIT_READ,
 					PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE,
 					PermissionKey.PAYMENT_RECONCILE,
 					PermissionKey.NOTIFICATION_READ, PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);

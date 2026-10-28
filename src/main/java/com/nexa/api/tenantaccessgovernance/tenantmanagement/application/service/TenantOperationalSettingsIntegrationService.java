@@ -31,7 +31,8 @@ public final class TenantOperationalSettingsIntegrationService implements com.ne
                 .orElseThrow(() -> new IllegalStateException("Operational settings are not configured"));
         OperationalSettings updated = new OperationalSettings(selectionPolicy, current.orderCutoffPolicy(),
                 current.fulfillmentDefaults(), current.inventoryVisibilityPolicy(), current.buyerAvailabilityPolicy(),
-                startsAt, endsAt, current.orderCutoffMinutes(), current.thermalLogRequired(), expectedVersion);
+                startsAt, endsAt, current.orderCutoffMinutes(), current.thermalLogRequired(),
+                current.minimumDeliveryLeadDays(), expectedVersion);
         return configuration.updateOperationalSettings(workspaceId, updated);
     }
 
@@ -41,11 +42,17 @@ public final class TenantOperationalSettingsIntegrationService implements com.ne
         return configuration.findPurchaseRequestExpiryPolicy(tenantId.toString(), workspaceId.toString());
     }
 
+    @Override
+    public Optional<DeliveryLeadTimePolicySource> findDeliveryLeadTimePolicy(
+            TenantId tenantId, WorkspaceId workspaceId) {
+        return configuration.findDeliveryLeadTimePolicy(tenantId.toString(), workspaceId.toString());
+    }
+
     private static Snapshot snapshot(OperationalSettings value) {
         return new Snapshot(value.defaultWarehouseSelectionPolicy(), value.orderCutoffPolicy(),
                 value.fulfillmentDefaults(), value.inventoryVisibilityPolicy(), value.buyerAvailabilityPolicy(),
                 value.operatingHoursStart(), value.operatingHoursEnd(), value.orderCutoffMinutes(),
-                value.thermalLogRequired(), value.version());
+                value.thermalLogRequired(), value.minimumDeliveryLeadDays(), value.version());
     }
 
 }

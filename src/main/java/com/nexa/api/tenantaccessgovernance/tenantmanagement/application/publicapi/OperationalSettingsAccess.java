@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publica
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
 
 import java.time.LocalTime;
 import java.util.Optional;
@@ -18,10 +19,21 @@ public interface OperationalSettingsAccess {
      */
     Optional<PurchaseRequestExpiryPolicySource> findPurchaseRequestExpiryPolicy(
             TenantId tenantId, WorkspaceId workspaceId);
+    /** Reads the delivery lead-time source without creating a missing settings row. */
+    Optional<DeliveryLeadTimePolicySource> findDeliveryLeadTimePolicy(
+            TenantId tenantId, WorkspaceId workspaceId);
     public record Snapshot(String selectionPolicy, String orderCutoffPolicy, String fulfillmentDefaults,
                            String inventoryVisibilityPolicy, String buyerAvailabilityPolicy,
                            LocalTime startsAt, LocalTime endsAt, int orderCutoffMinutes,
-                           boolean thermalLogRequired, long version) { }
+                           boolean thermalLogRequired, int minimumDeliveryLeadDays, long version) {
+        public Snapshot(String selectionPolicy, String orderCutoffPolicy, String fulfillmentDefaults,
+                String inventoryVisibilityPolicy, String buyerAvailabilityPolicy, LocalTime startsAt,
+                LocalTime endsAt, int orderCutoffMinutes, boolean thermalLogRequired, long version) {
+            this(selectionPolicy, orderCutoffPolicy, fulfillmentDefaults, inventoryVisibilityPolicy,
+                    buyerAvailabilityPolicy, startsAt, endsAt, orderCutoffMinutes, thermalLogRequired,
+                    OperationalSettings.DEFAULT_MINIMUM_DELIVERY_LEAD_DAYS, version);
+        }
+    }
 
     record PurchaseRequestExpiryPolicySource(TenantId tenantId, WorkspaceId workspaceId,
             SourceState sourceState, Long sourceVersion, int expiryDays) {
@@ -35,6 +47,23 @@ public interface OperationalSettingsAccess {
                 }
             } else if (sourceVersion != null || expiryDays != 3) {
                 throw new IllegalArgumentException("Confirmed absence uses the accepted three-day fallback");
+            }
+        }
+    }
+
+    record DeliveryLeadTimePolicySource(TenantId tenantId, WorkspaceId workspaceId,
+            SourceState sourceState, Long sourceVersion, int minimumDeliveryLeadDays) {
+        public DeliveryLeadTimePolicySource {
+            java.util.Objects.requireNonNull(tenantId, "Tenant id is required");
+            java.util.Objects.requireNonNull(workspaceId, "Workspace id is required");
+            java.util.Objects.requireNonNull(sourceState, "Source state is required");
+            if (sourceState == SourceState.PRESENT) {
+                if (sourceVersion == null || sourceVersion < 0 || minimumDeliveryLeadDays < 0) {
+                    throw new IllegalArgumentException("Present central delivery lead-time policy is invalid");
+                }
+            } else if (sourceVersion != null
+                    || minimumDeliveryLeadDays != OperationalSettings.DEFAULT_MINIMUM_DELIVERY_LEAD_DAYS) {
+                throw new IllegalArgumentException("Confirmed absence uses the accepted three-day default");
             }
         }
     }

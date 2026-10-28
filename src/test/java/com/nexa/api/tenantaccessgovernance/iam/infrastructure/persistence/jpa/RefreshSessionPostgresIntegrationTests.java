@@ -6,6 +6,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.model.SignInCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessionUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignInUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -52,9 +53,15 @@ class RefreshSessionPostgresIntegrationTests {
 
 	@DynamicPropertySource
 	static void databaseProperties(DynamicPropertyRegistry registry) {
+		CentralMigrationTestBootstrap.MigrationCredentials migration = CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
 		registry.add("NEXA_DATABASE_URL", POSTGRES::getJdbcUrl);
 		registry.add("NEXA_DATABASE_USERNAME", POSTGRES::getUsername);
 		registry.add("NEXA_DATABASE_PASSWORD", POSTGRES::getPassword);
+		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", () -> "nexa_migrator");
+		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", migration::migratorPassword);
+		registry.add("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", migration::workspaceScopeReaderPassword);
+		registry.add("NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD", migration::businessDocumentsScopeReaderPassword);
+		registry.add("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD", migration::internalOperatorPassword);
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);

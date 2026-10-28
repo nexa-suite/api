@@ -222,3 +222,10 @@ nexa_platform.purchase_request_expiry_policy_snapshot	SHARED_TECHNICAL	src/main/
 tenant_management.tenant_business_database_provisioning_task	BC01	V154__queue_tenant_business_database_provisioning.sql:2 CREATE TABLE; durable central provisioning work state for Tenant database lifecycle.
 tenant_management.tenant_business_database_workspace_anchor_task	BC01	V154__queue_tenant_business_database_provisioning.sql:82 CREATE TABLE; durable central Workspace anchor provisioning work state.
 tenant_management.payment_provider_route	BC01	V157__register_tenant_payment_provider_routes.sql:23 CREATE TABLE; central opaque callback route metadata; payment facts remain Tenant-local.
+payments.buyer_payment_method_setup_attempt	BC08	src/main/resources/db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:34 CREATE TABLE; owner per explicit Owner authorization.
+payments.buyer_payment_method_setup_event	BC08	src/main/resources/db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:107 CREATE TABLE; owner per explicit Owner authorization.
+payments.buyer_payment_provider_profile	BC08	src/main/resources/db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:7 CREATE TABLE; owner per explicit Owner authorization.
+payments.buyer_saved_payment_method	BC08	src/main/resources/db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:70 CREATE TABLE; owner per explicit Owner authorization.
+sales.buyer_address	BC02	src/main/resources/db/tenant-migration/V38__create_buyer_personal_addresses.sql:17 CREATE TABLE; owner per explicit Owner authorization.
+sales.buyer_catalog_favorite	BC02	src/main/resources/db/tenant-migration/V29__create_buyer_catalog_offer_favorites.sql:7 CREATE TABLE; owner per explicit Owner authorization.
+sales.buyer_sales_message	BC02	src/main/resources/db/tenant-migration/V34__create_buyer_sales_account_messages.sql:9 CREATE TABLE; owner per explicit Owner authorization.

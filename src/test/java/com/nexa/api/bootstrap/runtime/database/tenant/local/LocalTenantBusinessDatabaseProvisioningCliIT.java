@@ -30,6 +30,7 @@ class LocalTenantBusinessDatabaseProvisioningCliIT {
 	private static final String DOCUMENTS_WORKER_PASSWORD = "tenant-documents-worker-test-password";
 	private static final String PAYMENTS_WORKER_PASSWORD = "tenant-payments-worker-test-password";
 	private static final String TRACEABILITY_WORKER_PASSWORD = "tenant-traceability-worker-test-password";
+	private static final String RESERVATION_EXPIRY_WORKER_PASSWORD = "tenant-reservation-expiry-worker-test-password";
 
 	@Container
 	private static final PostgreSQLContainer DATABASE = new PostgreSQLContainer("postgres:18.4-alpine")
@@ -58,9 +59,13 @@ class LocalTenantBusinessDatabaseProvisioningCliIT {
 			statement.execute("CREATE ROLE nexa_business_traceability_worker LOGIN PASSWORD '"
 					+ TRACEABILITY_WORKER_PASSWORD
 					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker LOGIN PASSWORD '"
+					+ RESERVATION_EXPIRY_WORKER_PASSWORD
+					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE nexa_tenant_business TO nexa_migrator");
 			statement.execute("GRANT CONNECT ON DATABASE nexa_tenant_business TO nexa_runtime, nexa_policy_snapshot_writer, "
-					+ "nexa_business_documents_worker, nexa_payments_worker, nexa_business_traceability_worker");
+					+ "nexa_business_documents_worker, nexa_payments_worker, nexa_business_traceability_worker, "
+					+ "nexa_warehouse_reservation_expiry_worker");
 			statement.execute("REVOKE CONNECT, TEMPORARY ON DATABASE nexa_tenant_business FROM PUBLIC");
 			statement.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
 			statement.execute("GRANT CREATE ON SCHEMA public TO nexa_migrator");
@@ -95,12 +100,11 @@ class LocalTenantBusinessDatabaseProvisioningCliIT {
 		try (Connection connection = DriverManager.getConnection(
 				DATABASE.getJdbcUrl(), DATABASE.getUsername(), DATABASE.getPassword());
 			Statement statement = connection.createStatement();
-			var result = statement.executeQuery("SELECT version FROM public.flyway_schema_history "
-					+ "WHERE success ORDER BY installed_rank DESC LIMIT 1")) {
-			assertThat(result.next()).isTrue();
-			assertThat(result.getString(1)).isEqualTo(TenantBusinessDatabaseMigrationRequirements.load()
-					.requiredVersions().stream()
-					.max(java.util.Comparator.comparingInt(Integer::parseInt)).orElseThrow());
+			var result = statement.executeQuery("SELECT version FROM public.flyway_schema_history WHERE success")) {
+			Set<String> appliedVersions = new java.util.HashSet<>();
+			while (result.next()) appliedVersions.add(result.getString(1));
+			assertThat(appliedVersions).containsAll(
+					TenantBusinessDatabaseMigrationRequirements.load().requiredVersions());
 		}
 		seedIdentityAndScope(tenantId, workspaceId, databaseIdentity);
 		assertThatCode(() -> LocalTenantBusinessDatabaseProvisioningCli.verify(

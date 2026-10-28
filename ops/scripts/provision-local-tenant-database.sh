@@ -173,10 +173,12 @@ LOCAL_ROOT='' TENANT_DIRECTORY='' VOLUME_MARKER='' LOCK_DIRECTORY=''
 CENTRAL_CONTAINER_ID='' SCHEMA_MANIFEST_DIGEST='' WALLET_RECHARGE_SECRET_REFERENCE=''
 BUSINESS_DOCUMENTS_WORKER_SECRET_REFERENCE='' PAYMENT_CALLBACK_SECRET_REFERENCE=''
 BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE=''
+RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE=''
 WORKER_CREDENTIALS_MISSING=0
 BUSINESS_DOCUMENTS_WORKER_CREDENTIALS_MISSING=0
 PAYMENT_WORKER_CREDENTIALS_MISSING=0
 BUSINESS_TRACEABILITY_WORKER_CREDENTIALS_MISSING=0
+RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
 [[ "$API_CONTAINER_NAME" =~ ^nexa-modern-api(-[A-Za-z0-9][A-Za-z0-9_.-]{0,100})?$ ]] \
 	|| fail 'The local API container name is invalid.'
 trap cleanup EXIT
@@ -520,6 +522,7 @@ load_existing_state() {
 	BUSINESS_DOCUMENTS_WORKER_SECRET_REFERENCE="local-tenant-business-documents-worker:$TENANT_ID"
 	PAYMENT_CALLBACK_SECRET_REFERENCE="local-tenant-payment-callback-worker:$TENANT_ID"
 	BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE="local-tenant-business-traceability-worker:$TENANT_ID"
+	RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE="local-tenant-inventory-reservation-expiry-worker:$TENANT_ID"
 	if [[ -e "$TENANT_DIRECTORY/wallet-recharge-worker.properties" || -e "$TENANT_DIRECTORY/wallet-recharge-worker-password" ]]; then
 		[[ -f "$TENANT_DIRECTORY/wallet-recharge-worker.properties" && -f "$TENANT_DIRECTORY/wallet-recharge-worker-password" ]] \
 			&& private_mode "$TENANT_DIRECTORY/wallet-recharge-worker.properties" 600 \
@@ -593,22 +596,40 @@ load_existing_state() {
 		fi
 		BUSINESS_TRACEABILITY_WORKER_CREDENTIALS_MISSING=1
 	fi
+	if [[ -e "$TENANT_DIRECTORY/reservation-expiry-worker.properties" || -e "$TENANT_DIRECTORY/reservation-expiry-worker-password" ]]; then
+		[[ -f "$TENANT_DIRECTORY/reservation-expiry-worker.properties" && -f "$TENANT_DIRECTORY/reservation-expiry-worker-password" ]] \
+			&& private_mode "$TENANT_DIRECTORY/reservation-expiry-worker.properties" 600 \
+			&& private_mode "$TENANT_DIRECTORY/reservation-expiry-worker-password" 600 \
+			|| fail 'Local Tenant reservation-expiry worker state is incomplete or not owner-only; refusing to regenerate credentials.'
+		[[ "$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" credential-secret-reference)" == "$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE" ]] \
+			|| fail 'Local Tenant reservation-expiry worker reference does not match the Tenant.'
+		[[ "$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" username)" == nexa_warehouse_reservation_expiry_worker ]] \
+			|| fail 'Local Tenant reservation-expiry credentials require the dedicated worker role.'
+		[[ "$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" jdbc-url)" == "jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business" ]] \
+			|| fail 'Local Tenant reservation-expiry worker credentials target an unexpected database.'
+		ensure_api_jdbc_url "$TENANT_DIRECTORY/reservation-expiry-worker.properties" "$TENANT_API_JDBC_URL"
+		RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
+	else
+		RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=1
+	fi
 }
 create_local_state() {
 	local bootstrap_password migrator_password runtime_password policy_snapshot_writer_password
 	local wallet_recharge_worker_password business_documents_worker_password payment_callback_worker_password
-	local business_traceability_worker_password
+	local business_traceability_worker_password reservation_expiry_worker_password
 	bootstrap_password="$(openssl rand -hex 32)" migrator_password="$(openssl rand -hex 32)" \
 		runtime_password="$(openssl rand -hex 32)" policy_snapshot_writer_password="$(openssl rand -hex 32)" \
 		wallet_recharge_worker_password="$(openssl rand -hex 32)" \
 		business_documents_worker_password="$(openssl rand -hex 32)" \
 		payment_callback_worker_password="$(openssl rand -hex 32)" \
-		business_traceability_worker_password="$(openssl rand -hex 32)"
+		business_traceability_worker_password="$(openssl rand -hex 32)" \
+		reservation_expiry_worker_password="$(openssl rand -hex 32)"
 	DATABASE_IDENTITY="$(new_uuid)" SECRET_REFERENCE="local-tenant-db:$(new_uuid)"
 	WALLET_RECHARGE_SECRET_REFERENCE="local-tenant-wallet-recharge-worker:$TENANT_ID"
 	BUSINESS_DOCUMENTS_WORKER_SECRET_REFERENCE="local-tenant-business-documents-worker:$TENANT_ID"
 	PAYMENT_CALLBACK_SECRET_REFERENCE="local-tenant-payment-callback-worker:$TENANT_ID"
 	BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE="local-tenant-business-traceability-worker:$TENANT_ID"
+	RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE="local-tenant-inventory-reservation-expiry-worker:$TENANT_ID"
 	STAGING_DIRECTORY="$(mktemp -d "$LOCAL_ROOT/.${TENANT_ID}.setup.XXXXXX")"
 	chmod 700 "$STAGING_DIRECTORY"
 	write_private "$STAGING_DIRECTORY/bootstrap-admin-password" <<<"$bootstrap_password"
@@ -619,6 +640,7 @@ create_local_state() {
 	write_private "$STAGING_DIRECTORY/business-documents-worker-password" <<<"$business_documents_worker_password"
 	write_private "$STAGING_DIRECTORY/payment-callback-worker-password" <<<"$payment_callback_worker_password"
 	write_private "$STAGING_DIRECTORY/business-traceability-worker-password" <<<"$business_traceability_worker_password"
+	write_private "$STAGING_DIRECTORY/reservation-expiry-worker-password" <<<"$reservation_expiry_worker_password"
 	write_private "$STAGING_DIRECTORY/migrator.properties" <<EOF
 jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
 username=nexa_migrator
@@ -658,6 +680,13 @@ api-jdbc-url=$TENANT_API_JDBC_URL
 username=nexa_business_traceability_worker
 password=$business_traceability_worker_password
 EOF
+	write_private "$STAGING_DIRECTORY/reservation-expiry-worker.properties" <<EOF
+credential-secret-reference=$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE
+jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
+api-jdbc-url=$TENANT_API_JDBC_URL
+username=nexa_warehouse_reservation_expiry_worker
+password=$reservation_expiry_worker_password
+EOF
 	write_private "$STAGING_DIRECTORY/credentials.properties" <<EOF
 credential-secret-reference=$SECRET_REFERENCE
 jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
@@ -683,7 +712,7 @@ NEXA_TENANT_DATABASE_SECRET_DIR=$TENANT_DIRECTORY
 EOF
 	unset bootstrap_password migrator_password runtime_password policy_snapshot_writer_password \
 		wallet_recharge_worker_password business_documents_worker_password payment_callback_worker_password \
-		business_traceability_worker_password
+		business_traceability_worker_password reservation_expiry_worker_password
 	[[ ! -e "$TENANT_DIRECTORY" && ! -L "$TENANT_DIRECTORY" ]] || fail 'Local Tenant state appeared concurrently; inspect it before retrying.'
 	mv -- "$STAGING_DIRECTORY" "$TENANT_DIRECTORY"
 	STAGING_DIRECTORY=''
@@ -691,6 +720,7 @@ EOF
 	BUSINESS_DOCUMENTS_WORKER_CREDENTIALS_MISSING=0
 	PAYMENT_WORKER_CREDENTIALS_MISSING=0
 	BUSINESS_TRACEABILITY_WORKER_CREDENTIALS_MISSING=0
+	RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
 }
 
 ensure_wallet_recharge_worker_credentials() {
@@ -834,6 +864,30 @@ EOF
 		printf 'business-traceability-worker-credential-reference=%s\n' "$BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE" >> "$replacement"
 		chmod 600 "$replacement"
 		mv -- "$replacement" "$TENANT_DIRECTORY/state.properties"
+	fi
+}
+
+ensure_reservation_expiry_worker_credentials() {
+	local role_exists
+	RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE="local-tenant-inventory-reservation-expiry-worker:$TENANT_ID"
+	if [[ "$RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING" == 1 ]]; then
+		role_exists="$(tenant_compose exec -T tenant-database psql -X -qAt -v ON_ERROR_STOP=1 \
+			-U nexa_tenant_bootstrap_admin -d nexa_tenant_business \
+			-c "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='nexa_warehouse_reservation_expiry_worker')")" \
+			|| fail 'The local Tenant reservation-expiry worker role could not be inspected.'
+		[[ "$role_exists" == f ]] || fail 'The Tenant reservation-expiry worker role exists without its owner-private credential; refusing to regenerate it.'
+		local reservation_expiry_worker_password
+		reservation_expiry_worker_password="$(openssl rand -hex 32)"
+		write_private "$TENANT_DIRECTORY/reservation-expiry-worker-password" <<<"$reservation_expiry_worker_password"
+		write_private "$TENANT_DIRECTORY/reservation-expiry-worker.properties" <<EOF
+credential-secret-reference=$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE
+jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
+api-jdbc-url=$TENANT_API_JDBC_URL
+username=nexa_warehouse_reservation_expiry_worker
+password=$reservation_expiry_worker_password
+EOF
+		unset reservation_expiry_worker_password
+		RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
 	fi
 }
 
@@ -997,6 +1051,7 @@ ensure_wallet_recharge_worker_credentials
 ensure_business_documents_worker_credentials
 ensure_payment_callback_worker_credentials
 ensure_business_traceability_worker_credentials
+ensure_reservation_expiry_worker_credentials
 
 host_ready=0
 for _ in $(seq 1 30); do
@@ -1049,11 +1104,13 @@ SQL
 business_documents_worker_password="$(read_value "$TENANT_DIRECTORY/business-documents-worker.properties" password)"
 	payment_callback_worker_password="$(read_value "$TENANT_DIRECTORY/payment-callback-worker.properties" password)"
 business_traceability_worker_password="$(read_value "$TENANT_DIRECTORY/business-traceability-worker.properties" password)"
+reservation_expiry_worker_password="$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" password)"
 {
 	printf '\\set wallet_recharge_worker_password %s\n' "$wallet_recharge_worker_password"
 	printf '\\set business_documents_worker_password %s\n' "$business_documents_worker_password"
 	printf '\\set payments_worker_password %s\n' "$payment_callback_worker_password"
 	printf '\\set business_traceability_worker_password %s\n' "$business_traceability_worker_password"
+	printf '\\set reservation_expiry_worker_password %s\n' "$reservation_expiry_worker_password"
 	cat "$ROLE_SQL_FILE"
 } | tenant_compose exec -T tenant-database sh -ec '
 	export NEXA_LOCAL_MIGRATOR_PASSWORD="$(cat /run/secrets/migrator_password)"
@@ -1065,6 +1122,7 @@ unset wallet_recharge_worker_password
 unset business_documents_worker_password
 unset payment_callback_worker_password
 unset business_traceability_worker_password
+unset reservation_expiry_worker_password
 
 run_cli migrate
 tenant_compose exec -T tenant-database psql -X -q -v ON_ERROR_STOP=1 \

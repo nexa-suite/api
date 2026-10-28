@@ -3,6 +3,7 @@ package com.nexa.api.bootstrap.runtime.database.tenant.local;
 import com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcPaymentProviderRouteRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePaymentCallbackRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -18,7 +19,7 @@ import java.nio.file.Path;
 public class LocalTenantBusinessDatabasePaymentCallbackRouterConfiguration {
     @Bean(destroyMethod = "close")
     TenantBusinessDatabasePaymentCallbackRouter tenantBusinessDatabasePaymentCallbackRouter(
-            JdbcPaymentProviderRouteRegistry routes,
+            JdbcPaymentProviderRouteRegistry routes, TenantBusinessDatabaseBindingRegistry bindings,
             @Value("${nexa.tenant-business.local-credentials-directory:}") String credentialsDirectory,
             @Value("${nexa.tenant-business.router.maximum-cached-pools:8}") int maximumCachedPools,
             @Value("${nexa.tenant-business.router.maximum-pool-size:2}") int maximumPoolSize) {
@@ -26,7 +27,7 @@ public class LocalTenantBusinessDatabasePaymentCallbackRouterConfiguration {
             throw new IllegalStateException("Local Tenant database credential directory is not configured");
         }
         var credentials = new LocalTenantPaymentCallbackCredentialsProvider(Path.of(credentialsDirectory));
-        return new TenantBusinessDatabasePaymentCallbackRouter(routes,
+        return new TenantBusinessDatabasePaymentCallbackRouter(routes, bindings,
                 new HikariTenantBusinessDatabaseDataSourceFactory(credentials, maximumPoolSize), maximumCachedPools);
     }
 }

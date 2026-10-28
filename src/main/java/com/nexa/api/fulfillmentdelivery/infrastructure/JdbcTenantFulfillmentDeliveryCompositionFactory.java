@@ -146,10 +146,11 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
                 handoffNotifications, orders, accounts);
         LogisticsOperationsService logistics = new LogisticsOperationsService(dispatchQueries, dispatchCommands,
                 accounts, new com.nexa.api.fulfillmentdelivery.application.service.StartDispatchRouteService(
-                routeStart, warehouseHandoff), handoff);
+                routeStart, warehouseHandoff), handoff, access);
         MobileDeliveryContractService mobileDeliveryContracts = new MobileDeliveryContractService(
-                new JdbcMobileDeliveryContractAdapter(jdbc, orders), accounts,
-                bindings.traceabilityCommands(), clock, handoffTtl);
+                new JdbcMobileDeliveryContractAdapter(jdbc, orders, bindings.canonicalOutbox()), accounts,
+                bindings.traceabilityCommands(), bindings.salesOrderCommands(),
+                orders, clock, handoffTtl);
 
         DispatchWorkflowCommands dispatchWorkflowCommands = (context, reservationId, version, key) ->
                 logistics.create(context, reservationId, version, key);

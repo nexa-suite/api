@@ -2,6 +2,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
 import com.nexa.api.salescommitment.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesCommitmentCompositionFactory;
@@ -16,18 +17,27 @@ import java.util.function.Function;
 public final class TenantBoundPurchaseRequestDraftPort implements PurchaseRequestDraftPort {
     private final TenantBusinessDatabaseRouter router;
     private final TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies;
+    private final TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes;
     private final TenantSalesCommitmentCompositionProvider compositions;
 
     public TenantBoundPurchaseRequestDraftPort(TenantBusinessDatabaseRouter router,
             TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
             TenantSalesCommitmentCompositionProvider compositions) {
+        this(router, expiryPolicies, null, compositions);
+    }
+
+    public TenantBoundPurchaseRequestDraftPort(TenantBusinessDatabaseRouter router,
+            TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
+            TenantSalesCommitmentCompositionProvider compositions) {
         this.router = java.util.Objects.requireNonNull(router);
         this.expiryPolicies = java.util.Objects.requireNonNull(expiryPolicies);
+        this.deliveryLeadTimes = deliveryLeadTimes;
         this.compositions = java.util.Objects.requireNonNull(compositions);
     }
 
     @Override public PurchaseRequestDraftModels.DraftView create(CurrentAccessContext c, UUID account, LocalDate date) {
-        return call(c, composition -> composition.purchaseRequestDrafts().create(c, account, date));
+        return callWithDeliveryLeadTime(c, composition -> composition.purchaseRequestDrafts().create(c, account, date));
     }
     @Override public PurchaseRequestDraftModels.DraftPage list(CurrentAccessContext c, int page, int size) {
         return call(c, composition -> composition.purchaseRequestDrafts().list(c, page, size));
@@ -49,15 +59,26 @@ public final class TenantBoundPurchaseRequestDraftPort implements PurchaseReques
     }
     @Override public PurchaseRequestDraftModels.DraftView setPreferences(CurrentAccessContext c, UUID id,
             long version, String payment, LocalDate date) {
-        return call(c, composition -> composition.purchaseRequestDrafts().setPreferences(c, id, version, payment, date));
+        return callWithDeliveryLeadTime(c, composition -> composition.purchaseRequestDrafts().setPreferences(c, id, version, payment, date));
     }
     @Override public PurchaseRequestDraftModels.ReviewView review(CurrentAccessContext c, UUID id) {
         return call(c, composition -> composition.purchaseRequestDrafts().review(c, id));
     }
     @Override public PurchaseRequestDraftModels.DraftView submit(CurrentAccessContext c, UUID id,
             long version, String key) {
+        int minimumDays = minimumDeliveryLeadDays(c);
         return expiryPolicies.inTransaction(c, jdbc ->
-                compositions.bindTo(jdbc).purchaseRequestDrafts().submit(c, id, version, key));
+                compositions.bindTo(jdbc, minimumDays).purchaseRequestDrafts().submit(c, id, version, key));
+    }
+
+    private <T> T callWithDeliveryLeadTime(CurrentAccessContext context,
+            Function<TenantSalesCommitmentCompositionFactory.Composition, T> action) {
+        int minimumDays = minimumDeliveryLeadDays(context);
+        return router.inTransaction(context, jdbc -> action.apply(compositions.bindTo(jdbc, minimumDays)));
+    }
+
+    private int minimumDeliveryLeadDays(CurrentAccessContext context) {
+        return deliveryLeadTimes == null ? 3 : deliveryLeadTimes.minimumDeliveryLeadDays(context);
     }
 
     private <T> T call(CurrentAccessContext context,

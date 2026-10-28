@@ -7,6 +7,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabase
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDataSourceFactory;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
@@ -106,7 +107,8 @@ class TenantBoundCatalogDetailReaderIT {
 	private static final String RUNTIME_PASSWORD_B = "tenant-runtime-b-test-password";
 	private static final String POLICY_WRITER_PASSWORD = "tenant-policy-writer-test-password";
 	private static final List<String> TENANT_WORKER_ROLES = List.of("nexa_wallet_recharge_worker",
-			"nexa_business_documents_worker", "nexa_payments_worker", "nexa_business_traceability_worker");
+			"nexa_business_documents_worker", "nexa_payments_worker", "nexa_business_traceability_worker",
+			"nexa_warehouse_reservation_expiry_worker");
 	private static final String CATALOG_ITEM_ID = "CAT-0001";
 	private static final Path REPOSITORY_ROOT = Path.of("").toAbsolutePath().normalize();
 
@@ -295,14 +297,13 @@ class TenantBoundCatalogDetailReaderIT {
 
 	private static void configureCentralRuntime(PostgreSQLContainer central, String runtimePassword) throws SQLException {
 		try (Connection connection = adminConnection(central); Statement statement = connection.createStatement()) {
-			statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + runtimePassword
+			statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT PASSWORD '" + runtimePassword
 					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 		}
 	}
 
 	private static void migrateCentral() {
-		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
-				.locations("classpath:db/migration").load().migrate();
+		CentralMigrationTestBootstrap.migrateLatest(CENTRAL, CENTRAL_RUNTIME_PASSWORD);
 	}
 
 	private static void provisionTenantRoles(PostgreSQLContainer tenant, String runtimePassword) throws SQLException {
@@ -348,8 +349,8 @@ class TenantBoundCatalogDetailReaderIT {
 		centralAdmin.update("INSERT INTO iam.user_account (id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
 			userId, userId + "@example.test", userId + "@example.test", userId.toString(), userId.toString(),
 			"Catalog fixture Buyer " + suffix, "en", "ACTIVE", now, now);
-		centralAdmin.update("INSERT INTO tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-			membershipId, workspaceId, userId, "BUYER", "ACTIVE", now, now);
+		centralAdmin.update("INSERT INTO tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+			membershipId, tenantId, workspaceId, userId, "BUYER", "ACTIVE", now, now);
 		centralAdmin.update("""
 				INSERT INTO tenant_management.membership_role_definition
 				    (membership_id,tenant_id,workspace_id,role_id,assigned_at)
@@ -408,7 +409,8 @@ class TenantBoundCatalogDetailReaderIT {
 				""", tenant.accountId(), tenant.tenantId().value(), tenant.workspaceId().value(),
 				"BUYER-" + tenant.accountId().toString().substring(0, 8),
 				"Fixture Buyer " + tenant.databaseName(), "Fixture Buyer " + tenant.databaseName(), "PE", "RUC",
-				"20" + tenant.accountId().toString().replace("-", "").substring(0, 10),
+				"20" + String.format(java.util.Locale.ROOT, "%09d",
+						Math.floorMod(tenant.accountId().getMostSignificantBits(), 1_000_000_000L)),
 				"SEG-" + tenant.accountId().toString().substring(0, 8),
 				"Fixture Contact", tenant.accountId() + "@example.test", "+51999999999", "Fixture delivery profile",
 				"NET_30", "ACTIVE", now, now);
@@ -457,8 +459,10 @@ class TenantBoundCatalogDetailReaderIT {
 		ProductAvailabilityPort availability = new CatalogProductAvailabilityAdapter(centralAdmin, sellableSkus);
 		var itemQuery = new JdbcCatalogItemQueryAdapter(centralAdmin, availability, offers,
 				Clock.fixed(Instant.parse("2026-10-09T12:00:00Z"), java.time.ZoneOffset.UTC));
-		var customer = customerQuery.findActiveBuyerDetails(tenant.tenantId().toString(), tenant.workspaceId().toString(),
-				tenant.membershipId().toString()).orElseThrow();
+		// This expected-value read runs against the central schema, which keeps the
+		// legacy buyer link without the tenant-database V37 status column.
+		var customer = customerQuery.findActiveDetails(tenant.tenantId().toString(), tenant.workspaceId().toString(),
+			tenant.accountId().toString()).orElseThrow();
 		CatalogScope scope = new CatalogScope(tenant.tenantId().value(), tenant.workspaceId().value(), true,
 				UUID.fromString(customer.id()), customer.segment(), null);
 		return new CatalogQueryService(itemQuery).getByCatalogItemId(scope, CATALOG_ITEM_ID);
@@ -476,8 +480,9 @@ class TenantBoundCatalogDetailReaderIT {
 			List<String> tables, TenantFixture tenant) throws SQLException {
 		List<String> ordered = topologicalTables(source, tables);
 		copyTablesForScope(source, target, ordered, tenant);
-		assertThat(scopeChecksums(source, tables, tenant)).as("preserved scoped fixture rows for %s", tenant.databaseName())
-				.isEqualTo(scopeChecksums(target, tables, tenant));
+		assertThat(scopeChecksums(source, source, tables, tenant))
+				.as("preserved source columns for scoped fixture rows in %s", tenant.databaseName())
+				.isEqualTo(scopeChecksums(target, source, tables, tenant));
 	}
 
 	private static void copyTablesForScope(PostgreSQLContainer source, PostgreSQLContainer target,
@@ -552,15 +557,19 @@ class TenantBoundCatalogDetailReaderIT {
 		return ordered;
 	}
 
-	private static Map<String, String> scopeChecksums(PostgreSQLContainer database, List<String> tables,
-			TenantFixture tenant) throws SQLException {
+	private static Map<String, String> scopeChecksums(PostgreSQLContainer database,
+			PostgreSQLContainer columnSource, List<String> tables, TenantFixture tenant) throws SQLException {
 		Map<String, String> result = new LinkedHashMap<>();
-		try (Connection connection = adminConnection(database)) {
+		try (Connection connection = adminConnection(database);
+				Connection schemaConnection = adminConnection(columnSource)) {
 			for (String table : tables) {
-				List<String> keys = primaryKeyColumns(connection, table);
-				String order = keys.stream().map(TenantBoundCatalogDetailReaderIT::quote).collect(Collectors.joining(","));
-				String sql = "SELECT to_jsonb(row_data)::text FROM " + quoteQualified(table)
-						+ " row_data WHERE tenant_id=? AND workspace_id=? ORDER BY " + order;
+				List<String> columns = columnNames(schemaConnection, table);
+				List<String> keys = primaryKeyColumns(schemaConnection, table);
+				String projection = columns.stream().map(TenantBoundCatalogDetailReaderIT::quote)
+						.collect(Collectors.joining(","));
+				String order = keys.stream().map(key -> "row_data." + quote(key)).collect(Collectors.joining(","));
+				String sql = "SELECT to_jsonb(row_data)::text FROM (SELECT " + projection
+						+ " FROM " + quoteQualified(table) + " WHERE tenant_id=? AND workspace_id=?) row_data ORDER BY " + order;
 				StringBuilder canonical = new StringBuilder();
 				try (PreparedStatement query = connection.prepareStatement(sql)) {
 					query.setObject(1, tenant.tenantId().value());

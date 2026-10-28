@@ -113,6 +113,12 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
 
     @Override
     public TenantSalesCommitmentCompositionFactory.Composition bindTo(JdbcTemplate tenantJdbc) {
+        return bindTo(tenantJdbc, 3);
+    }
+
+    @Override
+    public TenantSalesCommitmentCompositionFactory.Composition bindTo(JdbcTemplate tenantJdbc,
+            int minimumDeliveryLeadDays) {
         JdbcTemplate jdbc = Objects.requireNonNull(tenantJdbc, "Tenant router callback JDBC session is required");
         CustomerAccountQuery tenantAccounts = Objects.requireNonNull(customerAccounts.bindTo(jdbc),
                 "Tenant Customer Account factory returned no query");
@@ -138,7 +144,9 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
                 "Tenant Sales factory returned no fulfillment query");
         FinancialAdjustmentSource adjustmentSource = adjustmentSource(tenantFulfillment, tenantPaymentConfirmations);
         TenantCreditAccountAdapterFactory.Bindings tenantCredit = Objects.requireNonNull(
-                creditAdapters.bindTo(jdbc, tenantAccounts, tenantReceivableAccess, traceability.commands(),
+                creditAdapters.bindTo(jdbc, tenantAccounts,
+                        TenantCreditEligibilitySourceFactory.bindTo(tenantAccounts),
+                        tenantReceivableAccess, traceability.commands(),
                         traceability.canonicalOutbox(), adjustmentSource),
                 "Tenant Credit factory returned no bindings");
 
@@ -160,7 +168,7 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
                 tenantSnapshots, tenantCredit.creditReservations(), tenantWarehouses, tenantBacking, tenantWallet,
                 tenantPaymentConfirmations, tenantCredit.receivables(), tenantCredit.financialAdjustments(),
                 traceability.canonicalOutbox(), tenantChangeFeed, maps, clock, objectMapper, walletTenderEnabled,
-                tenantWalletRefundBalances);
+                tenantWalletRefundBalances, minimumDeliveryLeadDays);
         return salesCommitments.bindTo(jdbc, bindings);
     }
 

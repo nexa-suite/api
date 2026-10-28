@@ -14,6 +14,8 @@ import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogAuthoriz
 import com.nexa.api.catalogcommercialpolicy.domain.model.catalogitem.CatalogItemId;
 
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 
 public final class CatalogQueryService implements ListCatalogItemsUseCase, GetCatalogItemUseCase, GetCatalogItemSnapshotUseCase {
 	private final CatalogItemQueryPort queryPort;
@@ -30,11 +32,18 @@ public final class CatalogQueryService implements ListCatalogItemsUseCase, GetCa
 
     @Override
     public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CatalogScope scope, String kind, String search, int page, int size) {
+        return filterOptions(scope, kind, search, page, size, null);
+    }
+
+    @Override
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+            CatalogScope scope, String kind, String search, int page, int size, UUID familyId) {
         Objects.requireNonNull(scope, "Catalog scope is required");
-        if (!java.util.Set.of("brand", "category").contains(kind) || page < 0 || size < 1 || size > 100
+        if (!java.util.Set.of("brand", "category", "family", "variant").contains(kind)
+                || (familyId != null && !"variant".equals(kind)) || page < 0 || size < 1 || size > 100
                 || (search != null && search.length() > 120)) throw new IllegalArgumentException("Invalid catalog filter query");
         authorization.requireCatalogRead();
-        return queryPort.filterOptions(scope, kind, search, page, size);
+        return queryPort.filterOptions(scope, kind, search, page, size, familyId);
     }
 
 	@Override
@@ -66,6 +75,20 @@ public final class CatalogQueryService implements ListCatalogItemsUseCase, GetCa
 		authorization.requireCatalogRead();
 		return queryPort.findByCatalogItemId(scope, id)
 				.orElseThrow(() -> new CatalogItemNotFoundException(id.value()));
+	}
+
+	public Optional<CatalogItemDetail> findBySellableSkuId(CatalogScope scope, UUID sellableSkuId) {
+		Objects.requireNonNull(scope, "Catalog scope is required");
+		Objects.requireNonNull(sellableSkuId, "Sellable SKU id is required");
+		authorization.requireCatalogRead();
+		return queryPort.findBySellableSkuId(scope, sellableSkuId);
+	}
+
+	public java.util.List<CatalogItemDetail> findBySellableSkuIds(CatalogScope scope, java.util.List<UUID> sellableSkuIds) {
+		Objects.requireNonNull(scope, "Catalog scope is required");
+		Objects.requireNonNull(sellableSkuIds, "Sellable SKU ids are required");
+		authorization.requireCatalogRead();
+		return queryPort.findBySellableSkuIds(scope, sellableSkuIds);
 	}
 
 	@Override

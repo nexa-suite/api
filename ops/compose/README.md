@@ -34,6 +34,15 @@ runs MinIO as unprivileged UID 10001. MinIO Community Edition is archived
 upstream, so this Compose service supports development and verification only.
 Select a maintained object-storage provider before the Production Gate.
 
+Before starting the API, `modern-up.sh` runs the one-shot
+`modern-migration-bootstrap` service. It applies central migrations through
+V168 with the database administrator, then runs each matching
+`ops/database/prepare-v*.sql` script with the administrator before applying
+that migration as a direct `nexa_migrator` login. The API container has Flyway
+disabled and receives the separate `nexa_runtime` and scoped-reader credentials;
+administrator and migrator credentials stay in the one-shot service. The local
+environment generator creates these distinct passwords in `.env.local`.
+
 Legacy expone API ASP.NET `5068`, Platform Vue `5173` y Portal Vue `5174`. PostgreSQL no publica puerto y vive en `nexa-legacy-data`.
 
 Las redes, volúmenes, credenciales y migraciones son independientes. Los overrides `modern.db-admin.compose.yml` y `legacy.db-admin.compose.yml` son opcionales y no se habilitan por defecto.

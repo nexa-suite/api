@@ -61,7 +61,9 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 		} catch (IllegalArgumentException exception) {
 			return Optional.empty();
 		}
-		jdbc.queryForObject("select set_config('app.workspace_lookup_slug', ?, true)", String.class, workspaceSlug.toLowerCase(Locale.ROOT));
+		jdbc.queryForObject("select set_config('app.access_context_user_id', ?, true) || "
+				+ "set_config('app.workspace_lookup_slug', ?, true)", String.class,
+				userId.toString(), workspaceSlug.toLowerCase(Locale.ROOT));
 		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
 				+ "w.id workspace_id, w.slug workspace_slug, w.name workspace_name, w.status workspace_status, "
 				+ "t.id tenant_id, t.slug tenant_slug, t.name tenant_name, t.status tenant_status, "
@@ -74,7 +76,8 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 		try {
 			return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<Optional<AccessPolicy>>) rs -> resolveExactlyOne(rs, userId, surface), userId, workspaceSlug.toLowerCase(Locale.ROOT));
 		} finally {
-			jdbc.queryForObject("select set_config('app.workspace_lookup_slug', '', true)", String.class);
+			jdbc.queryForObject("select set_config('app.access_context_user_id', '', true) || "
+					+ "set_config('app.workspace_lookup_slug', '', true)", String.class);
 		}
 	}
 
@@ -119,6 +122,8 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 		} catch (IllegalArgumentException exception) {
 			return List.of();
 		}
+		jdbc.queryForObject("select set_config('app.access_context_user_id', ?, true)", String.class,
+				userId.toString());
 		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
 				+ "w.id workspace_id, w.slug workspace_slug, w.name workspace_name, w.status workspace_status, "
 				+ "t.id tenant_id, t.slug tenant_slug, t.name tenant_name, t.status tenant_status, "
@@ -128,18 +133,22 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 				+ "join tenant_management.tenant t on t.id = w.tenant_id "
 				+ "join iam.user_account u on u.id = m.user_id "
 				+ "where m.user_id = ? order by m.id";
-		return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<List<AccessPolicy>>) rs -> {
-			List<AccessPolicy> eligible = new ArrayList<>();
-			while (rs.next()) {
-				if (!"ACTIVE".equals(rs.getString("membership_status"))
-						|| !"ACTIVE".equals(rs.getString("workspace_status"))
-						|| !"ACTIVE".equals(rs.getString("tenant_status"))) continue;
-				bindResolvedScope(rs);
-				AccessPolicy candidate = resolve(rs, userId, surface);
-				if (candidate != null) eligible.add(candidate);
-			}
-			return orderAccessContexts(eligible);
-		}, userId);
+		try {
+			return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<List<AccessPolicy>>) rs -> {
+				List<AccessPolicy> eligible = new ArrayList<>();
+				while (rs.next()) {
+					if (!"ACTIVE".equals(rs.getString("membership_status"))
+							|| !"ACTIVE".equals(rs.getString("workspace_status"))
+							|| !"ACTIVE".equals(rs.getString("tenant_status"))) continue;
+					bindResolvedScope(rs);
+					AccessPolicy candidate = resolve(rs, userId, surface);
+					if (candidate != null) eligible.add(candidate);
+				}
+				return orderAccessContexts(eligible);
+			}, userId);
+		} finally {
+			jdbc.queryForObject("select set_config('app.access_context_user_id', '', true)", String.class);
+		}
 	}
 
 	static List<AccessPolicy> orderAccessContexts(List<AccessPolicy> contexts) {

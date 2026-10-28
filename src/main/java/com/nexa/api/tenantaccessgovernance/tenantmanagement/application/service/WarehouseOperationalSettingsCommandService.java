@@ -48,7 +48,8 @@ public final class WarehouseOperationalSettingsCommandService implements Warehou
         TenantConfigurationModels.OperationalSettingsView request = new TenantConfigurationModels.OperationalSettingsView(
                 workspaceId, selectionPolicy, current.orderCutoffPolicy(), current.fulfillmentDefaults(),
                 current.inventoryVisibilityPolicy(), current.buyerAvailabilityPolicy(), startsAt, endsAt,
-                current.orderCutoffMinutes(), current.thermalLogRequired(), expectedSettingsVersion);
+                current.orderCutoffMinutes(), current.thermalLogRequired(), current.minimumDeliveryLeadDays(),
+                expectedSettingsVersion);
         TenantConfigurationModels.OperationalSettingsView updated = configuration.updateOperationalSettings(
                 context, workspaceId, request, expectedSettingsVersion, correlationId);
         return new Snapshot(updated.defaultWarehouseSelectionPolicy(), updated.operatingHoursStart(),

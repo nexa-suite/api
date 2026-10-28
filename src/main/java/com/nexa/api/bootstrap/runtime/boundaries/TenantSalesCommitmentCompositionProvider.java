@@ -8,6 +8,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public interface TenantSalesCommitmentCompositionProvider {
     TenantSalesCommitmentCompositionFactory.Composition bindTo(JdbcTemplate tenantJdbc);
 
+    /** Binds the validated workspace policy captured before entering the Tenant callback. */
+    default TenantSalesCommitmentCompositionFactory.Composition bindTo(JdbcTemplate tenantJdbc,
+            int minimumDeliveryLeadDays) {
+        return bindTo(tenantJdbc);
+    }
+
     /** True only when the Tenant PR command composition is explicitly configured for wallet tender. */
     default boolean walletOrderPaymentEnabled() { return false; }
 }

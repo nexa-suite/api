@@ -45,6 +45,8 @@ final class TenantBusinessIntegrationFixture {
 	private static final String PAYMENTS_WORKER_PASSWORD = "test-only-payments-worker-password";
 	private static final String TRACEABILITY_WORKER_USERNAME = "nexa_business_traceability_worker";
 	private static final String TRACEABILITY_WORKER_PASSWORD = "test-only-traceability-worker-password";
+	private static final String RESERVATION_EXPIRY_WORKER_USERNAME = "nexa_warehouse_reservation_expiry_worker";
+	private static final String RESERVATION_EXPIRY_WORKER_PASSWORD = "test-only-reservation-expiry-worker-password";
 	private static final String CREDENTIAL_REFERENCE_PREFIX = "test-tenant-business:";
 	private static final Path CREDENTIAL_DIRECTORY = privateCredentialDirectory();
 	private static final PostgreSQLContainer TENANT_POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
@@ -101,6 +103,11 @@ final class TenantBusinessIntegrationFixture {
 	static TenantBusinessDatabaseCredentials paymentCallbackWorkerCredentials(String reference) {
 		return workerCredentials(reference, "local-tenant-payment-callback-worker:",
 				PAYMENTS_WORKER_USERNAME, PAYMENTS_WORKER_PASSWORD);
+	}
+
+	static TenantBusinessDatabaseCredentials reservationExpiryWorkerCredentials(String reference) {
+		return workerCredentials(reference, "local-tenant-inventory-reservation-expiry-worker:",
+				RESERVATION_EXPIRY_WORKER_USERNAME, RESERVATION_EXPIRY_WORKER_PASSWORD);
 	}
 
 	static DataSource policyWriterDataSource(TenantBusinessDatabaseBinding binding) {
@@ -164,6 +171,7 @@ final class TenantBusinessIntegrationFixture {
 			createRole(statement, DOCUMENTS_WORKER_USERNAME, DOCUMENTS_WORKER_PASSWORD, true, false);
 			createRole(statement, PAYMENTS_WORKER_USERNAME, PAYMENTS_WORKER_PASSWORD, true, false);
 			createRole(statement, TRACEABILITY_WORKER_USERNAME, TRACEABILITY_WORKER_PASSWORD, true, false);
+			createRole(statement, RESERVATION_EXPIRY_WORKER_USERNAME, RESERVATION_EXPIRY_WORKER_PASSWORD, true, false);
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + MIGRATOR_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + TEST_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + RUNTIME_USERNAME);
@@ -171,6 +179,7 @@ final class TenantBusinessIntegrationFixture {
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + DOCUMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + PAYMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + TRACEABILITY_WORKER_USERNAME);
+			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + RESERVATION_EXPIRY_WORKER_USERNAME);
 			statement.execute("GRANT CREATE ON SCHEMA public TO " + MIGRATOR_USERNAME);
 		} catch (SQLException exception) {
 			throw new IllegalStateException("Could not provision Tenant integration database roles", exception);
@@ -204,6 +213,7 @@ final class TenantBusinessIntegrationFixture {
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + DOCUMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + PAYMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + TRACEABILITY_WORKER_USERNAME);
+			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + RESERVATION_EXPIRY_WORKER_USERNAME);
 		} catch (SQLException exception) {
 			throw new IllegalStateException("Could not create the physical Tenant integration database", exception);
 		}

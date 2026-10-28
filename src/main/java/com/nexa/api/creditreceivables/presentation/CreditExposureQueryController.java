@@ -2,6 +2,7 @@ package com.nexa.api.creditreceivables.presentation;
 
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import jakarta.servlet.http.HttpServletResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -34,21 +35,25 @@ public class CreditExposureQueryController {
 
     @GetMapping("/me/credit-exposure")
     @Operation(operationId = "getCurrentBuyerCreditExposure",
-            description = "Returns supplier-scoped credit facts for the active Buyer relationship resolved from the verified PORTAL membership. No client account selector is accepted.")
+            description = "Returns supplier-scoped credit facts for the active Buyer relationship resolved from the verified PORTAL membership. creditEligible requires an active credit account and customer terms that allow credit; availableCredit is zero otherwise. No client account selector is accepted.")
     public CreditExposureUseCase.CreditExposureView buyer(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
-            @RequestParam(defaultValue = "PEN") @Pattern(regexp = "[A-Za-z]{3}") String currency) {
+            @RequestParam(defaultValue = "PEN") @Pattern(regexp = "[A-Za-z]{3}") String currency,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
         return service.readBuyer(context, currency);
     }
 
     @GetMapping("/{clientAccountId}/credit-exposure")
     @Operation(operationId = "getClientCreditExposure",
-            description = "Returns the current credit limit, ledger exposure, active reservations, outstanding receivables and available credit for an active customer account. Tenant and workspace scope come from the verified access context.")
+            description = "Returns the current credit limit, ledger exposure, active reservations, outstanding receivables and available credit for an active customer account. creditEligible reports whether an active account and customer terms allow credit. Exposure amounts remain unmasked. Tenant and workspace scope come from the verified access context.")
     public CreditExposureUseCase.CreditExposureView get(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID clientAccountId,
             @Parameter(description = "Three-letter currency code; defaults to PEN")
-            @RequestParam(defaultValue = "PEN") @Pattern(regexp = "[A-Za-z]{3}") String currency) {
+            @RequestParam(defaultValue = "PEN") @Pattern(regexp = "[A-Za-z]{3}") String currency,
+            HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
         return service.read(context, clientAccountId.toString(), currency);
     }
 }

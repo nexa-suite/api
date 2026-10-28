@@ -18,6 +18,9 @@ import org.springframework.http.MediaType;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -125,7 +128,8 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
                     .andExpect(status().isForbidden());
         } finally {
             jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", logisticsMembership);
-            jdbc.update("delete from tenant_management.role_definition where id=?", downloadOnlyRole);
+            jdbc.update("delete from tenant_management.role_permission where role_id=?", downloadOnlyRole);
+            deleteTestRoleAsMigrationOwner(downloadOnlyRole);
             for (RoleAssignment assignment : existingRoles) {
                 jdbc.update("insert into tenant_management.membership_role_definition "
                                 + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
@@ -133,6 +137,15 @@ class BusinessDocumentGenerationAuthorizationIT extends NexaWorkflowIntegrationS
                         logisticsMembership, tenant, workspace, assignment.roleId(),
                         assignment.assignedByMembershipId(), assignment.assignedAt());
             }
+        }
+    }
+
+    private static void deleteTestRoleAsMigrationOwner(UUID roleId) throws SQLException {
+        try (Connection connection = openMigratorConnection();
+                PreparedStatement statement = connection.prepareStatement(
+                        "delete from tenant_management.role_definition where id=?")) {
+            statement.setObject(1, roleId);
+            statement.executeUpdate();
         }
     }
 

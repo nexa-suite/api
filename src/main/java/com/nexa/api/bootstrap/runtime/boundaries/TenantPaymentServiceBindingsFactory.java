@@ -73,7 +73,8 @@ public final class TenantPaymentServiceBindingsFactory {
         BusinessTraceabilityCommands tenantTraceability = trace.commands();
         FinancialAdjustmentSource adjustmentSource = adjustmentSource(tenantSales, tenantPayments);
         TenantCreditAccountAdapterFactory.Bindings credit = Objects.requireNonNull(creditAdapters.bindTo(
-                jdbc, tenantAccounts, tenantReceivables, tenantTraceability, tenantOutbox, adjustmentSource));
+                jdbc, tenantAccounts, TenantCreditEligibilitySourceFactory.bindTo(tenantAccounts),
+                tenantReceivables, tenantTraceability, tenantOutbox, adjustmentSource));
         BusinessDocumentCommands tenantDocuments = Objects.requireNonNull(
                 documents.bindCommandsTo(jdbc, tenantOutbox));
         BusinessEvidenceQuery tenantEvidence = Objects.requireNonNull(evidence.bindTo(jdbc));

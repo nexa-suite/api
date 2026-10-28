@@ -232,7 +232,10 @@ class CommercialInventoryConcurrencyIT extends NexaWorkflowIntegrationSupport {
         UUID id = UUID.randomUUID();
         Instant now = Instant.now();
         tenantJdbc().update("insert into sales.client_account(id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
-                id, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), "RACE-" + id.toString().substring(0, 8), "Race Client", "Race Client", "PE", "RUC", "20" + id.toString().replace("-", "").substring(0, 11), "STANDARD", "Race Contact", "race-" + id + "@example.invalid", "000000000", "Lima", "NET30", Timestamp.from(now), Timestamp.from(now));
+                id, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), "RACE-" + id.toString().substring(0, 8), "Race Client", "Race Client", "PE", "RUC",
+                "20" + String.format(java.util.Locale.ROOT, "%09d",
+                        Math.floorMod(id.getMostSignificantBits(), 1_000_000_000L)), "STANDARD", "Race Contact",
+                "race-" + id + "@example.invalid", "000000000", "Lima", "NET30", Timestamp.from(now), Timestamp.from(now));
         return id;
     }
 

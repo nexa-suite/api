@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.database;
 
 import com.nexa.api.bootstrap.runtime.boundaries.TenantBoundCreditAccountConfigurationUseCase;
+import com.nexa.api.bootstrap.runtime.boundaries.TenantCreditEligibilitySourceFactory;
 import com.nexa.api.bootstrap.runtime.boundaries.TenantBusinessTraceabilityBindingsFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseAuthority;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding;
@@ -275,8 +276,10 @@ class TenantBoundCreditAccountConfigurationIT {
     private static void reserveNewCredit(CurrentAccessContext context, UUID accountId) {
         inScope(context, () -> router.inTransaction(context, jdbc -> {
             var trace = traceability.bindTo(jdbc);
+            var accounts = customerAccounts.bindTo(jdbc);
             TenantCreditAccountAdapterFactory.Bindings bindings = creditAdapters.bindTo(jdbc,
-                    customerAccounts.bindTo(jdbc), creditAdapters.bindReceivablePaymentAccessTo(jdbc),
+                    accounts, TenantCreditEligibilitySourceFactory.bindTo(accounts),
+                    creditAdapters.bindReceivablePaymentAccessTo(jdbc),
                     trace.commands(), trace.canonicalOutbox(), unusedAdjustmentSource());
             bindings.creditReservations().reserveForCommitment(context.tenantId().value(),
                     context.workspaceId().value(), accountId, null, UUID.randomUUID(), null,
@@ -345,9 +348,9 @@ class TenantBoundCreditAccountConfigurationIT {
 
     private static void provisionRoles(PostgreSQLContainer database) throws SQLException {
         try (Connection connection = adminConnection(database); Statement statement = connection.createStatement()) {
-            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN PASSWORD '" + MIGRATOR_PASSWORD
+            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN NOINHERIT PASSWORD '" + MIGRATOR_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
-            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN PASSWORD '" + RUNTIME_PASSWORD
+            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN NOINHERIT PASSWORD '" + RUNTIME_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + database.getDatabaseName() + "\" TO " + MIGRATOR);
             statement.execute("GRANT CONNECT ON DATABASE \"" + database.getDatabaseName() + "\" TO " + RUNTIME);
@@ -385,8 +388,9 @@ class TenantBoundCreditAccountConfigurationIT {
                         + "tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,"
                         + "delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 accountId, tenantId, workspaceId, code, "Fixture Account", "Fixture Account", "PE", "RUC",
-                "20" + accountId.toString().replace("-", "").substring(0, 10), "B2B", "Fixture", "fixture@example.test",
-                "+51999999999", "Fixture delivery", "CREDIT", now, now);
+                "20" + String.format(java.util.Locale.ROOT, "%09d",
+                        Math.floorMod(accountId.getMostSignificantBits(), 1_000_000_000L)), "B2B", "Fixture", "fixture@example.test",
+                "+51999999999", "Fixture delivery", "CREDIT_30", now, now);
     }
 
     private static void seedExposureAndObligations(PostgreSQLContainer database, TenantFixture fixture,

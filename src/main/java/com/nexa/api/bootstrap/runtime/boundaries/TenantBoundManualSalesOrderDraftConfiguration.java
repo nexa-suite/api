@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderDraftUseCase;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -17,7 +18,8 @@ public class TenantBoundManualSalesOrderDraftConfiguration {
     @Bean
     @Primary
     ManualSalesOrderDraftUseCase tenantBoundManualSalesOrderDraftUseCase(TenantBusinessDatabaseRouter router,
+            TenantBusinessDatabaseDeliveryLeadTimePolicyResolver deliveryLeadTimes,
             TenantSalesCommitmentCompositionProvider compositions) {
-        return new TenantBoundManualSalesOrderDraftUseCase(router, compositions);
+        return new TenantBoundManualSalesOrderDraftUseCase(router, deliveryLeadTimes, compositions);
     }
 }

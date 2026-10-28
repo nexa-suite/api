@@ -2,7 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure;
 
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.notification.JdbcSecurityNotificationOutboxAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OpaqueSecurityTokenPort;
-import com.nexa.api.support.PostgresIntegrationSupport;
+import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.TenantConfigurationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcInvitationPersistenceAdapter;
@@ -21,6 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -38,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @TestPropertySource(properties = "nexa.security.notification-outbox.poll-delay=PT1H")
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-class TenantAdministrationIT extends PostgresIntegrationSupport {
+class TenantAdministrationIT extends NexaWorkflowIntegrationSupport {
     @Autowired
     private JdbcSecurityNotificationOutboxAdapter notificationOutbox;
 
@@ -82,7 +83,19 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         mockMvc.perform(get("/api/v1/settings/regional").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/settings/units").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/settings/security").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/access-matrix").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
+        tools.jackson.databind.JsonNode accessMatrix = json(mockMvc.perform(get("/api/v1/access-matrix")
+                        .header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn());
+        tools.jackson.databind.JsonNode operationsManager = null;
+        for (tools.jackson.databind.JsonNode entry : accessMatrix) {
+            if ("BUSINESS_OPERATIONS_MANAGER".equals(entry.path("role").asText())) {
+                operationsManager = entry;
+                break;
+            }
+        }
+        assertThat(operationsManager).isNotNull();
+        assertThat(operationsManager.path("permissions").size()).isZero();
+        assertThat(operationsManager.path("permissionKeys").toString())
+                .contains("catalog.read", "client.credit.configuration.manage", "payment.reconcile");
         mockMvc.perform(get("/api/v1/plan-usage").header("Authorization", "Bearer " + owner)).andExpect(status().isOk());
         mockMvc.perform(patch("/api/v1/settings/regional").header("Authorization", "Bearer " + owner).header("If-Match", "\"0\"")
                         .contentType(MediaType.APPLICATION_JSON).content("{\"timezone\":\"UTC\",\"language\":\"xx\",\"currency\":\"USD\",\"countryRegion\":\"PE\",\"dateTimePolicy\":\"LOCALE\",\"locale\":\"en-US\"}"))
@@ -138,29 +151,62 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
 
     @Test
     void tenantAllowsOnlyItsExistingV1WorkspaceAndProtectsFinalOwnerAndAdministrator() throws Exception {
-        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
-        String key = "workspace-extra-" + uuid();
-        mockMvc.perform(post("/api/v1/workspaces").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Extra Workspace\",\"slug\":\"extra-" + uuid().substring(0, 8) + "\"}"))
-                .andExpect(status().isConflict());
-        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace where tenant_id=?", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
+        FinalAdministrativeMembershipFixture fixture = isolateFinalAdministrativeMembership();
+        try {
+            String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+            String key = "workspace-extra-" + uuid();
+            mockMvc.perform(post("/api/v1/workspaces").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Extra Workspace\",\"slug\":\"extra-" + uuid().substring(0, 8) + "\"}"))
+                    .andExpect(status().isConflict());
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace where tenant_id=?", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
 
-        String ownerMembership = jdbc.queryForObject("select m.id::text from tenant_management.workspace_membership m join iam.user_account u on u.id=m.user_id where u.normalized_email=? and m.workspace_id=?", String.class, OWNER_EMAIL, UUID.fromString(workspaceId()));
-        String ownerMembershipVersion = jdbc.queryForObject("select version::text from tenant_management.workspace_membership where id=?", String.class, UUID.fromString(ownerMembership));
-        mockMvc.perform(patch("/api/v1/workspace-memberships/" + ownerMembership + "/roles").header("Authorization", "Bearer " + owner).header("If-Match", "\"" + ownerMembershipVersion + "\"")
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"roles\":[\"COMPANY_OWNER\"]}"))
-                .andExpect(status().isConflict());
-        mockMvc.perform(get("/api/v1/workspaces/" + UUID.randomUUID()).header("Authorization", "Bearer " + owner)).andExpect(status().isNotFound());
+            String ownerMembership = jdbc.queryForObject("select m.id::text from tenant_management.workspace_membership m join iam.user_account u on u.id=m.user_id where u.normalized_email=? and m.workspace_id=?", String.class, OWNER_EMAIL, UUID.fromString(workspaceId()));
+            String ownerMembershipVersion = jdbc.queryForObject("select version::text from tenant_management.workspace_membership where id=?", String.class, UUID.fromString(ownerMembership));
+            mockMvc.perform(patch("/api/v1/workspace-memberships/" + ownerMembership + "/roles").header("Authorization", "Bearer " + owner).header("If-Match", "\"" + ownerMembershipVersion + "\"")
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"roles\":[\"COMPANY_OWNER\"]}"))
+                    .andExpect(status().isConflict());
+
+            String suspendOwnerPath = "/api/v1/workspace-memberships/" + ownerMembership + "/suspensions";
+            mockMvc.perform(post(suspendOwnerPath).header("Authorization", "Bearer " + owner)
+                            .header("If-Match", "\"" + ownerMembershipVersion + "\""))
+                    .andExpect(status().isConflict());
+
+            SyntheticWorkspaceIdentity extraAdmin = createSyntheticWorkspaceIdentity(OWNER_EMAIL, "tenant_admin",
+                    "Final owner guard admin");
+            try {
+                mockMvc.perform(post(suspendOwnerPath).header("Authorization", "Bearer " + owner)
+                                .header("If-Match", "\"" + ownerMembershipVersion + "\""))
+                        .andExpect(status().isConflict());
+                assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m "
+                                + "join tenant_management.membership_role_definition a on a.membership_id=m.id "
+                                + "join tenant_management.role_definition r on r.id=a.role_id "
+                                + "where m.workspace_id=? and m.status='ACTIVE' and r.code='company_owner'",
+                        Integer.class, UUID.fromString(workspaceId()))).isEqualTo(1);
+            } finally {
+                retireSyntheticWorkspaceIdentity(extraAdmin);
+            }
+            mockMvc.perform(get("/api/v1/workspaces/" + UUID.randomUUID()).header("Authorization", "Bearer " + owner)).andExpect(status().isNotFound());
+        } finally {
+            restoreFinalAdministrativeMembership(fixture);
+        }
     }
 
     @Test
     void companyOwnerInvitationCannotCreateASecondActiveOwner() throws Exception {
-        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
-        mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
-                        .header("Idempotency-Key", "owner-invite-" + uuid()).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"second-owner-" + uuid().substring(0, 8) + "@example.test\",\"displayName\":\"Second Owner\",\"roles\":[\"COMPANY_OWNER\"]}"))
-                .andExpect(status().isConflict());
-        assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join tenant_management.membership_role_definition a on a.membership_id=m.id join tenant_management.role_definition r on r.id=a.role_id where w.tenant_id=? and m.status='ACTIVE' and r.code='company_owner'", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
+        FinalAdministrativeMembershipFixture fixture = isolateFinalAdministrativeMembership();
+        try {
+            String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+            String email = "second-owner-" + uuid().substring(0, 8) + "@example.test";
+            mockMvc.perform(post("/api/v1/organization-invitations").header("Authorization", "Bearer " + owner)
+                            .header("Idempotency-Key", "owner-invite-" + uuid()).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"email\":\"" + email + "\",\"displayName\":\"Second Owner\",\"roles\":[\"COMPANY_OWNER\"]}"))
+                    .andExpect(status().isConflict());
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m join tenant_management.workspace w on w.id=m.workspace_id join tenant_management.membership_role_definition a on a.membership_id=m.id join tenant_management.role_definition r on r.id=a.role_id where w.tenant_id=? and m.status='ACTIVE' and r.code='company_owner'", Integer.class, UUID.fromString(tenantId()))).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.organization_invitation where tenant_id=? and normalized_email=?",
+                    Integer.class, UUID.fromString(tenantId()), email)).isZero();
+        } finally {
+            restoreFinalAdministrativeMembership(fixture);
+        }
     }
 
     @Test
@@ -415,7 +461,10 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
 
     @Test
     void workspaceSettingsHaveOneCanonicalWarehouseStrategyAndCustomFieldsHaveAFullLifecycle() throws Exception {
-        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        SyntheticWorkspaceIdentity tenantAdmin = createSyntheticWorkspaceIdentity(OWNER_EMAIL, "tenant_admin",
+                "Workspace configuration admin");
+        try {
+        String owner = accessToken(tenantAdmin.email(), "PLATFORM");
         String workspace = workspaceId();
         MvcResult workspaceSettings = mockMvc.perform(get("/api/v1/workspaces/" + workspace + "/settings").header("Authorization", "Bearer " + owner))
                 .andExpect(status().isOk()).andReturn();
@@ -447,6 +496,9 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         assertThat(mockMvc.perform(get("/api/v1/custom-field-definitions?includeInactive=true").header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).contains(fieldId);
         mockMvc.perform(post("/api/v1/custom-field-definitions/" + fieldId + "/activations").header("Authorization", "Bearer " + owner)
                         .header("If-Match", deactivated.getResponse().getHeader("ETag"))).andExpect(status().isOk());
+        } finally {
+            retireSyntheticWorkspaceIdentity(tenantAdmin);
+        }
     }
 
     @Test
@@ -493,6 +545,94 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         assertThat(jdbc.queryForObject("select status from tenant_management.organization_invitation where id=?", String.class, UUID.fromString(invitationId))).isEqualTo("EXPIRED");
     }
 
+    private FinalAdministrativeMembershipFixture isolateFinalAdministrativeMembership() {
+        UUID tenantId = UUID.fromString(tenantId());
+        UUID workspaceId = UUID.fromString(workspaceId());
+        UUID ownerMembershipId = UUID.fromString(membershipId(OWNER_EMAIL));
+        MembershipState ownerState = membershipState(ownerMembershipId);
+        List<RoleAssignment> ownerRoles = roleAssignments(ownerMembershipId);
+        List<MembershipState> otherGuardMemberships = jdbc.query("select distinct m.id,m.status "
+                        + "from tenant_management.workspace_membership m "
+                        + "join tenant_management.workspace w on w.id=m.workspace_id "
+                        + "where m.status='ACTIVE' and m.id<>? and ("
+                        + "(m.workspace_id=? and exists (select 1 from tenant_management.membership_role_definition a "
+                        + "join tenant_management.role_definition r on r.id=a.role_id "
+                        + "where a.membership_id=m.id and r.code='tenant_admin')) "
+                        + "or (w.tenant_id=? and exists (select 1 from tenant_management.membership_role_definition a "
+                        + "join tenant_management.role_definition r on r.id=a.role_id "
+                        + "where a.membership_id=m.id and r.code='company_owner'))) ",
+                (result, row) -> new MembershipState(result.getObject("id", UUID.class), result.getString("status")),
+                ownerMembershipId, workspaceId, tenantId);
+        FinalAdministrativeMembershipFixture fixture = new FinalAdministrativeMembershipFixture(
+                ownerMembershipId, ownerState, ownerRoles, otherGuardMemberships);
+
+        try {
+            for (MembershipState membership : otherGuardMemberships) {
+                jdbc.update("update tenant_management.workspace_membership set status='DISABLED' where id=?",
+                        membership.id());
+            }
+            jdbc.update("update tenant_management.workspace_membership set status='ACTIVE' where id=?",
+                    ownerMembershipId);
+            jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?",
+                    ownerMembershipId);
+            int assignedRoles = jdbc.update("insert into tenant_management.membership_role_definition "
+                            + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+                            + "select ?,?,?,r.id,current_timestamp from tenant_management.role_definition r "
+                            + "where r.tenant_id is null and r.workspace_id is null "
+                            + "and r.code in ('tenant_admin','company_owner')",
+                    ownerMembershipId, tenantId, workspaceId);
+            if (assignedRoles != 2) {
+                throw new IllegalStateException("Final administrator fixture must assign both built-in roles");
+            }
+            return fixture;
+        } catch (RuntimeException failure) {
+            restoreFinalAdministrativeMembership(fixture);
+            throw failure;
+        }
+    }
+
+    private void restoreFinalAdministrativeMembership(FinalAdministrativeMembershipFixture fixture) {
+        jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?",
+                fixture.ownerMembershipId());
+        for (RoleAssignment role : fixture.ownerRoles()) {
+            jdbc.update("insert into tenant_management.membership_role_definition "
+                            + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
+                            + "values (?,?,?,?,?,?)",
+                    role.membershipId(), role.tenantId(), role.workspaceId(), role.roleId(),
+                    role.assignedByMembershipId(), role.assignedAt());
+        }
+        jdbc.update("update tenant_management.workspace_membership set status=? where id=?",
+                fixture.ownerState().status(), fixture.ownerMembershipId());
+        for (MembershipState membership : fixture.otherGuardMemberships()) {
+            jdbc.update("update tenant_management.workspace_membership set status=? where id=?",
+                    membership.status(), membership.id());
+        }
+    }
+
+    private MembershipState membershipState(UUID membershipId) {
+        return jdbc.queryForObject("select id,status from tenant_management.workspace_membership where id=?",
+                (result, row) -> new MembershipState(result.getObject("id", UUID.class), result.getString("status")),
+                membershipId);
+    }
+
+    private List<RoleAssignment> roleAssignments(UUID membershipId) {
+        return jdbc.query("select membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at "
+                        + "from tenant_management.membership_role_definition where membership_id=?",
+                (result, row) -> new RoleAssignment(result.getObject("membership_id", UUID.class),
+                        result.getObject("tenant_id", UUID.class), result.getObject("workspace_id", UUID.class),
+                        result.getObject("role_id", UUID.class), result.getObject("assigned_by_membership_id", UUID.class),
+                        result.getTimestamp("assigned_at")), membershipId);
+    }
+
+    private record MembershipState(UUID id, String status) { }
+
+    private record RoleAssignment(UUID membershipId, UUID tenantId, UUID workspaceId, UUID roleId,
+                                  UUID assignedByMembershipId, Timestamp assignedAt) { }
+
+    private record FinalAdministrativeMembershipFixture(UUID ownerMembershipId, MembershipState ownerState,
+                                                        List<RoleAssignment> ownerRoles,
+                                                        List<MembershipState> otherGuardMemberships) { }
+
     private int createWorkspaceStatus(String owner, String slug, String key) throws Exception {
         return mockMvc.perform(post("/api/v1/workspaces").header("Authorization", "Bearer " + owner).header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Race\",\"slug\":\"" + slug + "\"}")).andReturn().getResponse().getStatus();
@@ -515,10 +655,6 @@ class TenantAdministrationIT extends PostgresIntegrationSupport {
         return mockMvc.perform(post("/api/v1/organization-invitation-acceptances").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"" + token + "\",\"password\":\"" + TEST_PASSWORD + "\",\"displayName\":\"" + displayName + "\"}"))
                 .andReturn().getResponse().getStatus();
-    }
-
-    private tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {
-        return tools.jackson.databind.json.JsonMapper.shared().readTree(result.getResponse().getContentAsString());
     }
 
 }

@@ -4,6 +4,7 @@ import com.nexa.api.salescommitment.application.purchaserequest.port.CatalogItem
 import com.nexa.api.salescommitment.application.purchaserequest.port.IdempotencyPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.FieldPurchaseRequestSubmissionUseCase;
 import com.nexa.api.salescommitment.application.service.FieldPurchaseRequestSubmissionService;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTime;
 import com.nexa.api.salescommitment.application.purchaserequest.service.PurchaseRequestService;
 import com.nexa.api.salescommitment.infrastructure.purchaserequest.JdbcMaterialChangePersistenceAdapter;
 import com.nexa.api.salescommitment.infrastructure.purchaserequest.PurchaseRequestEventPersistenceAdapter;
@@ -53,6 +54,8 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
     public Composition bindTo(JdbcTemplate tenantJdbc, Bindings bindings) {
         JdbcTemplate jdbc = Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required");
         Bindings dependencies = Objects.requireNonNull(bindings, "Tenant Sales Commitment bindings are required");
+        MinimumDeliveryLeadTime minimumDeliveryLeadTime = new MinimumDeliveryLeadTime(
+                dependencies.minimumDeliveryLeadDays());
         var commitmentPort = commitments.bindTo(jdbc, new TenantCommercialCommitmentFactory.Bindings(
                 dependencies.sellableSkus(), dependencies.customerAccounts(), dependencies.creditReservations(),
                 dependencies.inventoryBacking(), dependencies.paymentConfirmations(), dependencies.receivables(),
@@ -67,7 +70,7 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
                 dependencies.walletReservations(), dependencies.walletRefundBalances());
         DirectOrderUseCase directOrders = new DirectOrderService(commitmentPort, persistence,
                 dependencies.clock(), idempotency, dependencies.objectMapper(),
-                dependencies.sellableSkus());
+                dependencies.sellableSkus(), minimumDeliveryLeadTime);
         var purchaseRequestPersistence = new PurchaseRequestPersistenceAdapter(jdbc);
         var purchaseRequests = new PurchaseRequestService(purchaseRequestPersistence,
                 new PurchaseRequestEventPersistenceAdapter(jdbc, dependencies.canonicalOutbox()),
@@ -75,11 +78,14 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
                 dependencies.customerAccounts(), dependencies.changeFeed(), commitmentPort,
                 dependencies.clock(), dependencies.objectMapper(),
                 new JdbcMaterialChangePersistenceAdapter(jdbc, purchaseRequestPersistence,
-                        dependencies.objectMapper(), dependencies.sellableSkus()), dependencies.walletTenderEnabled());
+                        dependencies.objectMapper(), dependencies.sellableSkus()), dependencies.walletTenderEnabled(),
+                minimumDeliveryLeadTime);
         var drafts = new PurchaseRequestDraftService(jdbc, dependencies.objectMapper(), commitmentPort,
-                dependencies.maps(), dependencies.customerAccounts(), dependencies.customerAddresses(),
+                dependencies.maps(), dependencies.customerAccounts(), customerTerms(dependencies.customerAccounts()),
+                dependencies.customerAddresses(),
                 dependencies.creditExposure(), dependencies.sellableSkus(), dependencies.warehouses(),
-                dependencies.canonicalOutbox(), dependencies.walletTenderEnabled());
+                dependencies.canonicalOutbox(), dependencies.walletTenderEnabled(), minimumDeliveryLeadTime,
+                dependencies.clock());
         var manualOrderPersistence = new ManualSalesOrderPersistenceAdapter(jdbc, dependencies.objectMapper());
         ManualSalesOrderUseCase manualSalesOrders = new ManualSalesOrderService(
                 new SalesSnapshotAssembler(
@@ -88,13 +94,14 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
                         dependencies.customerAddresses(), new WarehouseReferenceAclAdapter(dependencies.warehouses()),
                         new JdbcPeruGeographyPersistenceAdapter(jdbc), dependencies.maps(),
                         dependencies.catalogItemSnapshots(),
-                        new SellableSkuSnapshotPersistenceAdapter(dependencies.sellableSkus())), manualOrderPersistence);
+                        new SellableSkuSnapshotPersistenceAdapter(dependencies.sellableSkus())), manualOrderPersistence,
+                minimumDeliveryLeadTime, dependencies.clock());
         ManualSalesOrderDraftUseCase manualSalesOrderDrafts = new ManualSalesOrderDraftService(
                 new ManualSalesOrderDraftPersistenceAdapter(jdbc, dependencies.objectMapper(), dependencies.maps(),
                         dependencies.customerAccounts(), dependencies.customerAddresses(),
                         customerTerms(dependencies.customerAccounts()), dependencies.creditExposure(),
                         dependencies.sellableSkus(), dependencies.warehouses()),
-                manualSalesOrders, manualOrderPersistence);
+                manualSalesOrders, manualOrderPersistence, minimumDeliveryLeadTime, dependencies.clock());
         FieldPurchaseRequestSubmissionUseCase fieldPurchaseRequestSubmissions =
                 new FieldPurchaseRequestSubmissionService(purchaseRequests, dependencies.customerAccounts(),
                         dependencies.catalogItemSnapshots(), idempotency, dependencies.objectMapper(),

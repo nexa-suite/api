@@ -1,5 +1,6 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure;
 
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -66,16 +67,22 @@ class OrganizationRegistrationDraftHttpRlsIT {
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
+        CentralMigrationTestBootstrap.MigrationCredentials migration =
+                CentralMigrationTestBootstrap.migrateLatest(POSTGRES);
         registry.add("NEXA_DATABASE_URL", POSTGRES::getJdbcUrl);
         registry.add("NEXA_DATABASE_USERNAME", () -> RUNTIME_USERNAME);
-        registry.add("NEXA_DATABASE_PASSWORD", () -> RUNTIME_PASSWORD);
+        registry.add("NEXA_DATABASE_PASSWORD", migration::runtimePassword);
         registry.add("NEXA_DATABASE_RUNTIME_USERNAME", () -> RUNTIME_USERNAME);
-        registry.add("NEXA_DATABASE_RUNTIME_PASSWORD", () -> RUNTIME_PASSWORD);
-        registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", POSTGRES::getUsername);
-        registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", POSTGRES::getPassword);
+        registry.add("NEXA_DATABASE_RUNTIME_PASSWORD", migration::runtimePassword);
+        registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", () -> "nexa_migrator");
+        registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", migration::migratorPassword);
+        registry.add("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", migration::workspaceScopeReaderPassword);
+        registry.add("NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD",
+                migration::businessDocumentsScopeReaderPassword);
+        registry.add("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD", migration::internalOperatorPassword);
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", () -> RUNTIME_USERNAME);
-        registry.add("spring.datasource.password", () -> RUNTIME_PASSWORD);
+        registry.add("spring.datasource.password", migration::runtimePassword);
         registry.add("NEXA_FLYWAY_ENABLED", () -> "true");
         registry.add("NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME", () -> "true");
         registry.add("nexa.jdbc.adapters-enabled", () -> "true");
@@ -191,7 +198,7 @@ class OrganizationRegistrationDraftHttpRlsIT {
                         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_runtime') THEN
                             EXECUTE 'CREATE ROLE nexa_runtime LOGIN PASSWORD ''test-only-runtime-password''';
                         END IF;
-                        EXECUTE 'ALTER ROLE nexa_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ''test-only-runtime-password''';
+                        EXECUTE 'ALTER ROLE nexa_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD ''test-only-runtime-password''';
                     END
                     $$;
                     """);

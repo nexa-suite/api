@@ -2,7 +2,11 @@ package com.nexa.api.salescommitment.application.directorder.service;
 
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase;
+import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase.DirectOrderDeliveryPolicy;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
+import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTime;
+import com.nexa.api.salescommitment.application.policy.MinimumDeliveryLeadTimePolicyProvider;
 import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.IdempotencyPersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
@@ -11,7 +15,7 @@ import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -30,6 +34,7 @@ public class DirectOrderService implements DirectOrderUseCase {
     private final IdempotencyPersistencePort idempotency;
     private final ObjectMapper objectMapper;
     private final SellableSkuQuery sellableSkus;
+    private final MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies;
 
     public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock) {
         this(commitments, orders, clock, null, new ObjectMapper(), null);
@@ -42,12 +47,36 @@ public class DirectOrderService implements DirectOrderUseCase {
 
     public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock,
                               IdempotencyPersistencePort idempotency, ObjectMapper objectMapper, SellableSkuQuery sellableSkus) {
+        this(commitments, orders, clock, idempotency, objectMapper, sellableSkus,
+                new MinimumDeliveryLeadTime(3));
+    }
+
+    public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock,
+                              IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
+                              SellableSkuQuery sellableSkus, MinimumDeliveryLeadTime minimumDeliveryLeadTime) {
+        this(commitments, orders, clock, idempotency, objectMapper, sellableSkus,
+                MinimumDeliveryLeadTimePolicyProvider.fixed(minimumDeliveryLeadTime));
+    }
+
+    public DirectOrderService(CommercialCommitmentPort commitments, SalesOrderPersistencePort orders, Clock clock,
+                              IdempotencyPersistencePort idempotency, ObjectMapper objectMapper,
+                              SellableSkuQuery sellableSkus,
+                              MinimumDeliveryLeadTimePolicyProvider deliveryLeadTimePolicies) {
         this.commitments = commitments;
         this.orders = orders;
         this.clock = clock == null ? Clock.systemUTC() : clock;
         this.idempotency = idempotency;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.sellableSkus = sellableSkus;
+        this.deliveryLeadTimePolicies = java.util.Objects.requireNonNull(deliveryLeadTimePolicies);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DirectOrderDeliveryPolicy deliveryPolicy(CurrentAccessContext context) {
+        context.requirePermission(PermissionKey.SALES_ORDER_CREATE_MANUAL);
+        MinimumDeliveryLeadTime policy = deliveryLeadTimePolicies.forWorkspace(context);
+        return new DirectOrderDeliveryPolicy(policy.calendarDays(), policy.earliestAllowedDate(clock));
     }
 
     @Override
@@ -56,10 +85,12 @@ public class DirectOrderService implements DirectOrderUseCase {
                                  java.time.LocalDate requestedDeliveryDate, String deliverySnapshot,
                                  String paymentOption, String notes, List<Line> lines, String idempotencyKey) {
         if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Direct Order is internal sales-only");
-        context.requirePermission(Permission.SALES_WRITE);
+        context.requirePermission(PermissionKey.SALES_ORDER_CREATE_MANUAL);
+        requireIdempotencyKey(idempotencyKey);
         if (clientAccountId == null || clientAccountId.isBlank() || lines == null || lines.isEmpty()) {
             throw new CommercialBusinessException("VALIDATION_ERROR");
         }
+        deliveryLeadTimePolicies.forWorkspace(context).validate(requestedDeliveryDate, clock);
         java.util.UUID clientAccount;
         try {
             clientAccount = java.util.UUID.fromString(clientAccountId.trim());
@@ -116,6 +147,9 @@ public class DirectOrderService implements DirectOrderUseCase {
         }
     }
     private static String normalizedUnit(String value) { return value == null || value.isBlank() ? "" : value.trim(); }
+    private static void requireIdempotencyKey(String key) {
+        if (key == null || key.isBlank() || key.length() > 160) throw new IdempotencyKeyRequiredException();
+    }
     private static String value(Object value) { return value == null ? "" : value.toString(); }
 
     private Line canonicalLine(java.util.UUID tenantId, java.util.UUID workspaceId, Line line) {

@@ -43,6 +43,17 @@ public interface PaymentUseCases {
     PaymentModels.PaymentView reviewBankTransfer(CurrentAccessContext context, UUID paymentId,
             String action, String reason, String idempotencyKey);
 
+    java.util.List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(
+            CurrentAccessContext context);
+
+    PaymentModels.BuyerPaymentMethodSetupView createBuyerPaymentMethodSetup(CurrentAccessContext context,
+            String idempotencyKey);
+
+    PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext context,
+            UUID paymentMethodId);
+
+    void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId);
+
     /** Command value used by trusted callers; persistence-specific commands remain internal to BC-08. */
     record CreateReceivableCommand(String subjectType, UUID subjectId, Instant dueAt, String idempotencyKey) { }
 }

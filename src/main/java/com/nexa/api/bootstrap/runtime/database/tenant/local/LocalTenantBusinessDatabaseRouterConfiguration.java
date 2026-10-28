@@ -3,9 +3,9 @@ package com.nexa.api.bootstrap.runtime.database.tenant.local;
 import com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.DriverManagerTenantBusinessDatabasePolicySnapshotWriterDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseAuthority;
-import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseBindingRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseAuthority;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentialsProvider;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDeliveryLeadTimePolicyResolver;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
@@ -23,7 +23,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.annotation.Primary;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.nio.file.Path;
 
@@ -35,6 +34,7 @@ import java.nio.file.Path;
                 + "'${nexa.tenant-business.buyer-wallet-recharge.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.purchase-request.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.catalog-detail-read.enabled:false}' == 'true' or "
+                + "'${nexa.tenant-business.catalog-favorites.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.catalog-management.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.payments.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.fulfillment-delivery.enabled:false}' == 'true' or "
@@ -45,11 +45,6 @@ import java.nio.file.Path;
                 + "'${nexa.tenant-business.business-traceability.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.notifications.enabled:false}' == 'true'")
 public class LocalTenantBusinessDatabaseRouterConfiguration {
-    @Bean
-    TenantBusinessDatabaseBindingRegistry localTenantBusinessDatabaseBindingRegistry(JdbcTemplate centralJdbc) {
-        return new JdbcTenantBusinessDatabaseBindingRegistry(centralJdbc);
-    }
-
     @Bean
     TenantBusinessDatabaseAuthority localTenantBusinessDatabaseAuthority(
             ResolveCurrentAccessContextUseCase centralAccessContexts,
@@ -117,5 +112,11 @@ public class LocalTenantBusinessDatabaseRouterConfiguration {
             TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory writerDataSources) {
         return new TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver(
                 centralSettings, router, authority, writerDataSources);
+    }
+
+    @Bean
+    TenantBusinessDatabaseDeliveryLeadTimePolicyResolver localTenantDeliveryLeadTimePolicyResolver(
+            OperationalSettingsAccess centralSettings) {
+        return new TenantBusinessDatabaseDeliveryLeadTimePolicyResolver(centralSettings);
     }
 }
