@@ -35,7 +35,7 @@ class ManualSalesOrderServiceTests {
         ManualSalesOrderService service = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence,
                 context -> leadTime.get(), clock);
         CreateManualSalesOrderCommand command = new CreateManualSalesOrderCommand(SalesTestFixtures.ACCOUNT,
-                SalesTestFixtures.ADDRESS.toString(), null, LocalDate.of(2026, 10, 25), "Dock 2",
+                SalesTestFixtures.ADDRESS.toString(), null, LocalDate.now(ZoneOffset.UTC).plusDays(3), "Dock 2",
                 SalesTestFixtures.WAREHOUSE.toString(), "LOCAL", PaymentOption.CREDIT_LINE,
                 PurchaseRequestPriority.HIGH, "PEN", "Call before loading",
                 List.of(new CreateManualSalesOrderCommand.Line("ITEM-001", BigDecimal.valueOf(3), "bag", null)));
