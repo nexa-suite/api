@@ -297,13 +297,13 @@ class TenantBoundCatalogDetailReaderIT {
 
 	private static void configureCentralRuntime(PostgreSQLContainer central, String runtimePassword) throws SQLException {
 		try (Connection connection = adminConnection(central); Statement statement = connection.createStatement()) {
-			statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + runtimePassword
+			statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT PASSWORD '" + runtimePassword
 					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 		}
 	}
 
 	private static void migrateCentral() {
-		CentralMigrationTestBootstrap.migrateLatest(CENTRAL);
+		CentralMigrationTestBootstrap.migrateLatest(CENTRAL, CENTRAL_RUNTIME_PASSWORD);
 	}
 
 	private static void provisionTenantRoles(PostgreSQLContainer tenant, String runtimePassword) throws SQLException {
