@@ -2,19 +2,19 @@
 
 ## Unreleased
 
-- Honor the required variant-creation idempotency key through the application
-  and persistence boundary, using the existing scoped catalog command ledger.
-- Separate catalog product and taxonomy command permissions, preventing their
-  shared legacy alias from authorizing unrelated mutations.
+## [1.2.0] - 2026-10-28 (preparation candidate; not published)
 
-- Require feature-specific permissions for customer mutations, addresses,
-  purchase requests, sales orders, manual drafts and logistics reads, preventing
-  broad legacy sales aliases from granting unrelated operations.
-- Require `buyer.order.read` for Buyer order projections while retaining the
-  active customer-account scope.
-- Align built-in Tenant Administrator client/catalog query permissions through
-  an additive migration, and align the fixed Sales commercial-terms preset with
-  its existing persisted grant. Warehouse object grants remain explicit.
+Candidate based on `develop` at `cddcbbdbc93eaa8b0290a8b56ba8db6a5d29835c`. No release tag or GitHub Release is created by this preparation.
+
+- Add scoped Catalog filter references and variant-command idempotency; separate product and taxonomy permissions.
+- Require feature-specific permissions for customer, order, draft and logistics operations, including Buyer order reads; align Tenant Administrator query grants.
+- Add personal identity details to own-profile updates, structured Warehouse addresses and production/receipt dates for inventory lots; preserve lot chronology through transfers.
+- Add authorized Buyer delivery tracking and Driver live-location operations; restrict capture to active workdays and assigned deliveries.
+- Harden Business Document authorization, private local storage initialization and binary download failure handling.
+- Preserve Sellable SKU context during material-change acceptance and classify unavailable warehouse selection for Purchase Request drafts.
+- Return a Buyer-specific self-account response that omits unverified contact details.
+- Add central Flyway migrations V163–V168 and Tenant migrations V24–V25; published migrations remain unchanged.
+- Align Maven, Render and generated OpenAPI version metadata with `1.2.0`.
 
 ## [1.1.0-alpha.1] - 2026-10-10
 
