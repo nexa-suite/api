@@ -209,14 +209,6 @@ public final class GlobalExceptionHandler {
 				"Tenant business data is temporarily unavailable", request);
 	}
 
-	@ExceptionHandler(com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException.class)
-	public ResponseEntity<ProblemDetail> handleRoutedTenantBusinessDatabaseUnavailable(
-			com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException exception,
-			HttpServletRequest request) {
-		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
-				"Tenant business data is temporarily unavailable", request);
-	}
-
 	@ExceptionHandler(OrganizationPreconditionRequiredException.class)
 	public ResponseEntity<ProblemDetail> handlePrecondition(OrganizationPreconditionRequiredException exception, HttpServletRequest request) {
 		return response(HttpStatus.PRECONDITION_REQUIRED, ApiErrorCode.PRECONDITION_REQUIRED, "If-Match header is required", request);
