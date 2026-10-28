@@ -131,6 +131,13 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			assertThat(ready.verifiedSchemaManifestSha256())
 					.isEqualTo(TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest());
 			assertSeparateLocalPasswords(readyStateDirectory.resolve(readyTenantId.toString()));
+			var reservationExpiryCredentials = new LocalTenantInventoryReservationExpiryWorkerCredentialsProvider(
+					readyStateDirectory).requireCredentials(
+							"local-tenant-inventory-reservation-expiry-worker:" + readyTenantId);
+			assertThat(reservationExpiryCredentials.username()).isEqualTo("nexa_warehouse_reservation_expiry_worker");
+			assertThat(reservationExpiryCredentials.password()).isEqualTo(readPrivateValue(
+					readyStateDirectory.resolve(readyTenantId.toString()).resolve("reservation-expiry-worker.properties"),
+					"password"));
 			assertTenantScope(readyStateDirectory, readyTenantId, readyWorkspaceId, ready);
 			assertThat(volumeExists(readyVolume)).isTrue();
 
@@ -459,7 +466,12 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 				Files.readString(tenantDirectory.resolve("bootstrap-admin-password"), StandardCharsets.UTF_8).strip(),
 				Files.readString(tenantDirectory.resolve("migrator-password"), StandardCharsets.UTF_8).strip(),
 				Files.readString(tenantDirectory.resolve("runtime-password"), StandardCharsets.UTF_8).strip(),
-				Files.readString(tenantDirectory.resolve("policy-snapshot-writer-password"), StandardCharsets.UTF_8).strip());
+				Files.readString(tenantDirectory.resolve("policy-snapshot-writer-password"), StandardCharsets.UTF_8).strip(),
+				Files.readString(tenantDirectory.resolve("wallet-recharge-worker-password"), StandardCharsets.UTF_8).strip(),
+				Files.readString(tenantDirectory.resolve("business-documents-worker-password"), StandardCharsets.UTF_8).strip(),
+				Files.readString(tenantDirectory.resolve("payment-callback-worker-password"), StandardCharsets.UTF_8).strip(),
+				Files.readString(tenantDirectory.resolve("business-traceability-worker-password"), StandardCharsets.UTF_8).strip(),
+				Files.readString(tenantDirectory.resolve("reservation-expiry-worker-password"), StandardCharsets.UTF_8).strip());
 		assertThat(passwords).doesNotHaveDuplicates().doesNotContain(CENTRAL_PASSWORD);
 	}
 
