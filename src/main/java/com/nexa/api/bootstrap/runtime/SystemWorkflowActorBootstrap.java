@@ -9,8 +9,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import com.nexa.api.shared.context.RlsRequestScope;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceScopeReader;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /** Provisions the scoped technical membership for workspaces created after V59. */
 @Component
@@ -19,28 +23,36 @@ public class SystemWorkflowActorBootstrap {
     private static final String ACTOR = "11111111-1111-4111-8111-111111111111";
     private static final String ROLE = "22222222-2222-4222-8222-222222222222";
     private final JdbcTemplate jdbc;
+    private final WorkspaceScopeReader workspaceScopeReader;
 
-    public SystemWorkflowActorBootstrap(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public SystemWorkflowActorBootstrap(JdbcTemplate jdbc, WorkspaceScopeReader workspaceScopeReader) {
+        this.jdbc = jdbc;
+        this.workspaceScopeReader = workspaceScopeReader;
+    }
 
     @EventListener(ApplicationReadyEvent.class)
     @Order(Ordered.LOWEST_PRECEDENCE - 25)
     @Transactional
     public void provision() {
-        List<Workspace> workspaces;
+        List<WorkspaceDirectory.Scope> workspaces = new ArrayList<>();
+        UUID cursorTenant = null;
+        UUID cursorWorkspace = null;
         RlsRequestScope.enableCrossScopeWorkspaceScan();
         try {
-            jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
-            workspaces = jdbc.query("select id,tenant_id from tenant_management.workspace where status='ACTIVE' order by tenant_id,id",
-                    (rs, row) -> new Workspace(rs.getObject("tenant_id", java.util.UUID.class), rs.getObject("id", java.util.UUID.class)));
-        } finally {
-            try {
-                jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', '', true)", String.class);
-            } finally {
-                RlsRequestScope.clearCrossScopeWorkspaceScan();
+            while (true) {
+                List<WorkspaceDirectory.Scope> page = workspaceScopeReader.scanActiveWorkspacesAfter(
+                        cursorTenant, cursorWorkspace, 100);
+                workspaces.addAll(page);
+                if (page.size() < 100) break;
+                WorkspaceDirectory.Scope last = page.getLast();
+                cursorTenant = last.tenantId();
+                cursorWorkspace = last.workspaceId();
             }
+        } finally {
+            RlsRequestScope.clearCrossScopeWorkspaceScan();
         }
         try {
-            for (Workspace scope : workspaces) {
+            for (WorkspaceDirectory.Scope scope : workspaces) {
                 setTransactionScope(scope);
                 String workspace = scope.workspaceId().toString();
                 String tenant = scope.tenantId().toString();
@@ -56,7 +68,7 @@ public class SystemWorkflowActorBootstrap {
         }
     }
 
-    private void setTransactionScope(Workspace scope) {
+    private void setTransactionScope(WorkspaceDirectory.Scope scope) {
         jdbc.queryForObject("select set_config('app.current_tenant_id', ?, true) || set_config('app.current_workspace_id', ?, true)",
                 String.class, scope.tenantId().toString(), scope.workspaceId().toString());
     }
@@ -64,6 +76,4 @@ public class SystemWorkflowActorBootstrap {
     private void clearTransactionScope() {
         jdbc.queryForObject("select set_config('app.current_tenant_id', '', true) || set_config('app.current_workspace_id', '', true)", String.class);
     }
-
-    private record Workspace(java.util.UUID tenantId, java.util.UUID workspaceId) { }
 }

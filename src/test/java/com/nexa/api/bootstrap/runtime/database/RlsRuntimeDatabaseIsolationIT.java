@@ -22,6 +22,10 @@ import com.nexa.api.tenantaccessgovernance.iam.infrastructure.password.BCryptPas
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcAccessPolicyAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcWorkspacePreviewQueryAdapter;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.security.SecureOpaqueSecurityTokenAdapter;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceScopeReader;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceScopeReader;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.access.EffectiveAuthorization;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.FounderIdentity;
@@ -68,6 +72,7 @@ import static com.nexa.api.support.PostgresIntegrationSupport.openRuntimeConnect
 import static com.nexa.api.support.PostgresIntegrationSupport.runtimeDatabasePassword;
 import static com.nexa.api.support.PostgresIntegrationSupport.runtimeDatabaseUsername;
 import static com.nexa.api.support.PostgresIntegrationSupport.runtimeJdbcUrl;
+import static com.nexa.api.support.PostgresIntegrationSupport.workspaceScopeReaderPool;
 
 /** Verifies RLS with the real least-privilege runtime login, without role switching. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
@@ -339,8 +344,10 @@ class RlsRuntimeDatabaseIsolationIT {
 
     @Test
     void tenantOnlyConfigurationAndTenantWorkspaceIdentityRowsUseTheirExistingScopePaths() throws Exception {
-        int workspaceCountBeforeFixture = countRuntimeRowsWithCrossScopeScan("tenant_management.workspace");
-        int tenantCountBeforeFixture = countRuntimeRowsWithCrossScopeScan("tenant_management.tenant");
+        List<WorkspaceDirectory.Scope> existingScopes = scanWorkspaceScopesWithDedicatedReader();
+        int workspaceCountBeforeFixture = existingScopes.size();
+        int tenantCountBeforeFixture = (int) existingScopes.stream()
+                .map(WorkspaceDirectory.Scope::tenantId).distinct().count();
         Fixture fixture = insertFixture();
         UUID tenantWideRoleId = UUID.randomUUID();
         try (Connection connection = openRuntimeConnection()) {
@@ -426,8 +433,14 @@ class RlsRuntimeDatabaseIsolationIT {
 
             setSessionSetting(connection, "app.cross_scope_workspace_scan", "true");
             assertThat(count(connection, "select count(*) from tenant_management.workspace"))
-                    .isEqualTo(workspaceCountBeforeFixture + fixture.rows().size());
+                    .as("runtime cannot enumerate workspace identities even when the worker scan setting is supplied")
+                    .isZero();
             assertThat(count(connection, "select count(*) from tenant_management.tenant"))
+                    .as("runtime cannot enumerate tenant roots even when the worker scan setting is supplied")
+                    .isZero();
+            List<WorkspaceDirectory.Scope> scopesVisibleToReader = scanWorkspaceScopesWithDedicatedReader();
+            assertThat(scopesVisibleToReader).hasSize(workspaceCountBeforeFixture + fixture.rows().size());
+            assertThat(scopesVisibleToReader.stream().map(WorkspaceDirectory.Scope::tenantId).distinct().count())
                     .isEqualTo(tenantCountBeforeFixture + fixture.tenantIds().size());
             setSessionSetting(connection, "app.cross_scope_workspace_scan", "");
 
@@ -547,10 +560,12 @@ class RlsRuntimeDatabaseIsolationIT {
     void invitationExpiryWorkerTraversesScopesUnderForcedRlsWithBoundedBatches() throws Exception {
         Fixture fixture = insertFixture();
         RlsRequestScope.clear();
-        try (HikariDataSource pool = runtimePool()) {
+        try (HikariDataSource pool = runtimePool();
+                HikariDataSource scopeReaderPool = workspaceScopeReaderPool()) {
             RlsScopedDataSource scopedDataSource = new RlsScopedDataSource(pool);
             JdbcInvitationPersistenceAdapter invitations = new JdbcInvitationPersistenceAdapter(
-                    new JdbcTemplate(scopedDataSource), new DataSourceTransactionManager(scopedDataSource));
+                    new JdbcTemplate(scopedDataSource), new DataSourceTransactionManager(scopedDataSource),
+                    new JdbcWorkspaceScopeReader(() -> RlsScopedDataSource.forCurrentCentralScope(scopeReaderPool)));
             assertThat(invitations.expirePending(Instant.now().plusSeconds(1), 2))
                     .as("the cross-scope worker expires no more than its batch limit").isEqualTo(2);
             int expiredAfterFirstBatch = 0;
@@ -599,15 +614,19 @@ class RlsRuntimeDatabaseIsolationIT {
     void catalogStartupReconcilersAndWorkflowActorBootstrapUseWorkspaceScopes() throws Exception {
         Fixture fixture = insertFixture();
         RlsRequestScope.clear();
-        try (HikariDataSource pool = runtimePool()) {
+        try (HikariDataSource pool = runtimePool();
+                HikariDataSource scopeReaderPool = workspaceScopeReaderPool()) {
             RlsScopedDataSource scopedDataSource = new RlsScopedDataSource(pool);
+            WorkspaceScopeReader scopeReader = new JdbcWorkspaceScopeReader(
+                    () -> RlsScopedDataSource.forCurrentCentralScope(scopeReaderPool));
             JdbcTemplate jdbc = new JdbcTemplate(scopedDataSource);
             TransactionTemplate transaction = new TransactionTemplate(new DataSourceTransactionManager(scopedDataSource));
             var mapper = JsonMapper.shared();
-            CatalogPersistenceBootstrap catalog = new CatalogPersistenceBootstrap(jdbc, new CatalogSeedLoader(mapper), new com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory(jdbc));
+            JdbcWorkspaceDirectory workspaces = new JdbcWorkspaceDirectory(jdbc, scopeReader);
+            CatalogPersistenceBootstrap catalog = new CatalogPersistenceBootstrap(jdbc, new CatalogSeedLoader(mapper), workspaces);
             CatalogSkuPersistenceBootstrap sku = new CatalogSkuPersistenceBootstrap(jdbc,
-                    new CatalogFamilySkuMappingLoader(mapper), new CatalogVariantMappingLoader(mapper), new com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory(jdbc));
-            SystemWorkflowActorBootstrap actor = new SystemWorkflowActorBootstrap(jdbc);
+                    new CatalogFamilySkuMappingLoader(mapper), new CatalogVariantMappingLoader(mapper), workspaces);
+            SystemWorkflowActorBootstrap actor = new SystemWorkflowActorBootstrap(jdbc, scopeReader);
 
             transaction.executeWithoutResult(status -> catalog.importDeterministicSeed());
             transaction.executeWithoutResult(status -> sku.reconcile());
@@ -634,7 +653,7 @@ class RlsRuntimeDatabaseIsolationIT {
 
     @Test
     void pooledRuntimeConnectionClearsScopeBeforeTheSameConnectionIsReused() throws Exception {
-        int workspaceCountBeforeFixture = countRuntimeRowsWithCrossScopeScan("tenant_management.workspace");
+        int workspaceCountBeforeFixture = scanWorkspaceScopesWithDedicatedReader().size();
         Fixture fixture = insertFixture();
         RlsRequestScope.clear();
         try (HikariDataSource pool = runtimePool()) {
@@ -678,14 +697,16 @@ class RlsRuntimeDatabaseIsolationIT {
             RlsRequestScope.enableCrossScopeWorkspaceScan();
             int scanBackendPid = scopedJdbc.queryForObject("select pg_backend_pid()", Integer.class);
             assertThat(scopedJdbc.queryForObject("select count(*) from tenant_management.workspace", Integer.class))
-                    .as("named startup and maintenance paths can enumerate workspace scopes")
-                    .isEqualTo(workspaceCountBeforeFixture + fixture.rows().size());
+                    .as("the runtime login cannot enumerate workspaces even when a scan flag is present")
+                    .isZero();
             RlsRequestScope.clearCrossScopeWorkspaceScan();
             assertThat(scopedJdbc.queryForObject("select pg_backend_pid()", Integer.class)).isEqualTo(scanBackendPid);
             assertThat(scopedJdbc.queryForObject("select current_setting('app.cross_scope_workspace_scan', true)", String.class))
                     .as("cross-scope worker enumeration is reset before pooled connection reuse").isEmpty();
             assertThat(scopedJdbc.queryForObject("select count(*) from tenant_management.workspace", Integer.class))
                     .as("a reused connection without tenant or worker scope sees no workspace identities").isZero();
+            assertThat(scanWorkspaceScopesWithDedicatedReader()).hasSize(
+                    workspaceCountBeforeFixture + fixture.rows().size());
         } finally {
             RlsRequestScope.clear();
             deleteFixture(fixture);
@@ -1093,8 +1114,8 @@ class RlsRuntimeDatabaseIsolationIT {
                         workspaceId, tenantId, "RLS worker workspace", "rls-worker-workspace-" + workspaceId, now, now);
                 execute(connection, "insert into iam.user_account(id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',?,?,0)",
                         userId, "rls-worker-" + userId + "@example.test", "rls-worker-" + userId + "@example.test", "rls-worker-" + userId, "rls-worker-" + userId, "RLS worker", "es", now, now);
-                execute(connection, "insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)",
-                        membershipId, workspaceId, userId, now, now);
+                execute(connection, "insert into tenant_management.workspace_membership(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'INTERNAL','ACTIVE',?,?,0)",
+                        membershipId, tenantId, workspaceId, userId, now, now);
                 execute(connection, "insert into notifications.push_subscription(id,tenant_id,workspace_id,recipient_membership_id,user_id,surface,installation_id,platform,provider_token_hash,status,created_at,updated_at,last_seen_at,version) values (?,?,?,?,?,'PLATFORM',?,'IOS',?,'ENABLED',?,?,?,0)",
                         pushSubscriptionId, tenantId, workspaceId, membershipId, userId, "rls-installation-" + pushSubscriptionId,
                         "a".repeat(64), now, now, now);
@@ -1231,15 +1252,15 @@ class RlsRuntimeDatabaseIsolationIT {
                 .containsExactlyInAnyOrder("logistics.customer_instruction_revision", "logistics.customer_instruction_set", "logistics.delivery_active_attempt", "logistics.delivery_execution_disposition", "logistics.delivery_execution_hold", "logistics.delivery_execution_temperature_evidence", "logistics.delivery_instruction_acknowledgement", "logistics.delivery_instruction_revision", "logistics.delivery_load", "logistics.delivery_load_command_idempotency", "logistics.delivery_load_event", "logistics.delivery_load_stop", "logistics.dispatch_handoff_identity", "logistics.driver_coordinate", "logistics.driver_delivery_incident", "logistics.driver_delivery_incident_evidence", "logistics.driver_workday", "logistics.driver_workday_event", "logistics.fulfillment_dispatch_window_plan", "logistics.fulfillment_driver_assignment", "logistics.fulfillment_handoff_evidence", "logistics.fulfillment_outgoing_discrepancy_resolution", "logistics.fulfillment_outgoing_goods_check", "logistics.fulfillment_outgoing_goods_check_line", "logistics.operational_exception_coordination_transition", "sales.field_visit_evidence", "warehouse.inbound_receiving_discrepancy_case", "warehouse.inventory_cycle_count", "warehouse.inventory_cycle_count_correction", "warehouse.inventory_transfer_receipt_observation", "warehouse.physical_allocation_substitution_request", "tenant_management.warehouse_access_grant", "business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
                         "notifications.inbox_item", "notifications.push_subscription", "notifications.push_subscription_command_idempotency", "notifications.push_delivery_attempt", "notifications.push_delivery_claim",
                         "payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.reconciliation_refund_idempotency", "payments.receivable", "payments.receivable_allocation",
-                        "warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation", "warehouse.physical_allocation", "warehouse.physical_allocation_line", "warehouse.physical_allocation_event", "warehouse.physical_allocation_command_idempotency",
+                        "warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.inventory_reservation_allocation", "warehouse.inventory_reservation_line", "warehouse.reservation_shortage", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation", "warehouse.physical_allocation", "warehouse.physical_allocation_line", "warehouse.physical_allocation_event", "warehouse.physical_allocation_command_idempotency",
                         "logistics.dispatch_number_counter", "logistics.dispatch_order", "logistics.dispatch_event", "logistics.command_idempotency", "logistics.proof_of_delivery", "logistics.temperature_reading", "logistics.delivery_incident", "logistics.operational_handoff_note", "logistics.delivery_attempt", "logistics.delivery_attempt_line", "logistics.continuation_delivery", "logistics.continuation_delivery_line", "logistics.fulfillment", "logistics.fulfillment_line", "logistics.fulfillment_command_idempotency", "logistics.fulfillment_event", "logistics.picking_result", "logistics.picking_result_line", "logistics.picking_discrepancy", "logistics.picking_discrepancy_resolution", "logistics.delivery", "logistics.delivery_command_idempotency", "logistics.delivery_assignment", "logistics.delivery_quantity_outcome", "logistics.delivery_event", "logistics.temperature_evidence", "logistics.temperature_excursion", "logistics.proof_of_delivery_addendum", "logistics.delivery_handoff_token", "logistics.buyer_receipt_fact", "logistics.operational_exception_case", "logistics.operational_exception_transition", "logistics.stock_temperature_exception",
                         "warehouse.safety_stock_policy", "warehouse.inventory_transfer", "warehouse.inventory_transfer_history", "warehouse.inventory_backing", "warehouse.inventory_backing_line", "warehouse.inventory_backing_position", "payments.financial_adjustment", "payments.financial_ledger_entry", "payments.refund_credit_obligation", "payments.receivable_application",
-                        "sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.commercial_commitment", "sales.commercial_commitment_line", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_event", "sales.purchase_request_material_change", "sales.idempotency_record", "sales.idempotency_response", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order", "sales.sales_order_event",
-                        "audit.event",
+                        "sales.client_account", "sales.client_account_address", "sales.client_account_membership", "sales.commercial_commitment", "sales.commercial_commitment_line", "sales.manual_sales_order_draft", "sales.manual_sales_order_draft_idempotency", "sales.manual_sales_order_draft_line", "sales.purchase_request", "sales.purchase_request_event", "sales.purchase_request_line", "sales.purchase_request_material_change", "sales.idempotency_record", "sales.idempotency_response", "sales.purchase_request_draft", "sales.purchase_request_draft_destination", "sales.purchase_request_draft_idempotency", "sales.purchase_request_draft_line", "sales.purchase_request_draft_route", "sales.purchase_request_draft_warehouse_selection", "sales.sales_order", "sales.sales_order_event", "sales.sales_order_line",
+                        "audit.event", "integration.change_event", "integration.inbox_event",
                         "catalog_management.brand", "catalog_management.category", "catalog_management.command_idempotency", "catalog_management.customer_terms", "catalog_management.price_list", "catalog_management.price_list_item", "catalog_management.product", "catalog_management.product_asset_reference", "catalog_management.product_family", "catalog_management.product_presentation", "catalog_management.product_price", "catalog_management.product_variant", "catalog_management.product_visibility", "catalog_management.promotion", "catalog_management.promotion_category", "catalog_management.promotion_client_account", "catalog_management.promotion_product", "catalog_management.promotion_rule", "catalog_management.promotion_sku", "catalog_management.seed_import_history", "catalog_management.sellable_sku", "catalog_management.sku_price",
                         "sales.manual_order_idempotency", "sales.sales_order_sequence",
-                        "tenant_management.custom_field_definition", "tenant_management.membership_admin_event", "tenant_management.membership_authorization_state", "tenant_management.membership_role_assignment", "tenant_management.membership_role_definition", "tenant_management.organization_invitation", "tenant_management.organization_registration", "tenant_management.role_definition", "tenant_management.workspace_creation_idempotency",
-                        "tenant_management.organization_invitation_idempotency", "tenant_management.organization_settings", "tenant_management.reference_plan_assignment", "tenant_management.regional_settings", "tenant_management.tenant_business_database_binding", "tenant_management.tenant_security_settings", "tenant_management.unit_preferences", "tenant_management.tenant", "tenant_management.workspace",
+                        "tenant_management.custom_field_definition", "tenant_management.membership_admin_event", "tenant_management.membership_authorization_state", "tenant_management.membership_role_assignment", "tenant_management.membership_role_definition", "tenant_management.notification_preference", "tenant_management.operational_settings", "tenant_management.organization_invitation", "tenant_management.organization_invitation_role", "tenant_management.organization_registration", "tenant_management.role_definition", "tenant_management.role_permission", "tenant_management.workspace_creation_idempotency",
+                        "tenant_management.organization_invitation_idempotency", "tenant_management.organization_settings", "tenant_management.reference_plan_assignment", "tenant_management.regional_settings", "tenant_management.tenant_business_database_binding", "tenant_management.tenant_security_settings", "tenant_management.unit_preferences", "tenant_management.tenant", "tenant_management.workspace", "tenant_management.workspace_membership", "tenant_management.workspace_settings",
                         "iam.internal_support_audit_event", "iam.internal_support_request",
                         "payments.buyer_wallet_account", "payments.buyer_wallet_ledger_entry",
                         "payments.buyer_wallet_reservation", "payments.buyer_wallet_reservation_event",
@@ -1335,13 +1356,15 @@ class RlsRuntimeDatabaseIsolationIT {
                         workspaceId, tenantId, "RLS V1 workspace " + label, "rls-v1-workspace-" + workspaceId, now, now);
                 execute(connection, "insert into iam.user_account(id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',?,?,0)",
                         userId, "rls-v1-" + userId + "@example.test", "rls-v1-" + userId + "@example.test", "rls-v1-" + userId, "rls-v1-" + userId, "RLS V1 Test", "es", now, now);
-                execute(connection, "insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)",
-                        membershipId, workspaceId, userId, now, now);
+                execute(connection, "insert into tenant_management.workspace_membership(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'INTERNAL','ACTIVE',?,?,0)",
+                        membershipId, tenantId, workspaceId, userId, now, now);
                 execute(connection, "insert into catalog_management.category(id,tenant_id,workspace_id,slug,name,status,version,created_at,updated_at) values (?,?,?,?,'RLS V1 category','ACTIVE',0,?,?)",
                         categoryId, tenantId, workspaceId, "rls-v1-" + label, now, now);
                 execute(connection, "insert into sales.client_account(id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         accountId, tenantId, workspaceId, "RLSV1-" + label + "-" + accountId.toString().substring(0, 8),
-                        "RLS V1 business " + label, "RLS V1 commercial " + label, "PE", "RUC", "RLSV1" + accountId.toString().replace("-", "").substring(0, 10),
+                        "RLS V1 business " + label, "RLS V1 commercial " + label, "PE", "RUC",
+                        "20" + String.format(java.util.Locale.ROOT, "%09d",
+                                Math.floorMod(accountId.getMostSignificantBits(), 1_000_000_000L)),
                         "STANDARD", "RLS V1 Test", "rls-v1-" + label + "@example.test", "+51000000000", "STANDARD", "CREDIT", "ACTIVE", now, now);
                 execute(connection, "insert into sales.client_account_address(id,tenant_id,workspace_id,client_account_id,label,recipient_name,address_line,source,default_address,status,created_at,updated_at) values (?,?,?,?,?,?,?,'MANUAL',true,'ACTIVE',?,?)",
                         addressId, tenantId, workspaceId, accountId, "RLS V1 address " + label, "RLS V1 recipient", "RLS V1 address line", now, now);
@@ -1512,10 +1535,30 @@ class RlsRuntimeDatabaseIsolationIT {
         }
     }
 
-    private static int countRuntimeRowsWithCrossScopeScan(String tableName) throws SQLException {
-        try (Connection connection = openRuntimeConnection()) {
-            setSessionSetting(connection, "app.cross_scope_workspace_scan", "true");
-            return count(connection, "select count(*) from " + tableName);
+    private static List<WorkspaceDirectory.Scope> scanWorkspaceScopesWithDedicatedReader() {
+        List<WorkspaceDirectory.Scope> scopes = new ArrayList<>();
+        UUID afterTenant = null;
+        UUID afterWorkspace = null;
+        RlsRequestScope.clear();
+        try (HikariDataSource pool = workspaceScopeReaderPool()) {
+            WorkspaceScopeReader reader = new JdbcWorkspaceScopeReader(
+                    () -> RlsScopedDataSource.forCurrentCentralScope(pool));
+            while (true) {
+                List<WorkspaceDirectory.Scope> page;
+                RlsRequestScope.enableCrossScopeWorkspaceScan();
+                try {
+                    page = reader.scanAfter(afterTenant, afterWorkspace, 100);
+                } finally {
+                    RlsRequestScope.clearCrossScopeWorkspaceScan();
+                }
+                scopes.addAll(page);
+                if (page.size() < 100) return scopes;
+                WorkspaceDirectory.Scope last = page.getLast();
+                afterTenant = last.tenantId();
+                afterWorkspace = last.workspaceId();
+            }
+        } finally {
+            RlsRequestScope.clear();
         }
     }
 
