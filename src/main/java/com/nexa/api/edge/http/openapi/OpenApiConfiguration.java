@@ -172,14 +172,18 @@ public class OpenApiConfiguration {
 		return openAPI -> {
 			Map<String, Schema> schemas = openAPI.getComponents() == null ? null : openAPI.getComponents().getSchemas();
 			if (schemas == null) return;
-			for (String response : List.of("CatalogItemSummaryResponse", "CatalogItemDetailResponse")) {
+			Map<String, List<String>> nullableProperties = Map.of(
+					"CatalogItemSummaryResponse", List.of("basePrice", "currentOfferPrice"),
+					"CatalogItemDetailResponse", List.of("basePrice", "currentOfferPrice"),
+					"BuyerCatalogFavoriteResponse", List.of("currentOffer"));
+			nullableProperties.forEach((response, properties) -> {
 				Schema<?> schema = schemas.get(response);
-				if (schema == null) continue;
+				if (schema == null) return;
 				if (schema.getProperties() == null) throw new IllegalStateException("Catalog response has no properties: " + response);
-				for (String property : List.of("basePrice", "currentOfferPrice")) {
+				for (String property : properties) {
 					Object existing = schema.getProperties().get(property);
 					if (!(existing instanceof Schema<?> reference) || reference.get$ref() == null) {
-						throw new IllegalStateException("Catalog price schema reference is unavailable: "
+						throw new IllegalStateException("Nullable response schema reference is unavailable: "
 								+ response + "." + property);
 					}
 					List<Schema> alternatives = new java.util.ArrayList<>();
@@ -187,7 +191,7 @@ public class OpenApiConfiguration {
 					alternatives.add(new JsonSchema().types(java.util.Set.of("null")));
 					schema.addProperty(property, new ComposedSchema().anyOf(alternatives));
 				}
-			}
+			});
 		};
 	}
 
