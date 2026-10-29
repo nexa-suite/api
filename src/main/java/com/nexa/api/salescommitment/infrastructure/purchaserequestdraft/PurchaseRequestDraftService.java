@@ -9,9 +9,11 @@ import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAdd
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAddressReference;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftDestinationNotGeocodedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftInvariantException;
+import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftWarehouseSelectionUnavailableException;
 import com.nexa.api.salescommitment.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
 import com.nexa.api.customerbuyerrelationships.contract.Address;
 import com.nexa.api.salescommitment.domain.model.delivery.DeliveryAddressSnapshot;
@@ -315,10 +317,22 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     }
     private WarehouseRow selectWarehouse(CurrentAccessContext context, UUID draftId) {
         Map<UUID, BigDecimal> requested = jdbc.query("select sku_id,quantity from sales.purchase_request_draft_line where tenant_id=? and workspace_id=? and draft_id=? order by sku_id", (rs, n) -> Map.entry(rs.getObject(1, UUID.class), rs.getBigDecimal(2)), tenant(context), workspace(context), draftId).stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        if (requested.isEmpty()) throw new IllegalStateException("Products must be complete before warehouse selection");
-        return warehouses.findFulfillable(tenant(context), workspace(context), requested)
-                .map(PurchaseRequestDraftService::warehouseRow)
-                .orElseThrow(() -> new IllegalStateException("Warehouse serviceability conflict: no single warehouse can fulfill SKUs " + requested.keySet()));
+        if (requested.isEmpty()) throw new PurchaseRequestDraftInvariantException(
+                "Products must be complete before warehouse selection");
+        var selected = warehouses.findFulfillable(tenant(context), workspace(context), requested);
+        if (selected.isPresent()) return warehouseRow(selected.get());
+        Map<UUID, BigDecimal> totalAvailability = warehouses.availability(tenant(context), workspace(context),
+                requested.keySet().stream().toList());
+        throw warehouseSelectionFailure(requested, totalAvailability);
+    }
+
+    static RuntimeException warehouseSelectionFailure(Map<UUID, BigDecimal> requested,
+            Map<UUID, BigDecimal> totalAvailability) {
+        boolean aggregateShortage = requested.entrySet().stream().anyMatch(entry ->
+                totalAvailability.getOrDefault(entry.getKey(), BigDecimal.ZERO).compareTo(entry.getValue()) < 0);
+        return aggregateShortage
+                ? new WarehouseOperationException("INSUFFICIENT_SELLABLE_AVAILABILITY", false)
+                : new PurchaseRequestDraftWarehouseSelectionUnavailableException();
     }
 
     private WarehouseSnapshot warehouseSnapshot(WarehouseRow row, Instant selectedAt) {

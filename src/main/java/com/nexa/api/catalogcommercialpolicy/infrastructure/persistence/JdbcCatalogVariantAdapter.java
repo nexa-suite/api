@@ -22,10 +22,12 @@ import java.util.UUID;
 public class JdbcCatalogVariantAdapter implements CatalogVariantPort {
     private final JdbcTemplate jdbc;
     private final CatalogSkuPort skus;
+    private final CatalogCommandIdempotencySupport idempotency;
 
     public JdbcCatalogVariantAdapter(JdbcTemplate jdbc, CatalogSkuPort skus) {
         this.jdbc = jdbc;
         this.skus = skus;
+        this.idempotency = new CatalogCommandIdempotencySupport(jdbc);
     }
 
     @Override
@@ -34,7 +36,7 @@ public class JdbcCatalogVariantAdapter implements CatalogVariantPort {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         String term = like(search);
-        String where = "v.tenant_id=? and v.workspace_id=? and (? is null or v.family_id=?) and (? is null or lower(v.name) like lower(?) or lower(v.variant_code) like lower(?) or lower(f.name) like lower(?))";
+        String where = "v.tenant_id=? and v.workspace_id=? and (cast(? as uuid) is null or v.family_id=?) and (cast(? as text) is null or lower(v.name) like lower(?) or lower(v.variant_code) like lower(?) or lower(f.name) like lower(?))";
         Object[] args = {scope.tenantId(), scope.workspaceId(), familyId, familyId, term, term, term, term};
         long total = jdbc.queryForObject("select count(*) from catalog_management.product_variant v join catalog_management.product_family f on f.tenant_id=v.tenant_id and f.workspace_id=v.workspace_id and f.id=v.family_id where " + where, Long.class, args);
         List<CatalogVariantModels.VariantView> items = jdbc.query(sql(where) + " order by v.name,v.id limit ? offset ?", (rs, row) -> variant(rs), concat(args, safeSize, safePage * safeSize));
@@ -52,13 +54,23 @@ public class JdbcCatalogVariantAdapter implements CatalogVariantPort {
     @Override
     @Transactional
     public CatalogVariantModels.VariantView insert(CatalogScope scope, UUID familyId, String code, String name, String description) {
-        requireFamily(scope, familyId);
+        return insert(scope, familyId, code, name, description, null);
+    }
+
+    @Override
+    @Transactional
+    public CatalogVariantModels.VariantView insert(CatalogScope scope, UUID familyId, String code, String name, String description, String idempotencyKey) {
         String normalizedCode = required(code, 80, "Variant code");
         String normalizedName = required(name, 200, "Variant name");
-        UUID id = UUID.randomUUID();
+        String normalizedDescription = optional(description, 4000);
+        UUID candidate = UUID.randomUUID();
+        UUID id = idempotency.reserve(scope, "variant:create", idempotencyKey,
+                CatalogCommandIdempotencySupport.structuredHash(familyId, normalizedCode, normalizedName, normalizedDescription), candidate);
+        if (!id.equals(candidate)) return variant(scope, id);
+        requireFamily(scope, familyId);
         Instant now = Instant.now();
         jdbc.update("insert into catalog_management.product_variant (id,tenant_id,workspace_id,family_id,variant_code,name,description,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,'DRAFT',0,?,?)",
-                id, scope.tenantId(), scope.workspaceId(), familyId, normalizedCode, normalizedName, optional(description, 4000), Timestamp.from(now), Timestamp.from(now));
+                id, scope.tenantId(), scope.workspaceId(), familyId, normalizedCode, normalizedName, normalizedDescription, Timestamp.from(now), Timestamp.from(now));
         return variant(scope, id);
     }
 

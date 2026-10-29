@@ -129,7 +129,7 @@ final class WarehousePersistenceSupport {
                 rs.getString("catalog_item_id"), rs.getString("batch_number"),
                 rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
                 onHand, reserved, available, rs.getString("unit"),
-                status, rs.getLong("version"), rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString());
+                status, rs.getLong("version"), rs.getObject("sku_id") == null ? null : rs.getObject("sku_id").toString(), rs.getObject("production_date", LocalDate.class));
     }
 
     static WarehouseOperationsService.MovementSummary movement(ResultSet rs) throws java.sql.SQLException {

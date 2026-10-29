@@ -17,7 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.core.io.InputStreamResource;
 
 import java.io.IOException;
 import java.net.URI;
@@ -55,7 +55,7 @@ public final class BusinessDocumentController {
     public ResponseEntity<BusinessDocumentModels.GenerationRequestView> replace(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId, @RequestHeader("Idempotency-Key") String key) { var value = service.replace(context, documentId, key); return ResponseEntity.accepted().location(URI.create("/api/v1/business-documents/" + value.documentId())).body(value); }
     @GetMapping("/business-documents/{documentId}/downloads")
     @Operation(operationId = "downloadBusinessDocument")
-    public ResponseEntity<StreamingResponseBody> download(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId) { return stream(service.download(context, documentId)); }
+    public ResponseEntity<InputStreamResource> download(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId) { return stream(service.download(context, documentId)); }
 
     @PostMapping("/business-document-evidence/requests")
     @Operation(operationId = "requestBusinessDocumentEvidence")
@@ -95,20 +95,20 @@ public final class BusinessDocumentController {
 
     @GetMapping("/business-document-evidence/{evidenceId}/downloads")
     @Operation(operationId = "downloadBusinessDocumentEvidence")
-    public ResponseEntity<StreamingResponseBody> downloadEvidence(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID evidenceId) { return stream(service.downloadEvidence(context, evidenceId)); }
+    public ResponseEntity<InputStreamResource> downloadEvidence(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID evidenceId) { return stream(service.downloadEvidence(context, evidenceId)); }
 
     @DeleteMapping("/business-document-evidence/{evidenceId}")
     @Operation(operationId = "deleteBusinessDocumentEvidence")
     public ResponseEntity<Void> deleteEvidence(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID evidenceId) { service.deleteEvidence(context, evidenceId); return ResponseEntity.noContent().build(); }
 
-    private static ResponseEntity<StreamingResponseBody> stream(BusinessDocumentModels.Download value) {
+    private static ResponseEntity<InputStreamResource> stream(BusinessDocumentModels.Download value) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(parseContentType(value.contentType()));
         headers.setContentLength(value.byteSize());
         headers.setContentDisposition(ContentDisposition.attachment().filename(value.filename(), StandardCharsets.UTF_8).build());
         headers.set("X-Content-SHA256", value.checksumSha256());
         headers.setCacheControl("private, no-store");
-        StreamingResponseBody body = output -> { try (var input = value.content()) { input.transferTo(output); } };
+        InputStreamResource body = new InputStreamResource(value.content());
         return new ResponseEntity<>(body, headers, org.springframework.http.HttpStatus.OK);
     }
 

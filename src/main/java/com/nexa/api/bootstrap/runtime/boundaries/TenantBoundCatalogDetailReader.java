@@ -41,6 +41,14 @@ public final class TenantBoundCatalogDetailReader implements TenantCatalogHttpRe
 				"Tenant Catalog Availability adapter factory is required");
 	}
 
+    @Override
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CurrentAccessContext context, String kind, String search, int page, int size) {
+        Objects.requireNonNull(context, "Verified access context is required");
+        catalogDetails.requireCatalogRead();
+        return router.inTransaction(context, jdbc -> catalogReadQuery(context, jdbc)
+                .filterOptions(context.tenantId().value(), context.workspaceId().value(), kind, search, page, size));
+    }
+
 	@Override
 	public CatalogItemDetail getByCatalogItemId(CurrentAccessContext accessContext, String catalogItemId) {
 		Objects.requireNonNull(accessContext, "Verified access context is required");

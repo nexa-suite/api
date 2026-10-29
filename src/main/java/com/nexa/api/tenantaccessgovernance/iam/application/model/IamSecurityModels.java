@@ -12,9 +12,13 @@ public final class IamSecurityModels {
             String correlationId, String traceId) {}
 
     public record Profile(UUID userId, String email, String displayName, String phone, String preferredLanguage,
-            String timezone, long version) {}
+            String timezone, String firstName, String lastName, String documentType, String documentNumber,
+            String documentCountryCode, long version) {}
 
-    public record ProfilePatch(String displayName, String phone, String preferredLanguage, String timezone, long version) {}
+    public record ProfilePatch(String displayName, String phone, String preferredLanguage, String timezone,
+            String firstName, boolean firstNameProvided, String lastName, boolean lastNameProvided,
+            String documentType, boolean documentTypeProvided, String documentNumber, boolean documentNumberProvided,
+            String documentCountryCode, boolean documentCountryCodeProvided, long version) {}
 
     public record Session(UUID id, String surface, Instant createdAt, Instant lastSeenAt, Instant expiresAt,
             boolean current, String deviceLabel, String coarseIp) {}

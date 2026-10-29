@@ -75,7 +75,7 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
                 dependencies.customerAccounts(), dependencies.changeFeed(), commitmentPort,
                 dependencies.clock(), dependencies.objectMapper(),
                 new JdbcMaterialChangePersistenceAdapter(jdbc, purchaseRequestPersistence,
-                        dependencies.objectMapper()), dependencies.walletTenderEnabled());
+                        dependencies.objectMapper(), dependencies.sellableSkus()), dependencies.walletTenderEnabled());
         var drafts = new PurchaseRequestDraftService(jdbc, dependencies.objectMapper(), commitmentPort,
                 dependencies.maps(), dependencies.customerAccounts(), dependencies.customerAddresses(),
                 dependencies.creditExposure(), dependencies.sellableSkus(), dependencies.warehouses(),

@@ -3,6 +3,7 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.EventView;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.Page;
+import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.ReceiptView;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
@@ -61,6 +62,15 @@ public final class BuyerDeliveryTrackingController {
                 .map(event -> new EventResponse(event.type(), event.occurredAt())).toList();
     }
 
+    @GetMapping("/{deliveryId}/buyer-receipts")
+    @Operation(operationId = "listBuyerDeliveryReceipts")
+    public List<ReceiptResponse> receipts(@RequestAttribute(ACCESS) CurrentAccessContext context,
+                                          @PathVariable UUID deliveryId) {
+        return requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.none(),
+                composition -> composition.buyerTracking().receipts(context, deliveryId)).stream()
+                .map(BuyerDeliveryTrackingController::receiptResponse).toList();
+    }
+
     private static PageResponse<DeliveryResponse> page(Page<DeliveryView> page) {
         return new PageResponse<>(page.items().stream().map(BuyerDeliveryTrackingController::response).toList(),
                 page.page(), page.size(), page.total());
@@ -72,6 +82,12 @@ public final class BuyerDeliveryTrackingController {
                 value.version(), value.createdAt(), value.updatedAt());
     }
 
+    private static ReceiptResponse receiptResponse(ReceiptView value) {
+        return new ReceiptResponse(value.id(), value.deliveryId(), value.attemptId(), value.decision(),
+                value.driverDeliveredQuantity(), value.acceptedQuantity(), value.reason(), value.occurredAt(),
+                value.recordedByMembershipId());
+    }
+
     private static String etag(long version) { return "\"" + version + "\""; }
 
     public record PageResponse<T>(List<T> items, int page, int size, long total) { }
@@ -80,4 +96,8 @@ public final class BuyerDeliveryTrackingController {
                                    String proofOfDeliveryStatus, long version, Instant createdAt,
                                    Instant updatedAt) { }
     public record EventResponse(String type, Instant occurredAt) { }
+    public record ReceiptResponse(String id, String deliveryId, String attemptId, String decision,
+                                  java.math.BigDecimal driverDeliveredQuantity,
+                                  java.math.BigDecimal acceptedQuantity, String reason, Instant occurredAt,
+                                  String recordedByMembershipId) { }
 }

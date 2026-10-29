@@ -21,9 +21,11 @@ import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -48,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** Persistence adapter for business documents, storage boundary and bounded generation worker. */
@@ -68,15 +71,18 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private final DocumentProjectionLookupPort projections;
     private final CustomerAccountQuery customerAccounts;
     private final WorkspaceDirectory workspaces;
+    private final WarehouseObjectAccess warehouseAccess;
     private final TransactionTemplate transactionTemplate;
     private final JdbcBusinessDocumentCommands paymentReceiptCommands;
 
     public BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner, DocumentRendererPort renderer,
             DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections,
             CustomerAccountQuery customerAccounts, WorkspaceDirectory workspaces,
-            PlatformTransactionManager transactionManager, CanonicalOutboxPort canonicalOutbox) {
+            WarehouseObjectAccess warehouseAccess, PlatformTransactionManager transactionManager,
+            CanonicalOutboxPort canonicalOutbox) {
         this.jdbc = jdbc; this.storage = storage; this.scanner = scanner; this.renderer = renderer; this.subjects = subjects; this.projections = projections;
         this.customerAccounts = customerAccounts; this.workspaces = workspaces;
+        this.warehouseAccess = warehouseAccess;
         this.canonicalOutbox = canonicalOutbox;
         this.paymentReceiptCommands = new JdbcBusinessDocumentCommands(jdbc, canonicalOutbox);
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
@@ -96,8 +102,10 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
             throw new IllegalArgumentException("Issued documents are unavailable for receiving discrepancies");
         }
         if (!renderer.supports(type, output)) throw new IllegalArgumentException("Document format is not supported for this document type");
-        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
-                context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
+        DocumentSubjectSnapshot snapshot = subject == DocumentSubjectType.WAREHOUSE
+                ? requireAccessibleWarehouse(context, subjectId)
+                : subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
         if (!snapshot.subjectExists()) throw new IllegalArgumentException("Document subject not found");
         authorizeClientScope(context, snapshot.clientAccountId());
         String requestPayload = subject.name() + subjectId + type.name() + output.name();
@@ -143,6 +151,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         if (type != null) { whereBuilder.append(" and d.document_type=?"); params.add(type); }
         if (state != null) { whereBuilder.append(" and d.status=?"); params.add(state); }
         appendBuyerAccountFilter(whereBuilder, params, context, "d");
+        appendWarehouseGrantFilter(whereBuilder, params, context, "d");
         String where = whereBuilder.toString();
         long total = jdbc.queryForObject("select count(*) from business_documents.business_document d where " + where, Long.class, params.toArray());
         params.add(safeSize); params.add(safePage * safeSize);
@@ -153,7 +162,14 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     @Transactional(readOnly = true)
     public BusinessDocumentModels.DocumentView get(CurrentAccessContext context, UUID documentId) {
         read(context);
-        return jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().filter(value -> authorizedDocument(context, value.clientAccountId())).findFirst().orElseThrow(() -> new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document"));
+        BusinessDocumentModels.DocumentView document = jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where d.tenant_id=? and d.workspace_id=? and d.id=?", (rs, n) -> documentView(rs), tenant(context), workspace(context), documentId).stream().findFirst().orElseThrow(() -> new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document"));
+        if (!authorizedDocument(context, document.clientAccountId())) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document");
+        }
+        if (DocumentSubjectType.WAREHOUSE.name().equals(document.subjectType())) {
+            requireAccessibleWarehouse(context, uuid(document.subjectId()));
+        }
+        return document;
     }
 
     @Transactional(readOnly = true)
@@ -207,15 +223,38 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     @Transactional
     public BusinessDocumentModels.EvidenceView requestEvidence(CurrentAccessContext context, String subjectType, UUID subjectId,
             String originalFilename, String declaredContentType, String idempotencyKey) {
-        context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
+        DocumentSubjectType subject = parseSubject(subjectType);
+        requireEvidenceUploadPermission(context, subject);
         requireIdempotencyKey(idempotencyKey);
         String filename = sanitizedRequiredFilename(originalFilename);
         String contentType = requiredContentType(declaredContentType);
-        DocumentSubjectType subject = parseSubject(subjectType);
-        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
-                context.membershipId().value().toString(), new DocumentSubjectReference(subject, subjectId.toString()));
-        if (!snapshot.subjectExists()) throw new IllegalArgumentException("Evidence subject not found");
-        authorizeClientScope(context, snapshot.clientAccountId());
+        DocumentSubjectReference reference = new DocumentSubjectReference(subject, subjectId.toString());
+        DocumentSubjectSnapshot snapshot;
+        if (subject == DocumentSubjectType.WAREHOUSE) {
+            snapshot = requireAccessibleWarehouse(context, subjectId);
+        } else if (subject == DocumentSubjectType.PROOF_OF_DELIVERY) {
+            snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                    context.membershipId().value().toString(), reference);
+            if (!snapshot.subjectExists()) {
+                context.requirePermission(PermissionKey.DISPATCH_START_ROUTE);
+                snapshot = subjects.lookupForEvidence(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString(), context.userId().value().toString(), reference);
+            }
+        } else {
+            snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                    context.membershipId().value().toString(), reference);
+        }
+        if (!snapshot.subjectExists()) {
+            if (subject == DocumentSubjectType.WAREHOUSE) {
+                throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+            }
+            throw new IllegalArgumentException("Evidence subject not found");
+        }
+        if (subject == DocumentSubjectType.BUYER_RECEIPT) {
+            snapshot = requireAccessibleBuyerReceipt(context, subjectId, uuid(snapshot.clientAccountId()));
+        } else {
+            authorizeClientScope(context, snapshot.clientAccountId());
+        }
         String requestFingerprint = evidenceRequestFingerprint(tenant(context), workspace(context), context.membershipId().value(),
                 uuid(snapshot.clientAccountId()), subject.name(), subjectId, filename, contentType);
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (rs, n) -> rs.getObject(1),
@@ -245,7 +284,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
 
     public BusinessDocumentModels.EvidenceView completeEvidence(CurrentAccessContext context, UUID evidenceId, String originalFilename,
             String declaredContentType, InputStream content, long contentLength, String idempotencyKey) {
-        context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
+        requireEvidenceUploadPermission(context, null);
         requireIdempotencyKey(idempotencyKey);
         String filename = sanitizedRequiredFilename(originalFilename);
         String contentType = requiredContentType(declaredContentType);
@@ -326,13 +365,24 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         if (requestedType == DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY) {
             if (subjectId == null) throw new IllegalArgumentException("Receiving evidence requires a case subject");
             requireAccessibleInboundSubject(context, subjectId);
+        } else if (requestedType == DocumentSubjectType.BUYER_RECEIPT) {
+            if (subjectId == null) throw new IllegalArgumentException("Buyer receipt evidence requires a receipt subject");
+            requireAccessibleBuyerReceipt(context, subjectId, null);
         } else {
             where.append(" and e.subject_type <> ?");
             params.add(DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY.name());
+            if (requestedType == null) {
+                where.append(" and e.subject_type <> ?");
+                params.add(DocumentSubjectType.BUYER_RECEIPT.name());
+            }
+        }
+        if (requestedType == DocumentSubjectType.WAREHOUSE && subjectId != null) {
+            requireAccessibleWarehouse(context, subjectId);
         }
         if (requestedType != null) { where.append(" and e.subject_type=?"); params.add(requestedType.name()); }
         if (subjectId != null) { where.append(" and e.subject_id=?"); params.add(subjectId); }
         appendBuyerAccountFilter(where, params, context, "e");
+        appendWarehouseGrantFilter(where, params, context, "e");
         long total = jdbc.queryForObject("select count(*) from business_documents.evidence_object e where " + where, Long.class, params.toArray());
         params.add(safeSize); params.add(safePage * safeSize);
         List<BusinessDocumentModels.EvidenceView> rows = jdbc.query(evidenceSelect() + " where " + where + " order by e.created_at desc,e.id limit ? offset ?",
@@ -351,16 +401,15 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     }
 
     private InputStream openStoredObject(String storageObjectKey) {
-        try {
-            return storage.open(storageObjectKey);
-        } catch (RuntimeException exception) {
-            throw new IllegalStateException("Business document download failed", exception);
-        }
+        return storage.open(storageObjectKey);
     }
 
     public void deleteEvidence(CurrentAccessContext context, UUID evidenceId) {
         context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
-        EvidenceRow row = loadEvidenceForWrite(context, evidenceId).row();
+        EvidenceRow row = loadEvidenceScoped(context, evidenceId);
+        if (parseSubject(row.subjectType()) == DocumentSubjectType.BUYER_RECEIPT) {
+            throw new AccessPolicyViolation("Evidence attached to a Buyer receipt is immutable");
+        }
         if ("DELETED".equals(row.lifecycleStatus())) return;
         int deleted = jdbc.update("update business_documents.evidence_object set lifecycle_status='DELETED',claim_token=null,lease_until=null,upload_claim_token=null,upload_lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status <> 'DELETED'",
                 tenant(context), workspace(context), evidenceId);
@@ -576,20 +625,101 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
 
     private BusinessDocumentModels.GenerationRequestView requestView(java.sql.ResultSet rs) throws java.sql.SQLException { return new BusinessDocumentModels.GenerationRequestView(rs.getObject("id", UUID.class).toString(), rs.getObject("document_id", UUID.class) == null ? null : rs.getObject("document_id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("document_type"), rs.getString("format"), rs.getString("status"), rs.getTimestamp("requested_at").toInstant(), rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()); }
     private BusinessDocumentModels.DocumentView documentView(java.sql.ResultSet rs) throws java.sql.SQLException { UUID replacementOfDocumentId = rs.getObject("replacement_of_document_id", UUID.class); return new BusinessDocumentModels.DocumentView(rs.getObject("id", UUID.class).toString(), rs.getObject("client_account_id", UUID.class) == null ? null : rs.getObject("client_account_id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("document_type"), rs.getString("document_number"), rs.getInt("version"), rs.getString("status"), rs.getString("format"), rs.getString("storage_object_key"), rs.getString("checksum_sha256"), rs.getString("content_type"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("generated_at") == null ? null : rs.getTimestamp("generated_at").toInstant(), rs.getString("failure_code"), rs.getString("failure_detail"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(), replacementOfDocumentId == null ? null : replacementOfDocumentId.toString()); }
-    private BusinessDocumentModels.EvidenceView evidenceView(java.sql.ResultSet rs) throws java.sql.SQLException { return new BusinessDocumentModels.EvidenceView(rs.getObject("id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("lifecycle_status"), rs.getString("declared_content_type"), rs.getString("detected_content_type"), rs.getString("original_filename"), rs.getString("checksum_sha256"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("scanned_at") == null ? null : rs.getTimestamp("scanned_at").toInstant(), rs.getString("failure_code"), rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant()); }
-    private BusinessDocumentModels.EvidenceView evidenceView(EvidenceRow row) { return new BusinessDocumentModels.EvidenceView(row.id().toString(), row.subjectType(), row.subjectId().toString(), row.lifecycleStatus(), row.declaredContentType(), row.detectedContentType(), row.originalFilename(), row.checksumSha256(), row.byteSize(), row.createdAt(), row.scannedAt(), row.failureCode(), row.updatedAt()); }
+    private BusinessDocumentModels.EvidenceView evidenceView(java.sql.ResultSet rs) throws java.sql.SQLException { UUID requestedBy = rs.getObject("requested_by_membership_id", UUID.class); return new BusinessDocumentModels.EvidenceView(rs.getObject("id", UUID.class).toString(), rs.getString("subject_type"), rs.getObject("subject_id", UUID.class).toString(), rs.getString("lifecycle_status"), rs.getString("declared_content_type"), rs.getString("detected_content_type"), rs.getString("original_filename"), rs.getString("checksum_sha256"), rs.getObject("byte_size", Long.class) == null ? 0 : rs.getLong("byte_size"), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("scanned_at") == null ? null : rs.getTimestamp("scanned_at").toInstant(), rs.getString("failure_code"), rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toInstant(), requestedBy == null ? null : requestedBy.toString()); }
+    private BusinessDocumentModels.EvidenceView evidenceView(EvidenceRow row) { return new BusinessDocumentModels.EvidenceView(row.id().toString(), row.subjectType(), row.subjectId().toString(), row.lifecycleStatus(), row.declaredContentType(), row.detectedContentType(), row.originalFilename(), row.checksumSha256(), row.byteSize(), row.createdAt(), row.scannedAt(), row.failureCode(), row.updatedAt(), row.requestedByMembershipId() == null ? null : row.requestedByMembershipId().toString()); }
     private String evidenceSelect() { return "select e.id,e.client_account_id,e.subject_type,e.subject_id,e.requested_by_membership_id,e.idempotency_key,e.request_fingerprint,e.upload_content_sha256,e.object_key,e.lifecycle_status,e.declared_content_type,e.detected_content_type,e.original_filename,e.checksum_sha256,e.byte_size,e.created_at,e.scanned_at,e.failure_code,e.updated_at from business_documents.evidence_object e"; }
     private EvidenceAccess loadEvidence(CurrentAccessContext context, UUID evidenceId) { context.requirePermission(PermissionKey.DOCUMENT_READ); return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
-    private EvidenceAccess loadEvidenceForWrite(CurrentAccessContext context, UUID evidenceId) { context.requirePermission(PermissionKey.DOCUMENT_UPLOAD); return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
+    private EvidenceAccess loadEvidenceForWrite(CurrentAccessContext context, UUID evidenceId) {
+        requireEvidenceUploadPermission(context, null);
+        EvidenceRow row = loadEvidenceScoped(context, evidenceId);
+        if (context.hasRole(MembershipRole.BUYER)
+                && parseSubject(row.subjectType()) != DocumentSubjectType.BUYER_RECEIPT) {
+            throw new IllegalArgumentException("Evidence not found");
+        }
+        return evidenceAccess(row);
+    }
     private EvidenceAccess loadEvidenceForDownload(CurrentAccessContext context, UUID evidenceId) { return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
     private EvidenceAccess evidenceAccess(EvidenceRow row) { return new EvidenceAccess(row, evidenceView(row)); }
     private EvidenceRow loadEvidenceScoped(CurrentAccessContext context, UUID evidenceId) {
-        EvidenceRow row = jdbc.query(evidenceSelect() + " where e.tenant_id=? and e.workspace_id=? and e.id=?", (rs, n) -> evidenceRow(rs), tenant(context), workspace(context), evidenceId)
-                .stream().filter(value -> authorizedDocument(context, value.clientAccountId() == null ? null : value.clientAccountId().toString())).findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
-        if (parseSubject(row.subjectType()) == DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY) {
+        EvidenceRow row = jdbc.query(evidenceSelect() + " where e.tenant_id=? and e.workspace_id=? and e.id=?",
+                        (rs, n) -> evidenceRow(rs), tenant(context), workspace(context), evidenceId)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
+        DocumentSubjectType subject = parseSubject(row.subjectType());
+        if (subject != DocumentSubjectType.BUYER_RECEIPT && !authorizedDocument(context,
+                row.clientAccountId() == null ? null : row.clientAccountId().toString())) {
+            throw new IllegalArgumentException("Evidence not found");
+        }
+        if (subject == DocumentSubjectType.BUYER_RECEIPT) {
+            requireAccessibleBuyerReceipt(context, row.subjectId(), row.clientAccountId());
+        } else if (subject == DocumentSubjectType.WAREHOUSE) {
+            requireAccessibleWarehouse(context, row.subjectId());
+        }
+        if (subject == DocumentSubjectType.INBOUND_RECEIVING_DISCREPANCY) {
             requireAccessibleInboundSubject(context, row.subjectId());
         }
         return row;
+    }
+
+    private DocumentSubjectSnapshot requireAccessibleBuyerReceipt(CurrentAccessContext context, UUID receiptId,
+                                                                   UUID expectedClientAccountId) {
+        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                context.membershipId().value().toString(), new DocumentSubjectReference(
+                        DocumentSubjectType.BUYER_RECEIPT, receiptId.toString()));
+        if (!snapshot.subjectExists() || snapshot.subjectType() != DocumentSubjectType.BUYER_RECEIPT
+                || !tenant(context).toString().equals(snapshot.tenantId())
+                || !workspace(context).toString().equals(snapshot.workspaceId())
+                || !receiptId.toString().equals(snapshot.subjectId())
+                || !"DISPUTED".equals(snapshot.lifecycleState())
+                || snapshot.clientAccountId() == null
+                || expectedClientAccountId != null
+                    && !expectedClientAccountId.equals(uuid(snapshot.clientAccountId()))) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        if (context.hasRole(MembershipRole.BUYER)) {
+            requireCurrentBuyerReceiptRelationship(context, snapshot.clientAccountId());
+        }
+        return snapshot;
+    }
+
+    private DocumentSubjectSnapshot requireAccessibleWarehouse(CurrentAccessContext context, UUID warehouseId) {
+        if (warehouseAccess == null || !warehouseAccess.hasActiveGrant(context, warehouseId)) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                context.membershipId().value().toString(), new DocumentSubjectReference(
+                        DocumentSubjectType.WAREHOUSE, warehouseId.toString()));
+        if (!snapshot.subjectExists() || snapshot.subjectType() != DocumentSubjectType.WAREHOUSE
+                || !tenant(context).toString().equals(snapshot.tenantId())
+                || !workspace(context).toString().equals(snapshot.workspaceId())
+                || !warehouseId.toString().equals(snapshot.subjectId())) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        return snapshot;
+    }
+
+    private void requireCurrentBuyerReceiptRelationship(CurrentAccessContext context, String clientAccountId) {
+        if (clientAccountId == null) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        boolean related = customerAccounts.findBuyerReference(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString())
+                .filter(com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference::active)
+                .map(reference -> reference.id().equals(clientAccountId))
+                .orElse(false);
+        if (!related) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+    }
+
+    private void requireEvidenceUploadPermission(CurrentAccessContext context, DocumentSubjectType subject) {
+        if (context.hasRole(MembershipRole.BUYER)) {
+            if (subject != null && subject != DocumentSubjectType.BUYER_RECEIPT) {
+                throw new AccessPolicyViolation("Buyer evidence is limited to disputed buyer receipts");
+            }
+            context.requirePermission(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH);
+            return;
+        }
+        context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
     }
 
     private void requireAccessibleInboundSubject(CurrentAccessContext context, UUID caseId) {
@@ -710,6 +840,21 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         where.append(" and ").append(alias).append(".client_account_id in (")
                 .append(String.join(",", Collections.nCopies(accountIds.size(), "?"))).append(")");
         params.addAll(accountIds);
+    }
+
+    private void appendWarehouseGrantFilter(StringBuilder where, List<Object> params,
+            CurrentAccessContext context, String alias) {
+        Set<UUID> warehouseIds = warehouseAccess == null ? Set.of()
+                : Set.copyOf(warehouseAccess.activeWarehouseIds(context));
+        where.append(" and (").append(alias).append(".subject_type <> ? or ");
+        params.add(DocumentSubjectType.WAREHOUSE.name());
+        if (warehouseIds.isEmpty()) {
+            where.append("false)");
+            return;
+        }
+        where.append(alias).append(".subject_id in (")
+                .append(String.join(",", Collections.nCopies(warehouseIds.size(), "?"))).append("))");
+        params.addAll(warehouseIds);
     }
     private DocumentSubjectType parseSubject(String value) { try { return DocumentSubjectType.valueOf(value.trim().toUpperCase(Locale.ROOT)); } catch (Exception e) { throw new IllegalArgumentException("Document subject type is invalid", e); } }
     private BusinessDocumentType parseType(String value) { try { return BusinessDocumentType.valueOf(value.trim().toUpperCase(Locale.ROOT)); } catch (Exception e) { throw new IllegalArgumentException("Document type is invalid", e); } }

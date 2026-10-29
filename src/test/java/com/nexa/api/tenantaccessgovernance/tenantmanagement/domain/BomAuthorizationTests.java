@@ -9,11 +9,22 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.*;
 
 class BomAuthorizationTests {
+    @org.junit.jupiter.api.Test
+    void catalogPreparationUsesExactProductTaxonomyAndPriceGrants() {
+        var permissions = PermissionCatalog.forBuiltInRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER);
+        org.assertj.core.api.Assertions.assertThat(permissions).contains(PermissionKey.CATALOG_READ,
+                PermissionKey.CATALOG_PRODUCT_MANAGE, PermissionKey.CATALOG_TAXONOMY_MANAGE, PermissionKey.CATALOG_PRICE_MANAGE);
+        org.assertj.core.api.Assertions.assertThat(permissions).doesNotContain(PermissionKey.TENANT_ROLE_MANAGE,
+                PermissionKey.INVENTORY_ADJUST, PermissionKey.DISPATCH_COMPLETE);
+    }
+
     @Test void bomCoordinatesWithoutUnderlyingDomainAuthorityOrLegacyAliases() {
         EffectiveAuthorization authority=EffectiveAuthorization.fixed(Set.of(MembershipRole.BUSINESS_OPERATIONS_MANAGER),3);
         assertThat(authority.permissionCodes()).containsExactlyInAnyOrder(
                 "delivery.exception.read","delivery.exception.coordinate","notification.read","notification.manage_preferences",
-                "client.credit.configuration.manage", "payment.reconcile");
+                "client.credit.configuration.manage", "payment.reconcile",
+                "catalog.read", "catalog.product.manage", "catalog.taxonomy.manage", "catalog.price.manage",
+                "catalog:read", "catalog:manage", "catalog:price:manage");
         assertThat(authority.allows(PermissionKey.CLIENT_CREDIT_CONFIGURATION_MANAGE)).isTrue();
         assertThat(authority.allows(PermissionKey.PAYMENT_RECONCILE)).isTrue();
         assertThat(authority.allows(PermissionKey.CLIENT_CREDIT_MANAGE)).isFalse();

@@ -10,6 +10,7 @@ import com.nexa.api.inventoryavailability.application.publicapi.InboundReceiving
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.payments.application.publicapi.PaymentDocumentSourceQuery;
 import com.nexa.api.salescommitment.application.publicapi.SalesDocumentSourceQuery;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
@@ -25,18 +26,20 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
     private final FulfillmentDocumentSourceQuery fulfillment;
     private final InboundReceivingDiscrepancySubjectQuery inboundDiscrepancies;
     private final WarehouseSelectionQuery warehouses;
+    private final WarehouseObjectAccess warehouseAccess;
 
     public DocumentSubjectCompositionAdapter(SalesDocumentSourceQuery sales,
             ReceivablePaymentAccess receivables, PaymentDocumentSourceQuery payments,
             FulfillmentDocumentSourceQuery fulfillment,
             InboundReceivingDiscrepancySubjectQuery inboundDiscrepancies,
-            WarehouseSelectionQuery warehouses) {
+            WarehouseSelectionQuery warehouses, WarehouseObjectAccess warehouseAccess) {
         this.sales = sales;
         this.receivables = receivables;
         this.payments = payments;
         this.fulfillment = fulfillment;
         this.inboundDiscrepancies = inboundDiscrepancies;
         this.warehouses = warehouses;
+        this.warehouseAccess = warehouseAccess;
     }
 
     @Override
@@ -55,13 +58,39 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
             case PROOF_OF_DELIVERY -> resolveProofOfDelivery(tenant, workspace, id, subject);
             case DELIVERY_INCIDENT -> resolveDeliveryIncident(tenant, workspace, id, subject);
             case INBOUND_RECEIVING_DISCREPANCY -> resolveInboundDiscrepancy(tenant, workspace, actor, id, subject);
-            case WAREHOUSE -> resolveWarehouse(tenant, workspace, id, subject);
+            case WAREHOUSE -> resolveWarehouse(tenant, workspace, actor, id, subject);
+            case BUYER_RECEIPT -> resolveBuyerReceipt(tenant, workspace, id, subject);
         };
     }
 
-    private DocumentSubjectSnapshot resolveWarehouse(UUID tenant, UUID workspace, UUID id,
+    @Override
+    public DocumentSubjectSnapshot lookupForEvidence(String tenantId, String workspaceId, String actorMembershipId,
+                                                      String actorUserId, DocumentSubjectReference subject) {
+        if (subject.type() != DocumentSubjectType.PROOF_OF_DELIVERY) {
+            return lookup(tenantId, workspaceId, actorMembershipId, subject);
+        }
+        UUID tenant = uuid(tenantId, "tenantId");
+        UUID workspace = uuid(workspaceId, "workspaceId");
+        UUID actor = uuid(actorMembershipId, "actorMembershipId");
+        UUID user = uuid(actorUserId, "actorUserId");
+        UUID id = uuid(subject.subjectId(), "subjectId");
+        return fulfillment.findPodEvidenceSubject(tenant, workspace, id, actor, user)
+                .map(value -> proofOfDeliverySnapshot(tenant, workspace, value, subject))
+                .orElseGet(() -> absent(tenant, workspace, subject));
+    }
+
+    private DocumentSubjectSnapshot resolveBuyerReceipt(UUID tenant, UUID workspace, UUID id,
+                                                        DocumentSubjectReference subject) {
+        return fulfillment.findBuyerReceipt(tenant, workspace, id)
+                .map(value -> snapshot(tenant, workspace, subject.type(), value.id().toString(),
+                        value.customerAccountId().toString(), value.decision(), true))
+                .orElseGet(() -> absent(tenant, workspace, subject));
+    }
+
+    private DocumentSubjectSnapshot resolveWarehouse(UUID tenant, UUID workspace, UUID actor, UUID id,
                                                       DocumentSubjectReference subject) {
         return warehouses.existsInScope(tenant, workspace, id)
+                && warehouseAccess.hasActiveGrant(tenant, workspace, actor, id)
                 ? snapshot(tenant, workspace, subject.type(), id.toString(), null, "WAREHOUSE", true)
                 : absent(tenant, workspace, subject);
     }
@@ -110,7 +139,12 @@ public class DocumentSubjectCompositionAdapter implements DocumentSubjectLookupP
     private DocumentSubjectSnapshot resolveProofOfDelivery(UUID tenant, UUID workspace, UUID id, DocumentSubjectReference subject) {
         var pod = fulfillment.findPod(tenant, workspace, id);
         if (pod.isEmpty()) return absent(tenant, workspace, subject);
-        var value = pod.get();
+        return proofOfDeliverySnapshot(tenant, workspace, pod.get(), subject);
+    }
+
+    private DocumentSubjectSnapshot proofOfDeliverySnapshot(UUID tenant, UUID workspace,
+                                                             FulfillmentDocumentSourceQuery.ProofOfDelivery value,
+                                                             DocumentSubjectReference subject) {
         if (value.customerAccountId() != null) {
             return snapshot(tenant, workspace, subject.type(), value.id().toString(),
                     value.customerAccountId().toString(), value.status(), true);

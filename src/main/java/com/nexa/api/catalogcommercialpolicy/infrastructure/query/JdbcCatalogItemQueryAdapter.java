@@ -206,6 +206,27 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         return new Enrichment(availabilityById, prices);
     }
 
+
+    @Override
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CatalogScope scope, String kind, String search, int page, int size) {
+        boolean brand = "brand".equals(kind);
+        if (!brand && !"category".equals(kind)) throw new IllegalArgumentException("Unknown catalog filter kind");
+        String alias = brand ? "b" : "c";
+        String where = predicate(scope, new CatalogSearchCriteria()) + " and " + alias + ".status='ACTIVE'";
+        java.util.List<Object> args = new java.util.ArrayList<>(java.util.List.of(scope.tenantId(), scope.workspaceId()));
+        if (search != null && !search.isBlank()) {
+            where += " and lower(" + alias + ".name) like lower(?)";
+            args.add("%" + search.trim() + "%");
+        }
+        String choices = "select distinct " + alias + ".id," + alias + ".name " + fromClause() + where;
+        Long total = jdbc.queryForObject("select count(*) from (" + choices + ") choices", Long.class, args.toArray());
+        args.add(size);
+        args.add((long) page * size);
+        var items = jdbc.query(choices + " order by " + alias + ".name," + alias + ".id limit ? offset ?",
+                (rs, row) -> new com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions.Option(rs.getString(1), rs.getString(2)), args.toArray());
+        return new com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions(items, page, size, total == null ? 0 : total);
+    }
+
     private String selectSql() {
         return "select s.id sellable_sku_id,coalesce(s.legacy_product_id,s.id) product_id,s.legacy_catalog_item_id catalog_item_id,s.sku_code product_code," +
                 "coalesce(f.name,p.name) item_name,f.id family_id,f.family_code family_code,f.name family_name,v.variant_code variant_code,v.name variant_name,c.id category_id,c.name category_name," +
@@ -238,7 +259,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
     private static String buyerVisibility(CatalogScope scope) {
         return scope.buyerView()
-                ? " and pv.buyer_visible=true and f.status='ACTIVE' and (s.legacy_product_id is null or p.status='ACTIVE')"
+                ? " and current_price.amount is not null and f.status='ACTIVE' and (s.legacy_product_id is null or (pv.buyer_visible=true and p.status='ACTIVE'))"
                 : "";
     }
 

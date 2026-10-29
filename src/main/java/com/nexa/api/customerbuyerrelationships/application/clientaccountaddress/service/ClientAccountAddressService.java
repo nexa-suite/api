@@ -13,6 +13,7 @@ import com.nexa.api.customerbuyerrelationships.domain.model.clientaccount.Client
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -98,7 +99,8 @@ public class ClientAccountAddressService implements ClientAccountAddressUseCase 
                     .filter(id -> requestedAccountId == null || id.equals(requestedAccountId.trim()))
                     .orElseThrow(() -> new ApiResourceNotFoundException("client-account"));
         }
-        if (write) context.requirePermission(Permission.SALES_WRITE); else context.requirePermission(Permission.SALES_READ);
+        if (write) context.requirePermission(PermissionKey.CLIENT_ADDRESS_MANAGE);
+        else context.requirePermission(PermissionKey.CLIENT_READ);
         if (requestedAccountId == null || requestedAccountId.isBlank()) throw new ApiResourceNotFoundException("client-account");
         return accounts.findReference(scope(context), workspace(context), requestedAccountId.trim())
                 .map(CustomerAccountReference::id)

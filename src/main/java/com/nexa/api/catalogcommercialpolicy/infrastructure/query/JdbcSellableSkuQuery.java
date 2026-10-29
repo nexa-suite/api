@@ -76,11 +76,11 @@ public class JdbcSellableSkuQuery implements SellableSkuQuery {
 
     @Override
     public Optional<SellableSkuPolicy> findPhysicalValidationPolicy(UUID tenantId, UUID workspaceId, UUID skuId) {
-        return jdbc.query("select id,status,visible,temperature_min,temperature_max from catalog_management.sellable_sku "
+        return jdbc.query("select id,status,visible,temperature_min,temperature_max,unit_of_measure from catalog_management.sellable_sku "
                         + "where tenant_id=? and workspace_id=? and id=?",
                 (rs, ignored) -> new SellableSkuPolicy(rs.getObject("id", UUID.class), rs.getString("status"),
                         rs.getBoolean("visible"), rs.getBigDecimal("temperature_min"),
-                        rs.getBigDecimal("temperature_max")), tenantId, workspaceId, skuId)
+                        rs.getBigDecimal("temperature_max"), rs.getString("unit_of_measure")), tenantId, workspaceId, skuId)
                 .stream().findFirst();
     }
 
@@ -131,6 +131,13 @@ public class JdbcSellableSkuQuery implements SellableSkuQuery {
                                                                             UUID customerAccountId,
                                                                             String legacyCatalogItemId) {
         return query(tenantId, workspaceId, customerAccountId, "s.legacy_catalog_item_id=?", legacyCatalogItemId, BigDecimal.ONE);
+    }
+
+    @Override
+    public Optional<SellableSkuReference> findActiveByLegacyCatalogItemId(UUID tenantId, UUID workspaceId,
+            UUID customerAccountId, String legacyCatalogItemId, BigDecimal quantity) {
+        return query(tenantId, workspaceId, customerAccountId, "s.legacy_catalog_item_id=?", legacyCatalogItemId,
+                quantity);
     }
 
     private Optional<SellableSkuReference> query(UUID tenantId, UUID workspaceId, UUID customerAccountId,

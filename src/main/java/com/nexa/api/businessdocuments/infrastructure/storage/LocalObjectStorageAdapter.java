@@ -36,6 +36,13 @@ public final class LocalObjectStorageAdapter implements ObjectStoragePort {
     private LocalObjectStorageAdapter(org.springframework.core.env.Environment environment, TechnicalMetricsPort metrics) {
         this.root = Path.of(environment.getProperty("nexa.object-storage.root", "./.local-object-storage")).toAbsolutePath().normalize();
         this.metrics = metrics;
+        try {
+            Files.createDirectories(root);
+            Path probe = Files.createTempFile(root, ".write-check-", ".tmp");
+            Files.delete(probe);
+        } catch (IOException exception) {
+            throw new IllegalStateException("Local private object storage must be writable", exception);
+        }
     }
     @Override public StoredObject put(String objectKey, InputStream content, long contentLength, String contentType) {
         validateKey(objectKey);

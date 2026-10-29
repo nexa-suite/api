@@ -15,6 +15,7 @@ import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrderDraf
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -161,7 +162,7 @@ public class ManualSalesOrderDraftService implements ManualSalesOrderDraftUseCas
 
     private static void read(CurrentAccessContext context) {
         if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Buyer surface cannot access Sales manual orders");
-        context.requirePermission(Permission.SALES_READ);
+        context.requirePermission(PermissionKey.SALES_ORDER_READ);
     }
 
     private static void write(CurrentAccessContext context) {

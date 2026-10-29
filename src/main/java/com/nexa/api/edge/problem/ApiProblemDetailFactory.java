@@ -110,6 +110,7 @@ public final class ApiProblemDetailFactory {
 				case CHANGE_FEED_CAPACITY -> "Change feed capacity unavailable";
 				case CHANGE_FEED_CONNECTION_LIMIT -> "Change feed connection limit";
 				case WAREHOUSE_NOT_FOUND -> "Warehouse not found";
+				case WAREHOUSE_SELECTION_UNAVAILABLE -> "Warehouse selection unavailable";
 				case STORAGE_ZONE_NOT_FOUND -> "Storage zone not found";
 				case INVENTORY_LOT_NOT_FOUND -> "Inventory lot not found";
 				case INVENTORY_LOT_NOT_ALLOCATABLE -> "Inventory lot is not allocatable";

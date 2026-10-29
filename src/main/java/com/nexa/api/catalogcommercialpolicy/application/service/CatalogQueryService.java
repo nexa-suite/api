@@ -28,6 +28,15 @@ public final class CatalogQueryService implements ListCatalogItemsUseCase, GetCa
 		this.authorization = Objects.requireNonNull(authorization, "Catalog authorization port is required");
 	}
 
+    @Override
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CatalogScope scope, String kind, String search, int page, int size) {
+        Objects.requireNonNull(scope, "Catalog scope is required");
+        if (!java.util.Set.of("brand", "category").contains(kind) || page < 0 || size < 1 || size > 100
+                || (search != null && search.length() > 120)) throw new IllegalArgumentException("Invalid catalog filter query");
+        authorization.requireCatalogRead();
+        return queryPort.filterOptions(scope, kind, search, page, size);
+    }
+
 	@Override
 	public CatalogPage<com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary> list(CatalogSearchCriteria criteria) {
 		CatalogSearchCriteria safeCriteria = Objects.requireNonNull(criteria, "Catalog search criteria is required");

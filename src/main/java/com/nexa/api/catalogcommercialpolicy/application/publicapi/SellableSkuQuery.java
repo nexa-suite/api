@@ -67,6 +67,14 @@ public interface SellableSkuQuery {
         return findActiveByLegacyCatalogItemId(tenantId, workspaceId, legacyCatalogItemId);
     }
 
+    /** Resolves the active offer for a legacy catalog item at the requested quantity. */
+    default Optional<SellableSkuReference> findActiveByLegacyCatalogItemId(UUID tenantId, UUID workspaceId,
+            UUID customerAccountId, String legacyCatalogItemId, BigDecimal quantity) {
+        return findActiveByLegacyCatalogItemId(tenantId, workspaceId, customerAccountId, legacyCatalogItemId)
+                .flatMap(reference -> findActive(tenantId, workspaceId, customerAccountId,
+                        reference.skuId(), quantity));
+    }
+
     /** Inventory policy facts are independent of Buyer visibility and current pricing. */
     default List<InventorySkuSnapshot> findInventoryPolicies(UUID tenantId, UUID workspaceId, List<UUID> skuIds) {
         throw new UnsupportedOperationException("Inventory SKU policy query is not configured");
@@ -92,6 +100,9 @@ public interface SellableSkuQuery {
     }
 
     record SellableSkuPolicy(UUID skuId, String status, boolean visible,
-                             BigDecimal temperatureMin, BigDecimal temperatureMax) {
+                             BigDecimal temperatureMin, BigDecimal temperatureMax, String unitOfMeasure) {
+        public SellableSkuPolicy(UUID skuId, String status, boolean visible, BigDecimal temperatureMin, BigDecimal temperatureMax) {
+            this(skuId, status, visible, temperatureMin, temperatureMax, null);
+        }
     }
 }

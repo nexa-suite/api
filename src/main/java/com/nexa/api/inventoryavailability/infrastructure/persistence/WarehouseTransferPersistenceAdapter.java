@@ -296,6 +296,10 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         if (destination != null && !destination.unit().equalsIgnoreCase(transfer.unit())) {
             throw error("INVENTORY_UNIT_MISMATCH", false);
         }
+        if (destination != null && (!destination.expirationDate().equals(transfer.expirationDate())
+                || !java.util.Objects.equals(destination.productionDate(), source.productionDate()))) {
+            throw error("INVALID_REQUEST", false);
+        }
         if (destination != null && !destination.status().equals(destinationStatus)
                 && !destination.status().equals("DEPLETED")) throw error("INVENTORY_LOT_NOT_ALLOCATABLE", false);
 
@@ -320,6 +324,8 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                     transfer.expirationDate(), Timestamp.from(source.receivedAt()), destinationAfter, transfer.unit(),
                     destinationStatus, source.temperatureRangeSnapshot(), source.temperatureValue()),
                     "transfer destination receipt insert");
+            jdbc.update("update warehouse.inventory_lot destination set production_date=source.production_date from warehouse.inventory_lot source where destination.tenant_id=? and destination.workspace_id=? and destination.id=? and source.tenant_id=destination.tenant_id and source.workspace_id=destination.workspace_id and source.id=?",
+                    tenant(context), workspace(context), destinationLotId, transfer.sourceLotId());
         } else {
             destinationLotId = destination.id();
             destinationBefore = destination.onHand();
@@ -463,7 +469,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
     }
 
     private TransferLot loadTransferLot(CurrentAccessContext context, UUID id, boolean lock) {
-        TransferLot lot = jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
+        TransferLot lot = jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,production_date,received_at,"
                                 + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
                                 + " temperature_held_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?"
@@ -497,7 +503,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
 
     private TransferLot destinationLot(CurrentAccessContext context, UUID warehouseId, UUID skuId,
                                        String batchNumber, UUID sourceLotId, boolean lock) {
-        return jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,received_at,"
+        return jdbc.query("select id,warehouse_id,zone_id,catalog_item_id,sku_id,batch_number,expiration_date,production_date,received_at,"
                                 + "stock_quantity,reserved_quantity," + temperatureHeldQuantitySql("inventory_lot")
                                 + " temperature_held_quantity,unit,status,version,temperature_range_snapshot,temperature_value"
                                 + " from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=? and sku_id=?"
@@ -580,7 +586,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
         return new TransferLot(rs.getObject("id", UUID.class), rs.getObject("warehouse_id", UUID.class),
                 rs.getObject("zone_id", UUID.class), rs.getString("catalog_item_id"),
                 rs.getObject("sku_id", UUID.class), rs.getString("batch_number"),
-                rs.getObject("expiration_date", LocalDate.class), instant(rs, "received_at"),
+                rs.getObject("expiration_date", LocalDate.class), rs.getObject("production_date", LocalDate.class), instant(rs, "received_at"),
                 rs.getBigDecimal("stock_quantity"), rs.getBigDecimal("reserved_quantity"),
                 rs.getBigDecimal("temperature_held_quantity"), rs.getString("unit"),
                 rs.getString("status"), rs.getLong("version"), rs.getString("temperature_range_snapshot"),
@@ -616,7 +622,7 @@ public class WarehouseTransferPersistenceAdapter extends WarehouseJdbcSupport
                                  BigDecimal quantity, String unit, String reason, String sourceStatusAtDispatch) { }
 
     private record TransferLot(UUID id, UUID warehouseUuid, UUID zoneUuid, String catalogItemId, UUID skuId,
-                               String batchNumber, LocalDate expirationDate, java.time.Instant receivedAt,
+                               String batchNumber, LocalDate expirationDate, LocalDate productionDate, java.time.Instant receivedAt,
                                BigDecimal onHand, BigDecimal reserved, BigDecimal heldQuantity,
                                String unit, String status, long version,
                                String temperatureRangeSnapshot, BigDecimal temperatureValue) {

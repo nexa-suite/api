@@ -64,11 +64,17 @@ class BusinessDocumentReplacementIT extends NexaWorkflowIntegrationSupport {
         UUID workspace = UUID.fromString(workspaceId());
         var organizationSnapshot = organizationSnapshots.find(tenant, workspace)
                 .orElseThrow(() -> new IllegalStateException("Verified Tenant organization snapshot is required"));
-        documentWorkerRouter.inTransaction(tenant, workspace, tenantJdbc -> {
-            documentBindings.bindWorker(tenantJdbc, tenant, workspace, organizationSnapshot)
-                    .processPendingGenerationRequests(tenant, workspace);
-            return Boolean.TRUE;
-        });
+        // One worker invocation processes one queued request; earlier order documents may precede this replacement.
+        for (int attempt = 0; attempt < 20; attempt++) {
+            String status = tenantJdbc().queryForObject("select status from business_documents.business_document where tenant_id=? and workspace_id=? and id=?",
+                    String.class, tenant, workspace, UUID.fromString(replacementId));
+            if ("GENERATED".equals(status) || "FAILED".equals(status)) break;
+            documentWorkerRouter.inTransaction(tenant, workspace, tenantJdbc -> {
+                documentBindings.bindWorker(tenantJdbc, tenant, workspace, organizationSnapshot)
+                        .processPendingGenerationRequests(tenant, workspace);
+                return Boolean.TRUE;
+            });
+        }
 
         MvcResult replacement = mockMvc.perform(get("/api/v1/business-documents/" + replacementId)
                         .header("Authorization", "Bearer " + owner))

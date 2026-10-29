@@ -13,6 +13,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class LocalTenantBusinessDatabaseProvisioningCliTests {
 
     @Test
+    void warehouseCapabilitiesRequireAddressAndProductionDateMigrations() {
+        var versions = new HashSet<>(TenantBusinessDatabaseMigrationRequirements.load().requiredVersions());
+        versions.remove("24");
+        assertThatThrownBy(() -> LocalTenantBusinessDatabaseProvisioningCli.verifyRequiredMigrations(versions))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("V24");
+        versions.add("24");
+        versions.remove("25");
+        assertThatThrownBy(() -> LocalTenantBusinessDatabaseProvisioningCli.verifyRequiredMigrations(versions))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("V25");
+    }
+
+    @Test
     void tenantDatabaseCannotBecomeReadyWithoutEveryActiveCapabilityMigration() {
         assertThatThrownBy(() -> LocalTenantBusinessDatabaseProvisioningCli
                 .verifyRequiredMigrations(Set.of("1", "2", "3", "4", "5", "7")))
@@ -24,7 +36,7 @@ class LocalTenantBusinessDatabaseProvisioningCliTests {
     void tenantDatabaseCanBecomeReadyAfterAllActiveCapabilityMigrations() {
         assertThatCode(() -> LocalTenantBusinessDatabaseProvisioningCli
                 .verifyRequiredMigrations(Set.of("1", "2", "3", "4", "5", "7", "8", "9", "10", "11",
-                        "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23")))
+                        "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25")))
                 .doesNotThrowAnyException();
     }
 
@@ -39,7 +51,7 @@ class LocalTenantBusinessDatabaseProvisioningCliTests {
                 "tenant-business-notification-projection");
         assertThat(requirements.requiredVersions()).containsExactly(
                 "1", "2", "3", "4", "5", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-                "17", "18", "19", "20", "21", "22", "23");
+                "17", "18", "19", "20", "21", "22", "23", "24", "25");
         Set<String> requiredAssets = new HashSet<>();
         ClassLoader recordingClassLoader = new ClassLoader(getClass().getClassLoader()) {
             @Override
@@ -56,6 +68,8 @@ class LocalTenantBusinessDatabaseProvisioningCliTests {
         assertThat(requiredAssets).contains("db/tenant-migration/V21__grant_payment_callback_worker_idempotent_event_keys.sql");
         assertThat(requiredAssets).contains("db/tenant-migration/V22__remove_mutable_derived_columns.sql");
         assertThat(requiredAssets).contains("db/tenant-migration/V23__bound_tenant_push_delivery_retry_state.sql");
+        assertThat(requiredAssets).contains("db/tenant-migration/V24__structure_warehouse_addresses.sql");
+        assertThat(requiredAssets).contains("db/tenant-migration/V25__record_inventory_production_date.sql");
         assertThat(requirements.schemaManifestDigest()).matches("[0-9a-f]{64}");
         assertThat(TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest())
                 .isEqualTo(requirements.schemaManifestDigest());

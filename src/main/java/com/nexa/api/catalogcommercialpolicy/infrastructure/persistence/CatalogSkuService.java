@@ -39,11 +39,19 @@ public class CatalogSkuService implements CatalogSkuPort {
     @Override
     @Transactional(readOnly = true)
     public CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(CatalogScope scope, int page, int size, String search) {
+        return families(scope, page, size, search, null, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(CatalogScope scope, int page, int size, String search, String brand, String category) {
         int safePage = boundedPage(page);
         int safeSize = boundedSize(size);
         String term = like(search);
-        String where = "f.tenant_id=? and f.workspace_id=? and (? is null or lower(f.name) like lower(?) or lower(f.family_code) like lower(?))" + familyVisibility(scope);
-        Object[] arguments = { scope.tenantId(), scope.workspaceId(), term, term, term };
+        String where = "f.tenant_id=? and f.workspace_id=? and (cast(? as text) is null or lower(f.name) like lower(?) or lower(f.family_code) like lower(?))"
+                + " and (cast(? as text) is null or exists(select 1 from catalog_management.brand b0 where b0.tenant_id=f.tenant_id and b0.workspace_id=f.workspace_id and b0.id=f.brand_id and lower(b0.name) like lower(?)))"
+                + " and (cast(? as text) is null or exists(select 1 from catalog_management.category c0 where c0.tenant_id=f.tenant_id and c0.workspace_id=f.workspace_id and c0.id=f.category_id and lower(c0.name) like lower(?)))" + familyVisibility(scope);
+        Object[] arguments = { scope.tenantId(), scope.workspaceId(), term, term, term, like(brand), like(brand), like(category), like(category) };
         long total = jdbc.queryForObject("select count(*) from catalog_management.product_family f where " + where,
                 Long.class, arguments);
         List<CatalogSkuModels.FamilyView> rows = jdbc.query(familySql(where) + " order by f.name,f.id limit ? offset ?",
@@ -125,6 +133,8 @@ public class CatalogSkuService implements CatalogSkuPort {
                 sku.packagingType(), sku.unitOfMeasure(), sku.netWeight(), sku.grossWeight(), sku.packQuantity(),
                 sku.temperatureMin(), sku.temperatureMax(), sku.shelfLifeDays(), sku.minimumRemainingShelfLifeDays(),
                 sku.lotTrackingRequired(), sku.expiryTrackingRequired(), sku.taxCategory(), Timestamp.from(now), Timestamp.from(now));
+        jdbc.update("update catalog_management.sellable_sku set legacy_catalog_item_id=? where tenant_id=? and workspace_id=? and id=?",
+                "CAT-SKU-" + sku.id().toString().replace("-", "").toUpperCase(java.util.Locale.ROOT), scope.tenantId(), scope.workspaceId(), sku.id());
         return sku(scope, sku.id());
     }
 

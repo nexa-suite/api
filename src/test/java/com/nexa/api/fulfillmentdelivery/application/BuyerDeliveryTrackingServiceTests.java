@@ -4,6 +4,7 @@ import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAcc
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.DeliveryRecord;
+import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.ReceiptRecord;
 import com.nexa.api.fulfillmentdelivery.application.port.BuyerDeliveryTrackingQueryPort;
 import com.nexa.api.fulfillmentdelivery.application.service.BuyerDeliveryTrackingService;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
@@ -15,6 +16,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Wor
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -109,6 +111,28 @@ class BuyerDeliveryTrackingServiceTests {
         assertThat(events.getFirst().type()).isEqualTo("HANDED_OVER");
         assertThat(events.getFirst().occurredAt()).isEqualTo(handedOverAt);
         verify(context, org.mockito.Mockito.times(2)).requirePermission(PermissionKey.BUYER_TRACKING_READ);
+    }
+
+    @Test
+    void receiptQueryUsesCurrentBuyerAccountAndReturnsReceiptAttemptAuditFacts() {
+        when(deliveries.detail(tenant, workspace, deliveryId)).thenReturn(delivery());
+        when(salesOrders.findHeaders(tenant, workspace, List.of(salesOrderId)))
+                .thenReturn(Map.of(salesOrderId, new SalesOrderFulfillmentQuery.Header(
+                        salesOrderId, "SO-2042", account, "NORMAL")));
+        Instant occurredAt = Instant.parse("2026-10-09T15:12:00Z");
+        UUID receiptId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        when(deliveries.receipts(tenant, workspace, deliveryId, account)).thenReturn(List.of(
+                new ReceiptRecord(receiptId, deliveryId, attemptId, account, membership, "DISPUTED",
+                        new BigDecimal("3.0000"), new BigDecimal("2.0000"), "Caja faltante", occurredAt)));
+
+        var receipts = service.receipts(context, deliveryId);
+
+        assertThat(receipts).containsExactly(new com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.ReceiptView(
+                receiptId.toString(), deliveryId.toString(), attemptId.toString(), "DISPUTED",
+                new BigDecimal("3.0000"), new BigDecimal("2.0000"), "Caja faltante", occurredAt,
+                membership.toString()));
+        verify(deliveries).receipts(tenant, workspace, deliveryId, account);
     }
 
     private DeliveryRecord delivery() {

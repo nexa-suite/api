@@ -18,8 +18,10 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.UpdateOwnProf
 import com.nexa.api.shared.context.ClientAddressResolver;
 import com.nexa.api.shared.context.RequestMetadata;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -96,7 +98,10 @@ public final class IamSecurityController {
 			@RequestHeader(value = "If-Match", required = false) String ifMatch, @Valid @RequestBody ProfileRequest request) {
 		long version = version(ifMatch);
 		var value = updateProfile.update(actor(authentication, correlation(httpRequest), trace(httpRequest)),
-				new IamSecurityModels.ProfilePatch(request.displayName(), request.phone(), request.preferredLanguage(), request.timezone(), version));
+				new IamSecurityModels.ProfilePatch(request.displayName(), request.phone(), request.preferredLanguage(), request.timezone(),
+						request.firstName(), request.firstNameProvided(), request.lastName(), request.lastNameProvided(),
+						request.documentType(), request.documentTypeProvided(), request.documentNumber(), request.documentNumberProvided(),
+						request.documentCountryCode(), request.documentCountryCodeProvided(), version));
 		return ResponseEntity.ok().eTag(etag(value.version())).body(toResponse(value));
 	}
 
@@ -201,12 +206,58 @@ public final class IamSecurityController {
 	private static String etag(long version) { return "\"" + version + "\""; }
 	private static String correlation(HttpServletRequest request) { Object value = request.getAttribute(RequestMetadata.CORRELATION_ID_ATTRIBUTE); return value == null ? "unknown" : value.toString(); }
 	private static String trace(HttpServletRequest request) { String value = request.getHeader("X-Trace-ID"); return value == null || value.isBlank() ? correlation(request) : value; }
-	private static ProfileResponse toResponse(IamSecurityModels.Profile value) { return new ProfileResponse(value.userId(), value.email(), value.displayName(), value.phone(), value.preferredLanguage(), value.timezone(), value.version()); }
+	private static ProfileResponse toResponse(IamSecurityModels.Profile value) { return new ProfileResponse(value.userId(), value.email(), value.displayName(), value.phone(), value.preferredLanguage(), value.timezone(), value.firstName(), value.lastName(), value.documentType(), value.documentNumber(), value.documentCountryCode(), value.version()); }
 	private static SessionItem toResponse(IamSecurityModels.Session value) { return new SessionItem(value.id(), value.surface(), value.createdAt(), value.lastSeenAt(), value.expiresAt(), value.current(), value.deviceLabel(), value.coarseIp()); }
 	private static RegistrationResponse toResponse(IamSecurityModels.Registration value) { return new RegistrationResponse(value.id(), value.status(), value.submittedAt(), value.statusToken()); }
 
-	public record ProfileResponse(UUID userId, String email, String displayName, String phone, String preferredLanguage, String timezone, long version) {}
-	public record ProfileRequest(@NotBlank @Size(max = 160) String displayName, @Size(max = 64) String phone, @NotBlank @Pattern(regexp = "es|en") String preferredLanguage, @NotBlank @Size(max = 64) String timezone) {}
+	public record ProfileResponse(UUID userId, String email, String displayName, String phone, String preferredLanguage, String timezone,
+			String firstName, String lastName, String documentType, String documentNumber, String documentCountryCode, long version) {}
+	public static final class ProfileRequest {
+		@NotBlank @Size(max = 160) private String displayName;
+		@Size(max = 64) private String phone;
+		@NotBlank @Pattern(regexp = "es|en") private String preferredLanguage;
+		@NotBlank @Size(max = 64) private String timezone;
+		private String firstName;
+		private String lastName;
+		private String documentType;
+		private String documentNumber;
+		private String documentCountryCode;
+		private boolean firstNameProvided;
+		private boolean lastNameProvided;
+		private boolean documentTypeProvided;
+		private boolean documentNumberProvided;
+		private boolean documentCountryCodeProvided;
+
+		public ProfileRequest() {}
+		public String displayName() { return displayName; }
+		public String phone() { return phone; }
+		public String preferredLanguage() { return preferredLanguage; }
+		public String timezone() { return timezone; }
+		public String firstName() { return firstName; }
+		public String lastName() { return lastName; }
+		public String documentType() { return documentType; }
+		public String documentNumber() { return documentNumber; }
+		public String documentCountryCode() { return documentCountryCode; }
+		public boolean firstNameProvided() { return firstNameProvided; }
+		public boolean lastNameProvided() { return lastNameProvided; }
+		public boolean documentTypeProvided() { return documentTypeProvided; }
+		public boolean documentNumberProvided() { return documentNumberProvided; }
+		public boolean documentCountryCodeProvided() { return documentCountryCodeProvided; }
+
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minLength = 0, maxLength = 160)
+		public void setDisplayName(String value) { displayName = value; }
+		@Schema(minLength = 0, maxLength = 64)
+		public void setPhone(String value) { phone = value; }
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minLength = 1, pattern = "es|en")
+		public void setPreferredLanguage(String value) { preferredLanguage = value; }
+		@Schema(requiredMode = Schema.RequiredMode.REQUIRED, minLength = 0, maxLength = 64)
+		public void setTimezone(String value) { timezone = value; }
+		@JsonSetter("firstName") public void setFirstName(String value) { firstNameProvided = true; firstName = value; }
+		@JsonSetter("lastName") public void setLastName(String value) { lastNameProvided = true; lastName = value; }
+		@JsonSetter("documentType") public void setDocumentType(String value) { documentTypeProvided = true; documentType = value; }
+		@JsonSetter("documentNumber") public void setDocumentNumber(String value) { documentNumberProvided = true; documentNumber = value; }
+		@JsonSetter("documentCountryCode") public void setDocumentCountryCode(String value) { documentCountryCodeProvided = true; documentCountryCode = value; }
+	}
 	public record PasswordChangeRequest(@NotBlank String currentPassword, @NotBlank @Size(max = 128) String newPassword) {}
 	public record SessionResponse(List<SessionItem> sessions) {}
 	public record SessionItem(UUID sessionId, String surface, Instant createdAt, Instant lastSeenAt, Instant expiresAt, boolean current, String deviceLabel, String coarseIp) {}

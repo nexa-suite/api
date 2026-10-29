@@ -7,6 +7,8 @@ import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingM
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.DeliveryView;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.EventView;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.Page;
+import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.ReceiptRecord;
+import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.ReceiptView;
 import com.nexa.api.fulfillmentdelivery.application.port.BuyerDeliveryTrackingQueryPort;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -61,6 +63,14 @@ public class BuyerDeliveryTrackingService implements com.nexa.api.fulfillmentdel
         return deliveries.events(scope.tenantId(), scope.workspaceId(), deliveryId);
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public List<ReceiptView> receipts(CurrentAccessContext context, UUID deliveryId) {
+        Scope scope = scope(context);
+        requireDelivery(scope, deliveryId);
+        return deliveries.receipts(scope.tenantId(), scope.workspaceId(), deliveryId, scope.clientAccountId())
+                .stream().map(BuyerDeliveryTrackingService::buyerSafe).toList();
+    }
+
     private DeliveryRecord requireDelivery(Scope scope, UUID deliveryId) {
         if (deliveryId == null) throw error("RESOURCE_NOT_FOUND", true);
         DeliveryRecord record = deliveries.detail(scope.tenantId(), scope.workspaceId(), deliveryId);
@@ -96,6 +106,12 @@ public class BuyerDeliveryTrackingService implements com.nexa.api.fulfillmentdel
         return new DeliveryView(value.id().toString(), value.salesOrderNumber(), value.status(), value.destination(),
                 value.scheduledAt(), value.dispatchedAt(), value.deliveredAt(), value.proofOfDeliveryStatus(),
                 value.version(), value.createdAt(), value.updatedAt());
+    }
+
+    private static ReceiptView buyerSafe(ReceiptRecord value) {
+        return new ReceiptView(value.id().toString(), value.deliveryId().toString(), value.attemptId().toString(),
+                value.decision(), value.driverDeliveredQuantity(), value.acceptedQuantity(), value.reason(),
+                value.occurredAt(), value.buyerMembershipId().toString());
     }
 
     private static FulfillmentOperationException error(String code, boolean notFound) {

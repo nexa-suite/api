@@ -91,11 +91,12 @@ public final class TenantBusinessDocumentBindingsFactory {
         InboundReceivingDiscrepancySubjectQuery tenantDiscrepancies = required(
                 inboundDiscrepancies.bindTo(tenantJdbc, warehouseSnapshot));
         DocumentSubjectLookupPort subjects = new DocumentSubjectCompositionAdapter(tenantSales,
-                tenantReceivables, tenantPayments, tenantFulfillment, tenantDiscrepancies, tenantWarehouses);
+                tenantReceivables, tenantPayments, tenantFulfillment, tenantDiscrepancies, tenantWarehouses,
+                warehouseSnapshot);
         DocumentProjectionLookupPort projections = projections(tenantId, workspaceId, tenantJdbc,
                 tenantSales, tenantAccounts, tenantReceivables, tenantPayments, tenantFulfillment, Optional.empty());
         CanonicalOutboxPort outbox = traceability.bindTo(tenantJdbc).canonicalOutbox();
-        return required(documents.bindTo(tenantJdbc, subjects, projections, tenantAccounts, outbox));
+        return required(documents.bindTo(tenantJdbc, subjects, projections, tenantAccounts, warehouseSnapshot, outbox));
     }
 
     public FulfillmentDocumentSourceQuery bindFulfillmentSource(JdbcTemplate tenantJdbc) {

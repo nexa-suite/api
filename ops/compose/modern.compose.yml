@@ -1,6 +1,19 @@
 name: nexa-modern
 
 services:
+  modern-object-storage-init:
+    image: alpine:3.22
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/usr/local/bin/initialize-local-object-storage.sh"]
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - nexa-modern-object-storage:/objects
+      - ./scripts/initialize-local-object-storage.sh:/usr/local/bin/initialize-local-object-storage.sh:ro
+
   modern-tenant-credentials:
     image: alpine:3.22
     container_name: nexa-modern-tenant-credentials
@@ -143,6 +156,8 @@ services:
       - nexa-modern-tenant-runtime-credentials:/run/secrets/tenant-databases:ro
       - nexa-modern-object-storage:/app/.local-object-storage
     depends_on:
+      modern-object-storage-init:
+        condition: service_completed_successfully
       modern-postgres:
         condition: service_healthy
       modern-tenant-credentials:
