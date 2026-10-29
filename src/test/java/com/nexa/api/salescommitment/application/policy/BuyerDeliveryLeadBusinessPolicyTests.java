@@ -50,6 +50,21 @@ class BuyerDeliveryLeadBusinessPolicyTests {
     }
 
     @Test
+    void countsFromEveryReferenceDayAndAcceptsAWeekendAfterTheMinimum() {
+        LocalDate monday = LocalDate.of(2026, 10, 26);
+        for (int offset = 0; offset < 7; offset++) {
+            LocalDate reference = monday.plusDays(offset);
+            Clock clock = Clock.fixed(reference.atTime(12, 0)
+                    .atZone(java.time.ZoneId.of("America/Lima")).toInstant(), ZoneOffset.UTC);
+            LocalDate expected = offset < 5 ? reference.plusDays(7) : monday.plusDays(11);
+            assertThat(policy.minimumAllowedDeliveryDate(clock)).as(reference.toString()).isEqualTo(expected);
+        }
+        Clock mondayClock = Clock.fixed(Instant.parse("2026-10-26T17:00:00Z"), ZoneOffset.UTC);
+        assertThatCode(() -> policy.validate(LocalDate.of(2026, 11, 7), mondayClock))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void countsWeekdaysWithoutConsultingAHolidayCalendar() {
         Clock beforePeruNationalHolidays = Clock.fixed(Instant.parse("2026-07-23T17:00:00Z"), ZoneOffset.UTC);
 
