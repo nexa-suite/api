@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## [1.2.0] - 2026-10-28 (preparation candidate; not published)
+## [1.2.0] - 2026-10-28
 
-Candidate based on `develop` at `cddcbbdbc93eaa8b0290a8b56ba8db6a5d29835c`. No release tag or GitHub Release is created by this preparation.
+NEXA Academic Stable Checkpoint for controlled academic demonstration. Published from the verified signed `v1.2.0` tag with the corresponding [GitHub Release](https://github.com/nexa-suite/api/releases/tag/v1.2.0). See the [release notes](docs/releases/v1.2.0.md). This source release does not establish Product or System Acceptance or commercial production readiness.
 
 - Add scoped Catalog filter references and variant-command idempotency; separate product and taxonomy permissions.
 - Require feature-specific permissions for customer, order, draft and logistics operations, including Buyer order reads; align Tenant Administrator query grants.

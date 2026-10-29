@@ -7,16 +7,11 @@ Release notes are scoped to the API repository and do not imply complete Nexa do
 Consumer support requires a verified signed tag and the corresponding published
 GitHub Release; a preparation branch alone is not released support.
 
-## Local preparation candidates
-
-| Candidate | Summary |
-|---|---|
-| [v1.2.0](./v1.2.0.md) | Candidate from `develop` at `cddcbbd`; not tagged or published |
-
 ## Releases
 
 | Release | Summary |
 |---|---|
+| [v1.2.0](./v1.2.0.md) | NEXA Academic Stable Checkpoint; [published release](https://github.com/nexa-suite/api/releases/tag/v1.2.0) |
 | [v1.1.0](./v1.1.0.md) | Tenant-scoped business database routing and local suite review; [published release](https://github.com/nexa-suite/api/releases/tag/v1.1.0) |
 | [v1.0.0](./v1.0.0.md) | First stable-version API boundary with scoped local-fixture and technical-gauge fixes |
 | [v0.21.0](./v0.21.0.md) | Published academic technical checkpoint after v0.20.0; verify [publication](https://github.com/nexa-suite/api/releases/tag/v0.21.0) before consumption |
