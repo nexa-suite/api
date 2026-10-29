@@ -14,6 +14,7 @@ import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftCo
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftDestinationNotGeocodedException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftInvariantException;
 import com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftWarehouseSelectionUnavailableException;
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.salescommitment.application.purchaserequestdraft.model.PurchaseRequestDraftModels;
 import com.nexa.api.customerbuyerrelationships.contract.Address;
 import com.nexa.api.salescommitment.domain.model.delivery.DeliveryAddressSnapshot;
@@ -36,6 +37,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -54,6 +56,7 @@ import java.util.HexFormat;
 @Repository
 public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private static final String SCHEMA = "1.0";
+    private static final BuyerDeliveryLeadBusinessPolicy DELIVERY_LEAD_POLICY = new BuyerDeliveryLeadBusinessPolicy();
     private final JdbcTemplate jdbc;
     private final CanonicalOutboxPort canonicalOutbox;
     private final ObjectMapper objectMapper;
@@ -65,15 +68,17 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
     private final SellableSkuQuery sellableSkus;
     private final WarehouseSelectionQuery warehouses;
     private final boolean walletTenderEnabled;
+    private final Clock clock;
 
     @Autowired
     public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
                                        CommercialCommitmentPort commitments, MapRoutingPort maps,
                                        CustomerAccountQuery customers, CustomerAddressQuery addresses,
                                        CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
-                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox) {
+                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
+                                       Clock clock) {
         this(jdbc, objectMapper, commitments, maps, customers, addresses, creditExposure,
-                sellableSkus, warehouses, canonicalOutbox, false);
+                sellableSkus, warehouses, canonicalOutbox, false, clock);
     }
 
     /** Tenant composition opts in only after every local dependency is bound to this JDBC session. */
@@ -83,6 +88,16 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
                                        CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
                                        WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
                                        boolean walletTenderEnabled) {
+        this(jdbc, objectMapper, commitments, maps, customers, addresses, creditExposure,
+                sellableSkus, warehouses, canonicalOutbox, walletTenderEnabled, Clock.systemUTC());
+    }
+
+    public PurchaseRequestDraftService(JdbcTemplate jdbc, ObjectMapper objectMapper,
+                                       CommercialCommitmentPort commitments, MapRoutingPort maps,
+                                       CustomerAccountQuery customers, CustomerAddressQuery addresses,
+                                       CreditExposureQuery creditExposure, SellableSkuQuery sellableSkus,
+                                       WarehouseSelectionQuery warehouses, CanonicalOutboxPort canonicalOutbox,
+                                       boolean walletTenderEnabled, Clock clock) {
         this.jdbc = jdbc;
         this.canonicalOutbox = canonicalOutbox;
         this.objectMapper = objectMapper;
@@ -94,12 +109,14 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         this.sellableSkus = sellableSkus;
         this.warehouses = warehouses;
         this.walletTenderEnabled = walletTenderEnabled;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     @Transactional
     public PurchaseRequestDraftModels.DraftView create(CurrentAccessContext context, UUID clientAccountId, LocalDate requestedDeliveryDate) {
         buyerWrite(context);
-        if (clientAccountId == null || requestedDeliveryDate == null || requestedDeliveryDate.isBefore(LocalDate.now())) throw new IllegalArgumentException("Client account and future delivery date are required");
+        if (clientAccountId == null) throw new IllegalArgumentException("Client account is required");
+        DELIVERY_LEAD_POLICY.validate(requestedDeliveryDate, clock);
         requireBuyerClient(context, clientAccountId);
         Instant now = Instant.now();
         UUID id = UUID.randomUUID();
@@ -233,7 +250,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
         String normalizedPayment = paymentPreference == null ? null : paymentPreference.trim().toUpperCase(java.util.Locale.ROOT);
         if ("WALLET".equals(normalizedPayment)) requireWalletTenderEnabled();
         if (normalizedPayment == null || !Set.of("CREDIT_LINE", "BANK_TRANSFER", "CARD_STRIPE", "CASH", "CASH_ON_DELIVERY", "WALLET").contains(normalizedPayment)) throw new IllegalArgumentException("Payment preference is invalid");
-        if (requestedDeliveryDate == null || requestedDeliveryDate.isBefore(LocalDate.now())) throw new IllegalArgumentException("Requested delivery date is invalid");
+        DELIVERY_LEAD_POLICY.validate(requestedDeliveryDate, clock);
         jdbc.update("update sales.purchase_request_draft set payment_preference=?,requested_delivery_date=?,credit_result=?,version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and version=?", normalizedPayment, requestedDeliveryDate, creditResult(context, draftId, draft.clientAccountId, normalizedPayment), tenant(context), workspace(context), draftId, expectedVersion);
         updateStatus(context, draftId, expectedVersion + 1, hasLines(draftId, context), hasDestination(draftId, context), hasRoute(draftId, context), true);
         return get(context, draftId);
@@ -261,6 +278,7 @@ public class PurchaseRequestDraftService implements PurchaseRequestDraftPort {
             return get(context, existingClaim.draftId());
         }
         DraftRow draft = mutable(context, draftId, expectedVersion);
+        DELIVERY_LEAD_POLICY.validate(draft.requestedDeliveryDate, clock);
         if ("WALLET".equals(draft.paymentPreference())) requireWalletTenderEnabled();
         PurchaseRequestDraftModels.ReviewView review = review(context, draftId);
         if (!review.readyToSubmit()) throw new PurchaseRequestDraftInvariantException("Purchase request draft is not ready to submit");

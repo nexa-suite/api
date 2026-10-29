@@ -64,6 +64,7 @@ import com.nexa.api.salescommitment.application.exception.CommercialBusinessExce
 import com.nexa.api.salescommitment.application.exception.SalesPreconditionRequiredException;
 import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
+import com.nexa.api.salescommitment.application.exception.MinimumDeliveryLeadBusinessDaysViolationException;
 import com.nexa.api.salescommitment.domain.publicapi.SalesOrderInvariantViolation;
 import com.nexa.api.salescommitment.application.exception.SalesOrderRejectionReasonRequiredException;
 import com.nexa.api.salescommitment.application.exception.SalesOrderTransitionException;
@@ -387,6 +388,12 @@ public final class GlobalExceptionHandler {
 			default -> ApiErrorCode.CLIENT_ACCOUNT_NOT_FOUND;
 		};
 		return response(HttpStatus.NOT_FOUND, code, "Resource not found", request);
+	}
+	@ExceptionHandler(MinimumDeliveryLeadBusinessDaysViolationException.class)
+	public ResponseEntity<ProblemDetail> handleMinimumDeliveryLeadViolation(
+			MinimumDeliveryLeadBusinessDaysViolationException exception, HttpServletRequest request) {
+		return response(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR,
+				"Requested delivery date must be on or after " + exception.minimumAllowedDate(), request);
 	}
 	@ExceptionHandler(SalesInvariantViolation.class)
 	public ResponseEntity<ProblemDetail> handleSalesInvariant(SalesInvariantViolation exception, HttpServletRequest request) {

@@ -47,11 +47,11 @@ public class SalesRuntimeConfiguration {
 		return new SalesSnapshotAssembler(accounts, addresses, warehouses, geography, maps, catalog, sellableSkus);
 	}
 	@Bean ManualSalesOrderUseCase manualSalesOrderUseCase(SalesSnapshotAssembler snapshots,
-			ManualSalesOrderPersistencePort persistence) { return new ManualSalesOrderService(snapshots, persistence); }
+			ManualSalesOrderPersistencePort persistence, Clock clock) { return new ManualSalesOrderService(snapshots, persistence, clock); }
 	@Bean ManualSalesOrderDraftUseCase manualSalesOrderDraftUseCase(ManualSalesOrderDraftPersistencePort drafts,
 			@Qualifier("manualSalesOrderUseCase") ManualSalesOrderUseCase manualOrders,
-			ManualSalesOrderPersistencePort orders) {
-		return new ManualSalesOrderDraftService(drafts, manualOrders, orders);
+			ManualSalesOrderPersistencePort orders, Clock clock) {
+		return new ManualSalesOrderDraftService(drafts, manualOrders, orders, clock);
 	}
 	@Bean PurchaseRequestUseCase purchaseRequestUseCase(PurchaseRequestPersistencePort persistence, PurchaseRequestEventPersistencePort events,
 			IdempotencyPersistencePort idempotency, CatalogItemSnapshotLookupPort catalog, CustomerAccountQuery accounts,

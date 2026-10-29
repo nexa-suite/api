@@ -24,6 +24,8 @@ El snapshot heredado contiene una colisión previa en `CatalogPricingPreviewCont
 
 El contrato de instrucciones operativas Driver/Dispatch y sus límites de autorización está descrito en [`delivery-instructions.md`](./delivery-instructions.md).
 
+`GET /api/v1/buyer/delivery-lead-policy` devuelve la política global fija del Buyer: cinco días hábiles de lunes a viernes desde el día siguiente, con fecha calculada en `America/Lima` y sin calendario de feriados. El contrato integrado está en [`buyer-delivery-lead-policy.md`](../integration/buyer-delivery-lead-policy.md).
+
 ## Buyer credit visibility
 
 `GET /api/v1/client-accounts/me/credit-exposure` resolves the active account from the verified PORTAL membership and requires `payment.read`. It returns existing BC-07 credit limit, exposure, reservations, outstanding receivables, available credit and timestamp facts. It accepts no customer-account selector. The existing workforce `/{clientAccountId}/credit-exposure` route retains its `client.read` requirement.

@@ -20,6 +20,7 @@ contexts.
 ## HTTP and OpenAPI contracts
 
 - [Operations contract closure and implementation boundaries](./operations-contract-closure.md)
+- [Buyer delivery lead policy](./integration/buyer-delivery-lead-policy.md)
 
 - [OpenAPI instructions and compatibility checks](./openapi/README.md)
 - [Committed OpenAPI snapshot](./openapi/openapi.json)

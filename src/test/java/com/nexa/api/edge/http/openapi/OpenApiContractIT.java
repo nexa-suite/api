@@ -60,6 +60,17 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/buyer/deliveries")).isTrue();
         assertThat(document.get("paths").has("/api/v1/buyer/deliveries/{deliveryId}")).isTrue();
         assertThat(document.get("paths").has("/api/v1/buyer/deliveries/{deliveryId}/events")).isTrue();
+        assertThat(document.get("paths").has("/api/v1/buyer/delivery-lead-policy")).isTrue();
+        assertThat(document.get("paths").get("/api/v1/buyer/delivery-lead-policy").get("get")
+                .get("operationId").asText()).isEqualTo("getBuyerDeliveryLeadPolicy");
+        var leadPolicyProperties = document.at(
+                "/components/schemas/BuyerDeliveryLeadPolicyResponse/properties");
+        assertThat(leadPolicyProperties.has("minimumDeliveryLeadBusinessDays")).isTrue();
+        assertThat(leadPolicyProperties.has("minimumAllowedDeliveryDate")).isTrue();
+        assertThat(leadPolicyProperties.has("timezone")).isTrue();
+        assertThat(leadPolicyProperties.size()).isEqualTo(3);
+        assertThat(document.get("paths").get("/api/v1/buyer/delivery-lead-policy").get("get")
+                .has("parameters")).isFalse();
         assertThat(document.get("paths").has("/api/v1/my-deliveries/{id}/events")).isTrue();
         assertThat(document.get("paths").has("/api/v1/skus/resolve")).isTrue();
         assertThat(document.get("paths").has("/api/v1/inventory/lots/resolve")).isTrue();
