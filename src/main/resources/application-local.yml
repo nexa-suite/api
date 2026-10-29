@@ -113,7 +113,7 @@ nexa:
     reset:
       ttl: ${NEXA_PASSWORD_RESET_TTL:PT30M}
       platform-url: ${NEXA_PLATFORM_RESET_URL:http://localhost:4200/reset-password}
-      portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4300/reset-password}
+      portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4200/reset-password}
       throttle-key: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:}
     system-operator-token: ${NEXA_SYSTEM_OPERATOR_TOKEN:}
     notification-outbox-key: ${NEXA_NOTIFICATION_OUTBOX_KEY:}

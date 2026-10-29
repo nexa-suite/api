@@ -26,7 +26,7 @@ public final class SmtpPasswordResetDeliveryAdapter implements PasswordResetDeli
             @Value("${nexa.security.smtp.host:}") String host,
             @Value("${nexa.security.smtp.from:no-reply@nexa.local}") String from,
             @Value("${nexa.security.reset.platform-url:http://localhost:4200/reset-password}") String platformUrl,
-            @Value("${nexa.security.reset.portal-url:http://localhost:4300/reset-password}") String portalUrl,
+            @Value("${nexa.security.reset.portal-url:http://localhost:4200/reset-password}") String portalUrl,
             @Value("${nexa.security.smtp.timeout:PT5S}") Duration timeout,
             @Value("${nexa.security.smtp.required:false}") boolean required) {
         this.sender = sender; this.host = host == null ? "" : host.trim(); this.from = from;
@@ -43,7 +43,7 @@ public final class SmtpPasswordResetDeliveryAdapter implements PasswordResetDeli
     public void sendReset(String email, String surface, String token, Instant expiresAt, String deliveryKey) {
         if (host.isBlank() && !required) return;
         String base = "PORTAL".equalsIgnoreCase(surface) ? portalUrl : platformUrl;
-        send(email, "Nexa password reset", "Use this link to reset your Nexa password: " + base + "?token=" + token
+        send(email, "Nexa password reset", "Use this link to reset your Nexa password: " + base + "#token=" + token
                 + "\n\nThis link expires at " + expiresAt + ".", deliveryKey);
     }
 
