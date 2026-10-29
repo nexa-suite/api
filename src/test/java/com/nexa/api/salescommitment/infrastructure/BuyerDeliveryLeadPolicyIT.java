@@ -98,6 +98,23 @@ class BuyerDeliveryLeadPolicyIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void legacyPurchaseRequestAllowsMissingDateInDraftButNotSubmission() throws Exception {
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        MvcResult draft = mockMvc.perform(post("/api/v1/purchase-requests")
+                        .header("Authorization", "Bearer " + buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[]}"))
+                .andExpect(status().isCreated()).andReturn();
+        assertThat(json(draft).get("requestedDeliveryDate").isNull()).isTrue();
+        String requestId = json(draft).get("id").asText();
+        mockMvc.perform(post("/api/v1/purchase-requests/" + requestId + "/submissions")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("If-Match", draft.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "missing-lead-" + uuid()))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void draftCreateReviewAndSubmitUseCurrentBusinessClockAndReplayIdempotently() throws Exception {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         UUID tenant = UUID.fromString(tenantId());

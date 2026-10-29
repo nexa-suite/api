@@ -270,7 +270,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment, List<RequestedLine> requestedLines) {
 		boolean buyer = context.hasRole(MembershipRole.BUYER);
 		if (buyer) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
-		DELIVERY_LEAD_POLICY.validate(deliveryDate, clock);
+		if (deliveryDate != null) DELIVERY_LEAD_POLICY.validate(deliveryDate, clock);
 		String account;
 		if (buyer) {
 			account = buyerAccount(context);
@@ -326,7 +326,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	public PurchaseRequestView update(CurrentAccessContext context, String id, String priority, LocalDate deliveryDate,
 			String deliveryProfile, String paymentOption, String comment, long version) {
 		PurchaseRequestView current = canEdit(context, id);
-		DELIVERY_LEAD_POLICY.validate(deliveryDate == null ? current.requestedDeliveryDate() : deliveryDate, clock);
+		if (deliveryDate != null) DELIVERY_LEAD_POLICY.validate(deliveryDate, clock);
 		PurchaseRequest aggregate = rehydrate(current);
 		PaymentOption selectedPayment = paymentOption == null ? aggregate.paymentOption() : PaymentOption.from(paymentOption);
 		if (selectedPayment == PaymentOption.WALLET) {

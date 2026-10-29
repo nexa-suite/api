@@ -1,5 +1,6 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure;
 
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -10,6 +11,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -446,11 +448,14 @@ class TemperatureEvidenceApiIT extends NexaWorkflowIntegrationSupport {
     }
 
     private PurchaseRequestResource createApprovedPurchaseRequestForItem(String catalogItemId) throws Exception {
+        LocalDate requestedDeliveryDate = new BuyerDeliveryLeadBusinessPolicy()
+                .minimumAllowedDeliveryDate(Clock.systemUTC());
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
                         .header("Authorization", "Bearer " + buyer)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"lines\":[{\"catalogItemId\":\"" + catalogItemId
+                        .content("{\"requestedDeliveryDate\":\"" + requestedDeliveryDate
+                                + "\",\"lines\":[{\"catalogItemId\":\"" + catalogItemId
                                 + "\",\"quantity\":1,\"unit\":\"UNIT\"}]}"))
                 .andExpect(status().isCreated()).andReturn();
         String requestId = json(created).get("id").asText();
