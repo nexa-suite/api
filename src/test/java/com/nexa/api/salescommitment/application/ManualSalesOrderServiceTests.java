@@ -5,8 +5,10 @@ import com.nexa.api.salescommitment.application.salesorder.model.CreateManualSal
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderLineView;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderPersistencePort;
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOrderSnapshotViewMapper;
 import com.nexa.api.salescommitment.application.salesorder.service.ManualSalesOrderService;
+import com.nexa.api.salescommitment.application.exception.MinimumDeliveryLeadBusinessDaysViolationException;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrder;
@@ -15,25 +17,53 @@ import com.nexa.api.salescommitment.domain.model.salesorder.SalesOrderNumber;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ManualSalesOrderServiceTests {
     @Test
-    void manualOrderUsesIdempotencyBeforeAllocatingASecondIdentity() {
+    void manualOrderRejectsTooSoonDeliveryBeforeSnapshotOrPersistence() {
         CapturingPersistence persistence = new CapturingPersistence();
-        ManualSalesOrderService service = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence);
+        Clock clock = Clock.fixed(Instant.parse("2026-10-29T17:00:00Z"), ZoneOffset.UTC);
+        ManualSalesOrderService service = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence, clock);
         CreateManualSalesOrderCommand command = new CreateManualSalesOrderCommand(SalesTestFixtures.ACCOUNT,
-                SalesTestFixtures.ADDRESS.toString(), null, java.time.LocalDate.now().plusDays(1), "Dock 2",
+                SalesTestFixtures.ADDRESS.toString(), null, LocalDate.of(2026, 11, 4), "Dock 2",
                 SalesTestFixtures.WAREHOUSE.toString(), "LOCAL", PaymentOption.CREDIT_LINE,
                 PurchaseRequestPriority.HIGH, "PEN", "Call before loading",
                 List.of(new CreateManualSalesOrderCommand.Line("ITEM-001", BigDecimal.valueOf(3), "bag", null)));
 
+        assertThatThrownBy(() -> service.create(SalesTestFixtures.salesContext(), command, "manual-key-early"))
+                .isInstanceOf(MinimumDeliveryLeadBusinessDaysViolationException.class);
+
+        assertThat(persistence.identityCalls).isZero();
+        assertThat(persistence.saveCalls).isZero();
+    }
+
+    @Test
+    void manualOrderUsesIdempotencyBeforeAllocatingASecondIdentity() {
+        CapturingPersistence persistence = new CapturingPersistence();
+        Clock initialClock = Clock.fixed(Instant.parse("2026-10-29T17:00:00Z"), ZoneOffset.UTC);
+        LocalDate requestedDate = new BuyerDeliveryLeadBusinessPolicy().minimumAllowedDeliveryDate(initialClock);
+        CreateManualSalesOrderCommand command = new CreateManualSalesOrderCommand(SalesTestFixtures.ACCOUNT,
+                SalesTestFixtures.ADDRESS.toString(), null, requestedDate, "Dock 2",
+                SalesTestFixtures.WAREHOUSE.toString(), "LOCAL", PaymentOption.CREDIT_LINE,
+                PurchaseRequestPriority.HIGH, "PEN", "Call before loading",
+                List.of(new CreateManualSalesOrderCommand.Line("ITEM-001", BigDecimal.valueOf(3), "bag", null)));
+
+        ManualSalesOrderService service = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence, initialClock);
         ManualSalesOrderView first = service.create(SalesTestFixtures.salesContext(), command, "manual-key-1");
-        ManualSalesOrderView replay = service.create(SalesTestFixtures.salesContext(), command, "manual-key-1");
+        Clock laterClock = Clock.fixed(Instant.parse("2026-10-31T17:00:00Z"), ZoneOffset.UTC);
+        assertThat(new BuyerDeliveryLeadBusinessPolicy().minimumAllowedDeliveryDate(laterClock))
+                .isAfter(requestedDate);
+        ManualSalesOrderService replayService = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence, laterClock);
+        ManualSalesOrderView replay = replayService.create(SalesTestFixtures.salesContext(), command, "manual-key-1");
 
         assertThat(replay.id()).isEqualTo(first.id());
         assertThat(replay.snapshot().delivery().address().address().line()).isEqualTo("Av. Lima 123");

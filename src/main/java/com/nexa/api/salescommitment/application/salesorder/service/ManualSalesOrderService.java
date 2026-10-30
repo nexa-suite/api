@@ -5,6 +5,7 @@ import com.nexa.api.salescommitment.application.salesorder.model.CreateManualSal
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderPersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderUseCase;
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.salescommitment.application.workflow.SalesSnapshotAssembler;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAccountId;
 import com.nexa.api.salescommitment.domain.model.salesorder.ManualSalesOrder;
@@ -20,17 +21,27 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.util.HexFormat;
+import java.util.Objects;
 
 /** Creates direct Sales orders after resolving every cross-context fact into snapshots. */
 public class ManualSalesOrderService implements ManualSalesOrderUseCase {
+    private static final BuyerDeliveryLeadBusinessPolicy DELIVERY_LEAD_POLICY = new BuyerDeliveryLeadBusinessPolicy();
     private final SalesSnapshotAssembler snapshots;
     private final ManualSalesOrderPersistencePort persistence;
+    private final Clock clock;
 
     public ManualSalesOrderService(SalesSnapshotAssembler snapshots,
                                    ManualSalesOrderPersistencePort persistence) {
+        this(snapshots, persistence, Clock.systemUTC());
+    }
+
+    public ManualSalesOrderService(SalesSnapshotAssembler snapshots,
+                                   ManualSalesOrderPersistencePort persistence, Clock clock) {
         this.snapshots = snapshots;
         this.persistence = persistence;
+        this.clock = Objects.requireNonNull(clock, "Application clock is required");
     }
 
     @Override
@@ -53,6 +64,7 @@ public class ManualSalesOrderService implements ManualSalesOrderUseCase {
         String requestHash = requestHash(command);
         var replay = persistence.findByIdempotency(tenant, workspace, actor, idempotencyKey, requestHash);
         if (replay.isPresent()) return replay.get();
+        DELIVERY_LEAD_POLICY.validate(command.requestedDeliveryDate(), clock);
 
         var assembled = snapshots.manual(context, command.clientAccountId(), command.addressId(), command.manualAddress(),
                 command.requestedDeliveryDate(), command.deliveryNotes(), command.notes(), command.warehouseId(), command.routeProvider(),
