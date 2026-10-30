@@ -31,4 +31,21 @@ class SmtpPasswordResetDeliveryAdapterTests {
                 .contains("http://localhost:4200/reset-password#token=sample-token")
                 .doesNotContain("?token=");
     }
+
+    @Test
+    void platformResetLinkUsesConfiguredPlatformDestination() throws Exception {
+        JavaMailSender sender = mock(JavaMailSender.class);
+        MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
+        when(sender.createMimeMessage()).thenReturn(message);
+        var adapter = new SmtpPasswordResetDeliveryAdapter(sender, "smtp.example", "no-reply@example.test",
+                "https://platform.example.test/reset-password", "https://portal.example.test/reset-password",
+                Duration.ofSeconds(5), true);
+
+        adapter.sendReset("member@example.test", "PLATFORM", "sample-token", Instant.parse("2026-10-29T20:00:00Z"));
+
+        verify(sender).send(message);
+        assertThat(message.getContent().toString())
+                .contains("https://platform.example.test/reset-password#token=sample-token")
+                .doesNotContain("portal.example.test", "?token=");
+    }
 }
