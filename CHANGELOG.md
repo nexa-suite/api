@@ -2,9 +2,17 @@
 
 ## Unreleased
 
-## [1.2.0] - 2026-10-28 (preparation candidate; not published)
+## [2.0.0] — Release candidate
 
-Candidate based on `develop` at `cddcbbdbc93eaa8b0290a8b56ba8db6a5d29835c`. No release tag or GitHub Release is created by this preparation.
+- Enforce the global five-business-day delivery minimum in the America/Lima timezone. Earlier dates accepted by the previous release are rejected; consumers must consult the Buyer delivery policy before submission.
+- Preserve draft creation without a delivery date and require a valid date on submission.
+- Add the authenticated Buyer delivery policy endpoint. Existing persisted lead settings no longer control this policy.
+
+This candidate is not published; release and acceptance gates remain open.
+
+## [1.2.0] - 2026-10-28
+
+NEXA Academic Stable Checkpoint for controlled academic demonstration. Published from the verified signed `v1.2.0` tag with the corresponding [GitHub Release](https://github.com/nexa-suite/api/releases/tag/v1.2.0). See the [release notes](docs/releases/v1.2.0.md). This source release does not establish Product or System Acceptance or commercial production readiness.
 
 - Add scoped Catalog filter references and variant-command idempotency; separate product and taxonomy permissions.
 - Require feature-specific permissions for customer, order, draft and logistics operations, including Buyer order reads; align Tenant Administrator query grants.

@@ -1,6 +1,7 @@
 package com.nexa.api.salescommitment.application.salesorder.service;
 
 import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.salescommitment.application.salesorder.model.CreateManualSalesOrderCommand;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderView;
@@ -19,21 +20,32 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Per
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /** Application use case for the four-step, resumable Sales manual-order workflow. */
 public class ManualSalesOrderDraftService implements ManualSalesOrderDraftUseCase {
+    private static final BuyerDeliveryLeadBusinessPolicy DELIVERY_LEAD_POLICY = new BuyerDeliveryLeadBusinessPolicy();
     private final ManualSalesOrderDraftPersistencePort persistence;
     private final ManualSalesOrderUseCase manualOrders;
     private final ManualSalesOrderPersistencePort orderPersistence;
+    private final Clock clock;
 
     public ManualSalesOrderDraftService(ManualSalesOrderDraftPersistencePort persistence,
                                         ManualSalesOrderUseCase manualOrders,
                                         ManualSalesOrderPersistencePort orderPersistence) {
+        this(persistence, manualOrders, orderPersistence, Clock.systemUTC());
+    }
+
+    public ManualSalesOrderDraftService(ManualSalesOrderDraftPersistencePort persistence,
+                                        ManualSalesOrderUseCase manualOrders,
+                                        ManualSalesOrderPersistencePort orderPersistence, Clock clock) {
         this.persistence = persistence;
         this.manualOrders = manualOrders;
         this.orderPersistence = orderPersistence;
+        this.clock = Objects.requireNonNull(clock, "Application clock is required");
     }
 
     @Override
@@ -57,6 +69,7 @@ public class ManualSalesOrderDraftService implements ManualSalesOrderDraftUseCas
                                                               ManualSalesOrderDraftModels.ClientCommand command) {
         write(context);
         if (command == null) throw new IllegalArgumentException("Manual order client conditions are required");
+        DELIVERY_LEAD_POLICY.validate(command.requestedDeliveryDate(), clock);
         return persistence.updateClient(context, draftId, version, command);
     }
 
@@ -115,6 +128,7 @@ public class ManualSalesOrderDraftService implements ManualSalesOrderDraftUseCas
                     .orElseThrow(() -> new IllegalStateException("Created manual sales order is unavailable"));
         }
         if (draft.version() != version) throw new com.nexa.api.salescommitment.application.exception.PurchaseRequestDraftConcurrencyException();
+        DELIVERY_LEAD_POLICY.validate(draft.requestedDeliveryDate(), clock);
         ManualSalesOrderDraft.requireReady(ManualSalesOrderDraftStatus.valueOf(draft.status()));
         ManualSalesOrderDraftModels.ReviewView review = reviewForLockedDraft(draft);
         if (!review.readyToCreate()) throw new IllegalArgumentException("Manual sales order draft is not ready to create");

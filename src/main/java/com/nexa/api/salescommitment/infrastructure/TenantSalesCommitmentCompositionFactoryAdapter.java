@@ -79,7 +79,7 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
         var drafts = new PurchaseRequestDraftService(jdbc, dependencies.objectMapper(), commitmentPort,
                 dependencies.maps(), dependencies.customerAccounts(), dependencies.customerAddresses(),
                 dependencies.creditExposure(), dependencies.sellableSkus(), dependencies.warehouses(),
-                dependencies.canonicalOutbox(), dependencies.walletTenderEnabled());
+                dependencies.canonicalOutbox(), dependencies.walletTenderEnabled(), dependencies.clock());
         var manualOrderPersistence = new ManualSalesOrderPersistenceAdapter(jdbc, dependencies.objectMapper());
         ManualSalesOrderUseCase manualSalesOrders = new ManualSalesOrderService(
                 new SalesSnapshotAssembler(
@@ -88,13 +88,14 @@ public final class TenantSalesCommitmentCompositionFactoryAdapter
                         dependencies.customerAddresses(), new WarehouseReferenceAclAdapter(dependencies.warehouses()),
                         new JdbcPeruGeographyPersistenceAdapter(jdbc), dependencies.maps(),
                         dependencies.catalogItemSnapshots(),
-                        new SellableSkuSnapshotPersistenceAdapter(dependencies.sellableSkus())), manualOrderPersistence);
+                        new SellableSkuSnapshotPersistenceAdapter(dependencies.sellableSkus())), manualOrderPersistence,
+                dependencies.clock());
         ManualSalesOrderDraftUseCase manualSalesOrderDrafts = new ManualSalesOrderDraftService(
                 new ManualSalesOrderDraftPersistenceAdapter(jdbc, dependencies.objectMapper(), dependencies.maps(),
                         dependencies.customerAccounts(), dependencies.customerAddresses(),
                         customerTerms(dependencies.customerAccounts()), dependencies.creditExposure(),
                         dependencies.sellableSkus(), dependencies.warehouses()),
-                manualSalesOrders, manualOrderPersistence);
+                manualSalesOrders, manualOrderPersistence, dependencies.clock());
         FieldPurchaseRequestSubmissionUseCase fieldPurchaseRequestSubmissions =
                 new FieldPurchaseRequestSubmissionService(purchaseRequests, dependencies.customerAccounts(),
                         dependencies.catalogItemSnapshots(), idempotency, dependencies.objectMapper(),
