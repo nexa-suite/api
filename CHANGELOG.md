@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [2.0.0] — Release candidate
+
+- Enforce the global five-business-day delivery minimum in the America/Lima timezone. Earlier dates accepted by the previous release are rejected; consumers must consult the Buyer delivery policy before submission.
+- Preserve draft creation without a delivery date and require a valid date on submission.
+- Add the authenticated Buyer delivery policy endpoint. Existing persisted lead settings no longer control this policy.
+- Route native Buyer password-reset requests to the Platform recovery page with Origin-bound, expiring, single-use token consumption and generic rate-limited request responses.
+
+This candidate is not published; release and acceptance gates remain open.
+
 ## [1.2.0] - 2026-10-28
 
 NEXA Academic Stable Checkpoint for controlled academic demonstration. Published from the verified signed `v1.2.0` tag with the corresponding [GitHub Release](https://github.com/nexa-suite/api/releases/tag/v1.2.0). See the [release notes](docs/releases/v1.2.0.md). This source release does not establish Product or System Acceptance or commercial production readiness.
