@@ -11,6 +11,7 @@ GitHub Release; a preparation branch alone is not released support.
 
 | Release | Summary |
 |---|---|
+| [v2.0.0](./v2.0.0.md) | Candidate: five-business-day delivery rule; not published |
 | [v1.2.0](./v1.2.0.md) | NEXA Academic Stable Checkpoint; [published release](https://github.com/nexa-suite/api/releases/tag/v1.2.0) |
 | [v1.1.0](./v1.1.0.md) | Tenant-scoped business database routing and local suite review; [published release](https://github.com/nexa-suite/api/releases/tag/v1.1.0) |
 | [v1.0.0](./v1.0.0.md) | First stable-version API boundary with scoped local-fixture and technical-gauge fixes |
