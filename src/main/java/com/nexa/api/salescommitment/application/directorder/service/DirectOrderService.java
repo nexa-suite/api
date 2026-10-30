@@ -5,6 +5,7 @@ import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseC
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
 import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.IdempotencyPersistencePort;
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderPersistencePort;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
@@ -24,6 +25,7 @@ import java.util.HexFormat;
 import java.util.List;
 
 public class DirectOrderService implements DirectOrderUseCase {
+    private static final BuyerDeliveryLeadBusinessPolicy DELIVERY_LEAD_POLICY = new BuyerDeliveryLeadBusinessPolicy();
     private final CommercialCommitmentPort commitments;
     private final SalesOrderPersistencePort orders;
     private final Clock clock;
@@ -85,6 +87,7 @@ public class DirectOrderService implements DirectOrderUseCase {
                 catch (Exception exception) { throw new IllegalStateException("Direct Order idempotency snapshot is invalid", exception); }
             }
         }
+        DELIVERY_LEAD_POLICY.validate(requestedDeliveryDate, clock);
         CommercialCommitmentPort.DirectOrderResult result = commitments.establishDirectOrder(
                 new CommercialCommitmentPort.DirectOrderCommand(context.tenantId().value(), context.workspaceId().value(),
                         clientAccount, context.membershipId().value(), context.membershipId().value(),

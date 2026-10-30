@@ -20,6 +20,7 @@ import com.nexa.api.salescommitment.application.purchaserequest.port.MaterialCha
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestEventPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.salescommitment.domain.publicapi.SalesInvariantViolation;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.BuyerMembershipId;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.CatalogItemSnapshot;
@@ -59,6 +60,7 @@ import java.util.Locale;
 import java.util.UUID;
 
 public class PurchaseRequestService implements PurchaseRequestUseCase {
+	private static final BuyerDeliveryLeadBusinessPolicy DELIVERY_LEAD_POLICY = new BuyerDeliveryLeadBusinessPolicy();
 	private final PurchaseRequestPersistencePort persistence;
 	private final PurchaseRequestEventPersistencePort events;
 	private final IdempotencyPersistencePort idempotency;
@@ -266,16 +268,17 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	@Transactional
 	public PurchaseRequestView create(CurrentAccessContext context, String requestedClientAccountId, String priority,
 			LocalDate deliveryDate, String deliveryProfile, String paymentOption, String comment, List<RequestedLine> requestedLines) {
+		boolean buyer = context.hasRole(MembershipRole.BUYER);
+		if (buyer) buyerWrite(context); else internal(context, Permission.SALES_WRITE);
+		if (deliveryDate != null) DELIVERY_LEAD_POLICY.validate(deliveryDate, clock);
 		String account;
-		if (context.hasRole(MembershipRole.BUYER)) {
-			buyerWrite(context);
+		if (buyer) {
 			account = buyerAccount(context);
 			if (requestedClientAccountId != null && !requestedClientAccountId.isBlank()
 					&& !account.equals(requestedClientAccountId.trim())) {
 				throw new SalesResourceNotFoundException("client-account");
 			}
 		} else {
-			internal(context, Permission.SALES_WRITE);
 			if (requestedClientAccountId == null || requestedClientAccountId.isBlank()) {
 				throw new SalesInvariantViolation("Client Account is required for an internal Purchase Request");
 			}
@@ -323,6 +326,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 	public PurchaseRequestView update(CurrentAccessContext context, String id, String priority, LocalDate deliveryDate,
 			String deliveryProfile, String paymentOption, String comment, long version) {
 		PurchaseRequestView current = canEdit(context, id);
+		if (deliveryDate != null) DELIVERY_LEAD_POLICY.validate(deliveryDate, clock);
 		PurchaseRequest aggregate = rehydrate(current);
 		PaymentOption selectedPayment = paymentOption == null ? aggregate.paymentOption() : PaymentOption.from(paymentOption);
 		if (selectedPayment == PaymentOption.WALLET) {
@@ -429,6 +433,9 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 					idempotencyOperation, idempotencyKey, commandHash);
 			if (prior.isPresent()) return replay(prior.get(), context);
 		}
+		if ("submit".equals(normalized)) {
+			DELIVERY_LEAD_POLICY.validate(current.requestedDeliveryDate(), clock);
+		}
 		materializeExpiryIfDue(context, current, normalized, version);
 		if ("start-review".equals(normalized) || "approve".equals(normalized)) {
 			if (current.version() != version) throw new SalesConcurrencyConflictException();
@@ -534,6 +541,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 
 	private MaterialChangeTerms revalidateProposal(CurrentAccessContext context, String customerAccountId,
 			MaterialChangeTerms proposed) {
+		DELIVERY_LEAD_POLICY.validate(proposed.requestedDeliveryDate(), clock);
 		List<PurchaseRequestLineView> lines = new ArrayList<>();
 		for (PurchaseRequestLineView line : proposed.lines()) {
 			CatalogItemSnapshot currentItem = catalog.findActive(line.catalogItemId(), context.tenantId().value(),

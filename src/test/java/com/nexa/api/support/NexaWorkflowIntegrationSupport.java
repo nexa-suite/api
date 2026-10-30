@@ -1,9 +1,11 @@
 package com.nexa.api.support;
 
+import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -67,11 +69,15 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
     protected PurchaseRequestResource createApprovedPurchaseRequest(String catalogItemId) throws Exception {
         if ("CAT-0002".equals(catalogItemId)) { ensureCommercialInventory(); }
         else { ensureCommercialInventory(LocalDate.of(2099, 1, 1), catalogItemId); }
+        LocalDate requestedDeliveryDate = new BuyerDeliveryLeadBusinessPolicy()
+                .minimumAllowedDeliveryDate(Clock.systemUTC());
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
         MvcResult created = mockMvc.perform(post("/api/v1/purchase-requests")
                         .header("Authorization", "Bearer " + buyer)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"lines\":[{\"catalogItemId\":\"" + catalogItemId + "\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
+                        .content("{\"requestedDeliveryDate\":\"" + requestedDeliveryDate
+                                + "\",\"lines\":[{\"catalogItemId\":\"" + catalogItemId
+                                + "\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
                 .andExpect(status().isCreated()).andReturn();
         String requestId = json(created).get("id").asText();
         String etag = created.getResponse().getHeader("ETag");
