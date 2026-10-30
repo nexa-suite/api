@@ -15,6 +15,8 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RevokeOtherSe
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RevokeOwnSessionCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SubmitOrganizationRegistrationCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.UpdateOwnProfileCommand;
+import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.AuthenticationTransport;
+import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.PasswordResetRequestTransport;
 import com.nexa.api.shared.context.ClientAddressResolver;
 import com.nexa.api.shared.context.RequestMetadata;
 import io.swagger.v3.oas.annotations.Operation;
@@ -141,6 +143,12 @@ public final class IamSecurityController {
 	@PostMapping("/auth/password-reset-requests")
 	@Operation(summary = "Request a generic password reset response")
 	public ResetResponse requestReset(HttpServletRequest httpRequest, @Valid @RequestBody ResetRequest request) {
+		if (PasswordResetRequestTransport.isNativePortalRequest(httpRequest.getMethod(), httpRequest.getHeader("Origin"),
+				httpRequest.getHeader(AuthenticationTransport.NATIVE_CLIENT_HEADER),
+				httpRequest.getHeader(PasswordResetRequestTransport.SURFACE_HEADER), httpRequest.getRequestURI())
+				&& !"PORTAL".equals(request.surface())) {
+			throw new IllegalArgumentException("Native password reset requests must target the Portal surface");
+		}
 		return new ResetResponse(requestReset.request(request.email(), request.surface(),
 				clientAddressResolver.resolve(httpRequest.getRemoteAddr(), httpRequest.getHeader("X-Forwarded-For")),
 				correlation(httpRequest), trace(httpRequest)));

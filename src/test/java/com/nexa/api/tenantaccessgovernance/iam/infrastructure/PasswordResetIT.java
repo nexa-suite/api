@@ -63,6 +63,28 @@ class PasswordResetIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void acceptsNativePortalRequestWithGenericUnknownAccountResponse() throws Exception {
+        var response = mockMvc.perform(post("/api/v1/auth/password-reset-requests")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .header("X-Nexa-Surface", "PORTAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"unknown-" + uuid() + "@example.test\",\"surface\":\"PORTAL\"}"))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(response).get("message").asText()).doesNotContain("unknown");
+    }
+
+    @Test
+    void rejectsNativePortalRequestWhoseBodyTargetsAnotherSurface() throws Exception {
+        var response = mockMvc.perform(post("/api/v1/auth/password-reset-requests")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .header("X-Nexa-Surface", "PORTAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"unknown-" + uuid() + "@example.test\",\"surface\":\"PLATFORM\"}"))
+                .andExpect(status().isBadRequest()).andReturn();
+        assertThat(json(response).get("code").asText()).isEqualTo("INVALID_REQUEST");
+    }
+
     private static String sha256(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (Exception exception) { throw new IllegalStateException(exception); }
