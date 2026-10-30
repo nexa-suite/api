@@ -194,7 +194,8 @@ class BuyerDeliveryLeadPolicyIT extends NexaWorkflowIntegrationSupport {
                         .header("Authorization", "Bearer " + buyer))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.readyToSubmit").value(true));
 
-        businessTime.set(initialInstant.plus(Duration.ofDays(2)));
+        // Three days cross at least one business day, even across a weekend.
+        businessTime.set(initialInstant.plus(Duration.ofDays(3)));
         LocalDate advancedMinimum = policyCalculator.minimumAllowedDeliveryDate(businessClock);
         assertThat(advancedMinimum).isAfter(initialMinimum);
 
