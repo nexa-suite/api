@@ -23,7 +23,6 @@ public interface OperationalSettingsAccess {
                            String inventoryVisibilityPolicy, String buyerAvailabilityPolicy,
                            LocalTime startsAt, LocalTime endsAt, int orderCutoffMinutes,
                            boolean thermalLogRequired, long version) { }
-    }
 
     record PurchaseRequestExpiryPolicySource(TenantId tenantId, WorkspaceId workspaceId,
             SourceState sourceState, Long sourceVersion, int expiryDays) {
