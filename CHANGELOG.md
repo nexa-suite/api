@@ -7,6 +7,7 @@
 - Enforce the global five-business-day delivery minimum in the America/Lima timezone. Earlier dates accepted by the previous release are rejected; consumers must consult the Buyer delivery policy before submission.
 - Preserve draft creation without a delivery date and require a valid date on submission.
 - Add the authenticated Buyer delivery policy endpoint. Existing persisted lead settings no longer control this policy.
+- Route native Buyer password-reset requests to the Platform recovery page with Origin-bound, expiring, single-use token consumption and generic rate-limited request responses.
 
 This candidate is not published; release and acceptance gates remain open.
 
