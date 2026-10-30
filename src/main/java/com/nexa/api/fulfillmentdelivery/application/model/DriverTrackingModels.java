@@ -1,5 +1,7 @@
 package com.nexa.api.fulfillmentdelivery.application.model;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -9,7 +11,7 @@ public final class DriverTrackingModels {
                           boolean locationAvailable) { }
     public record Coordinate(UUID sampleId, double latitude, double longitude, double accuracyMeters,
                              Instant capturedAt, Instant expiresAt) { }
-    public record DeliveryTracking(UUID deliveryId, Coordinate location) { }
+    public record DeliveryTracking(UUID deliveryId, @Schema(nullable = true) Coordinate location) { }
     public record WorkdayCommand(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
                                  UUID workdayId, Long expectedVersion, String action,
                                  String idempotencyKey, String requestHash, Instant now, boolean locationAvailableAtStart) {
@@ -20,9 +22,13 @@ public final class DriverTrackingModels {
     }
     public record SampleCommand(UUID tenantId, UUID workspaceId, UUID actorMembershipId,
                                 UUID workdayId, Coordinate coordinate, Instant now) { }
-    public record DeliveryScope(UUID salesOrderId, UUID driverMembershipId, String status, Instant trackingStartedAt) {
+    public record DeliveryScope(UUID salesOrderId, UUID driverMembershipId, String status, Instant trackingStartedAt,
+                                UUID fulfillmentId) {
+        public DeliveryScope(UUID salesOrderId, UUID driverMembershipId, String status, Instant trackingStartedAt) {
+            this(salesOrderId, driverMembershipId, status, trackingStartedAt, null);
+        }
         public DeliveryScope(UUID salesOrderId, UUID driverMembershipId, String status) {
-            this(salesOrderId, driverMembershipId, status, null);
+            this(salesOrderId, driverMembershipId, status, null, null);
         }
     }
 }

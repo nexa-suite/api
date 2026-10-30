@@ -61,7 +61,9 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 		} catch (IllegalArgumentException exception) {
 			return Optional.empty();
 		}
-		jdbc.queryForObject("select set_config('app.workspace_lookup_slug', ?, true)", String.class, workspaceSlug.toLowerCase(Locale.ROOT));
+		jdbc.queryForObject("select set_config('app.workspace_lookup_slug', ?, true) || "
+				+ "set_config('app.access_context_user_id', ?, true)", String.class,
+				workspaceSlug.toLowerCase(Locale.ROOT), userId.toString());
 		String sql = "select m.id membership_id, m.membership_type, m.status membership_status, m.version authorization_version, "
 				+ "w.id workspace_id, w.slug workspace_slug, w.name workspace_name, w.status workspace_status, "
 				+ "t.id tenant_id, t.slug tenant_slug, t.name tenant_name, t.status tenant_status, "
@@ -74,7 +76,8 @@ public class JdbcAccessPolicyAdapter implements AccessPolicyPort {
 		try {
 			return jdbc.query(sql, (org.springframework.jdbc.core.ResultSetExtractor<Optional<AccessPolicy>>) rs -> resolveExactlyOne(rs, userId, surface), userId, workspaceSlug.toLowerCase(Locale.ROOT));
 		} finally {
-			jdbc.queryForObject("select set_config('app.workspace_lookup_slug', '', true)", String.class);
+			jdbc.queryForObject("select set_config('app.workspace_lookup_slug', '', true) || "
+				+ "set_config('app.access_context_user_id', '', true)", String.class);
 		}
 	}
 

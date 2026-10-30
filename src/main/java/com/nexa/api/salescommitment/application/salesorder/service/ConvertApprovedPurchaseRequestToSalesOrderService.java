@@ -25,7 +25,7 @@ public final class ConvertApprovedPurchaseRequestToSalesOrderService {
     private final SalesOrderConversionPersistencePort persistence;
 
     public ConvertApprovedPurchaseRequestToSalesOrderService(SalesOrderConversionPersistencePort persistence) {
-        this.persistence = persistence;
+        this.persistence = java.util.Objects.requireNonNull(persistence);
     }
 
     @Transactional

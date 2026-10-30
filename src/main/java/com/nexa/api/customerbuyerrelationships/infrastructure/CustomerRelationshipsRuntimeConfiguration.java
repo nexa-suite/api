@@ -8,6 +8,8 @@ import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.service.ClientAccountAddressService;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.ActiveSalesMembershipDirectory;
+import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -17,8 +19,9 @@ import org.springframework.context.annotation.Profile;
 public class CustomerRelationshipsRuntimeConfiguration {
     @Bean
     ClientAccountUseCase clientAccountUseCase(
-            ClientAccountPersistencePort persistence, BuyerMembershipDirectory buyerMemberships) {
-        return new ClientAccountService(persistence, buyerMemberships);
+            ClientAccountPersistencePort persistence, BuyerMembershipDirectory buyerMemberships,
+            ActiveSalesMembershipDirectory salesMemberships, BusinessTraceabilityCommands traceability) {
+        return new ClientAccountService(persistence, buyerMemberships, salesMemberships, traceability);
     }
 
     @Bean

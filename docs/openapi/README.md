@@ -28,6 +28,28 @@ El contrato de instrucciones operativas Driver/Dispatch y sus límites de autori
 
 ## Buyer credit visibility
 
-`GET /api/v1/client-accounts/me/credit-exposure` resolves the active account from the verified PORTAL membership and requires `payment.read`. It returns existing BC-07 credit limit, exposure, reservations, outstanding receivables, available credit and timestamp facts. It accepts no customer-account selector. The existing workforce `/{clientAccountId}/credit-exposure` route retains its `client.read` requirement.
+`GET /api/v1/client-accounts/me/credit-exposure` resolves the active account from the verified PORTAL membership and requires `payment.read`. It returns existing BC-07 credit limit, exposure, reservations, outstanding receivables, available credit and timestamp facts, plus `creditEligible`, which requires an active credit account and credit-allowing customer terms. Buyer `availableCredit` is zero when terms are absent or do not allow credit. It accepts no customer-account selector. The existing workforce `/{clientAccountId}/credit-exposure` route retains its `client.read` requirement and unmasked exposure amounts.
 
 This additive read supports Buyer financial visibility in Web and Mobile. It neither creates a stored-value wallet nor changes credit or payment posting rules.
+
+## Buyer Catalog favorites
+
+The API implements the Owner-requested personal Buyer preference on a catalog
+offer's `sellableSkuId`. This is an API implementation requested by the Owner
+for BC-02; the current Blueprint does not define a favorites feature.
+`GET /api/v1/buyer/favorites` returns a bounded page for the verified Buyer
+membership, `PUT /api/v1/buyer/favorites/{sellableSkuId}` idempotently saves a
+currently active Buyer-visible offer, and `DELETE` on that SKU path idempotently
+removes the association. The Tenant database stores only the membership/SKU
+association; response offer data is resolved from current BC-03 Catalog
+visibility and pricing rules. Page items keep `sellableSkuId` and `favoritedAt`
+when an offer is no longer active or visible, with `currentOffer: null`, so the
+Buyer can identify and delete the stored association. `totalItems` counts all
+stored preferences.
+The route is enabled in the `local` profile by
+`nexa.tenant-business.catalog-favorites.enabled`.
+
+## Inventory lot temperature audit
+
+The read-only BC-05 lot temperature route and its Warehouse/BOM authorization
+scope are described in [`inventory-lot-temperature-readings.md`](./inventory-lot-temperature-readings.md).

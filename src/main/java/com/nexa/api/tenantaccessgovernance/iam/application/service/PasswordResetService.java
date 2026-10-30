@@ -1,6 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.iam.application.service;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurityException;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.PasswordResetDeliveryChannel;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RequestPasswordResetCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ResetPasswordCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.CredentialPersistencePort;
@@ -48,24 +49,35 @@ public class PasswordResetService implements RequestPasswordResetCommand, ResetP
     private final SecurityNotificationOutboxPort outbox;
     private final Clock clock;
     private final Duration resetTtl;
+    private final int maxConsumptionAttempts;
 
     public PasswordResetService(PasswordResetPersistencePort resets, PasswordResetThrottlePort throttle,
             CredentialPersistencePort credentials, OpaqueSecurityTokenPort tokens, PasswordVerificationPort verifier,
             PasswordHashPort hasher, RefreshSessionPersistencePort sessions,
             AccessContextTicketPersistencePort accessContextTickets, SecurityAuditPort audit,
             SecurityNotificationOutboxPort outbox, Clock clock,
-            @Value("${nexa.security.reset.ttl:PT30M}") Duration resetTtl) {
+            @Value("${nexa.security.reset.ttl:PT30M}") Duration resetTtl,
+            @Value("${nexa.security.reset.consume-max-attempts-per-10-minutes:10}") int maxConsumptionAttempts) {
+        if (maxConsumptionAttempts < 1) throw new IllegalArgumentException("Password reset consumption limit must be positive");
         this.resets = resets; this.throttle = throttle; this.credentials = credentials; this.tokens = tokens;
         this.verifier = verifier; this.hasher = hasher; this.sessions = sessions;
         this.accessContextTickets = accessContextTickets; this.audit = audit; this.outbox = outbox;
-        this.clock = clock; this.resetTtl = resetTtl;
+        this.clock = clock; this.resetTtl = resetTtl; this.maxConsumptionAttempts = maxConsumptionAttempts;
     }
 
     @Override
     @Transactional
     public String request(String email, String surface, String clientAddress, String correlationId, String traceId) {
+        return request(email, surface, PasswordResetDeliveryChannel.WEB, clientAddress, correlationId, traceId);
+    }
+
+    @Override
+    @Transactional
+    public String request(String email, String surface, PasswordResetDeliveryChannel channel,
+            String clientAddress, String correlationId, String traceId) {
         String normalized = normalizeEmail(email);
         if (surface == null || surface.isBlank()) throw new IamSecurityException("RESET_INVALID");
+        if (channel == null) throw new IamSecurityException("RESET_INVALID");
         Instant now = clock.instant();
         long attempts = throttle.recordAttempt(normalized, clientAddress);
         if (attempts > 3) throw new IamSecurityException("RESET_RATE_LIMITED");
@@ -82,7 +94,7 @@ public class PasswordResetService implements RequestPasswordResetCommand, ResetP
             PasswordResetRequest pending = PasswordResetRequest.pending(new PasswordResetRequestId(UUID.randomUUID()),
                     new PasswordResetTokenHash(tokens.sha256(rawToken)), now, new PasswordResetExpiry(now.plus(resetTtl)));
             resets.save(normalized, surface, pending);
-            outbox.enqueuePasswordReset(credential.get().email(), surface, rawToken, pending.expiry().value());
+            outbox.enqueuePasswordReset(credential.get().email(), surface, channel, rawToken, pending.expiry().value());
         }
         audit.append(new SecurityAuditPort.Event("PASSWORD_RESET_REQUESTED", null, credential.map(c -> c.userId()).orElse(null),
                 null, null, surface, valueOrUnknown(correlationId), valueOrUnknown(traceId), now,
@@ -92,7 +104,10 @@ public class PasswordResetService implements RequestPasswordResetCommand, ResetP
 
     @Override
     @Transactional
-    public void reset(String token, String newPassword, String correlationId, String traceId) {
+    public void reset(String token, String newPassword, String clientAddress, String correlationId, String traceId) {
+        if (throttle.recordConsumptionAttempt(clientAddress) > maxConsumptionAttempts) {
+            throw new IamSecurityException("RESET_RATE_LIMITED");
+        }
         if (token == null || token.isBlank() || !PasswordPolicy.isValid(newPassword)) throw new IamSecurityException("RESET_INVALID");
         Instant now = clock.instant();
         var record = resets.findByTokenHashForUpdate(tokens.sha256(token)).orElseThrow(() -> new IamSecurityException("RESET_INVALID"));

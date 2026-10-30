@@ -22,6 +22,17 @@ class ManualSalesOrderDraftIT extends PostgresIntegrationSupport {
     void manualOrderDraftPersistsEachStepUsesIfMatchAndReplaysFinalSubmission() throws Exception {
         String token = accessToken(SALES_EMAIL, "PLATFORM");
         String clientId = buyerClientAccountId();
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        MvcResult account = mockMvc.perform(get("/api/v1/client-accounts/" + clientId)
+                        .header("Authorization", "Bearer " + owner))
+                .andExpect(status().isOk())
+                .andReturn();
+        mockMvc.perform(put("/api/v1/client-accounts/" + clientId + "/sales-owner")
+                        .header("Authorization", "Bearer " + owner)
+                        .header("If-Match", account.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"membershipId\":\"" + membershipId(SALES_EMAIL) + "\"}"))
+                .andExpect(status().isOk());
         String skuId = tenantJdbc().queryForObject("select s.id::text from catalog_management.sellable_sku s "
                 + "where s.tenant_id=? and s.workspace_id=? and s.legacy_catalog_item_id='CAT-0002' "
                 + "and s.status='ACTIVE' and s.visible and exists (select 1 from warehouse.inventory_lot l "

@@ -3,6 +3,7 @@ package com.nexa.api.creditreceivables.infrastructure.persistence;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.exception.CreditReceivableOperationException;
 import com.nexa.api.creditreceivables.application.publicapi.CreditPaymentCommands;
+import com.nexa.api.creditreceivables.application.publicapi.CreditEligibilitySource;
 import com.nexa.api.creditreceivables.domain.model.credit.CreditAccount;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,15 +22,22 @@ import java.util.UUID;
 public class JdbcCreditPaymentAdapter implements CreditPaymentCommands {
     private final JdbcTemplate jdbc;
     private final BusinessTraceabilityCommands traceability;
+    private final CreditEligibilitySource creditEligibility;
 
-    public JdbcCreditPaymentAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability) {
+    public JdbcCreditPaymentAdapter(JdbcTemplate jdbc, BusinessTraceabilityCommands traceability,
+                                    CreditEligibilitySource creditEligibility) {
         this.jdbc = jdbc;
         this.traceability = traceability;
+        this.creditEligibility = java.util.Objects.requireNonNull(creditEligibility);
     }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public Result apply(ResultRequest request) {
+        if (!creditEligibility.lockAndCheckCreditAllowed(request.tenantId().toString(),
+                request.workspaceId().toString(), request.clientAccountId().toString())) {
+            throw error("INSUFFICIENT_CREDIT");
+        }
         jdbc.query("select pg_advisory_xact_lock(hashtextextended(?,0))", (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
                 request.tenantId() + "|" + request.workspaceId() + "|credit-payment|" + request.clientAccountId() + "|" + request.currency());
         CreditRow credit = jdbc.query("select id,credit_limit,credit_exposure,reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? and client_account_id=? and currency=? and status='ACTIVE' for update",

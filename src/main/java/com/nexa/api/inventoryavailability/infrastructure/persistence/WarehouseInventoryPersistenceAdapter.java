@@ -8,7 +8,9 @@ import com.nexa.api.inventoryavailability.application.publicapi.InventoryTempera
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseInventoryPersistencePort;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLot;
@@ -206,7 +208,7 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         pageArgs.add(size); pageArgs.add(page * size);
         query.append(" order by ").append(order).append(",id asc limit ? offset ?");
         List<WarehouseOperationsService.LotSummary> items = jdbc.query(query.toString(), (rs, row) -> WarehousePersistenceSupport.lot(rs), pageArgs.toArray());
-        return new WarehouseOperationsService.Page<>(items, page, size, count(countSql, args.toArray()));
+        return new WarehouseOperationsService.Page<>(withDisplayNames(context, items), page, size, count(countSql, args.toArray()));
     }
 
     @Transactional(readOnly = true)
@@ -229,8 +231,108 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
     @Transactional(readOnly = true)
     public WarehouseOperationsService.LotSummary lot(CurrentAccessContext context, String id) {
         requireRead(context);
-        return loadLot(context, uuid(id), false);
+        return withDisplayNames(context, List.of(loadLot(context, uuid(id), false))).getFirst();
     }
+
+    private List<WarehouseOperationsService.LotSummary> withDisplayNames(
+            CurrentAccessContext context, List<WarehouseOperationsService.LotSummary> lots) {
+        if (lots.isEmpty()) return lots;
+        List<UUID> skuIds = lots.stream().map(WarehouseOperationsService.LotSummary::skuId)
+                .filter(java.util.Objects::nonNull).map(UUID::fromString).distinct().toList();
+        List<String> legacyIds = lots.stream().filter(lot -> lot.skuId() == null)
+                .map(WarehouseOperationsService.LotSummary::catalogItemId)
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        Map<UUID, SellableSkuQuery.InventorySkuSnapshot> skus = new java.util.HashMap<>();
+        Map<String, SellableSkuQuery.InventorySkuSnapshot> legacy = new java.util.HashMap<>();
+        List<SellableSkuQuery.InventorySkuSnapshot> facts = new ArrayList<>();
+        if (!skuIds.isEmpty()) facts.addAll(catalog.findInventoryPolicies(tenant(context), workspace(context), skuIds));
+        if (!legacyIds.isEmpty()) facts.addAll(catalog.findInventoryPoliciesByLegacyIds(tenant(context), workspace(context), legacyIds));
+        for (var fact : facts) {
+            skus.put(fact.id(), fact);
+            if (fact.legacyCatalogItemId() != null) legacy.put(fact.legacyCatalogItemId(), fact);
+        }
+        Map<String, String> warehouses = displayNames(context, "warehouse.warehouse",
+                lots.stream().map(WarehouseOperationsService.LotSummary::warehouseId).distinct().toList());
+        Map<String, String> zones = displayNames(context, "warehouse.storage_zone",
+                lots.stream().map(WarehouseOperationsService.LotSummary::zoneId).distinct().toList());
+        return lots.stream().map(lot -> {
+            var fact = lot.skuId() == null ? legacy.get(lot.catalogItemId()) : skus.get(UUID.fromString(lot.skuId()));
+            return lot.withDisplayNames(fact == null ? null : fact.productName(),
+                    fact == null ? null : fact.skuCode(), warehouses.get(lot.warehouseId()), zones.get(lot.zoneId()), fact == null ? null : fact.imageFileName());
+        }).toList();
+    }
+
+    private Map<String, String> displayNames(CurrentAccessContext context, String table, List<String> ids) {
+        List<Object> args = new ArrayList<>(List.of(tenant(context), workspace(context)));
+        args.addAll(ids.stream().map(UUID::fromString).toList());
+        String placeholders = ids.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        Map<String, String> names = new java.util.HashMap<>();
+        jdbc.query("select id,name from " + table + " where tenant_id=? and workspace_id=? and id in (" + placeholders + ")",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> names.put(rs.getObject("id").toString(), rs.getString("name")),
+                args.toArray());
+        return names;
+    }
+
+    @Transactional(readOnly = true)
+    public WarehouseOperationsService.TemperatureReadingsSummary temperatureReadings(
+            CurrentAccessContext context, String lotId, int page, int size) {
+        pageCheck(page, size);
+        boolean bomAuditReader = context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER);
+        if (bomAuditReader) {
+            context.requireSurface(Surface.PLATFORM);
+            context.requirePermission(PermissionKey.INVENTORY_TEMPERATURE_AUDIT_READ);
+        } else {
+            requireRead(context);
+        }
+
+        UUID id = uuid(lotId);
+        TemperatureLot lot = jdbc.query("select warehouse_id,temperature_value,temperature_recorded_at,"
+                        + "temperature_recorded_by_membership_id,temperature_evidence_object_id "
+                        + "from warehouse.inventory_lot where tenant_id=? and workspace_id=? and id=?",
+                (rs, row) -> new TemperatureLot(rs.getObject("warehouse_id", UUID.class),
+                        rs.getBigDecimal("temperature_value"), instantNullable(rs, "temperature_recorded_at"),
+                        rs.getObject("temperature_recorded_by_membership_id", UUID.class),
+                        rs.getObject("temperature_evidence_object_id", UUID.class)),
+                tenant(context), workspace(context), id).stream().findFirst()
+                .orElseThrow(() -> error("INVENTORY_LOT_NOT_FOUND", true));
+        if (!bomAuditReader && !warehouseAccess.hasActiveGrant(context, lot.warehouseId())) {
+            // Hide whether a scoped lot exists from a reader without its Warehouse grant.
+            throw error("INVENTORY_LOT_NOT_FOUND", true);
+        }
+
+        List<Object> scope = List.of(tenant(context), workspace(context), id);
+        List<Object> pageArguments = new ArrayList<>(scope);
+        pageArguments.add(size);
+        pageArguments.add((long) page * size);
+        List<WarehouseOperationsService.TemperatureEvaluationSummary> evaluations = jdbc.query(
+                "select id,coalesce(observed_value,received_value) as value_celsius,source_type,expected_min,expected_max,"
+                        + "status,disposition,resolution_reason,created_at,resolved_at,evidence_object_id,affected_quantity,"
+                        + "actor_membership_id,blocks_committed_execution from warehouse.inventory_temperature_evaluation "
+                        + "where tenant_id=? and workspace_id=? and lot_id=? and source_type='RECEIVING' "
+                        + "order by created_at desc,id desc limit ? offset ?",
+                (rs, row) -> new WarehouseOperationsService.TemperatureEvaluationSummary(
+                        rs.getObject("id", UUID.class).toString(), rs.getBigDecimal("value_celsius"),
+                        rs.getString("source_type"), rs.getBigDecimal("expected_min"), rs.getBigDecimal("expected_max"),
+                        rs.getString("status"), rs.getString("disposition"), rs.getString("resolution_reason"),
+                        instant(rs, "created_at"), instantNullable(rs, "resolved_at"),
+                        rs.getObject("evidence_object_id", UUID.class) == null ? null
+                                : rs.getObject("evidence_object_id", UUID.class).toString(),
+                        rs.getBigDecimal("affected_quantity"),
+                        rs.getObject("actor_membership_id", UUID.class) == null ? null
+                                : rs.getObject("actor_membership_id", UUID.class).toString(),
+                        rs.getBoolean("blocks_committed_execution")), pageArguments.toArray());
+        long total = count("select count(*) from warehouse.inventory_temperature_evaluation "
+                + "where tenant_id=? and workspace_id=? and lot_id=? and source_type='RECEIVING'", scope.toArray());
+        WarehouseOperationsService.ReceivingTemperatureReading receiving = lot.valueCelsius() == null ? null
+                : new WarehouseOperationsService.ReceivingTemperatureReading(lot.valueCelsius(), lot.recordedAt(),
+                lot.recordedByMembershipId() == null ? null : lot.recordedByMembershipId().toString(),
+                lot.evidenceObjectId() == null ? null : lot.evidenceObjectId().toString());
+        return new WarehouseOperationsService.TemperatureReadingsSummary(lotId, lot.warehouseId().toString(),
+                receiving, new WarehouseOperationsService.Page<>(evaluations, page, size, total));
+    }
+
+    private record TemperatureLot(UUID warehouseId, BigDecimal valueCelsius, Instant recordedAt,
+                                  UUID recordedByMembershipId, UUID evidenceObjectId) { }
 
     public WarehouseOperationsService.LotSummary receive(CurrentAccessContext context, WarehouseOperationsService.Receipt receipt,
                                                           String key, String correlation) {
@@ -245,7 +347,12 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
                 : requestHash("inbound-v2", legacyReceiptHashValue(receipt).substring(0, legacyReceiptHashValue(receipt).length() - 1)
                         + ", temperatureEvidenceObjectId=" + receipt.temperatureEvidenceObjectId() + "]");
         IdempotencyRecord prior = idempotent(context, "inbound", key);
-        if (prior != null) { requireSamePayload(prior, hash); return loadLot(context, uuid(prior.resourceId()), false); }
+        if (prior != null) {
+            requireSamePayload(prior, hash);
+            WarehouseOperationsService.LotSummary lot = loadLot(context, uuid(prior.resourceId()), false);
+            if (prior.requestHash() == null || prior.requestHash().isBlank() || !prior.requestHash().equals(hash)) return lot;
+            return withConfirmedReceivedQuantity(lot, receipt.quantity());
+        }
         UUID zone = uuidRequired(receipt.zoneId(), "zoneId");
         String requestedCatalogItemId = receipt.catalogItemId() == null || receipt.catalogItemId().isBlank() ? null : bounded(receipt.catalogItemId(), "catalogItemId", 64);
         requireActiveZone(context, warehouse, zone);
@@ -307,7 +414,16 @@ public class WarehouseInventoryPersistenceAdapter extends WarehouseJdbcSupport
         if (receipt.productionDate() != null) jdbc.update("update warehouse.inventory_lot set production_date=? where tenant_id=? and workspace_id=? and id=?",
                 receipt.productionDate(), tenant(context), workspace(context), id);
         saveIdempotency(context, "inbound", key, hash, id.toString());
-        return loadLot(context, id, false);
+        WarehouseOperationsService.LotSummary lot = loadLot(context, id, false);
+        IdempotencyRecord recorded = idempotent(context, "inbound", key);
+        if (recorded == null || !hash.equals(recorded.requestHash()) || !id.toString().equals(recorded.resourceId())) return lot;
+        return withConfirmedReceivedQuantity(lot, receipt.quantity());
+    }
+
+    private static WarehouseOperationsService.LotSummary withConfirmedReceivedQuantity(
+            WarehouseOperationsService.LotSummary lot, BigDecimal quantity) {
+        if (quantity == null || quantity.signum() <= 0 || quantity.stripTrailingZeros().scale() > 4) return lot;
+        return lot.withConfirmedReceivedQuantity(quantity);
     }
 
     private static String legacyReceiptHashValue(WarehouseOperationsService.Receipt receipt) {

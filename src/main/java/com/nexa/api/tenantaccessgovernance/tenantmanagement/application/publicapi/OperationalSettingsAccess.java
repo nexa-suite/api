@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publica
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
 
 import java.time.LocalTime;
 import java.util.Optional;
@@ -22,6 +23,7 @@ public interface OperationalSettingsAccess {
                            String inventoryVisibilityPolicy, String buyerAvailabilityPolicy,
                            LocalTime startsAt, LocalTime endsAt, int orderCutoffMinutes,
                            boolean thermalLogRequired, long version) { }
+    }
 
     record PurchaseRequestExpiryPolicySource(TenantId tenantId, WorkspaceId workspaceId,
             SourceState sourceState, Long sourceVersion, int expiryDays) {

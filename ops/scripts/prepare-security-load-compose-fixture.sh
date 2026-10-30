@@ -8,6 +8,7 @@ cd -- "$API_DIRECTORY"
 fail() { printf '%s\n' "$1" >&2; exit 1; }
 mask_secret() { printf '::add-mask::%s\n' "$1"; }
 random_secret() { openssl rand -hex 32; }
+random_base64_secret() { openssl rand -base64 32 | tr -d '\r\n'; }
 
 [[ "${GITHUB_ACTIONS:-}" == true ]] || fail 'This fixture preparation helper is restricted to GitHub Actions.'
 [[ -n "${GITHUB_WORKSPACE:-}" && "$(cd -- "$GITHUB_WORKSPACE" && pwd)" == "$API_DIRECTORY" ]] \
@@ -18,8 +19,15 @@ for path in .env.local .local-keys .local; do
 	[[ ! -e "$path" && ! -L "$path" ]] || fail "Refusing to reuse existing CI-local state at $path."
 done
 
+unset postgres_password
 postgres_password="$(random_secret)"
+unset runtime_password
+runtime_password="$(random_secret)"
+migrator_password="$(random_secret)"
 documents_reader_password="$(random_secret)"
+workspace_scope_reader_password="$(random_secret)"
+internal_operator_database_password="$(random_secret)"
+tenant_database_provisioner_password="$(random_base64_secret)"
 reset_throttle_key="$(random_secret)"
 notification_outbox_key="$(random_secret)"
 system_operator_token="$(random_secret)"
@@ -33,7 +41,8 @@ logistics_password="$(random_secret)"
 buyer_password="$(random_secret)"
 
 for secret in \
-	"$postgres_password" "$documents_reader_password" "$reset_throttle_key" \
+	"$postgres_password" "$runtime_password" "$migrator_password" "$documents_reader_password" \
+	"$workspace_scope_reader_password" "$internal_operator_database_password" "$tenant_database_provisioner_password" "$reset_throttle_key" \
 	"$notification_outbox_key" "$system_operator_token" "$minio_root_user" "$minio_root_password" \
 	"$owner_password" "$tenant_admin_password" "$sales_password" \
 	"$warehouse_password" "$logistics_password" "$buyer_password"; do
@@ -65,7 +74,13 @@ NEXA_DATABASE_PASSWORD=$postgres_password
 NEXA_MODERN_POSTGRES_DB=nexa
 NEXA_MODERN_POSTGRES_USER=nexa
 NEXA_MODERN_POSTGRES_PASSWORD=$postgres_password
+NEXA_DATABASE_RUNTIME_PASSWORD=$runtime_password
+NEXA_DATABASE_MIGRATOR_USERNAME=nexa_migrator
+NEXA_DATABASE_MIGRATOR_PASSWORD=$migrator_password
 NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD=$documents_reader_password
+NEXA_WORKSPACE_SCOPE_READER_PASSWORD=$workspace_scope_reader_password
+NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD=$internal_operator_database_password
+NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD=$tenant_database_provisioner_password
 NEXA_MINIO_ROOT_USER=$minio_root_user
 NEXA_MINIO_ROOT_PASSWORD=$minio_root_password
 NEXA_OBJECT_STORAGE_BUCKET=nexa-private
@@ -138,8 +153,32 @@ done
 compose_file=ops/compose/modern.compose.yml
 compose() { docker compose --env-file .env.local -f "$compose_file" "$@"; }
 central_psql() {
-	compose exec -T -e "PGPASSWORD=$postgres_password" modern-postgres psql \
-		-X -qAt -v ON_ERROR_STOP=1 -U nexa_runtime -d nexa "$@"
+	{
+		printf '%s\n' "$runtime_password"
+		cat
+	} | compose exec -T modern-postgres sh -ec '
+		unset password PGPASSWORD
+		umask 077
+		passfile="$(mktemp)" || exit 70
+		cleanup() {
+			status=$?
+			trap - EXIT HUP INT TERM
+			rm -f -- "$passfile" || status=70
+			exit "$status"
+		}
+		trap cleanup EXIT
+		trap "exit 129" HUP
+		trap "exit 130" INT
+		trap "exit 143" TERM
+		chmod 600 "$passfile" || exit 70
+		IFS= read -r password || exit 70
+		case "$password" in ''|*[!A-Fa-f0-9]*) exit 70 ;; esac
+		[ "${#password}" -eq 64 ] || exit 70
+		printf "localhost:*:*:nexa_runtime:%s\\n" "$password" > "$passfile" || exit 70
+		unset password
+		PGPASSFILE="$passfile" psql -X -qAt -w -v ON_ERROR_STOP=1 \
+			-U nexa_runtime -d nexa "$@"
+	' sh "$@"
 }
 report_provisioning_failure() {
 	local diagnostic worker_log safe_lines tenant_database_container_id tenant_database_state tenant_database_log
@@ -218,8 +257,19 @@ identity=''
 for _ in $(seq 1 60); do
 	if identity="$(central_psql -v tenant_slug=icisa -v workspace_slug=icisa \
 		-v buyer_email=buyer@icisa.test <<'SQL'
+BEGIN;
 SET app.bootstrap_tenant_slug = :'tenant_slug';
 SET app.workspace_lookup_slug = :'workspace_slug';
+SELECT set_config(
+	'app.access_context_user_id',
+	coalesce((
+		SELECT buyer.id::text
+		  FROM iam.user_account buyer
+		 WHERE buyer.normalized_email=lower(:'buyer_email') AND buyer.status='ACTIVE'
+	 LIMIT 1
+	), '00000000-0000-0000-0000-000000000000'),
+	true
+) AS _access_context_user_id \gset
 SELECT count(*)::text || '|' || min(tenant.id::text) || '|' || min(workspace.id::text)
        || '|' || min(buyer.id::text) || '|' || min(membership.id::text)
   FROM tenant_management.tenant tenant
@@ -230,6 +280,7 @@ SELECT count(*)::text || '|' || min(tenant.id::text) || '|' || min(workspace.id:
    AND workspace.slug=:'workspace_slug' AND workspace.status='ACTIVE'
    AND buyer.normalized_email=lower(:'buyer_email') AND buyer.status='ACTIVE'
    AND membership.membership_type='BUYER' AND membership.status='ACTIVE';
+COMMIT;
 SQL
 	)"; then
 		IFS='|' read -r identity_count tenant_id workspace_id buyer_user_id buyer_membership_id <<< "$identity"
@@ -289,9 +340,9 @@ docker run --rm --network container:nexa-modern-api --user "$(id -u):$(id -g)" \
 	--env-file "$API_DIRECTORY/.env.local" \
 	-e NEXA_DATABASE_URL=jdbc:postgresql://modern-postgres:5432/nexa \
 	-e NEXA_DATABASE_USERNAME=nexa_runtime \
-	-e "NEXA_DATABASE_PASSWORD=$postgres_password" \
+	-e "NEXA_DATABASE_PASSWORD=$runtime_password" \
 	-e NEXA_DATABASE_RUNTIME_USERNAME=nexa_runtime \
-	-e "NEXA_DATABASE_RUNTIME_PASSWORD=$postgres_password" \
+	-e "NEXA_DATABASE_RUNTIME_PASSWORD=$runtime_password" \
 	-e NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME=true \
 	-e NEXA_FLYWAY_ENABLED=false \
 	-e NEXA_TENANT_BUSINESS_LOCAL_CREDENTIALS_DIRECTORY=/workspace/.local/tenant-databases \
@@ -308,9 +359,29 @@ tenant_container="$(docker ps --filter "label=com.docker.compose.project=$tenant
 [[ -n "$tenant_container" && "$tenant_container" != *$'\n'* ]] \
 	|| fail 'The provisioned Tenant database container could not be identified uniquely.'
 tenant_sql="SET app.current_tenant_id = '$tenant_id'; SET app.current_workspace_id = '$workspace_id'; SELECT string_agg(warehouse.id::text, ',' ORDER BY warehouse.id) FROM warehouse.warehouse warehouse WHERE warehouse.tenant_id = '$tenant_id'::UUID AND warehouse.workspace_id = '$workspace_id'::UUID AND warehouse.code = 'ICISA-COLD-01' AND warehouse.status = 'ACTIVE';"
-warehouse_ids="$(docker exec "$tenant_container" sh -ec \
-	'export PGPASSWORD="$(cat /run/secrets/bootstrap_admin_password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' \
-	sh "$tenant_sql")"
+warehouse_ids="$(docker exec "$tenant_container" sh -ec '
+	unset password PGPASSWORD
+	umask 077
+	passfile="$(mktemp)" || exit 70
+	cleanup() {
+		status=$?
+		trap - EXIT HUP INT TERM
+		rm -f -- "$passfile" || status=70
+		exit "$status"
+	}
+	trap cleanup EXIT
+	trap "exit 129" HUP
+	trap "exit 130" INT
+	trap "exit 143" TERM
+	chmod 600 "$passfile" || exit 70
+	password="$(cat /run/secrets/bootstrap_admin_password)" || exit 70
+	case "$password" in ''|*[!A-Fa-f0-9]*) exit 70 ;; esac
+	[ "${#password}" -eq 64 ] || exit 70
+	printf "localhost:*:*:%s:%s\\n" "$POSTGRES_USER" "$password" > "$passfile" || exit 70
+	unset password
+	PGPASSFILE="$passfile" psql -X -qAt -w -v ON_ERROR_STOP=1 \
+		-U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"
+' sh "$tenant_sql")"
 [[ -n "$warehouse_ids" ]] || fail 'Tenant database fixture seed did not create an active ICISA-COLD-01 Warehouse.'
 IFS=',' read -r -a warehouse_id_list <<< "$warehouse_ids"
 (( ${#warehouse_id_list[@]} > 0 )) || fail 'Tenant database returned no Warehouse identifiers.'

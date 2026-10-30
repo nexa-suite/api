@@ -93,4 +93,10 @@ public final class TenantBoundPurchaseRequestUseCase implements PurchaseRequestU
         return expiryPolicies.inTransaction(context,
                 jdbc -> action.apply(compositions.bindTo(jdbc).purchaseRequests()));
     }
+
+    private <T> T callWithExpiryPolicy(CurrentAccessContext context,
+            Function<PurchaseRequestUseCase, T> action) {
+        return expiryPolicies.inTransaction(context,
+                jdbc -> action.apply(compositions.bindTo(jdbc).purchaseRequests()));
+    }
 }

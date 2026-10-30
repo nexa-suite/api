@@ -35,6 +35,8 @@ public final class SmtpSecurityRuntimeConfigurationValidator {
 
         validateLink(environment, "nexa.security.reset.platform-url");
         validateLink(environment, "nexa.security.reset.portal-url");
+        validateLink(environment, "nexa.security.reset.platform-native-url");
+        validateLink(environment, "nexa.security.reset.portal-native-url");
     }
 
     private static boolean smtpConfigured(Environment environment) {

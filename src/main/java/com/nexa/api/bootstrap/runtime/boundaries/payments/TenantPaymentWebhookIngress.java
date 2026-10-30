@@ -1,7 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries.payments;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcPaymentProviderRouteRegistry;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.payments.application.publicapi.model.PaymentModels;
 import com.nexa.api.payments.application.publicapi.TenantPaymentWebhookInboxIntake;
 import com.nexa.api.payments.application.publicapi.webhooks.PaymentWebhookSignatureVerifier;
@@ -24,14 +24,17 @@ public final class TenantPaymentWebhookIngress {
     private final JdbcPaymentProviderRouteRegistry routes;
     private final WalletRechargeWebhookIntake walletRechargeWebhookIntake;
     private final TenantPaymentWebhookInboxIntake webhookInbox;
+    private final TenantBuyerPaymentMethodSetupWebhookProcessor buyerPaymentMethodSetupProcessor;
 
     public TenantPaymentWebhookIngress(PaymentWebhookSignatureVerifier verifier,
             JdbcPaymentProviderRouteRegistry routes, WalletRechargeWebhookIntake walletRechargeWebhookIntake,
-            TenantPaymentWebhookInboxIntake webhookInbox) {
+            TenantPaymentWebhookInboxIntake webhookInbox,
+            TenantBuyerPaymentMethodSetupWebhookProcessor buyerPaymentMethodSetupProcessor) {
         this.verifier = Objects.requireNonNull(verifier);
         this.routes = Objects.requireNonNull(routes);
         this.walletRechargeWebhookIntake = Objects.requireNonNull(walletRechargeWebhookIntake);
         this.webhookInbox = Objects.requireNonNull(webhookInbox);
+        this.buyerPaymentMethodSetupProcessor = Objects.requireNonNull(buyerPaymentMethodSetupProcessor);
     }
 
     public PaymentModels.WebhookReceipt receive(String payload, String signature) {
@@ -43,6 +46,9 @@ public final class TenantPaymentWebhookIngress {
         if (walletRechargeId != null && !walletRechargeId.isBlank()) {
             // Wallet callbacks retain their separately accepted opaque wallet route and worker.
             return walletRechargeWebhookIntake.receiveWalletRechargeWebhook(payload, signature);
+        }
+        if (event.eventType() != null && event.eventType().startsWith("setup_intent.")) {
+            return buyerPaymentMethodSetupProcessor.process(event, signature);
         }
         if (event.paymentIntentId() == null || !event.eventType().startsWith("payment_intent.")) {
             return new PaymentModels.WebhookReceipt(event.eventId(), "IGNORED");

@@ -44,6 +44,35 @@ public interface TenantPaymentSession {
     PaymentModels.PaymentView reviewBankTransfer(CurrentAccessContext context, UUID paymentId,
             String action, String reason, String idempotencyKey);
 
+    java.util.List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(
+            CurrentAccessContext context);
+
+    BuyerPaymentMethodSetupPreparation prepareBuyerPaymentMethodSetup(CurrentAccessContext context,
+            String idempotencyKey);
+
+    BuyerPaymentMethodSetupPreparation prepareBuyerPaymentMethodLocalConfirmation(CurrentAccessContext context,
+            String providerSetupIntentId);
+
+    void bindBuyerPaymentProviderCustomer(CurrentAccessContext context,
+            BuyerPaymentMethodSetupPreparation preparation, String providerCustomerId);
+
+    void recordBuyerPaymentSetupIntent(CurrentAccessContext context,
+            BuyerPaymentMethodSetupPreparation preparation, String providerCustomerId, String providerSetupIntentId);
+
+    PaymentModels.WebhookReceipt applyBuyerPaymentMethodSetupWebhook(UUID tenantId, UUID workspaceId,
+            UUID buyerMembershipId, UUID clientAccountId, UUID setupAttemptId, String setupIntentId,
+            String providerCustomerId, String eventId, String eventType, String providerStatus,
+            String signatureSha256,
+            com.nexa.api.payments.application.publicapi.provider.PaymentProviderOperations.ProviderPaymentMethod method);
+
+    BuyerPaymentMethodDetachPreparation prepareBuyerPaymentMethodDetach(CurrentAccessContext context,
+            UUID paymentMethodId);
+
+    void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId);
+
+    PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext context,
+            UUID paymentMethodId);
+
     TenantCardPaymentPreparation prepareTenantCardPayment(CurrentAccessContext context, UUID receivableId,
             String idempotencyKey);
 
@@ -71,6 +100,15 @@ public interface TenantPaymentSession {
     record ProviderIntent(String providerId, String clientSecret, String status) { }
 
     record ProviderRefund(String providerRefundId, String status) { }
+
+    record BuyerPaymentMethodSetupPreparation(UUID tenantId, UUID workspaceId, UUID clientAccountId,
+            UUID buyerMembershipId, UUID setupAttemptId, String idempotencyKeyHash,
+            String providerCustomerId, String providerSetupIntentId,
+            String providerCustomerIdempotencyKey, String providerSetupIntentIdempotencyKey,
+            java.util.Map<String, String> providerMetadata) { }
+
+    record BuyerPaymentMethodDetachPreparation(UUID clientAccountId, UUID buyerMembershipId,
+            UUID paymentMethodId, String providerCustomerId, String providerPaymentMethodId) { }
 
     record TenantCardPaymentPreparation(UUID paymentId, UUID receivableId, long amountMinor, String currency,
             String providerIdempotencyKey, String idempotencyKey, String providerPaymentIntentId,

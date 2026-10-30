@@ -1,5 +1,6 @@
 package com.nexa.api.bootstrap.runtime.database;
 
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import com.nexa.api.bootstrap.runtime.boundaries.CatalogClientAccountCompositionAdapter;
 import com.nexa.api.bootstrap.runtime.boundaries.TenantBoundCatalogDetailReader;
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseAuthority;
@@ -28,6 +29,7 @@ import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersisten
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogSkuPersistenceBootstrap;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogVariantMappingLoader;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountDetails;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.customerbuyerrelationships.infrastructure.persistence.ClientAccountPersistenceAdapter;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.ProductAvailabilityPort;
@@ -106,7 +108,8 @@ class TenantBoundCatalogDetailReaderIT {
 	private static final String RUNTIME_PASSWORD_B = "tenant-runtime-b-test-password";
 	private static final String POLICY_WRITER_PASSWORD = "tenant-policy-writer-test-password";
 	private static final List<String> TENANT_WORKER_ROLES = List.of("nexa_wallet_recharge_worker",
-			"nexa_business_documents_worker", "nexa_payments_worker", "nexa_business_traceability_worker");
+			"nexa_business_documents_worker", "nexa_payments_worker", "nexa_business_traceability_worker",
+			"nexa_warehouse_reservation_expiry_worker");
 	private static final String CATALOG_ITEM_ID = "CAT-0001";
 	private static final Path REPOSITORY_ROOT = Path.of("").toAbsolutePath().normalize();
 
@@ -301,15 +304,14 @@ class TenantBoundCatalogDetailReaderIT {
 	}
 
 	private static void migrateCentral() {
-		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
-				.locations("classpath:db/migration").load().migrate();
+		CentralMigrationTestBootstrap.migrateToCurrent(CENTRAL);
 	}
 
 	private static void provisionTenantRoles(PostgreSQLContainer tenant, String runtimePassword) throws SQLException {
 		try (Connection connection = adminConnection(tenant); Statement statement = connection.createStatement()) {
-			statement.execute("CREATE ROLE nexa_migrator LOGIN PASSWORD '" + MIGRATOR_PASSWORD
+			statement.execute("CREATE ROLE nexa_migrator LOGIN NOINHERIT PASSWORD '" + MIGRATOR_PASSWORD
 					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
-			statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + runtimePassword
+			statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT PASSWORD '" + runtimePassword
 					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("CREATE ROLE nexa_policy_snapshot_writer LOGIN PASSWORD '" + POLICY_WRITER_PASSWORD
 					+ "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
@@ -348,8 +350,8 @@ class TenantBoundCatalogDetailReaderIT {
 		centralAdmin.update("INSERT INTO iam.user_account (id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
 			userId, userId + "@example.test", userId + "@example.test", userId.toString(), userId.toString(),
 			"Catalog fixture Buyer " + suffix, "en", "ACTIVE", now, now);
-		centralAdmin.update("INSERT INTO tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-			membershipId, workspaceId, userId, "BUYER", "ACTIVE", now, now);
+		centralAdmin.update("INSERT INTO tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+			membershipId, tenantId, workspaceId, userId, "BUYER", "ACTIVE", now, now);
 		centralAdmin.update("""
 				INSERT INTO tenant_management.membership_role_definition
 				    (membership_id,tenant_id,workspace_id,role_id,assigned_at)
@@ -408,7 +410,9 @@ class TenantBoundCatalogDetailReaderIT {
 				""", tenant.accountId(), tenant.tenantId().value(), tenant.workspaceId().value(),
 				"BUYER-" + tenant.accountId().toString().substring(0, 8),
 				"Fixture Buyer " + tenant.databaseName(), "Fixture Buyer " + tenant.databaseName(), "PE", "RUC",
-				"20" + tenant.accountId().toString().replace("-", "").substring(0, 10),
+				"20" + String.format(java.util.Locale.ROOT, "%09d", new java.math.BigInteger(
+					tenant.accountId().toString().replace("-", ""), 16)
+					.mod(java.math.BigInteger.valueOf(1_000_000_000L))),
 				"SEG-" + tenant.accountId().toString().substring(0, 8),
 				"Fixture Contact", tenant.accountId() + "@example.test", "+51999999999", "Fixture delivery profile",
 				"NET_30", "ACTIVE", now, now);
@@ -450,7 +454,18 @@ class TenantBoundCatalogDetailReaderIT {
 	}
 
 	private static CatalogItemDetail readCentralFixture(TenantFixture tenant) {
-		CustomerAccountQuery customerQuery = new ClientAccountPersistenceAdapter(centralAdmin);
+		ClientAccountPersistenceAdapter centralAccounts = new ClientAccountPersistenceAdapter(centralAdmin);
+		CustomerAccountQuery customerQuery = new ClientAccountPersistenceAdapter(centralAdmin) {
+			@Override public Optional<CustomerAccountDetails> findActiveBuyerDetails(
+					String tenantId, String workspaceId, String membershipId) {
+				return centralAccounts.findActiveDetails(tenantId, workspaceId, tenant.accountId().toString());
+			}
+			@Override public Optional<String> findUnfilteredReferenceForMembership(
+					String tenantId, String workspaceId, String membershipId) {
+				return centralAccounts.findActiveDetails(tenantId, workspaceId, tenant.accountId().toString())
+						.map(CustomerAccountDetails::id);
+			}
+		};
 		CatalogClientAccountPort clientAccounts = new CatalogClientAccountCompositionAdapter(customerQuery);
 		AuthoritativeOfferQuery offers = new JdbcAuthoritativeOfferQuery(centralAdmin, clientAccounts);
 		var sellableSkus = new JdbcSellableSkuQuery(centralAdmin, offers);

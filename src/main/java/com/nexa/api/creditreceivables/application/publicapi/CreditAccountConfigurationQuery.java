@@ -40,6 +40,7 @@ public interface CreditAccountConfigurationQuery {
 
         public BigDecimal availableCredit() {
             if (status == Status.NOT_CONFIGURED) return null;
+            if (status != Status.ACTIVE) return BigDecimal.ZERO;
             return creditLimit.subtract(used()).max(BigDecimal.ZERO);
         }
 

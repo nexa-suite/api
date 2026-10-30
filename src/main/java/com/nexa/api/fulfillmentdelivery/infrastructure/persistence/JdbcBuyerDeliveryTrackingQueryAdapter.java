@@ -55,7 +55,9 @@ public class JdbcBuyerDeliveryTrackingQueryAdapter implements BuyerDeliveryTrack
                     tenantId, workspaceId, orders.items().stream().map(SalesOrderFulfillmentQuery.OrderReference::id).toList());
             for (SalesOrderFulfillmentQuery.OrderReference order : orders.items()) {
                 for (DeliveryRecord record : bySalesOrder.getOrDefault(order.id(), List.of())) {
-                    if (total >= start && total < end) selected.add(withOrderNumber(record, order.number()));
+                    if (total >= start && total < end) {
+                        selected.add(withOrderReference(record, order.number(), order.status()));
+                    }
                     total++;
                 }
             }
@@ -181,8 +183,9 @@ public class JdbcBuyerDeliveryTrackingQueryAdapter implements BuyerDeliveryTrack
                 instant(rs, "updated_at"));
     }
 
-    private static DeliveryRecord withOrderNumber(DeliveryRecord record, String orderNumber) {
-        return new DeliveryRecord(record.id(), record.salesOrderId(), orderNumber, record.status(),
+    private static DeliveryRecord withOrderReference(DeliveryRecord record, String orderNumber,
+                                                     String orderStatus) {
+        return new DeliveryRecord(record.id(), record.salesOrderId(), orderNumber, orderStatus, record.status(),
                 record.destination(), record.scheduledAt(), record.dispatchedAt(), record.deliveredAt(),
                 record.proofOfDeliveryStatus(), record.version(), record.createdAt(), record.updatedAt());
     }

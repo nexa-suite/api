@@ -7,6 +7,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,9 +41,9 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         + "select ?,password_hash,algorithm,changed_at from iam.password_credential where user_id=?",
                 user, sourceUser);
         jdbc.update("insert into tenant_management.workspace_membership "
-                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "values (?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
-                membership, workspace, user);
+                        + "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+                membership, tenant, workspace, user);
         int assigned = jdbc.update("insert into tenant_management.membership_role_definition "
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
                         + "select ?,?,?,r.id,?,current_timestamp from tenant_management.role_definition r "
@@ -218,6 +219,9 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
                         .header("Idempotency-Key", "reserve-" + suffix))
                 .andExpect(status().isCreated()).andReturn();
         String reservationId = json(reservation).get("id").asText();
+        for (UUID backingWarehouseId : dispatchBackingWarehouseIds(pending.id())) {
+            grantWarehouseAccess(backingWarehouseId.toString(), membershipId(LOGISTICS_EMAIL));
+        }
         String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
         MvcResult dispatch = mockMvc.perform(post("/api/v1/inventory-reservations/" + reservationId + "/dispatch-orders")
                         .header("Authorization", "Bearer " + logistics).header("If-Match", reservation.getResponse().getHeader("ETag"))
@@ -226,12 +230,31 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
         return new DispatchResource(json(dispatch).get("id").asText(), json(dispatch).get("dispatchNumber").asText(), dispatch.getResponse().getHeader("ETag"), logistics, reservationId, confirmed.getResponse().getHeader("ETag"), pending.id());
     }
 
+    protected Set<UUID> dispatchBackingWarehouseIds(String salesOrderId) {
+        return Set.copyOf(tenantJdbc().queryForList(
+                "select distinct bp.warehouse_id from sales.sales_order so "
+                        + "join warehouse.inventory_backing b on b.tenant_id=so.tenant_id "
+                        + "and b.workspace_id=so.workspace_id and b.commercial_commitment_id=so.commercial_commitment_id "
+                        + "join warehouse.inventory_backing_line bl on bl.tenant_id=b.tenant_id "
+                        + "and bl.workspace_id=b.workspace_id and bl.backing_id=b.id "
+                        + "join warehouse.inventory_backing_position bp on bp.tenant_id=bl.tenant_id "
+                        + "and bp.workspace_id=bl.workspace_id and bp.backing_line_id=bl.id "
+                        + "where so.tenant_id=? and so.workspace_id=? and so.id=? "
+                        + "and b.status in ('BACKED','CONSUMED')",
+                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                UUID.fromString(salesOrderId)));
+    }
+
     private void grantWarehouseAccess(String warehouseId) throws Exception {
+        grantWarehouseAccess(warehouseId, membershipId(WAREHOUSE_EMAIL));
+    }
+
+    protected void grantWarehouseAccess(String warehouseId, String targetMembershipId) throws Exception {
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
         mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
                         .header("Authorization", "Bearer " + owner)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
+                        .content("{\"membershipId\":\"" + targetMembershipId + "\"}"))
                 .andExpect(status().isOk());
     }
 

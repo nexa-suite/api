@@ -21,5 +21,16 @@ public final class PhysicalAllocationModels {
                                              UUID warehouseId, UUID zoneId, UUID lotId,
                                              BigDecimal quantity, BigDecimal releasedQuantity,
                                              BigDecimal consumedQuantity, BigDecimal remainingQuantity,
-                                             String unit, LocalDate expirationDate) { }
+                                             String unit, LocalDate expirationDate,
+                                             String productName, String skuCode, String imageFileName, String presentation,
+                                             String brandName, String warehouseName, String zoneName, String batchNumber) {
+        public PhysicalAllocationLineView(UUID physicalAllocationLineId, UUID skuId, String catalogItemId,
+                                          UUID warehouseId, UUID zoneId, UUID lotId, BigDecimal quantity,
+                                          BigDecimal releasedQuantity, BigDecimal consumedQuantity, BigDecimal remainingQuantity,
+                                          String unit, LocalDate expirationDate) {
+            this(physicalAllocationLineId, skuId, catalogItemId, warehouseId, zoneId, lotId, quantity,
+                    releasedQuantity, consumedQuantity, remainingQuantity, unit, expirationDate,
+                    null, null, null, null, null, null, null, null);
+        }
+    }
 }

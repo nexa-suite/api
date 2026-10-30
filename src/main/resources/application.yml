@@ -56,6 +56,10 @@ info:
 nexa:
   database:
     require-least-privilege-runtime: ${NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME:true}
+    workspace-scope-reader:
+      maximum-pool-size: ${NEXA_WORKSPACE_SCOPE_READER_POOL_MAX:2}
+    internal-operator:
+      maximum-pool-size: ${NEXA_INTERNAL_OPERATOR_DATABASE_POOL_MAX:2}
   mobile:
     delivery-handoff-ttl: ${NEXA_MOBILE_DELIVERY_HANDOFF_TTL:PT10M}
   security:
@@ -73,7 +77,9 @@ nexa:
       required: ${NEXA_SMTP_REQUIRED:false}
     reset:
       platform-url: ${NEXA_PLATFORM_RESET_URL:http://localhost:4200/reset-password}
-      portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4200/reset-password}
+      portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4300/reset-password}
+      platform-native-url: ${NEXA_PLATFORM_NATIVE_RESET_URL:}
+      portal-native-url: ${NEXA_PORTAL_NATIVE_RESET_URL:}
       throttle-key: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:}
     system-operator-token: ${NEXA_SYSTEM_OPERATOR_TOKEN:}
     notification-outbox-key: ${NEXA_NOTIFICATION_OUTBOX_KEY:}

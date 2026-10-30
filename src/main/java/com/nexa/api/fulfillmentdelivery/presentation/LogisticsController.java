@@ -8,6 +8,8 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
@@ -37,6 +39,24 @@ public final class LogisticsController {
     @GetMapping("/dispatch-orders") public PageResponse<DispatchResponse> dispatches(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required=false) String status, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="25") int size, @RequestParam(defaultValue="updatedAt,desc") String sort) { return page(runLogistics(c, service -> service.list(c,status,page,size,sort))); }
     @GetMapping("/dispatch-assignees") @Operation(operationId = "listDispatchAssignees") public List<LogisticsOperationsModels.AssigneeView> assignees(@RequestAttribute(ACCESS) CurrentAccessContext c) { return runLogistics(c, FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(), service -> service.assignees(c)); }
     @GetMapping("/dispatch-orders/{id}") public ResponseEntity<DispatchResponse> dispatch(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){LogisticsOperationsModels.DispatchView value=runLogistics(c, service -> service.detail(c,id));return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));}
+    @GetMapping("/dispatch-orders/{id}/deliveries")
+    @Operation(operationId = "listDispatchOrderDeliveries",
+            description = "Returns each Delivery linked to the Dispatch Order and its POD linked by deliveryId. A Dispatch Order may have zero or multiple Deliveries.")
+    public DispatchDeliveriesResponse dispatchDeliveries(@RequestAttribute(ACCESS) CurrentAccessContext c,
+                                                         @PathVariable @Parameter(description = "Dispatch Order UUID",
+                                                                 schema = @Schema(type = "string", format = "uuid")) String id) {
+        LogisticsOperationsModels.DispatchDeliveriesView value = runLogistics(c,
+                service -> service.dispatchDeliveries(c, id));
+        return new DispatchDeliveriesResponse(value.dispatchOrderId(), value.deliveries().stream()
+                .map(delivery -> new DispatchDeliveryResponse(delivery.deliveryId(), delivery.fulfillmentId(),
+                        delivery.deliveryStatus(), delivery.deliveryVersion(), delivery.deliveryUpdatedAt(),
+                        delivery.pod() == null ? null : new DispatchDeliveryPodResponse(delivery.pod().id(),
+                                delivery.pod().deliveryId(), delivery.pod().status(), delivery.pod().receiverName(),
+                                delivery.pod().completedAt(), delivery.pod().sealedAt(),
+                                delivery.pod().photoEvidenceDeclared(),
+                                delivery.pod().signatureEvidenceDeclared())))
+                .toList());
+    }
     @GetMapping("/dispatch-orders/{id}/events") public List<DispatchEventResponse> events(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return runLogistics(c, service -> service.events(c,id)).stream().map(this::event).toList();}
     @GetMapping("/dispatch-orders/{id}/handoff-notes") public List<HandoffNoteResponse> handoffNotes(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return runLogistics(c, service -> service.handoffNotes(c,id)).stream().map(this::handoffNote).toList();}
     @PostMapping("/inventory-reservations/{reservationId}/dispatch-orders") @Operation(operationId = "createDispatchOrder") public ResponseEntity<DispatchResponse> create(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String reservationId,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key){return created(response(runLogistics(c, service -> service.create(c,reservationId,version(ifMatch),key))));}
@@ -50,12 +70,12 @@ public final class LogisticsController {
     @PostMapping("/dispatch-orders/{id}/reprogrammings") public ResponseEntity<DispatchResponse> reprogram(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody ReprogramRequest r){return mutation(runLogistics(c, service -> service.reprogram(c,id,version(ifMatch),key,r.deliveryWindowStart(),r.deliveryWindowEnd(),r.eta(),r.reason())));}
     @PostMapping("/dispatch-orders/{id}/cancellations") @Operation(operationId = "cancelDispatchOrder") public ResponseEntity<DispatchResponse> cancel(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody(required=false) ReasonRequest r){return mutation(runLogistics(c, service -> service.cancel(c,id,version(ifMatch),key,r==null?null:r.reason())));}
     @PostMapping("/dispatch-orders/{id}/delivery-attempts") @Operation(operationId = "recordFailedDeliveryAttempt") public ResponseEntity<DispatchResponse> failedAttempt(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody(required=false) FailedAttemptRequest r){return failedAttemptMutation(c,id,ifMatch,key,r);}
-    @PostMapping("/dispatch-orders/{id}/failed-delivery-attempts") @Operation(operationId = "recordFailedDeliveryAttemptLegacyAlias") public ResponseEntity<DispatchResponse> failedAttemptLegacyAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody(required=false) FailedAttemptRequest r){return failedAttemptMutation(c,id,ifMatch,key,r);}
+    @PostMapping("/dispatch-orders/{id}/failed-delivery-attempts") @Operation(operationId = "recordFailedDeliveryAttemptLegacyAlias", deprecated = true, description = "Deprecated compatibility alias. Use POST /api/v1/dispatch-orders/{id}/delivery-attempts.") public ResponseEntity<DispatchResponse> failedAttemptLegacyAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody(required=false) FailedAttemptRequest r){return failedAttemptMutation(c,id,ifMatch,key,r);}
     @PostMapping("/dispatch-orders/{id}/partial-deliveries") @Operation(operationId = "completePartialDelivery") public ResponseEntity<DispatchResponse> partial(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody(required=false) PartialDeliveryRequest r){return partialMutation(c,id,ifMatch,key,r);}
-    @PostMapping("/dispatch-orders/{id}/delivery-partials") @Operation(operationId = "completePartialDeliveryLegacyAlias") public ResponseEntity<DispatchResponse> partialLegacyAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody(required=false) PartialDeliveryRequest r){return partialMutation(c,id,ifMatch,key,r);}
+    @PostMapping("/dispatch-orders/{id}/delivery-partials") @Operation(operationId = "completePartialDeliveryLegacyAlias", deprecated = true, description = "Deprecated compatibility alias. Use POST /api/v1/dispatch-orders/{id}/partial-deliveries.") public ResponseEntity<DispatchResponse> partialLegacyAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody(required=false) PartialDeliveryRequest r){return partialMutation(c,id,ifMatch,key,r);}
     @PostMapping("/dispatch-orders/{id}/delivery-completions") public ResponseEntity<DispatchResponse> complete(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody PodRequest r){return mutation(runLogistics(c, service -> service.complete(c,id,version(ifMatch),key,r.receiverName(),r.completedAt(),r.notes(),r.photoEvidenceDeclared(),r.signatureEvidenceDeclared())));}
     @PostMapping("/dispatch-orders/{id}/handoff-notes") public ResponseEntity<HandoffNoteResponse> appendHandoffNote(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody HandoffNoteRequest r){HandoffNoteResponse value=handoffNote(runLogistics(c, service -> service.appendHandoffNote(c,id,version(ifMatch),key,r.note())));return ResponseEntity.status(201).eTag(etag(value.dispatchVersion())).body(value);}
-    @GetMapping("/proof-of-delivery") public PageResponse<PodResponse> proof(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) String status,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="25") int size){return podPage(runLogistics(c, service -> service.proofOfDelivery(c,status,page,size)));}
+    @GetMapping("/proof-of-delivery") public PageResponse<PodResponse> proof(@RequestAttribute(ACCESS) CurrentAccessContext c,@Parameter(schema=@Schema(allowableValues={"PENDING","COMPLETED"})) @RequestParam(required=false) String status,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="25") int size){return podPage(runLogistics(c, service -> service.proofOfDelivery(c,status,page,size)));}
     @GetMapping("/logistics/operations-dashboard") public LogisticsOperationsModels.DashboardView dashboard(@RequestAttribute(ACCESS) CurrentAccessContext c){return runLogistics(c, service -> service.dashboard(c));}
     @GetMapping("/logistics/operational-analytics") public LogisticsOperationsModels.AnalyticsView analytics(@RequestAttribute(ACCESS) CurrentAccessContext c,@RequestParam(required=false) Instant from,@RequestParam(required=false) Instant to){return runLogistics(c, service -> service.analytics(c,from,to));}
     @GetMapping("/my-deliveries")
@@ -153,7 +173,18 @@ public final class LogisticsController {
     public record ObligationLineResponse(String catalogItemId,BigDecimal quantity,String unit){}
     public record DispatchEventResponse(String id,String type,String fromStatus,String toStatus,String occurredAt,boolean buyerVisible,String summary){}
     public record HandoffNoteResponse(String id,String dispatchOrderId,String note,String authorMembershipId,Instant occurredAt,long dispatchVersion){}
-    public record PodResponse(String podId,String dispatchOrderId,String dispatchNumber,String status,String receiverName,Instant completedAt,String notes,boolean photoEvidenceDeclared,boolean signatureEvidenceDeclared,Instant updatedAt){}
+    public record PodResponse(String podId,String dispatchOrderId,String dispatchNumber,@Schema(allowableValues={"PENDING","COMPLETED"}) String status,String receiverName,Instant completedAt,String notes,boolean photoEvidenceDeclared,boolean signatureEvidenceDeclared,Instant updatedAt){}
+    public record DispatchDeliveriesResponse(UUID dispatchOrderId,List<DispatchDeliveryResponse> deliveries){}
+    public record DispatchDeliveryResponse(UUID deliveryId,@Schema(nullable=true) UUID fulfillmentId,
+                                           @Schema(allowableValues={"PLANNED","ASSIGNED","DISPATCHED","IN_TRANSIT","PARTIAL","DELIVERED","FAILED","CANCELLED"}) String deliveryStatus,
+                                           long deliveryVersion,Instant deliveryUpdatedAt,
+                                           @Schema(nullable=true) DispatchDeliveryPodResponse pod){}
+    public record DispatchDeliveryPodResponse(UUID id,UUID deliveryId,
+                                              @Schema(allowableValues={"PENDING","COMPLETED","CAPTURED","SEALED","REJECTED"}) String status,
+                                              @Schema(nullable=true) String receiverName,Instant completedAt,
+                                              @Schema(nullable=true) Instant sealedAt,
+                                              @Schema(description="Buyer or operator declared photo evidence; this does not indicate that an evidence file is available.") boolean photoEvidenceDeclared,
+                                              @Schema(description="Buyer or operator declared signature evidence; this does not indicate that an evidence file is available.") boolean signatureEvidenceDeclared){}
     public record AssignmentRequest(String responsibleMembershipId,String vehicleReference,String routeName){}
     public record ScheduleRequest(Instant deliveryWindowStart,Instant deliveryWindowEnd,Instant eta){}
     public record ReprogramRequest(Instant deliveryWindowStart,Instant deliveryWindowEnd,Instant eta,String reason){}

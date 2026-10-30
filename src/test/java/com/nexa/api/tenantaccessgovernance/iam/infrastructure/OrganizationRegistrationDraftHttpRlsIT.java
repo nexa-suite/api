@@ -1,7 +1,8 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure;
 
-import org.junit.jupiter.api.AfterAll;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,7 +13,10 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.sql.Connection;
@@ -41,22 +45,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @TestPropertySource(properties = "spring.autoconfigure.exclude=")
+@Testcontainers(disabledWithoutDocker = true)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class OrganizationRegistrationDraftHttpRlsIT {
     private static final String MIGRATOR_USERNAME = "nexa";
     private static final String MIGRATOR_PASSWORD = "test-only-password";
     private static final String RUNTIME_USERNAME = "nexa_runtime";
     private static final String RUNTIME_PASSWORD = "test-only-runtime-password";
 
+    @Container
     private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
             .withDatabaseName("nexa")
             .withUsername(MIGRATOR_USERNAME)
             .withPassword(MIGRATOR_PASSWORD);
 
-    static {
-        if (Boolean.getBoolean("nexa.integration.enabled")) {
-            POSTGRES.start();
-            createRuntimeRole();
-        }
+    @BeforeAll
+    static void preparePostgres() {
+        createRuntimeRole();
+        CentralMigrationTestBootstrap.migrateToCurrent(POSTGRES);
     }
 
     @Autowired
@@ -71,8 +77,11 @@ class OrganizationRegistrationDraftHttpRlsIT {
         registry.add("NEXA_DATABASE_PASSWORD", () -> RUNTIME_PASSWORD);
         registry.add("NEXA_DATABASE_RUNTIME_USERNAME", () -> RUNTIME_USERNAME);
         registry.add("NEXA_DATABASE_RUNTIME_PASSWORD", () -> RUNTIME_PASSWORD);
-        registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", POSTGRES::getUsername);
-        registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", POSTGRES::getPassword);
+        registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", () -> CentralMigrationTestBootstrap.MIGRATOR_USERNAME);
+        registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", () -> CentralMigrationTestBootstrap.MIGRATOR_PASSWORD);
+        registry.add("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", () -> CentralMigrationTestBootstrap.WORKSPACE_SCOPE_READER_PASSWORD);
+        registry.add("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD",
+                () -> CentralMigrationTestBootstrap.INTERNAL_OPERATOR_DATABASE_PASSWORD);
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", () -> RUNTIME_USERNAME);
         registry.add("spring.datasource.password", () -> RUNTIME_PASSWORD);
@@ -115,11 +124,6 @@ class OrganizationRegistrationDraftHttpRlsIT {
             registration.setObject(1, createdRegistration);
             registration.executeUpdate();
         }
-    }
-
-    @AfterAll
-    static void stopPostgres() {
-        if (POSTGRES.isRunning()) POSTGRES.stop();
     }
 
     @Test

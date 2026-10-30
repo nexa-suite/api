@@ -10,7 +10,6 @@ import com.nexa.api.salescommitment.application.salesorder.export.port.SalesOrde
 import com.nexa.api.salescommitment.application.salesorder.export.port.SalesOrderSummaryProjectionPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 
 import java.nio.charset.StandardCharsets;
@@ -33,6 +32,7 @@ public final class SalesOrderSummaryExportService implements SalesOrderSummaryEx
 			SalesOrderSummaryExportFormat format) {
 		Objects.requireNonNull(context, "Access context is required");
 		Objects.requireNonNull(format, "Export format is required");
+		SalesOrderSummaryExportUseCase.requireExportPermission(context);
 		String tenantId = context.tenantId().toString();
 		String workspaceId = context.workspaceId().toString();
 		String clientAccountId = clientScope(context, tenantId, workspaceId);
@@ -50,10 +50,8 @@ public final class SalesOrderSummaryExportService implements SalesOrderSummaryEx
 
 	private String clientScope(CurrentAccessContext context, String tenantId, String workspaceId) {
 		if (!context.hasRole(MembershipRole.BUYER)) {
-			context.requirePermission(PermissionKey.ORDER_EXPORT_READ);
 			return null;
 		}
-		context.requirePermission(PermissionKey.BUYER_ORDER_READ);
 		return accounts.findBuyerReference(tenantId, workspaceId, context.membershipId().toString())
 				.map(CustomerAccountReference::id)
 				.orElseThrow(() -> new SalesResourceNotFoundException("client-account"));

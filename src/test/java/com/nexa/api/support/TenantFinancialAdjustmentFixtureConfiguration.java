@@ -1,6 +1,7 @@
 package com.nexa.api.support;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
+import com.nexa.api.creditreceivables.application.publicapi.CreditEligibilitySource;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentSource;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
@@ -41,11 +42,13 @@ public class TenantFinancialAdjustmentFixtureConfiguration {
 
             @Override
             public Bindings bindTo(JdbcTemplate tenantJdbc, CustomerAccountQuery tenantCustomerAccounts,
+                    CreditEligibilitySource tenantCreditEligibility,
                     ReceivablePaymentAccess tenantReceivablePaymentAccess,
                     BusinessTraceabilityCommands tenantTraceability, CanonicalOutboxPort tenantCanonicalOutbox,
                     FinancialAdjustmentSource tenantFinancialAdjustmentSource) {
-                Bindings bindings = delegate.bindTo(tenantJdbc, tenantCustomerAccounts, tenantReceivablePaymentAccess,
-                        tenantTraceability, tenantCanonicalOutbox, tenantFinancialAdjustmentSource);
+                Bindings bindings = delegate.bindTo(tenantJdbc, tenantCustomerAccounts, tenantCreditEligibility,
+                        tenantReceivablePaymentAccess, tenantTraceability, tenantCanonicalOutbox,
+                        tenantFinancialAdjustmentSource);
                 FinancialAdjustmentCommands actual = bindings.financialAdjustments();
                 FinancialAdjustmentCommands fixtureCommands = new FinancialAdjustmentCommands() {
                     @Override
@@ -61,7 +64,7 @@ public class TenantFinancialAdjustmentFixtureConfiguration {
                         return actual.post(request);
                     }
                 };
-                return new Bindings(bindings.customerAccounts(), bindings.creditExposure(),
+                return new Bindings(bindings.customerAccounts(), bindings.creditEligibility(), bindings.creditExposure(),
                         bindings.creditReservations(), bindings.receivables(), bindings.receivablePaymentAccess(),
                         bindings.receivableApplications(), bindings.creditPayments(), fixtureCommands,
                         bindings.creditAccountConfigurations(), bindings.creditAccountConfigurationCommands());

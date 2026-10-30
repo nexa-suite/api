@@ -27,7 +27,7 @@ public final class TenantBoundPurchaseRequestDraftPort implements PurchaseReques
     }
 
     @Override public PurchaseRequestDraftModels.DraftView create(CurrentAccessContext c, UUID account, LocalDate date) {
-        return call(c, composition -> composition.purchaseRequestDrafts().create(c, account, date));
+        return callWithDeliveryLeadTime(c, composition -> composition.purchaseRequestDrafts().create(c, account, date));
     }
     @Override public PurchaseRequestDraftModels.DraftPage list(CurrentAccessContext c, int page, int size) {
         return call(c, composition -> composition.purchaseRequestDrafts().list(c, page, size));
@@ -49,7 +49,7 @@ public final class TenantBoundPurchaseRequestDraftPort implements PurchaseReques
     }
     @Override public PurchaseRequestDraftModels.DraftView setPreferences(CurrentAccessContext c, UUID id,
             long version, String payment, LocalDate date) {
-        return call(c, composition -> composition.purchaseRequestDrafts().setPreferences(c, id, version, payment, date));
+        return callWithDeliveryLeadTime(c, composition -> composition.purchaseRequestDrafts().setPreferences(c, id, version, payment, date));
     }
     @Override public PurchaseRequestDraftModels.ReviewView review(CurrentAccessContext c, UUID id) {
         return call(c, composition -> composition.purchaseRequestDrafts().review(c, id));
@@ -58,6 +58,11 @@ public final class TenantBoundPurchaseRequestDraftPort implements PurchaseReques
             long version, String key) {
         return expiryPolicies.inTransaction(c, jdbc ->
                 compositions.bindTo(jdbc).purchaseRequestDrafts().submit(c, id, version, key));
+    }
+
+    private <T> T callWithDeliveryLeadTime(CurrentAccessContext context,
+            Function<TenantSalesCommitmentCompositionFactory.Composition, T> action) {
+        return router.inTransaction(context, jdbc -> action.apply(compositions.bindTo(jdbc)));
     }
 
     private <T> T call(CurrentAccessContext context,

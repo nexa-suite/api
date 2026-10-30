@@ -17,6 +17,10 @@ public class BusinessDocumentServiceFacade {
     public BusinessDocumentServiceFacade(BusinessDocumentUseCase port) { this.port = port; }
     public BusinessDocumentModels.GenerationRequestView request(CurrentAccessContext c, String subjectType, UUID subjectId, String documentType, String format, String key) { return port.request(c, subjectType, subjectId, documentType, format, key); }
     public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext c, int page, int size, String type, String status) { return port.list(c, page, size, type, status); }
+    public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext c,
+            int page, int size, String type, String status, String subjectType, UUID subjectId) {
+        return port.list(c, page, size, type, status, subjectType, subjectId);
+    }
     public BusinessDocumentModels.DocumentView get(CurrentAccessContext c, UUID id) { return port.get(c, id); }
     public List<BusinessDocumentModels.DocumentEventView> events(CurrentAccessContext c, UUID id) { return port.events(c, id); }
     public BusinessDocumentModels.GenerationRequestView regenerate(CurrentAccessContext c, UUID id, String key) { return port.regenerate(c, id, key); }

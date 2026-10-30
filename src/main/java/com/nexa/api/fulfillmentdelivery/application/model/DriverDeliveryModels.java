@@ -12,9 +12,18 @@ public final class DriverDeliveryModels {
     public record DeliveryView(UUID id, UUID fulfillmentId, UUID salesOrderId, String status,
                                String destinationSnapshot, Instant scheduledAt, Instant dispatchedAt,
                                Instant deliveredAt, Instant updatedAt, long version, AttemptView activeAttempt,
-                               List<OutcomeLineView> outcomeLines, ArrivalFact arrival) {
+                               List<OutcomeLineView> outcomeLines, ArrivalFact arrival,
+                               LastAttemptView lastAttempt, boolean handoffRenewalEligible) {
         public DeliveryView {
             outcomeLines = List.copyOf(outcomeLines == null ? List.of() : outcomeLines);
+        }
+
+        public DeliveryView(UUID id, UUID fulfillmentId, UUID salesOrderId, String status,
+                            String destinationSnapshot, Instant scheduledAt, Instant dispatchedAt,
+                            Instant deliveredAt, Instant updatedAt, long version, AttemptView activeAttempt,
+                            List<OutcomeLineView> outcomeLines, ArrivalFact arrival) {
+            this(id, fulfillmentId, salesOrderId, status, destinationSnapshot, scheduledAt, dispatchedAt,
+                    deliveredAt, updatedAt, version, activeAttempt, outcomeLines, arrival, null, false);
         }
     }
 
@@ -25,6 +34,9 @@ public final class DriverDeliveryModels {
 
     public record AttemptView(UUID id, int attemptNumber, String status,
                               UUID startedByMembershipId, Instant startedAt) { }
+
+    public record LastAttemptView(UUID id, int attemptNumber, String status, String outcome,
+                                  UUID startedByMembershipId) { }
 
     public record AttemptStartResult(DeliveryView delivery, AttemptView attempt, boolean replayed) { }
 

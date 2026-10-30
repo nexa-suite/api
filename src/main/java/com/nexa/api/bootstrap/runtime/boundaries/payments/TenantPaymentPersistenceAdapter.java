@@ -6,9 +6,10 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBind
 import com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.payments.application.publicapi.model.PaymentModels;
 import com.nexa.api.payments.application.publicapi.PaymentUseCases;
+import com.nexa.api.payments.application.publicapi.LocalBuyerPaymentMethodSetupConfirmation;
 import com.nexa.api.payments.application.publicapi.PaymentWebhookInboxWorker;
 import com.nexa.api.payments.application.publicapi.provider.PaymentProviderOperations;
 import com.nexa.api.payments.application.publicapi.webhooks.PaymentWebhookIntake;
@@ -18,6 +19,7 @@ import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.context.annotation.Primary;
@@ -25,6 +27,8 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -33,7 +37,8 @@ import java.util.function.Function;
 @Primary
 @Profile("local")
 @ConditionalOnProperty(prefix = "nexa.tenant-business.payments", name = "enabled", havingValue = "true")
-public final class TenantPaymentPersistenceAdapter implements PaymentUseCases, PaymentWebhookIntake {
+public final class TenantPaymentPersistenceAdapter implements PaymentUseCases, PaymentWebhookIntake,
+        LocalBuyerPaymentMethodSetupConfirmation {
     private final TenantBusinessDatabaseRouter router;
     private final TenantBusinessDatabaseAuthority authority;
     private final TenantPaymentServiceBindingsFactory services;
@@ -41,11 +46,13 @@ public final class TenantPaymentPersistenceAdapter implements PaymentUseCases, P
     private final PaymentProviderOperations provider;
     private final TenantPaymentWebhookIngress webhookIngress;
     private final PaymentWebhookInboxWorker inboxWorker;
+    private final String publishableKey;
 
     public TenantPaymentPersistenceAdapter(TenantBusinessDatabaseRouter router,
             TenantBusinessDatabaseAuthority authority, TenantPaymentServiceBindingsFactory services,
             JdbcPaymentProviderRouteRegistry providerRoutes, PaymentProviderOperations provider,
-            TenantPaymentWebhookIngress webhookIngress, PaymentWebhookInboxWorker inboxWorker) {
+            TenantPaymentWebhookIngress webhookIngress, PaymentWebhookInboxWorker inboxWorker,
+            @Value("${nexa.payments.publishable-key:}") String publishableKey) {
         this.router = Objects.requireNonNull(router);
         this.authority = Objects.requireNonNull(authority);
         this.services = Objects.requireNonNull(services);
@@ -53,6 +60,7 @@ public final class TenantPaymentPersistenceAdapter implements PaymentUseCases, P
         this.provider = Objects.requireNonNull(provider);
         this.webhookIngress = Objects.requireNonNull(webhookIngress);
         this.inboxWorker = Objects.requireNonNull(inboxWorker);
+        this.publishableKey = publishableKey == null ? "" : publishableKey;
     }
 
     @Override public PaymentModels.Page<PaymentModels.ReceivableView> listReceivables(
@@ -194,6 +202,88 @@ public final class TenantPaymentPersistenceAdapter implements PaymentUseCases, P
         return write(context, service -> service.reviewBankTransfer(context, paymentId, action, reason, idempotencyKey));
     }
 
+    @Override public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(
+            CurrentAccessContext context) {
+        return read(context, service -> service.listBuyerSavedPaymentMethods(context));
+    }
+
+    @Override public PaymentModels.BuyerPaymentMethodSetupView createBuyerPaymentMethodSetup(
+            CurrentAccessContext context, String idempotencyKey) {
+        requireCurrentScope(context);
+        if (!provider.supportsBuyerPaymentMethodSetup()) {
+            throw unavailable("The configured payment provider does not support Buyer SetupIntents");
+        }
+        String publicKey = providerPublishableKey();
+        TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation = write(context,
+                service -> service.prepareBuyerPaymentMethodSetup(context, idempotencyKey));
+        PaymentProviderOperations.ProviderCustomer customer;
+        if (preparation.providerCustomerId() == null) {
+            customer = provider.createCustomer(new PaymentProviderOperations.CustomerRequest(
+                    preparation.providerCustomerIdempotencyKey(), customerMetadata(preparation)));
+            requireProviderCustomer(customer, preparation);
+            write(context, service -> {
+                service.bindBuyerPaymentProviderCustomer(context, preparation, customer.providerId());
+                return null;
+            });
+        } else {
+            customer = provider.retrieveCustomer(preparation.providerCustomerId()).orElseThrow(() ->
+                    unavailable("The Buyer payment provider Customer is unavailable"));
+            requireProviderCustomer(customer, preparation);
+        }
+
+        PaymentProviderOperations.ProviderSetupIntent setupIntent = preparation.providerSetupIntentId() == null
+                ? provider.createSetupIntent(new PaymentProviderOperations.SetupIntentRequest(customer.providerId(),
+                        preparation.providerSetupIntentIdempotencyKey(), preparation.providerMetadata()))
+                : provider.retrieveSetupIntent(preparation.providerSetupIntentId()).orElseThrow(() ->
+                        unavailable("The Buyer payment SetupIntent is unavailable"));
+        requireProviderSetupIntent(setupIntent, preparation, customer.providerId());
+        write(context, service -> {
+            service.recordBuyerPaymentSetupIntent(context, preparation, customer.providerId(), setupIntent.providerId());
+            return null;
+        });
+        return new PaymentModels.BuyerPaymentMethodSetupView(setupIntent.providerId(), setupIntent.clientSecret(),
+                setupIntent.status(), publicKey);
+    }
+
+    @Override public PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(
+            CurrentAccessContext context, UUID paymentMethodId) {
+        return write(context, service -> service.setBuyerSavedPaymentMethodDefault(context, paymentMethodId));
+    }
+
+    @Override public void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId) {
+        requireCurrentScope(context);
+        if (!provider.supportsBuyerPaymentMethodSetup()) {
+            throw unavailable("The configured payment provider does not support Buyer PaymentMethods");
+        }
+        TenantPaymentSession.BuyerPaymentMethodDetachPreparation preparation = write(context,
+                service -> service.prepareBuyerPaymentMethodDetach(context, paymentMethodId));
+        PaymentProviderOperations.ProviderPaymentMethod detached = provider.detachPaymentMethod(
+                preparation.providerPaymentMethodId());
+        if (detached == null || !preparation.providerPaymentMethodId().equals(detached.providerId())) {
+            throw unavailable("Stripe did not confirm detaching the Buyer PaymentMethod");
+        }
+        write(context, service -> {
+            service.removeBuyerSavedPaymentMethod(context, paymentMethodId);
+            return null;
+        });
+    }
+
+    @Override public PaymentModels.WebhookReceipt confirmLocalBuyerPaymentMethodSetup(CurrentAccessContext context,
+            String providerSetupIntentId) {
+        requireCurrentScope(context);
+        if (!provider.supportsLocalSetupIntentConfirmation()) {
+            throw unavailable("The configured provider does not expose the local SetupIntent simulation");
+        }
+        TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation = read(context,
+                service -> service.prepareBuyerPaymentMethodLocalConfirmation(context, providerSetupIntentId));
+        PaymentProviderOperations.SignedProviderWebhook callback = provider
+                .confirmLocalSetupIntent(preparation.providerSetupIntentId());
+        if (callback == null || callback.payload() == null || callback.signature() == null) {
+            throw unavailable("Local provider did not produce a signed SetupIntent callback");
+        }
+        return webhookIngress.receive(callback.payload(), callback.signature());
+    }
+
     @Override public PaymentModels.WebhookReceipt receiveStripeWebhook(String payload, String signature) {
         return webhookIngress.receive(payload, signature);
     }
@@ -245,6 +335,38 @@ public final class TenantPaymentPersistenceAdapter implements PaymentUseCases, P
                 || intent.providerId().length() > 255 || intent.status() == null || intent.status().isBlank()
                 || intent.clientSecret() == null || intent.clientSecret().isBlank()) {
             throw new IllegalStateException("Stripe returned an incomplete Tenant payment intent");
+        }
+    }
+
+    private String providerPublishableKey() {
+        // SetupIntents require a provider client key; it is public configuration and contains no credential.
+        if (publishableKey.isBlank()) throw unavailable("Stripe publishable key is not configured");
+        return publishableKey;
+    }
+
+    private static Map<String, String> customerMetadata(
+            TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation) {
+        java.util.LinkedHashMap<String, String> metadata = new java.util.LinkedHashMap<>(preparation.providerMetadata());
+        metadata.remove("nexa_setup_attempt_id");
+        return Map.copyOf(metadata);
+    }
+
+    private static void requireProviderCustomer(PaymentProviderOperations.ProviderCustomer customer,
+            TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation) {
+        if (customer == null || customer.providerId() == null || customer.providerId().isBlank()
+                || customer.providerId().length() > 255
+                || !customerMetadata(preparation).equals(customer.metadata())) {
+            throw new IllegalStateException("Stripe Customer does not match the verified Buyer payment profile");
+        }
+    }
+
+    private static void requireProviderSetupIntent(PaymentProviderOperations.ProviderSetupIntent intent,
+            TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation, String customerId) {
+        if (intent == null || intent.providerId() == null || intent.providerId().isBlank()
+                || intent.providerId().length() > 255 || intent.clientSecret() == null || intent.clientSecret().isBlank()
+                || intent.status() == null || intent.status().isBlank() || !customerId.equals(intent.customerId())
+                || !preparation.providerMetadata().equals(intent.metadata())) {
+            throw new IllegalStateException("Stripe SetupIntent does not match the server-issued Buyer setup attempt");
         }
     }
 

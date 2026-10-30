@@ -12,6 +12,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurity
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
 import com.nexa.api.edge.http.CorrelationIdFilter;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.payments.application.exception.PaymentIdempotencyPayloadConflictException;
 import com.nexa.api.payments.application.exception.BuyerWalletRefundConflictException;
@@ -138,7 +139,7 @@ public final class GlobalExceptionHandler {
 			case SYSTEM_OPERATOR_REQUIRED -> HttpStatus.FORBIDDEN;
 			default -> HttpStatus.BAD_REQUEST;
 		};
-		String detail = code == ApiErrorCode.RESET_RATE_LIMITED ? "Password reset requests are temporarily limited"
+		String detail = code == ApiErrorCode.RESET_RATE_LIMITED ? "Password reset is temporarily limited"
 				: code == ApiErrorCode.PUBLIC_CONTACT_RATE_LIMITED ? "Contact requests are temporarily limited"
 				: code == ApiErrorCode.RESET_INVALID ? "The reset request is invalid or expired" : "The requested security operation could not be completed";
 		return response(status, code, detail, request);
@@ -199,6 +200,13 @@ public final class GlobalExceptionHandler {
 	@ExceptionHandler(AccessDeniedException.class)
 	public ResponseEntity<ProblemDetail> handleAccessDenied(AccessDeniedException exception, HttpServletRequest request) {
 		return response(HttpStatus.FORBIDDEN, ApiErrorCode.FORBIDDEN, "Access to this resource is denied", request);
+	}
+
+	@ExceptionHandler(TenantBusinessDatabaseUnavailableException.class)
+	public ResponseEntity<ProblemDetail> handleTenantBusinessDatabaseUnavailable(
+			TenantBusinessDatabaseUnavailableException exception, HttpServletRequest request) {
+		return response(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.TECHNICAL_CAPABILITY_UNAVAILABLE,
+				"Tenant business data is temporarily unavailable", request);
 	}
 
 	@ExceptionHandler(OrganizationPreconditionRequiredException.class)
@@ -611,7 +619,8 @@ public final class GlobalExceptionHandler {
 						"FULFILLMENT_TRANSITION_INVALID", "DELIVERY_NOT_ATTEMPTABLE", "POD_NOT_CAPTURED",
 						"FULFILLMENT_SHORTAGE_NOT_OPEN", "FULFILLMENT_PICKING_REQUIRED", "FULFILLMENT_NOT_STAGED",
 					"POD_REQUIRES_FINAL_DELIVERY", "DELIVERY_NOT_ACTIVE", "DELIVERY_HANDOFF_NOT_ACTIVE",
-					"DELIVERY_HANDOFF_EXPIRED", "DELIVERY_HANDOFF_TOKEN_INVALID", "BUYER_RECEIPT_ALREADY_RECORDED",
+					"DELIVERY_HANDOFF_EXPIRED", "DELIVERY_HANDOFF_TOKEN_INVALID", "DELIVERY_HANDOFF_POD_SEALED",
+					"BUYER_RECEIPT_ALREADY_RECORDED",
 					"TEMPERATURE_LOT_NOT_ALLOCATED", "TEMPERATURE_NOT_REQUIRED",
 					"TEMPERATURE_OUT_OF_RANGE_BACKEND_CONTRACT_GAP", "TEMPERATURE_POLICY_UNAVAILABLE",
 					"STALE_ALLOCATION", "NOT_ALLOCATED", "WRONG_SKU", "WRONG_LOT", "WRONG_WAREHOUSE", "WRONG_UNIT",

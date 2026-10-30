@@ -74,8 +74,8 @@ class ClientAccountBuyerAssociationIT extends PostgresIntegrationSupport {
         String username = "race_" + userId.toString().replace("-", "").substring(0, 16);
         jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
                 userId, email, email, username, username, "Race Buyer", "en");
-        jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'BUYER','ACTIVE',current_timestamp,current_timestamp,0)",
-                membershipId, UUID.fromString(workspaceId()), userId);
+		jdbc.update("insert into tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'BUYER','ACTIVE',current_timestamp,current_timestamp,0)",
+				membershipId, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), userId);
         return membershipId;
     }
 

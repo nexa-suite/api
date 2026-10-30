@@ -144,17 +144,33 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
 
     @Transactional(readOnly = true)
     public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext context, int page, int size, String documentType, String status) {
+        return list(context, page, size, documentType, status, null, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext context,
+            int page, int size, String documentType, String status, String subjectType, UUID subjectId) {
         read(context); int safePage = Math.max(0, page), safeSize = Math.max(1, Math.min(100, size)); String type = blankToNull(documentType), state = blankToNull(status);
+        String subject = blankToNull(subjectType);
+        if ((subject == null) != (subjectId == null)) {
+            throw new IllegalArgumentException("Document subject type and id must be supplied together");
+        }
+        if (subject != null) subject = parseSubject(subject).name();
         StringBuilder whereBuilder = new StringBuilder("d.tenant_id=? and d.workspace_id=?");
         List<Object> params = new ArrayList<>();
         params.add(tenant(context)); params.add(workspace(context));
         if (type != null) { whereBuilder.append(" and d.document_type=?"); params.add(type); }
         if (state != null) { whereBuilder.append(" and d.status=?"); params.add(state); }
+        if (subject != null) {
+            whereBuilder.append(" and d.subject_type=? and d.subject_id=?");
+            params.add(subject); params.add(subjectId);
+        }
         appendBuyerAccountFilter(whereBuilder, params, context, "d");
         appendWarehouseGrantFilter(whereBuilder, params, context, "d");
         String where = whereBuilder.toString();
         long total = jdbc.queryForObject("select count(*) from business_documents.business_document d where " + where, Long.class, params.toArray());
-        params.add(safeSize); params.add(safePage * safeSize);
+        params.add(safeSize); params.add((long) safePage * safeSize);
         List<BusinessDocumentModels.DocumentView> rows = jdbc.query("select d.id,d.client_account_id,d.subject_type,d.subject_id,d.document_type,d.document_number,d.version,d.status,d.format,d.storage_object_key,d.checksum_sha256,d.content_type,d.byte_size,d.generated_at,d.failure_code,d.failure_detail,d.created_at,d.updated_at,d.replacement_of_document_id from business_documents.business_document d where " + where + " order by d.created_at desc,d.id limit ? offset ?", (rs, n) -> documentView(rs), params.toArray());
         return new BusinessDocumentModels.Page<>(rows, safePage, safeSize, total);
     }

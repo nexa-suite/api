@@ -15,7 +15,6 @@ import java.util.function.Function;
 public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSalesOrderDraftUseCase {
     private final TenantBusinessDatabaseRouter router;
     private final TenantSalesCommitmentCompositionProvider compositions;
-
     public TenantBoundManualSalesOrderDraftUseCase(TenantBusinessDatabaseRouter router,
             TenantSalesCommitmentCompositionProvider compositions) {
         this.router = Objects.requireNonNull(router, "Tenant business database router is required");
@@ -35,7 +34,7 @@ public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSale
     @Override
     public ManualSalesOrderDraftModels.DraftView updateClient(CurrentAccessContext context, UUID draftId,
             long version, ManualSalesOrderDraftModels.ClientCommand command) {
-        return call(context, drafts -> drafts.updateClient(context, draftId, version, command));
+        return callWithDeliveryLeadTime(context, drafts -> drafts.updateClient(context, draftId, version, command));
     }
 
     @Override
@@ -58,7 +57,7 @@ public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSale
     @Override
     public ManualSalesOrderView submit(CurrentAccessContext context, UUID draftId, long version,
             String idempotencyKey) {
-        return call(context, drafts -> drafts.submit(context, draftId, version, idempotencyKey));
+        return callWithDeliveryLeadTime(context, drafts -> drafts.submit(context, draftId, version, idempotencyKey));
     }
 
     @Override
@@ -67,6 +66,12 @@ public final class TenantBoundManualSalesOrderDraftUseCase implements ManualSale
     }
 
     private <T> T call(CurrentAccessContext context, Function<ManualSalesOrderDraftUseCase, T> action) {
+        return router.inTransaction(context,
+                jdbc -> action.apply(compositions.bindTo(jdbc).manualSalesOrderDrafts()));
+    }
+
+    private <T> T callWithDeliveryLeadTime(CurrentAccessContext context,
+            Function<ManualSalesOrderDraftUseCase, T> action) {
         return router.inTransaction(context,
                 jdbc -> action.apply(compositions.bindTo(jdbc).manualSalesOrderDrafts()));
     }

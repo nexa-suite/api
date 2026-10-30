@@ -6,8 +6,10 @@ import com.nexa.api.salescommitment.application.salesorder.export.port.SalesOrde
 import com.nexa.api.salescommitment.application.salesorder.export.port.SalesOrderSummaryRenderer;
 import com.nexa.api.salescommitment.application.salesorder.export.service.SalesOrderSummaryExportService;
 import com.nexa.api.salescommitment.application.salesorder.export.service.SalesOrderSummaryRendererStrategy;
+import com.nexa.api.salescommitment.infrastructure.export.JdbcSalesOrderSummaryProjectionAdapter;
 import com.nexa.api.salescommitment.infrastructure.export.CsvSalesOrderSummaryRenderer;
 import com.nexa.api.salescommitment.infrastructure.export.PdfSalesOrderSummaryRenderer;
+import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderSummaryExportFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -32,5 +34,12 @@ public class SalesOrderSummaryExportRuntimeConfiguration {
 	SalesOrderSummaryExportUseCase salesOrderSummaryExportUseCase(SalesOrderSummaryProjectionPort projection,
 			CustomerAccountQuery accounts, SalesOrderSummaryRendererStrategy renderers) {
 		return new SalesOrderSummaryExportService(projection, accounts, renderers);
+	}
+
+	@Bean
+	TenantSalesOrderSummaryExportFactory tenantSalesOrderSummaryExportFactory(
+			SalesOrderSummaryRendererStrategy renderers) {
+		return (tenantJdbc, tenantAccounts) -> new SalesOrderSummaryExportService(
+				new JdbcSalesOrderSummaryProjectionAdapter(tenantJdbc), tenantAccounts, renderers);
 	}
 }

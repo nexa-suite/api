@@ -4,6 +4,7 @@ import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService.WarehouseException;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
+import com.nexa.api.inventoryavailability.application.publicapi.WarehouseLogisticsFulfillmentPort.ReservationOrderReference;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLot;
 import com.nexa.api.inventoryavailability.domain.model.inventorylot.InventoryLotStatus;
 import com.nexa.api.inventoryavailability.domain.model.inventoryreservation.InventoryReservation;
@@ -15,13 +16,22 @@ import org.springframework.stereotype.Repository;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** Owns the Warehouse side of the Logistics reservation handoff. */
 @Repository
 @Profile("!test")
 public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsFulfillmentPort {
+    private static final int VISIBILITY_QUERY_BATCH_SIZE = 500;
+
     private final JdbcTemplate jdbc;
     private final ChangeEventPersistencePort changeFeed;
     private final InventoryCommercialSource commercialSource;
@@ -127,8 +137,128 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
 
     @Override
     public long countReadyReservations(String tenantId, String workspaceId, Instant now) {
-        return jdbc.queryForObject("select count(*) from warehouse.inventory_reservation where tenant_id=? and workspace_id=? "
-                        + "and status='RESERVED' and expires_at>?", Long.class, uuid(tenantId), uuid(workspaceId), timestamp(now));
+        return jdbc.queryForObject("select count(*) from warehouse.inventory_reservation where tenant_id=? "
+                        + "and workspace_id=? and status='RESERVED' and expires_at>?", Long.class,
+                uuid(tenantId), uuid(workspaceId), timestamp(now));
+    }
+
+    @Override
+    public long countReadyReservations(String tenantId, String workspaceId, Set<UUID> grantedWarehouseIds,
+                                       Instant now) {
+        Set<UUID> grants = normalized(grantedWarehouseIds);
+        if (grants.isEmpty()) return 0;
+        UUID tenant = uuid(tenantId);
+        UUID workspace = uuid(workspaceId);
+        List<ReservationCandidate> candidates = jdbc.query(
+                "select r.id,r.sales_order_id from warehouse.inventory_reservation r "
+                        + "where r.tenant_id=? and r.workspace_id=? and r.status='RESERVED' and r.expires_at>?",
+                (rs, row) -> new ReservationCandidate(rs.getObject("id", UUID.class),
+                        rs.getObject("sales_order_id", UUID.class)),
+                tenant, workspace, timestamp(now));
+        return findVisibleReservationReferences(tenant, workspace, candidates, grants, Set.of("BACKED")).size();
+    }
+
+    @Override
+    public Set<ReservationOrderReference> visibleReservationReferences(String tenantId, String workspaceId,
+                                                                       Set<ReservationOrderReference> reservationReferences,
+                                                                       Set<UUID> grantedWarehouseIds) {
+        Set<ReservationOrderReference> requestedReferences = reservationReferences == null
+                ? Set.of() : reservationReferences.stream().filter(Objects::nonNull)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Set<UUID> grants = normalized(grantedWarehouseIds);
+        if (requestedReferences.isEmpty() || grants.isEmpty()) return Set.of();
+
+        UUID tenant = uuid(tenantId);
+        UUID workspace = uuid(workspaceId);
+        List<UUID> sortedIds = requestedReferences.stream().map(ReservationOrderReference::reservationId)
+                .distinct().sorted().toList();
+        List<ReservationCandidate> candidates = new ArrayList<>();
+        for (int start = 0; start < sortedIds.size(); start += VISIBILITY_QUERY_BATCH_SIZE) {
+            List<UUID> idBatch = sortedIds.subList(start,
+                    Math.min(start + VISIBILITY_QUERY_BATCH_SIZE, sortedIds.size()));
+            String idParameters = placeholders(idBatch.size());
+            List<Object> args = new ArrayList<>(List.of(tenant, workspace));
+            args.addAll(idBatch);
+            List<ReservationCandidate> found = jdbc.query(
+                    "select r.id,r.sales_order_id from warehouse.inventory_reservation r "
+                            + "where r.tenant_id=? and r.workspace_id=? and r.id in (" + idParameters + ")",
+                    (rs, row) -> new ReservationCandidate(rs.getObject("id", UUID.class),
+                            rs.getObject("sales_order_id", UUID.class)), args.toArray());
+            found.stream().filter(candidate -> candidate.salesOrderId() != null)
+                    .filter(candidate -> requestedReferences.contains(
+                            new ReservationOrderReference(candidate.id(), candidate.salesOrderId())))
+                    .forEach(candidates::add);
+        }
+        return findVisibleReservationReferences(tenant, workspace, candidates, grants,
+                Set.of("BACKED", "CONSUMED"));
+    }
+
+    private Set<ReservationOrderReference> findVisibleReservationReferences(UUID tenant, UUID workspace,
+                                                                            List<ReservationCandidate> candidates,
+                                                                            Set<UUID> grantedWarehouseIds,
+                                                                            Set<String> backingStatuses) {
+        if (candidates.isEmpty() || grantedWarehouseIds.isEmpty()) return Set.of();
+
+        Map<UUID, Optional<UUID>> commitmentByOrder = new LinkedHashMap<>();
+        Map<ReservationOrderReference, UUID> commitmentByReservation = new LinkedHashMap<>();
+        for (ReservationCandidate candidate : candidates) {
+            if (candidate.salesOrderId() == null) continue;
+            Optional<UUID> commitmentId = commitmentByOrder.computeIfAbsent(candidate.salesOrderId(), orderId ->
+                    commercialSource.findCandidate(tenant, workspace, orderId)
+                            .map(InventoryCommercialSource.Snapshot::commercialCommitmentId));
+            commitmentId.filter(Objects::nonNull)
+                    .ifPresent(id -> commitmentByReservation.put(
+                            new ReservationOrderReference(candidate.id(), candidate.salesOrderId()), id));
+        }
+        Set<UUID> commitmentIds = Set.copyOf(commitmentByReservation.values());
+        if (commitmentIds.isEmpty()) return Set.of();
+
+        List<UUID> sortedWarehouses = grantedWarehouseIds.stream().sorted().toList();
+        String statusParameters = placeholders(backingStatuses.size());
+        String warehouseParameters = placeholders(sortedWarehouses.size());
+        List<UUID> sortedCommitments = commitmentIds.stream().sorted().toList();
+        Set<UUID> fullyBackedCommitments = new LinkedHashSet<>();
+        for (int start = 0; start < sortedCommitments.size(); start += VISIBILITY_QUERY_BATCH_SIZE) {
+            List<UUID> commitmentBatch = sortedCommitments.subList(start,
+                    Math.min(start + VISIBILITY_QUERY_BATCH_SIZE, sortedCommitments.size()));
+            List<Object> args = new ArrayList<>(List.of(tenant, workspace));
+            args.addAll(commitmentBatch);
+            args.addAll(backingStatuses.stream().sorted().toList());
+            args.addAll(sortedWarehouses);
+            fullyBackedCommitments.addAll(jdbc.query(
+                    "select b.commercial_commitment_id from warehouse.inventory_backing b "
+                            + "where b.tenant_id=? and b.workspace_id=? and b.commercial_commitment_id in ("
+                            + placeholders(commitmentBatch.size()) + ") and b.status in (" + statusParameters + ") "
+                            + "and exists (select 1 from warehouse.inventory_backing_line bl "
+                            + "where bl.tenant_id=b.tenant_id and bl.workspace_id=b.workspace_id and bl.backing_id=b.id) "
+                            + "and not exists (select 1 from warehouse.inventory_backing_line bl "
+                            + "where bl.tenant_id=b.tenant_id and bl.workspace_id=b.workspace_id and bl.backing_id=b.id "
+                            + "and (bl.backed_quantity<>bl.requested_quantity or bl.backed_quantity<>coalesce(("
+                            + "select sum(bp.quantity) from warehouse.inventory_backing_position bp "
+                            + "where bp.tenant_id=bl.tenant_id and bp.workspace_id=bl.workspace_id "
+                            + "and bp.backing_line_id=bl.id),0))) "
+                            + "and not exists (select 1 from warehouse.inventory_backing_line bl "
+                            + "join warehouse.inventory_backing_position bp on bp.tenant_id=bl.tenant_id "
+                            + "and bp.workspace_id=bl.workspace_id and bp.backing_line_id=bl.id "
+                            + "where bl.tenant_id=b.tenant_id and bl.workspace_id=b.workspace_id and bl.backing_id=b.id "
+                            + "and bp.warehouse_id not in (" + warehouseParameters + "))",
+                    (rs, row) -> rs.getObject("commercial_commitment_id", UUID.class), args.toArray()));
+        }
+        if (fullyBackedCommitments.isEmpty()) return Set.of();
+        Set<ReservationOrderReference> visible = new LinkedHashSet<>();
+        commitmentByReservation.forEach((reservationId, commitmentId) -> {
+            if (fullyBackedCommitments.contains(commitmentId)) visible.add(reservationId);
+        });
+        return java.util.Collections.unmodifiableSet(visible);
+    }
+
+    private static Set<UUID> normalized(Set<UUID> values) {
+        if (values == null || values.isEmpty()) return Set.of();
+        return values.stream().filter(Objects::nonNull).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private static String placeholders(int count) {
+        return String.join(",", java.util.Collections.nCopies(count, "?"));
     }
 
     private ReservationLock lockReservation(UUID tenant, UUID workspace, UUID id) {
@@ -205,6 +335,7 @@ public class WarehouseLogisticsFulfillmentAdapter implements WarehouseLogisticsF
     private static UUID uuid(String value) { try { return UUID.fromString(value); } catch (RuntimeException exception) { throw error("INVALID_REQUEST", false); } }
     private static Timestamp timestamp(Instant value) { return Timestamp.from(value); }
     private static WarehouseException error(String code, boolean notFound) { return new WarehouseException(code, notFound); }
+    private record ReservationCandidate(UUID id, UUID salesOrderId) { }
     private record ReservationLock(UUID id, String status, Instant expiresAt, long version) { }
     private record Allocation(UUID lotId, BigDecimal quantity, String unit, UUID warehouseId, UUID zoneId,
                               String catalogItemId, UUID skuId, BigDecimal stock, BigDecimal reserved, String status, long version) { }

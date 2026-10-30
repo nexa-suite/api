@@ -51,6 +51,7 @@ public enum PermissionKey {
 	WAREHOUSE_READ("warehouse.read", PermissionGroup.WAREHOUSE, "warehouse:read"),
 	WAREHOUSE_LOCATION_MANAGE("warehouse.location.manage", PermissionGroup.WAREHOUSE, "warehouse:write"),
 	INVENTORY_READ("inventory.read", PermissionGroup.INVENTORY, "warehouse:read"),
+	INVENTORY_TEMPERATURE_AUDIT_READ("inventory.temperature.audit.read", PermissionGroup.INVENTORY),
 	INVENTORY_RECEIVE("inventory.receive", PermissionGroup.INVENTORY, "warehouse:write"),
 	INVENTORY_ADJUST("inventory.adjust", PermissionGroup.INVENTORY, "warehouse:write"),
 	INVENTORY_RESERVE("inventory.reserve", PermissionGroup.INVENTORY, "warehouse:write"),

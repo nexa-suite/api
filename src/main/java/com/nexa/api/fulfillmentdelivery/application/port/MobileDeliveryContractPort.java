@@ -16,6 +16,8 @@ public interface MobileDeliveryContractPort {
 
     BuyerReceipt recordReceipt(ReceiptRequest request);
 
+    BuyerReceiptAcceptance recordAcceptance(AcceptanceRequest request);
+
     record IssueRequest(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId,
                         UUID actorMembershipId, UUID actorUserId, String idempotencyKey,
                         String requestHash, String tokenHash, Instant issuedAt, Instant expiresAt) { }
@@ -47,7 +49,24 @@ public interface MobileDeliveryContractPort {
                           String decision, BigDecimal acceptedQuantity, String reason,
                           String idempotencyKey, String requestHash, Instant now) { }
 
+    record AcceptanceRequest(UUID tenantId, UUID workspaceId, UUID buyerMembershipId,
+                             UUID customerAccountId, String tokenHash, UUID expectedDeliveryId,
+                             BigDecimal expectedAcceptedQuantity, String idempotencyKey,
+                             String requestHash, Instant now) { }
+
     record BuyerReceipt(UUID id, UUID deliveryId, UUID attemptId, String decision,
                         BigDecimal driverDeliveredQuantity, BigDecimal acceptedQuantity,
                         String reason, Instant occurredAt, boolean replayed) { }
+
+    record BuyerReceiptAcceptance(UUID receiptId, UUID deliveryId, UUID attemptId, UUID podId,
+                                  UUID salesOrderId, BigDecimal acceptedQuantity, Instant occurredAt,
+                                  String deliveryStatus, String podStatus, long deliveryVersion,
+                                  boolean podSealedNow, boolean allOrderQuantityReceived, boolean replayed) {
+        public BuyerReceiptAcceptance(UUID receiptId, UUID deliveryId, UUID attemptId, UUID podId,
+                                      BigDecimal acceptedQuantity, Instant occurredAt,
+                                      String deliveryStatus, String podStatus, boolean replayed) {
+            this(receiptId, deliveryId, attemptId, podId, null, acceptedQuantity, occurredAt,
+                    deliveryStatus, podStatus, 0L, false, false, replayed);
+        }
+    }
 }

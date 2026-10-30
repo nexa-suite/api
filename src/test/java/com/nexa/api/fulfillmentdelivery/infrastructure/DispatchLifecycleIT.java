@@ -8,18 +8,117 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.StreamSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
+    private record SalesOwnerState(UUID membershipId, long version, java.sql.Timestamp updatedAt) { }
+
+    @Test void salesDispatchReadsFollowActiveAccountAssignment() throws Exception {
+        var dispatch = createReservedDispatch();
+        UUID accountId = tenantJdbc().queryForObject(
+                "select client_account_id from sales.sales_order where tenant_id=? and workspace_id=? and id=?",
+                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                UUID.fromString(dispatch.salesOrderId()));
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        SalesOwnerState originalOwner = tenantJdbc().query(
+                "select sales_owner_membership_id,version,updated_at from sales.client_account "
+                        + "where tenant_id=? and workspace_id=? and id=?",
+                rs -> rs.next() ? new SalesOwnerState(rs.getObject(1, UUID.class), rs.getLong(2),
+                        rs.getTimestamp(3)) : null, tenant, workspace, accountId);
+        assertThat(originalOwner).isNotNull();
+        int cleared = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=null, "
+                        + "updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? "
+                        + "and id=? and version=? and sales_owner_membership_id is not distinct from ?",
+                tenant, workspace, accountId, originalOwner.version(), originalOwner.membershipId());
+        assertThat(cleared).isEqualTo(1);
+        long clearedVersion = originalOwner.version() + 1;
+        UUID salesMembership = UUID.fromString(membershipId(SALES_EMAIL));
+        try {
+            String sales = accessToken(SALES_EMAIL, "PLATFORM");
+            MvcResult unassignedList = mockMvc.perform(get("/api/v1/dispatch-orders")
+                            .header("Authorization", "Bearer " + sales))
+                    .andExpect(status().isOk()).andReturn();
+            assertThat(StreamSupport.stream(json(unassignedList).get("items").spliterator(), false)
+                    .map(item -> item.path("id").asText()).toList()).doesNotContain(dispatch.id());
+            mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id())
+                            .header("Authorization", "Bearer " + sales))
+                    .andExpect(status().isNotFound());
+
+            String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+            MvcResult account = mockMvc.perform(get("/api/v1/client-accounts/" + accountId)
+                            .header("Authorization", "Bearer " + owner))
+                    .andExpect(status().isOk()).andReturn();
+            mockMvc.perform(put("/api/v1/client-accounts/" + accountId + "/sales-owner")
+                            .header("Authorization", "Bearer " + owner)
+                            .header("If-Match", account.getResponse().getHeader("ETag"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"membershipId\":\"" + salesMembership + "\"}"))
+                    .andExpect(status().isOk());
+
+            String assignedSales = accessToken(SALES_EMAIL, "PLATFORM");
+            MvcResult assignedWithoutWarehouseGrant = mockMvc.perform(get("/api/v1/dispatch-orders")
+                            .header("Authorization", "Bearer " + assignedSales))
+                    .andExpect(status().isOk()).andReturn();
+            assertThat(StreamSupport.stream(json(assignedWithoutWarehouseGrant).get("items").spliterator(), false)
+                    .map(item -> item.path("id").asText()).toList()).doesNotContain(dispatch.id());
+            mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id())
+                            .header("Authorization", "Bearer " + assignedSales))
+                    .andExpect(status().isNotFound());
+            mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id() + "/events")
+                            .header("Authorization", "Bearer " + assignedSales))
+                    .andExpect(status().isNotFound());
+
+            Set<UUID> backingWarehouses = dispatchBackingWarehouseIds(dispatch.salesOrderId());
+            assertThat(backingWarehouses).isNotEmpty();
+            for (UUID warehouseId : backingWarehouses) {
+                grantWarehouseAccess(warehouseId.toString(), salesMembership.toString());
+            }
+
+            String grantedSales = accessToken(SALES_EMAIL, "PLATFORM");
+            MvcResult assignedList = mockMvc.perform(get("/api/v1/dispatch-orders")
+                            .header("Authorization", "Bearer " + grantedSales))
+                    .andExpect(status().isOk()).andReturn();
+            assertThat(StreamSupport.stream(json(assignedList).get("items").spliterator(), false)
+                    .map(item -> item.path("id").asText()).toList()).contains(dispatch.id());
+            mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id())
+                            .header("Authorization", "Bearer " + grantedSales))
+                    .andExpect(status().isOk());
+            mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id() + "/events")
+                            .header("Authorization", "Bearer " + grantedSales))
+                    .andExpect(status().isOk());
+        } finally {
+            SalesOwnerState currentOwner = tenantJdbc().query(
+                    "select sales_owner_membership_id,version,updated_at from sales.client_account "
+                            + "where tenant_id=? and workspace_id=? and id=?",
+                    rs -> rs.next() ? new SalesOwnerState(rs.getObject(1, UUID.class), rs.getLong(2),
+                            rs.getTimestamp(3)) : null, tenant, workspace, accountId);
+            if (currentOwner != null && (currentOwner.membershipId() == null
+                    || currentOwner.membershipId().equals(salesMembership))) {
+                tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=?,version=? "
+                                + "where tenant_id=? and workspace_id=? and id=? and version=? "
+                                + "and sales_owner_membership_id is not distinct from ?",
+                        originalOwner.membershipId(), originalOwner.updatedAt(), originalOwner.version(), tenant,
+                        workspace, accountId, currentOwner.version(), currentOwner.membershipId());
+            }
+        }
+    }
+
     @Test void dispatchNumbersRemainSequentialWithinTheYear() throws Exception {
         var first = createReservedDispatch();
         var second = createReservedDispatch();
@@ -152,7 +251,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
 
     @Test void temperatureExcursionCreatesIncidentAndBuyerSeesOnlyMappedReview() throws Exception {
         var dispatch = ready(schedule(assign(prepare(
-                createReservedDispatch("CAT-0005", java.time.LocalDate.now().plusDays(1))))));
+                createReservedDispatch("CAT-0005", java.time.LocalDate.now(java.time.ZoneOffset.UTC).plusDays(2))))));
         dispatch = mutate(dispatch, "/route-starts", "{}", "route-temperature");
         MvcResult reading = mockMvc.perform(post("/api/v1/dispatch-orders/" + dispatch.id() + "/temperature-readings")
                         .header("Authorization", "Bearer " + dispatch.logisticsToken()).header("If-Match", dispatch.etag()).header("Idempotency-Key", "temperature-1")
@@ -252,6 +351,121 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
         assertThat(json(detail).get("clientName").asText()).isNotBlank();
         assertThat(json(detail).get("priority").asText()).isIn("NORMAL", "HIGH", "URGENT");
         assertThat(json(detail).get("temperatureStatus").asText()).isNotBlank();
+    }
+
+    @Test void revokedWarehouseGrantDeniesHandoffReplayAndNewWriteWithoutChangingDispatch() throws Exception {
+        var dispatch = createReservedDispatch();
+        UUID commercialCommitmentId = tenantJdbc().queryForObject(
+                "select commercial_commitment_id from sales.sales_order where tenant_id=? and workspace_id=? and id=?",
+                UUID.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                UUID.fromString(dispatch.salesOrderId()));
+        Set<UUID> backingWarehouseIds = Set.copyOf(tenantJdbc().query(
+                "select distinct bp.warehouse_id from warehouse.inventory_backing b "
+                        + "join warehouse.inventory_backing_line bl on bl.tenant_id=b.tenant_id "
+                        + "and bl.workspace_id=b.workspace_id and bl.backing_id=b.id "
+                        + "join warehouse.inventory_backing_position bp on bp.tenant_id=bl.tenant_id "
+                        + "and bp.workspace_id=bl.workspace_id and bp.backing_line_id=bl.id "
+                        + "where b.tenant_id=? and b.workspace_id=? and b.commercial_commitment_id=? "
+                        + "and b.status in ('BACKED','CONSUMED') order by bp.warehouse_id",
+                (rs, row) -> rs.getObject("warehouse_id", UUID.class), UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), commercialCommitmentId));
+        assertThat(backingWarehouseIds).isNotEmpty();
+        String warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String handoffPath = "/api/v1/dispatch-orders/" + dispatch.id() + "/handoff-notes";
+        String key = "handoff-revoke-" + dispatch.id();
+        String originalEtag = dispatch.etag();
+        String body = "{\"note\":\"Carga preparada para transferencia\"}";
+
+        String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
+        for (UUID backingWarehouseId : backingWarehouseIds) {
+            MvcResult grantsResult = mockMvc.perform(get("/api/v1/warehouses/" + backingWarehouseId + "/access-grants")
+                            .header("Authorization", "Bearer " + ownerToken))
+                    .andExpect(status().isOk()).andReturn();
+            var grant = StreamSupport.stream(json(grantsResult).spliterator(), false)
+                    .filter(value -> membershipId(WAREHOUSE_EMAIL).equals(value.path("membershipId").asText()))
+                    .findFirst().orElseThrow();
+            assertThat(grant.path("status").asText()).isEqualTo("ACTIVE");
+        }
+
+        MvcResult first = mockMvc.perform(post(handoffPath)
+                        .header("Authorization", "Bearer " + warehouseToken)
+                        .header("If-Match", originalEtag)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn();
+        assertThat(json(first).get("dispatchOrderId").asText()).isEqualTo(dispatch.id());
+
+        for (UUID backingWarehouseId : backingWarehouseIds) {
+            MvcResult grantsResult = mockMvc.perform(get("/api/v1/warehouses/" + backingWarehouseId + "/access-grants")
+                            .header("Authorization", "Bearer " + ownerToken))
+                    .andExpect(status().isOk()).andReturn();
+            var grant = StreamSupport.stream(json(grantsResult).spliterator(), false)
+                    .filter(value -> membershipId(WAREHOUSE_EMAIL).equals(value.path("membershipId").asText()))
+                    .findFirst().orElseThrow();
+            assertThat(grant.path("status").asText()).isEqualTo("ACTIVE");
+            mockMvc.perform(delete("/api/v1/warehouses/" + backingWarehouseId + "/access-grants/"
+                                    + membershipId(WAREHOUSE_EMAIL))
+                            .header("Authorization", "Bearer " + ownerToken)
+                            .header("If-Match", "\"" + grant.path("version").asLong() + "\""))
+                    .andExpect(status().isOk());
+            MvcResult revokedGrantsResult = mockMvc.perform(
+                            get("/api/v1/warehouses/" + backingWarehouseId + "/access-grants")
+                                    .header("Authorization", "Bearer " + ownerToken))
+                    .andExpect(status().isOk()).andReturn();
+            var revokedGrant = StreamSupport.stream(json(revokedGrantsResult).spliterator(), false)
+                    .filter(value -> membershipId(WAREHOUSE_EMAIL).equals(value.path("membershipId").asText()))
+                    .findFirst().orElseThrow();
+            assertThat(revokedGrant.path("status").asText()).isEqualTo("REVOKED");
+            assertThat(revokedGrant.path("version").asLong()).isGreaterThan(grant.path("version").asLong());
+        }
+
+        UUID dispatchId = UUID.fromString(dispatch.id());
+        Long versionAfterAuthorizedNote = tenantJdbc().queryForObject(
+                "select version from logistics.dispatch_order where id=?", Long.class, dispatchId);
+        Integer eventsAfterAuthorizedNote = tenantJdbc().queryForObject(
+                "select count(*) from logistics.dispatch_event where dispatch_order_id=?", Integer.class, dispatchId);
+        String revokedWarehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+
+        mockMvc.perform(post(handoffPath)
+                        .header("Authorization", "Bearer " + revokedWarehouseToken)
+                        .header("If-Match", originalEtag)
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(post(handoffPath)
+                        .header("Authorization", "Bearer " + revokedWarehouseToken)
+                        .header("If-Match", originalEtag)
+                        .header("Idempotency-Key", key + "-new")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isNotFound());
+
+        MvcResult remainingWarehouseDispatches = mockMvc.perform(get("/api/v1/dispatch-orders")
+                        .header("Authorization", "Bearer " + revokedWarehouseToken))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(StreamSupport.stream(json(remainingWarehouseDispatches).get("items").spliterator(), false)
+                .map(item -> item.path("id").asText()).toList()).doesNotContain(dispatch.id());
+        mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id())
+                        .header("Authorization", "Bearer " + revokedWarehouseToken))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id() + "/events")
+                        .header("Authorization", "Bearer " + revokedWarehouseToken))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id() + "/handoff-notes")
+                        .header("Authorization", "Bearer " + revokedWarehouseToken))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id() + "/deliveries")
+                        .header("Authorization", "Bearer " + revokedWarehouseToken))
+                .andExpect(status().isForbidden());
+
+        String buyerToken = accessToken(BUYER_EMAIL, "PORTAL");
+        mockMvc.perform(get("/api/v1/dispatch-orders/" + dispatch.id())
+                        .header("Authorization", "Bearer " + buyerToken))
+                .andExpect(status().isOk());
+
+        assertThat(tenantJdbc().queryForObject("select version from logistics.dispatch_order where id=?",
+                Long.class, dispatchId)).isEqualTo(versionAfterAuthorizedNote);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.dispatch_event where dispatch_order_id=?",
+                Integer.class, dispatchId)).isEqualTo(eventsAfterAuthorizedNote);
     }
 
     private DispatchResource prepare(DispatchResource value) throws Exception { return mutate(value, "/preparation-starts", "{}", "prepare-" + value.id()); }

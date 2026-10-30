@@ -12,11 +12,13 @@ import com.nexa.api.customerbuyerrelationships.application.clientaccount.model.C
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.model.CustomerAccountPage;
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.port.ClientAccountPersistencePort;
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.service.ClientAccountService;
+import com.nexa.api.customerbuyerrelationships.domain.model.clientaccount.ClientAccountType;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressPersistencePort;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.service.ClientAccountAddressService;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
+import com.nexa.api.fulfillmentdelivery.application.model.DispatchSalesOwnerScope;
 import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsModels;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchCommandPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchQueryPersistencePort;
@@ -29,6 +31,7 @@ import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseReq
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestPersistencePort;
 import com.nexa.api.salescommitment.application.purchaserequest.service.PurchaseRequestService;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderSalesOwnerScope;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderDraftPersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderPersistencePort;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderUseCase;
@@ -92,7 +95,7 @@ class RoleFocusedReadAuthorizationTests {
 	}
 
 	@Test
-	void tenantAdministratorReadsClientAndCatalogButCannotReadSalesOrLogistics() {
+	void tenantAdministratorReadsCatalogButCannotReadBuyerAccountsSalesOrLogistics() {
 		CurrentAccessContext admin = contextFor(MembershipRole.TENANT_ADMIN);
 		assertThat(admin.allows(PermissionKey.CLIENT_READ)).isTrue();
 		assertThat(admin.allows(PermissionKey.CATALOG_READ)).isTrue();
@@ -100,12 +103,10 @@ class RoleFocusedReadAuthorizationTests {
 		assertThat(admin.allows(Permission.SALES_READ)).isTrue();
 
 		ClientAccountPersistencePort clientPersistence = mock(ClientAccountPersistencePort.class);
-		CustomerAccountPage<ClientAccountView> clientPage = new CustomerAccountPage<>(List.of(), 0, 10, 0);
-		when(clientPersistence.list(tenantId.toString(), workspaceId.toString(), null, null, 0, 10))
-				.thenReturn(clientPage);
 		ClientAccountService clients = new ClientAccountService(clientPersistence, mock(BuyerMembershipDirectory.class));
-		assertThat(clients.list(admin, null, null, 0, 10)).isSameAs(clientPage);
-		verify(clientPersistence).list(tenantId.toString(), workspaceId.toString(), null, null, 0, 10);
+		assertThatThrownBy(() -> clients.list(admin, null, null, 0, 10))
+				.isInstanceOf(AccessPolicyViolation.class);
+		verifyNoInteractions(clientPersistence);
 
 		CatalogItemQueryPort catalogQuery = mock(CatalogItemQueryPort.class);
 		CatalogSearchCriteria criteria = new CatalogSearchCriteria("", null, null, null, 0, 10,
@@ -151,13 +152,20 @@ class RoleFocusedReadAuthorizationTests {
 	void salesPresetPassesEachReadFilterAndKeepsSalesSafeLogisticsProjection() {
 		CurrentAccessContext sales = contextFor(MembershipRole.SALES);
 		SalesOrderPersistencePort orders = mock(SalesOrderPersistencePort.class);
+		CustomerAccountQuery salesAccounts = mock(CustomerAccountQuery.class);
+		SalesOrderSalesOwnerScope salesOrderOwnerScope = new SalesOrderSalesOwnerScope(Set.of(UUID.fromString(accountId)));
+		when(salesAccounts.lockActiveSalesOwnerAccountIds(tenantId.toString(), workspaceId.toString(),
+				sales.membershipId().toString())).thenReturn(List.of(accountId));
 		SalesPage<com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView> ordersPage =
 				new SalesPage<>(List.of(), 0, 10, 0);
-		when(orders.list(tenantId.toString(), workspaceId.toString(), null, SALES_ORDER_FILTER)).thenReturn(ordersPage);
-		SalesOrderService salesOrderService = new SalesOrderService(orders, mock(CustomerAccountQuery.class),
+		when(orders.listForSalesOwner(tenantId.toString(), workspaceId.toString(), salesOrderOwnerScope, SALES_ORDER_FILTER))
+				.thenReturn(ordersPage);
+		SalesOrderService salesOrderService = new SalesOrderService(orders, salesAccounts,
 				mock(SalesOrderAggregatePersistencePort.class), mock(SalesOrderConversionPersistencePort.class));
 		assertThat(salesOrderService.list(sales, SALES_ORDER_FILTER)).isSameAs(ordersPage);
-		verify(orders).list(tenantId.toString(), workspaceId.toString(), null, SALES_ORDER_FILTER);
+		verify(salesAccounts).lockActiveSalesOwnerAccountIds(tenantId.toString(), workspaceId.toString(),
+				sales.membershipId().toString());
+		verify(orders).listForSalesOwner(tenantId.toString(), workspaceId.toString(), salesOrderOwnerScope, SALES_ORDER_FILTER);
 
 		PurchaseRequestPersistencePort requests = mock(PurchaseRequestPersistencePort.class);
 		SalesPage<com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestView> requestsPage =
@@ -178,18 +186,24 @@ class RoleFocusedReadAuthorizationTests {
 		verify(drafts).get(sales, draftId);
 
 		DispatchQueryPersistencePort dispatchQueries = mock(DispatchQueryPersistencePort.class);
+		String salesOwnedAccountId = UUID.randomUUID().toString();
 		LogisticsOperationsModels.DispatchView dispatch = new LogisticsOperationsModels.DispatchView(
-				"dispatch-id", "D-1", "reservation-private", "order-private", "SO-1", "account-private",
+				"dispatch-id", "D-1", "reservation-private", "order-private", "SO-1", salesOwnedAccountId,
 				"C-1", "Client", "IN_ROUTE", "destination", "area", "NORMAL", null, null, null,
 				new LogisticsOperationsModels.AssignmentView("membership", "driver", "vehicle", "route"),
 				java.math.BigDecimal.ZERO, java.math.BigDecimal.TEN, "C", "OK", "pod-private", "COMPLETED",
 				1, Instant.EPOCH, List.of("INTERNAL_ALERT"), null, "continuation-private", "IN_ROUTE", List.of());
 		LogisticsOperationsModels.Page<LogisticsOperationsModels.DispatchView> dispatchPage =
 				new LogisticsOperationsModels.Page<>(List.of(dispatch), 0, 10, 1);
-		when(dispatchQueries.list(tenantId.toString(), workspaceId.toString(), null, "IN_ROUTE", 0, 10,
-				"createdAt,desc")).thenReturn(dispatchPage);
+		CustomerAccountQuery assignedAccounts = mock(CustomerAccountQuery.class);
+		when(assignedAccounts.lockActiveSalesOwnerAccountIds(tenantId.toString(), workspaceId.toString(),
+				sales.membershipId().toString())).thenReturn(List.of(salesOwnedAccountId));
+		DispatchSalesOwnerScope salesOwnerScope =
+				new DispatchSalesOwnerScope(Set.of(UUID.fromString(salesOwnedAccountId)));
+		when(dispatchQueries.listForSalesOwner(tenantId.toString(), workspaceId.toString(), "IN_ROUTE", 0, 10,
+				"createdAt,desc", salesOwnerScope)).thenReturn(dispatchPage);
 		LogisticsOperationsService logistics = new LogisticsOperationsService(dispatchQueries,
-				mock(DispatchCommandPersistencePort.class), mock(CustomerAccountQuery.class),
+				mock(DispatchCommandPersistencePort.class), assignedAccounts,
 				mock(StartDispatchRouteService.class));
 		LogisticsOperationsModels.DispatchView salesSafe = logistics.list(sales, "IN_ROUTE", 0, 10,
 				"createdAt,desc").items().getFirst();
@@ -198,23 +212,21 @@ class RoleFocusedReadAuthorizationTests {
 		assertThat(salesSafe.clientAccountId()).isNull();
 		assertThat(salesSafe.assignment()).isNull();
 		assertThat(salesSafe.temperatureStatus()).isNull();
-		verify(dispatchQueries).list(tenantId.toString(), workspaceId.toString(), null, "IN_ROUTE", 0, 10,
-				"createdAt,desc");
+		verify(assignedAccounts).lockActiveSalesOwnerAccountIds(tenantId.toString(), workspaceId.toString(),
+				sales.membershipId().toString());
+		verify(dispatchQueries).listForSalesOwner(tenantId.toString(), workspaceId.toString(), "IN_ROUTE", 0, 10,
+				"createdAt,desc", salesOwnerScope);
 	}
 
 	@Test
-	void tenantAdministratorCanReadClientAddressesButCannotManageThem() {
+	void tenantAdministratorCannotReadBuyerAddressesOrManageThem() {
 		CurrentAccessContext admin = contextFor(MembershipRole.TENANT_ADMIN);
 		ClientAccountAddressPersistencePort persistence = mock(ClientAccountAddressPersistencePort.class);
 		CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
-		when(accounts.findReference(tenantId.toString(), workspaceId.toString(), accountId))
-				.thenReturn(Optional.of(new CustomerAccountReference(accountId, "ACTIVE")));
-		when(persistence.list(tenantId.toString(), workspaceId.toString(), accountId)).thenReturn(List.of());
 		ClientAccountAddressService addresses = new ClientAccountAddressService(persistence, accounts);
 
-		assertThat(addresses.list(admin, accountId)).isEmpty();
-		verify(accounts).findReference(tenantId.toString(), workspaceId.toString(), accountId);
-		verify(persistence).list(tenantId.toString(), workspaceId.toString(), accountId);
+		assertThatThrownBy(() -> addresses.list(admin, accountId)).isInstanceOf(AccessPolicyViolation.class);
+		verifyNoInteractions(accounts, persistence);
 		assertThat(admin.allows(PermissionKey.CLIENT_ADDRESS_MANAGE)).isFalse();
 		assertThatThrownBy(() -> addresses.create(admin, accountId, null))
 				.isInstanceOf(AccessPolicyViolation.class);
@@ -252,10 +264,10 @@ class RoleFocusedReadAuthorizationTests {
 		ClientAccountPersistencePort persistence = mock(ClientAccountPersistencePort.class);
 		ClientAccountView command = new ClientAccountView(null, null, "Business", "Commercial", null,
 				null, null, null, "Contact", "contact@example.test", "555-0100", "STANDARD", "NET30",
-				null, null, 0);
+				null, null, 0, ClientAccountType.BUSINESS);
 		ClientAccountView persisted = new ClientAccountView(accountId, "C-1", "Business", "Commercial", "PE",
 				"RUC", "20123456789", "GENERAL", "Contact", "contact@example.test", "555-0100",
-				"STANDARD", "NET30", "ACTIVE", null, 1);
+				"STANDARD", "NET30", "ACTIVE", null, 1, ClientAccountType.BUSINESS);
 		when(persistence.update(tenantId.toString(), workspaceId.toString(), accountId, "Business", "Commercial",
 				"Contact", "contact@example.test", "555-0100", "STANDARD", "NET30", 0)).thenReturn(1);
 		when(persistence.find(tenantId.toString(), workspaceId.toString(), accountId)).thenReturn(Optional.of(persisted));

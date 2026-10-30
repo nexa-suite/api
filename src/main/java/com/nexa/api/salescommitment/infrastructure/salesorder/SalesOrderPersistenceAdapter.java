@@ -10,6 +10,7 @@ import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderEventView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderSalesOwnerScope;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderLineView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderPersistencePort;
@@ -444,9 +445,30 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 
 	@Override
 	public SalesPage<SalesOrderView> list(String tenantId, String workspaceId, String buyerAccountId, SalesOrderFilter filter) {
+		return list(tenantId, workspaceId, buyerAccountId, null, filter);
+	}
+
+	@Override
+	public SalesPage<SalesOrderView> listForSalesOwner(String tenantId, String workspaceId,
+			SalesOrderSalesOwnerScope scope, SalesOrderFilter filter) {
+		List<UUID> accountIds = salesOwnerAccountIds(scope);
+		if (accountIds.isEmpty()) return new SalesPage<>(List.of(), filter.page(), filter.size(), 0);
+		return list(tenantId, workspaceId, null, accountIds, filter);
+	}
+
+	private SalesPage<SalesOrderView> list(String tenantId, String workspaceId, String buyerAccountId,
+			List<UUID> salesOwnerAccountIds, SalesOrderFilter filter) {
 		String where = " where o.tenant_id=? and o.workspace_id=?"; List<Object> args = new ArrayList<>(List.of(uuid(tenantId), uuid(workspaceId)));
 		if (buyerAccountId != null) { where += " and o.client_account_id=?"; args.add(uuid(buyerAccountId)); }
+		if (salesOwnerAccountIds != null) {
+			where += " and o.client_account_id in (" + placeholders(salesOwnerAccountIds.size()) + ")";
+			args.addAll(salesOwnerAccountIds);
+		}
 		if (filter.status() != null) { where += " and o.status=?"; args.add(filter.status()); }
+		if (!filter.statuses().isEmpty()) {
+			where += " and o.status in (" + placeholders(filter.statuses().size()) + ")";
+			args.addAll(filter.statuses());
+		}
 		if (filter.priority() != null && !filter.priority().isBlank()) { where += " and o.priority=?"; args.add(filter.priority()); }
 		if (filter.clientAccountId() != null && !filter.clientAccountId().isBlank()) { where += " and o.client_account_id=?"; args.add(uuid(filter.clientAccountId())); }
 		if (filter.search() != null && !filter.search().isBlank()) {
@@ -487,9 +509,28 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 
 	@Override
 	public Optional<SalesOrderView> find(String tenantId, String workspaceId, String buyerAccountId, String id) {
-		String scope = buyerAccountId == null ? "" : " and o.client_account_id=?"; List<Object> args = new ArrayList<>(List.of(uuid(tenantId), uuid(workspaceId)));
-		if (buyerAccountId != null) args.add(uuid(buyerAccountId)); args.add(uuid(id));
-		return jdbc.query(orderSql() + " where o.tenant_id=? and o.workspace_id=?" + scope + " and o.id=?", this::optionalDetail, args.toArray());
+		return find(tenantId, workspaceId, buyerAccountId, null, id);
+	}
+
+	@Override
+	public Optional<SalesOrderView> findForSalesOwner(String tenantId, String workspaceId,
+			SalesOrderSalesOwnerScope scope, String id) {
+		List<UUID> accountIds = salesOwnerAccountIds(scope);
+		if (accountIds.isEmpty()) return Optional.empty();
+		return find(tenantId, workspaceId, null, accountIds, id);
+	}
+
+	private Optional<SalesOrderView> find(String tenantId, String workspaceId, String buyerAccountId,
+			List<UUID> salesOwnerAccountIds, String id) {
+		String where = " where o.tenant_id=? and o.workspace_id=?";
+		List<Object> args = new ArrayList<>(List.of(uuid(tenantId), uuid(workspaceId)));
+		if (buyerAccountId != null) { where += " and o.client_account_id=?"; args.add(uuid(buyerAccountId)); }
+		if (salesOwnerAccountIds != null) {
+			where += " and o.client_account_id in (" + placeholders(salesOwnerAccountIds.size()) + ")";
+			args.addAll(salesOwnerAccountIds);
+		}
+		args.add(uuid(id));
+		return jdbc.query(orderSql() + where + " and o.id=?", this::optionalDetail, args.toArray());
 	}
 
 	@Override
@@ -497,6 +538,28 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		find(tenantId, workspaceId, buyerAccountId, id).orElseThrow(() -> new SalesResourceNotFoundException("sales-order"));
 		return jdbc.query("select id,event_type,from_status,to_status,reason,actor_membership_id,occurred_at from sales.sales_order_event where tenant_id=? and workspace_id=? and sales_order_id=? order by occurred_at,id",
 				(rs, row) -> new SalesOrderEventView(rs.getObject(1).toString(), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getObject(6).toString(), rs.getTimestamp(7).toInstant()), uuid(tenantId), uuid(workspaceId), uuid(id));
+	}
+
+	@Override
+	public List<SalesOrderEventView> eventsForSalesOwner(String tenantId, String workspaceId,
+			SalesOrderSalesOwnerScope scope, String id) {
+		List<UUID> accountIds = salesOwnerAccountIds(scope);
+		if (accountIds.isEmpty()) throw new SalesResourceNotFoundException("sales-order");
+		find(tenantId, workspaceId, null, accountIds, id)
+				.orElseThrow(() -> new SalesResourceNotFoundException("sales-order"));
+		List<Object> args = new ArrayList<>(List.of(uuid(tenantId), uuid(workspaceId), uuid(id)));
+		args.add(uuid(tenantId));
+		args.add(uuid(workspaceId));
+		args.addAll(accountIds);
+		return jdbc.query("select e.id,e.event_type,e.from_status,e.to_status,e.reason,e.actor_membership_id,e.occurred_at "
+				+ "from sales.sales_order_event e join sales.sales_order o "
+				+ "on o.tenant_id=e.tenant_id and o.workspace_id=e.workspace_id and o.id=e.sales_order_id "
+				+ "where e.tenant_id=? and e.workspace_id=? and e.sales_order_id=? "
+				+ "and o.tenant_id=? and o.workspace_id=? and o.client_account_id in (" + placeholders(accountIds.size()) + ") "
+				+ "order by e.occurred_at,e.id",
+				(rs, row) -> new SalesOrderEventView(rs.getObject(1).toString(), rs.getString(2), rs.getString(3),
+						rs.getString(4), rs.getString(5), rs.getObject(6).toString(), rs.getTimestamp(7).toInstant()),
+				args.toArray());
 	}
 
 	@Override
@@ -543,6 +606,13 @@ public class SalesOrderPersistenceAdapter implements SalesOrderPersistencePort, 
 		return value;
 	}
 	private String orderFromSql() { return " from sales.sales_order o"; }
+	private static List<UUID> salesOwnerAccountIds(SalesOrderSalesOwnerScope scope) {
+		if (scope == null || scope.activeClientAccountIds().isEmpty()) return List.of();
+		return scope.activeClientAccountIds().stream().sorted().toList();
+	}
+	private static String placeholders(int count) {
+		return String.join(",", java.util.Collections.nCopies(count, "?"));
+	}
 	private String orderSql() { return "select o.id,o.number,o.tenant_id,o.workspace_id,o.client_account_id,o.created_by_membership_id,o.buyer_membership_id,o.source_purchase_request_id,o.priority,o.requested_delivery_date,o.delivery_snapshot,o.payment_option,o.notes,o.currency,o.total_amount,o.status,o.created_at,o.updated_at,o.confirmed_at,o.rejected_at,o.cancelled_at,o.rejection_reason,o.version,o.commercial_commitment_id,o.origin_type" + orderFromSql(); }
 	private SalesOrderView summary(ResultSet rs) throws java.sql.SQLException { return new SalesOrderView(rs.getObject(1).toString(), rs.getString(2), rs.getObject(3).toString(), rs.getObject(4).toString(), rs.getObject(5).toString(), rs.getObject(6).toString(), stringUuid(rs.getObject(7)), stringUuid(rs.getObject(8)), com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority.from(rs.getString(9)), rs.getObject(10, java.time.LocalDate.class), rs.getString(11), com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption.from(rs.getString(12)), rs.getString(13), rs.getString(14), rs.getBigDecimal(15), rs.getString(16), rs.getTimestamp(17).toInstant(), rs.getTimestamp(18).toInstant(), rs.getTimestamp(19) == null ? null : rs.getTimestamp(19).toInstant(), rs.getTimestamp(20) == null ? null : rs.getTimestamp(20).toInstant(), rs.getTimestamp(21) == null ? null : rs.getTimestamp(21).toInstant(), rs.getString(22), rs.getLong(23), List.of(), rs.getString(25), stringUuid(rs.getObject(24))); }
 	private Optional<SalesOrderView> optionalDetail(ResultSet rs) throws java.sql.SQLException { return rs.next() ? Optional.of(detail(rs)) : Optional.empty(); }

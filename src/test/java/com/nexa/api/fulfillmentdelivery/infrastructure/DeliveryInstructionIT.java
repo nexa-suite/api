@@ -54,6 +54,74 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void salesCustomerInstructionsAreLimitedToTheAssignedAccountOwner() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID account = UUID.fromString(buyerClientAccountId());
+        UUID sellerA = UUID.fromString(membershipId(SALES_EMAIL));
+        SalesOwnerState previousOwner = tenantJdbc().query("select sales_owner_membership_id,version,updated_at "
+                        + "from sales.client_account "
+                        + "where tenant_id=? and workspace_id=? and id=?",
+                rs -> rs.next() ? new SalesOwnerState(rs.getObject(1, UUID.class), rs.getLong(2), rs.getTimestamp(3)) : null,
+                tenant, workspace, account);
+        if (previousOwner == null) throw new IllegalStateException("Buyer account fixture is missing");
+        SyntheticSalesIdentity sellerB = createSalesIdentity();
+        boolean ownerClaimed = false;
+        long assignedVersion = previousOwner.version() + 1;
+        try {
+            int claimed = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?, "
+                            + "updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=? "
+                            + "and version=? and sales_owner_membership_id is not distinct from ?",
+                    sellerA, tenant, workspace, account, previousOwner.version(), previousOwner.membershipId());
+            assertThat(claimed).isEqualTo(1);
+            ownerClaimed = true;
+            ensureCommercialInventory();
+            String sellerAToken = accessToken(SALES_EMAIL, "PLATFORM");
+            String sellerBToken = accessToken(sellerB.email(), "PLATFORM");
+            MvcResult createdOrder = mockMvc.perform(post("/api/v1/direct-orders")
+                            .header("Authorization", bearer(sellerAToken))
+                            .header("Idempotency-Key", "delivery-instruction-owner-" + UUID.randomUUID())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"clientAccountId\":\"" + account
+                                    + "\",\"priority\":\"NORMAL\",\"requestedDeliveryDate\":\"2099-12-31\","
+                                    + "\"deliveryProfileSnapshot\":\"Delivery instruction owner scope\","
+                                    + "\"paymentOption\":\"IMMEDIATE\",\"lines\":[{\"catalogItemId\":\"CAT-0002\","
+                                    + "\"quantity\":1,\"unit\":\"UNIT\"}]}"))
+                    .andExpect(status().isCreated()).andReturn();
+            UUID orderId = UUID.fromString(json(createdOrder).get("id").asText());
+            String path = "/api/v1/sales-orders/" + orderId + "/customer-delivery-instructions";
+            MvcResult ownerRead = mockMvc.perform(get(path).header("Authorization", bearer(sellerAToken)))
+                    .andExpect(status().isOk()).andReturn();
+            String currentEtag = ownerRead.getResponse().getHeader("ETag");
+
+            mockMvc.perform(get(path).header("Authorization", bearer(sellerBToken)))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("DELIVERY_NOT_FOUND"));
+            mockMvc.perform(post(path).header("Authorization", bearer(sellerBToken))
+                            .header("If-Match", currentEtag)
+                            .header("Idempotency-Key", "unassigned-instruction-" + UUID.randomUUID())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"kind\":\"NORMAL\",\"content\":\"Must stay private\","
+                                    + "\"sourceReference\":\"Synthetic seller report\"}"))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("DELIVERY_NOT_FOUND"));
+            mockMvc.perform(post(path).header("Authorization", bearer(sellerAToken))
+                            .header("If-Match", currentEtag)
+                            .header("Idempotency-Key", "assigned-instruction-" + UUID.randomUUID())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"kind\":\"NORMAL\",\"content\":\"Assigned seller report\","
+                                    + "\"sourceReference\":\"Synthetic seller report\"}"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.instructions.length()").value(1));
+        } finally {
+            if (ownerClaimed) {
+                tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=?,version=? "
+                                + "where tenant_id=? and workspace_id=? and id=? and sales_owner_membership_id=? and version=?",
+                        previousOwner.membershipId(), previousOwner.updatedAt(), previousOwner.version(), tenant, workspace,
+                        account, sellerA, assignedVersion);
+            }
+            deleteSalesIdentity(sellerB);
+        }
+    }
+
+    @Test
     void criticalAcknowledgementsGateNewAttemptAndBindToCurrentRevisionAndActor() throws Exception {
         String workdayToken = accessToken(LOGISTICS_EMAIL, "PLATFORM");
         var currentWorkday = mockMvc.perform(get("/api/v1/driver/workdays/current")
@@ -440,10 +508,10 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                         + "values (?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
                 workspace, tenant, "Delivery-instruction isolation workspace", workspaceSlug);
         jdbc.update("insert into tenant_management.workspace_membership "
-                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "select ?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
+						+ "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+						+ "select ?,?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
                         + "from tenant_management.workspace_membership where id=?",
-                membership, workspace, sourceMembership);
+						membership, tenant, workspace, sourceMembership);
         jdbc.update("insert into tenant_management.membership_role_definition "
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
@@ -453,6 +521,51 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
         return workspaceSlug;
     }
 
+    private SyntheticSalesIdentity createSalesIdentity() {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID user = UUID.randomUUID();
+        UUID membership = UUID.randomUUID();
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 14);
+        String email = "sales-instruction-" + suffix + "@icisa-test.local";
+        String username = "sales_instruction_" + suffix;
+        jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,"
+                        + "display_name,preferred_language,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,?,?,'es','ACTIVE',current_timestamp,current_timestamp,0)",
+                user, email, email, username, username, "Synthetic delivery instruction seller");
+        jdbc.update("insert into iam.password_credential (user_id,password_hash,algorithm,changed_at) "
+                        + "select ?,password_hash,algorithm,changed_at from iam.password_credential where user_id=?",
+                user, UUID.fromString(membershipUserId(SALES_EMAIL)));
+        jdbc.update("insert into tenant_management.workspace_membership "
+                        + "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+                membership, tenant, workspace, user);
+        assertThat(jdbc.update("insert into tenant_management.membership_role_definition "
+                        + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
+                        + "select ?,?,?,r.id,?,current_timestamp from tenant_management.role_definition r "
+                        + "where r.tenant_id is null and r.workspace_id is null and r.code='sales'",
+                membership, tenant, workspace, UUID.fromString(membershipId(OWNER_EMAIL))))
+                .as("synthetic member must receive the existing Sales role").isEqualTo(1);
+        return new SyntheticSalesIdentity(user, membership, email);
+    }
+
+    private String membershipUserId(String email) {
+        return jdbc.queryForObject("select m.user_id::text from tenant_management.workspace_membership m "
+                        + "join iam.user_account u on u.id=m.user_id where u.normalized_email=? and m.workspace_id=?",
+                String.class, email, UUID.fromString(workspaceId()));
+    }
+
+    private void deleteSalesIdentity(SyntheticSalesIdentity identity) {
+        jdbc.update("delete from iam.access_context_selection_ticket where user_id=?", identity.userId());
+        jdbc.update("update iam.refresh_session set replaced_by_session_id=null where user_id=?", identity.userId());
+        jdbc.update("delete from iam.refresh_session where user_id=?", identity.userId());
+        jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", identity.membershipId());
+        jdbc.update("delete from tenant_management.membership_authorization_state where membership_id=?", identity.membershipId());
+        jdbc.update("delete from tenant_management.workspace_membership where id=?", identity.membershipId());
+        jdbc.update("delete from iam.password_credential where user_id=?", identity.userId());
+        jdbc.update("delete from iam.user_account where id=?", identity.userId());
+    }
+
     private static String driverPath(AssignedDelivery fixture) {
         return "/api/v1/driver/deliveries/" + fixture.deliveryId();
     }
@@ -460,4 +573,6 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
     private static String bearer(String token) { return "Bearer " + token; }
 
     private record AssignedDelivery(UUID deliveryId, UUID membershipId, String token, UUID salesOrderId) { }
+    private record SyntheticSalesIdentity(UUID userId, UUID membershipId, String email) { }
+    private record SalesOwnerState(UUID membershipId, long version, java.sql.Timestamp updatedAt) { }
 }

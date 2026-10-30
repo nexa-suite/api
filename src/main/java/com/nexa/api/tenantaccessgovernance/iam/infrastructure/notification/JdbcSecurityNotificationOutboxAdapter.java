@@ -1,6 +1,7 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure.notification;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityNotificationOutboxPort;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.PasswordResetDeliveryChannel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -46,7 +47,13 @@ public final class JdbcSecurityNotificationOutboxAdapter implements SecurityNoti
 
     @Override
     public void enqueuePasswordReset(String recipient, String surface, String token, Instant expiresAt) {
-        enqueue("PASSWORD_RESET", recipient, surface, "token=" + token + "\nexpiresAt=" + expiresAt);
+        enqueuePasswordReset(recipient, surface, PasswordResetDeliveryChannel.WEB, token, expiresAt);
+    }
+
+    @Override
+    public void enqueuePasswordReset(String recipient, String surface, PasswordResetDeliveryChannel channel,
+            String token, Instant expiresAt) {
+        enqueue("PASSWORD_RESET", recipient, surface, "channel=" + channel.name() + "\ntoken=" + token + "\nexpiresAt=" + expiresAt);
     }
 
     @Override

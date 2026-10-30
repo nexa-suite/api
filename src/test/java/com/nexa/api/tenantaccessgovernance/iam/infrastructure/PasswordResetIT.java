@@ -100,6 +100,28 @@ class PasswordResetIT extends NexaWorkflowIntegrationSupport {
                 String.class, BUYER_EMAIL)).isEqualTo(originalHash);
     }
 
+    @Test
+    void persistsInvalidTokenAttemptsAndLimitsFurtherConsumption() throws Exception {
+        for (int attempt = 0; attempt < 10; attempt++) {
+            mockMvc.perform(post("/api/v1/auth/password-resets")
+                            .with(request -> { request.setRemoteAddr("198.51.100.42"); return request; })
+                            .header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"token\":\"invalid-reset-token-" + attempt
+                                    + "\",\"newPassword\":\"integration-reset-password-2026\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        mockMvc.perform(post("/api/v1/auth/password-resets")
+                        .with(request -> { request.setRemoteAddr("198.51.100.42"); return request; })
+                        .header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"another-invalid-reset-token\",\"newPassword\":\"integration-reset-password-2026\"}"))
+                .andExpect(status().isTooManyRequests());
+
+        assertThat(jdbc.queryForObject(
+                "select max(request_count) from iam.password_reset_throttle_bucket where throttle_dimension='IP'",
+                Integer.class)).isEqualTo(11);
+    }
+
     private static String sha256(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (Exception exception) { throw new IllegalStateException(exception); }

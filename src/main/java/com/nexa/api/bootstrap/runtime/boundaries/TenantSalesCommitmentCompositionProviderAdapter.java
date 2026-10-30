@@ -138,7 +138,9 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
                 "Tenant Sales factory returned no fulfillment query");
         FinancialAdjustmentSource adjustmentSource = adjustmentSource(tenantFulfillment, tenantPaymentConfirmations);
         TenantCreditAccountAdapterFactory.Bindings tenantCredit = Objects.requireNonNull(
-                creditAdapters.bindTo(jdbc, tenantAccounts, tenantReceivableAccess, traceability.commands(),
+                creditAdapters.bindTo(jdbc, tenantAccounts,
+                        TenantCreditEligibilitySourceFactory.bindTo(tenantAccounts),
+                        tenantReceivableAccess, traceability.commands(),
                         traceability.canonicalOutbox(), adjustmentSource),
                 "Tenant Credit factory returned no bindings");
 

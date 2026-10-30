@@ -9,6 +9,7 @@ public interface DriverTrackingPort {
     Workday command(WorkdayCommand request);
     Coordinate capture(SampleCommand request);
     Coordinate latest(UUID tenant, UUID workspace, UUID actor, Instant now);
+    Coordinate latestForDelivery(UUID tenant, UUID workspace, UUID actor, UUID deliveryId, Instant now);
     DeliveryScope deliveryScope(UUID tenant, UUID workspace, UUID deliveryId);
     void purgeExpiredCoordinates();
 }

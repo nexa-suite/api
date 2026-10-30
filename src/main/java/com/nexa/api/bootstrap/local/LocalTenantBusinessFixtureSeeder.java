@@ -77,7 +77,10 @@ public final class LocalTenantBusinessFixtureSeeder {
 			if (!seed.portalAccess() || !buyerClientCode.equals(seed.code())) continue;
 			UUID accountId = accounts.getFirst().id();
 			jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) "
-					+ "values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing",
+					+ "values (?,?,?,?,?) on conflict (workspace_membership_id) do update set status='ACTIVE',"
+					+ "updated_at=excluded.created_at,version=sales.client_account_membership.version+1 "
+					+ "where sales.client_account_membership.client_account_id=excluded.client_account_id "
+					+ "and sales.client_account_membership.status='INACTIVE'",
 				accountId, membershipId, tenantId, workspaceId, timestamp(now));
 			List<UUID> linkedAccounts = jdbc.query("select client_account_id from sales.client_account_membership "
 					+ "where workspace_membership_id=? and tenant_id=? and workspace_id=?",

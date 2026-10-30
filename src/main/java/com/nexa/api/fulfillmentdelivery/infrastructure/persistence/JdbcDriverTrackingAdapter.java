@@ -87,7 +87,23 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   return jdbc.query("select p.* from logistics.driver_coordinate p join logistics.driver_workday d on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id and d.id=p.workday_id where p.tenant_id=? and p.workspace_id=? and p.actor_membership_id=? and d.status='ACTIVE' and p.expires_at>? and exists(select 1 from logistics.delivery ld join logistics.delivery_assignment la on la.tenant_id=ld.tenant_id and la.workspace_id=ld.workspace_id and la.delivery_id=ld.id where ld.tenant_id=p.tenant_id and ld.workspace_id=p.workspace_id and la.responsible_membership_id=p.actor_membership_id and ld.status in ('DISPATCHED','IN_TRANSIT') and p.captured_at>=coalesce(ld.dispatched_at,ld.created_at)) order by p.captured_at desc,p.received_at desc limit 1",(rs,n)->coordinate(rs),t,w,a,ts(now)).stream().findFirst().orElse(null);
  }
  @Override public DeliveryScope deliveryScope(UUID t,UUID w,UUID id){
-  return jdbc.query("select coalesce(f.sales_order_id,o.sales_order_id) sales_order_id,a.responsible_membership_id,d.status,coalesce(d.dispatched_at,d.created_at) tracking_started_at from logistics.delivery d left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id left join logistics.dispatch_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.dispatch_order_id join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id where d.tenant_id=? and d.workspace_id=? and d.id=?",(rs,n)->new DeliveryScope(rs.getObject("sales_order_id",UUID.class),rs.getObject("responsible_membership_id",UUID.class),rs.getString("status"),instant(rs,"tracking_started_at")),t,w,id).stream().findFirst().orElse(null);
+  return jdbc.query("select coalesce(f.sales_order_id,o.sales_order_id) sales_order_id,a.responsible_membership_id,d.status,coalesce(d.dispatched_at,d.created_at) tracking_started_at,d.fulfillment_id from logistics.delivery d left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id left join logistics.dispatch_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.dispatch_order_id join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id where d.tenant_id=? and d.workspace_id=? and d.id=?",(rs,n)->new DeliveryScope(rs.getObject("sales_order_id",UUID.class),rs.getObject("responsible_membership_id",UUID.class),rs.getString("status"),instant(rs,"tracking_started_at"),rs.getObject("fulfillment_id",UUID.class)),t,w,id).stream().findFirst().orElse(null);
+ }
+ @Override public Coordinate latestForDelivery(UUID t,UUID w,UUID a,UUID deliveryId,Instant now){
+  return jdbc.query("""
+          select p.* from logistics.driver_coordinate p
+          join logistics.driver_workday day on day.tenant_id=p.tenant_id and day.workspace_id=p.workspace_id
+              and day.id=p.workday_id and day.actor_membership_id=p.actor_membership_id
+          join logistics.delivery_assignment assignment on assignment.tenant_id=p.tenant_id
+              and assignment.workspace_id=p.workspace_id and assignment.responsible_membership_id=p.actor_membership_id
+          join logistics.delivery delivery on delivery.tenant_id=assignment.tenant_id
+              and delivery.workspace_id=assignment.workspace_id and delivery.id=assignment.delivery_id
+          where p.tenant_id=? and p.workspace_id=? and p.actor_membership_id=? and delivery.id=?
+              and day.status='ACTIVE' and p.expires_at>?
+              and delivery.status in ('DISPATCHED','IN_TRANSIT')
+              and p.captured_at>=coalesce(delivery.dispatched_at,delivery.created_at)
+          order by p.captured_at desc,p.received_at desc limit 1
+          """,(rs,n)->coordinate(rs),t,w,a,deliveryId,ts(now)).stream().findFirst().orElse(null);
  }
  @Override @Scheduled(fixedDelay=30000) public void purgeExpiredCoordinates(){jdbc.execute("select logistics.purge_expired_driver_coordinates()");}
  private Workday lockDay(UUID t,UUID w,UUID a,UUID id){return jdbc.query("select * from logistics.driver_workday where tenant_id=? and workspace_id=? and actor_membership_id=? and id=? for update",(rs,n)->day(rs),t,w,a,id).stream().findFirst().orElse(null);}

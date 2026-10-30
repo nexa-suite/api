@@ -12,8 +12,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named="nexa.integration.enabled", matches="true")
 class FieldVisitEvidenceIT extends NexaWorkflowIntegrationSupport {
     @Test void currentRelationshipEvidenceReplaysOnceAndCannotChangeBody() throws Exception {
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        String salesMembership = membershipId(SALES_EMAIL);
         String customer = buyerClientAccountId();
+        var account = mockMvc.perform(get("/api/v1/client-accounts/"+customer).header("Authorization","Bearer "+owner))
+            .andExpect(status().isOk()).andReturn();
+        mockMvc.perform(put("/api/v1/client-accounts/"+customer+"/sales-owner")
+            .header("Authorization","Bearer "+owner).header("If-Match",account.getResponse().getHeader("ETag"))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"membershipId\":\""+salesMembership+"\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.salesOwnerMembershipId").value(salesMembership));
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
         var detail = mockMvc.perform(get("/api/v1/client-accounts/"+customer).header("Authorization","Bearer "+sales))
             .andExpect(status().isOk()).andReturn();
         String version = "\""+json(detail).get("version").asLong()+"\"";
