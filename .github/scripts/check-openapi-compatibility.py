@@ -8,6 +8,17 @@ import sys
 
 HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 
+V2_PRIVATE_BUYER_ACCOUNT_RESPONSE = {
+    "version": "2.0.0",
+    "path": "/api/v1/client-accounts/me",
+    "method": "get",
+    "operation_id": "getMyClientAccount",
+    "schema": "BuyerClientAccountSelfResponse",
+    "historical_schemas": frozenset({"BuyerClientAccountSelfResponse", "ClientAccountDetailResponse"}),
+    "responses": ("200", "404"),
+    "properties": frozenset({"contactPerson", "contactEmail", "phone", "buyerMembershipId"}),
+}
+
 
 def load_base(ref: str):
     try:
@@ -28,6 +39,85 @@ def methods(path):
 def _component_name(reference):
     prefix = "#/components/schemas/"
     return reference[len(prefix):] if isinstance(reference, str) and reference.startswith(prefix) else None
+
+
+def _count_component_references(document, component_name):
+    expected_reference = f"#/components/schemas/{component_name}"
+    count = 0
+
+    def visit(value):
+        nonlocal count
+        if isinstance(value, dict):
+            if value.get("$ref") == expected_reference:
+                count += 1
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(document)
+    return count
+
+
+def _private_buyer_account_response_schema(document, status):
+    target = V2_PRIVATE_BUYER_ACCOUNT_RESPONSE
+    operation = document.get("paths", {}).get(target["path"], {}).get(target["method"])
+    if not isinstance(operation, dict) or operation.get("operationId") != target["operation_id"]:
+        return None
+
+    content = operation.get("responses", {}).get(status, {}).get("content", {})
+    schema = content.get("*/*", {}).get("schema", {})
+    if set(content) != {"*/*"} or not isinstance(schema, dict) or set(schema) != {"$ref"}:
+        return None
+    return _component_name(schema.get("$ref"))
+
+
+def _v2_private_buyer_account_exception(base, current):
+    """Return the old response schema name when this exact v2.0.0 change applies."""
+    target = V2_PRIVATE_BUYER_ACCOUNT_RESPONSE
+    if current.get("info", {}).get("version") != target["version"]:
+        return None
+
+    old_schema_name = _private_buyer_account_response_schema(base, "200")
+    current_schema_name = _private_buyer_account_response_schema(current, "200")
+    if (old_schema_name not in target["historical_schemas"]
+            or current_schema_name != target["schema"]):
+        return None
+
+    # Older baselines reused ClientAccountDetailResponse broadly; that old
+    # component is kept under the normal global schema check below. Only the
+    # successful self-account representation is covered by this exception.
+    old_schema = base.get("components", {}).get("schemas", {}).get(old_schema_name)
+    new_schema = current.get("components", {}).get("schemas", {}).get(target["schema"])
+    if not isinstance(old_schema, dict) or not isinstance(new_schema, dict):
+        return None
+    old_properties = old_schema.get("properties", {})
+    new_properties = new_schema.get("properties", {})
+    if (not target["properties"].issubset(old_properties)
+            or target["properties"].intersection(new_properties)):
+        return None
+    return old_schema_name
+
+
+def _buyer_account_response_schema_reference_count(document, schema_name):
+    target = V2_PRIVATE_BUYER_ACCOUNT_RESPONSE
+    return sum(
+        _private_buyer_account_response_schema(document, status) == schema_name
+        for status in target["responses"]
+    )
+
+
+def _component_private_removals(base, current, schema_name, exception_schema_name):
+    target = V2_PRIVATE_BUYER_ACCOUNT_RESPONSE
+    base_target_references = _buyer_account_response_schema_reference_count(base, schema_name)
+    current_target_references = _buyer_account_response_schema_reference_count(current, schema_name)
+    if (exception_schema_name == schema_name == target["schema"]
+            and base_target_references > 0
+            and _count_component_references(base, schema_name) == base_target_references
+            and _count_component_references(current, schema_name) == current_target_references):
+        return target["properties"]
+    return frozenset()
 
 
 def _resolve(schema, components):
@@ -73,7 +163,8 @@ def _nullable_union_value_schema(schema):
     return None
 
 
-def schema_breaks(old, new, location, old_components, new_components, visited=None):
+def schema_breaks(old, new, location, old_components, new_components, visited=None,
+                  allowed_removed_properties=None):
     if not isinstance(old, dict) or not isinstance(new, dict):
         return []
     old_nullable_value_schema = _nullable_union_value_schema(old)
@@ -91,13 +182,13 @@ def schema_breaks(old, new, location, old_components, new_components, visited=No
         # changes subject to the same field, type, enum, and required checks.
         return schema_breaks(
             old_nullable_value_schema, nullable_value_schema, location,
-            old_components, new_components, visited)
+            old_components, new_components, visited, allowed_removed_properties)
     if nullable_value_schema is not None:
         # A null alternative is compatible only when the prior non-null schema
         # remains intact; compare that branch with the existing recursive gate.
         return schema_breaks(
             old, nullable_value_schema, location,
-            old_components, new_components, visited)
+            old_components, new_components, visited, allowed_removed_properties)
     if old_nullable_value_schema is not None:
         return [f"{location}: nullable alternative removed"]
 
@@ -123,6 +214,8 @@ def schema_breaks(old, new, location, old_components, new_components, visited=No
     new_properties = new_resolved.get("properties", {})
     for name, old_property in old_properties.items():
         if name not in new_properties:
+            if allowed_removed_properties and name in allowed_removed_properties:
+                continue
             failures.append(f"{location}: property removed: {name}")
             continue
         failures.extend(schema_breaks(
@@ -182,7 +275,8 @@ def _security_breaks(old_security, new_security, location):
     return failures
 
 
-def _content_breaks(old_content, new_content, location, old_components, new_components):
+def _content_breaks(old_content, new_content, location, old_components, new_components,
+                    allowed_removed_properties=None):
     failures = []
     for media_type, old_media in old_content.items():
         if media_type not in new_content:
@@ -195,11 +289,13 @@ def _content_breaks(old_content, new_content, location, old_components, new_comp
             continue
         failures.extend(schema_breaks(
             old_schema, new_schema, f"{location} {media_type}",
-            old_components, new_components))
+            old_components, new_components,
+            allowed_removed_properties=allowed_removed_properties))
     return failures
 
 
 def check_compatibility(base, current):
+    private_buyer_account_schema = _v2_private_buyer_account_exception(base, current)
     failures = []
     old_components = base.get("components", {}).get("schemas", {})
     new_components = current.get("components", {}).get("schemas", {})
@@ -210,7 +306,9 @@ def check_compatibility(base, current):
             continue
         failures.extend(schema_breaks(
             old_schema, new_components[name], f"component {name}",
-            old_components, new_components))
+            old_components, new_components,
+            allowed_removed_properties=_component_private_removals(
+                base, current, name, private_buyer_account_schema)))
 
     old_paths = base.get("paths", {})
     new_paths = current.get("paths", {})
@@ -261,10 +359,21 @@ def check_compatibility(base, current):
                 if status not in new_op.get("responses", {}):
                     failures.append(f"{location}: response removed: {status}")
                     continue
+                allowed_private_fields = frozenset()
+                target = V2_PRIVATE_BUYER_ACCOUNT_RESPONSE
+                old_response_schema = _private_buyer_account_response_schema(base, status)
+                new_response_schema = _private_buyer_account_response_schema(current, status)
+                if (private_buyer_account_schema is not None
+                        and path == target["path"] and method == target["method"]
+                        and status in target["responses"]
+                        and old_response_schema in target["historical_schemas"]
+                        and new_response_schema == target["schema"]):
+                    allowed_private_fields = target["properties"]
                 failures.extend(_content_breaks(
                     old_response.get("content", {}),
                     new_op["responses"][status].get("content", {}),
-                    f"{location} response {status}", old_components, new_components))
+                    f"{location} response {status}", old_components, new_components,
+                    allowed_removed_properties=allowed_private_fields))
     return failures
 
 
