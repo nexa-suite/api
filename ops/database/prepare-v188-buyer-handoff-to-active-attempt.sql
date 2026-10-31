@@ -26,8 +26,8 @@ BEGIN
     SELECT max(version::integer) INTO flyway_version
       FROM public.flyway_schema_history
      WHERE success;
-    IF coalesce(flyway_version, 0) <> 187 THEN
-        RAISE EXCEPTION 'V188 preparation requires central Flyway version 187 to be current';
+    IF coalesce(flyway_version, 0) <> 186 THEN
+        RAISE EXCEPTION 'V188 preparation requires central Flyway version 186 to be current';
     END IF;
 
     SELECT * INTO migration_role FROM pg_roles WHERE rolname = 'nexa_migrator';
