@@ -54,6 +54,7 @@ jobs:
           docker logs nexa-ci-clamav
           docker logs nexa-ci-stripe-mock
       - name: Verify API with real PostgreSQL integrations
+        id: verify
         env:
           NEXA_DATABASE_POOL_MAX: "4"
           NEXA_CLAMAV_MODE: network
@@ -64,6 +65,28 @@ jobs:
           -Dnexa.scheduling.enabled=false
           -Dspring.modulith.moments.enabled=false
           -Dspring.datasource.hikari.maximum-pool-size=4
+      - name: Export OpenAPI diagnostic candidate
+        id: openapi_snapshot
+        if: ${{ failure() && steps.verify.outcome == 'failure' && github.event_name == 'pull_request' }}
+        env:
+          NEXA_DATABASE_POOL_MAX: "4"
+          NEXA_CLAMAV_MODE: network
+          NEXA_CLAMAV_HOST: 127.0.0.1
+          NEXA_CLAMAV_PORT: "3310"
+        run: >-
+          ./mvnw -B -ntp -Dtest=OpenApiContractIT
+          -Dnexa.integration.enabled=true -Dnexa.openapi.write-snapshot=true
+          -Dnexa.scheduling.enabled=false
+          -Dspring.modulith.moments.enabled=false
+          -Dspring.datasource.hikari.maximum-pool-size=4 test
+      - name: Upload OpenAPI diagnostic candidate
+        if: ${{ always() && steps.openapi_snapshot.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openapi-candidate-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: docs/openapi/openapi.json
+          if-no-files-found: error
+          retention-days: 3
       - name: Verify OpenAPI compatibility against base snapshot
         if: ${{ github.event_name == 'pull_request' }}
         env:
