@@ -34,12 +34,35 @@ entry, `container-id=<64 lowercase hexadecimal characters>`. The referenced
 container must be running, use the official PostgreSQL image, and provide
 `psql`; the active Docker context must still be a local Unix/npipe socket. The
 explicit state directory must be an absolute path beneath a mode-`0700` parent
-and is created mode `0700`. This isolated path uses the target container's local
-PostgreSQL socket and accepts no database host URL or credentials in the config.
+and is created mode `0700` during provisioning. Read-only READY verification
+requires the directory to exist and never creates it. This isolated path uses
+the target container's local PostgreSQL socket and accepts no database host URL
+or credentials in the config.
 The normal application attachment target is `nexa-modern-api`. The E2E harness
-may set `NEXA_LOCAL_API_CONTAINER_NAME` to its unique disposable container name;
-the provisioner still requires a running container with the exact
-`modern-api` service and `nexa-modern` project labels before attaching it.
+may set `NEXA_LOCAL_API_CONTAINER_NAME` and `NEXA_LOCAL_API_COMPOSE_PROJECT` to
+its unique disposable container name and project; the provisioner requires a
+running container with the exact `modern-api` service and configured project
+labels before attaching it. The unique project keeps `modern-down.sh` from
+matching the disposable API anchor.
+
+The integration-only worker path accepts `--once --task-id <uuid>` with the
+same central config and an existing mode-`0700` state directory outside
+`.local`. The initial provisioning run requires an empty state directory. A
+retry with `--include-workspace-anchor` may contain only the selected Tenant's
+owner-only state and private lock directory. That flag also processes the exact
+anchor task for the selected task's Tenant and Workspace; the worker never
+claims an unrelated queue item. The selected central PostgreSQL container must
+carry `com.nexa.local-provisioning.disposable-test=true` and must not have
+Compose project or service labels. A missing or unclaimable task exits without
+claiming another queue item. Before that one-shot path exits successfully, it
+rereads the exact provisioning task and Tenant/Workspace anchor and runs the
+provisioner's `--verify-ready-only` check. That check confirms the existing
+owner-private state matches the central Tenant, Workspace, database identity,
+credential references, and port, and that the volume marker and Docker volume
+belong to the Tenant's Compose project. It is read-only: missing or mismatched
+state/volume fails without regenerating credentials, starting Compose, or
+changing either READY task or binding. The continuous local worker remains the
+normal path for the Modern Compose database.
 
 Each Tenant uses a separate Compose project and persistent volume named from
 the Tenant UUID. PostgreSQL publishes only on `127.0.0.1`. Its bridge network
@@ -65,6 +88,25 @@ checks the writer role but does not copy BC01 settings or create snapshot rows.
 The central `.env.local` credentials are not written to Tenant files or
 supplied to Tenant database pools.
 
+The central database also has a dedicated `nexa_tenant_database_provisioner`
+login for the local provisioning worker and its child provisioner. It can read
+the Tenant provisioning queues and update only their lifecycle columns; it
+cannot create queue tasks or change their Tenant/Workspace ownership. The API's
+`nexa_runtime` login retains queue reads and atomic inserts scoped to the active
+Tenant/Workspace during organization activation, but cannot update queued work.
+The two passwords are separate. The worker reads the provisioner password
+from the private local environment and passes it to its child through a private
+pipe. Both send the password over stdin to the transient central PostgreSQL
+shell, which validates the generated Base64 format and writes a mode-0600
+temporary passfile. `psql` receives only the passfile path through `PGPASSFILE`,
+not the password in its environment or arguments. An exit trap removes the file
+after success or failure; neither container environment nor Docker arguments
+contain the password.
+Central database access sets the Tenant and Workspace scope for each
+provisioning command. This role is local opt-in
+plumbing; Render still has no provisioning worker and no production cutover is
+implemented.
+
 Credentials and provisioning state live under the ignored
 `.local/tenant-databases/<tenant-uuid>/` directory. The tool creates that
 directory with mode `0700` and its files with mode `0600`. The local Java
@@ -80,6 +122,13 @@ owner-only permissions for API UID `10001`, then the API mounts that volume
 read-only. A network-isolated helper stays alive and syncs each Tenant
 directory with staged creation and per-file atomic replacement; a newly
 provisioned Tenant becomes visible without Docker socket access or API restart.
+Reservation expiry uses a separate `reservation-expiry-worker.properties`
+credential, `nexa_warehouse_reservation_expiry_worker` role, and V27 table and
+column grants. Its local router is enabled only with Warehouse Operations and
+requires the central READY binding, READY Workspace scope, and matching
+physical Workspace anchor. It keeps a routed transaction open while each
+reservation runs in its own transaction, so its configured maximum pool size
+must be at least two; the local configuration rejects smaller values.
 Bootstrap-admin and migrator credentials stay on the host. Running
 `ops/compose/scripts/modern-up.sh` refreshes the projection and restarts the
 helper/API. On the local Spring profile, explicitly enabled paths use the
@@ -102,10 +151,19 @@ these versions and capabilities:
 - V13 and V21 `tenant-payments-callback-worker`; V14, V17, V18, V19, V20 and V23
   `tenant-business-traceability-worker`.
 - V15 and V23 `tenant-business-notification-projection`; V16 `buyer-wallet-refunds`;
-  V22 `tenant-business`.
+  V22, V24, V25 and V33 `tenant-business`; V26 `tenant-parent-scoped-rls`; V27
+  `tenant-reservation-expiry-worker`; V28 `tenant-inbox-event-rls`; V29
+  `tenant-buyer-catalog-favorites`; V30 `tenant-change-event-append-only`; V31
+  `tenant-document-generation-workspace-rls`; V34 `tenant-buyer-sales-messaging`;
+  V35 and V41 `tenant-buyer-delivery-acceptance`; V36
+  `tenant-buyer-saved-payment-methods`; V37
+  `tenant-client-account-buyer-memberships`; V38 and V39
+  `tenant-buyer-personal-address-book`; V40 `tenant-catalog-sku-variant-family`;
+  V42 `tenant-payments-callback-worker`; V43 `tenant-buyer-personal-address-book`.
 
-V6 is intentionally absent. The manifest records the exact SQL asset for each
-required version. Central V162 `bound_tenant_push_delivery_retry_state` is a
+V6 is intentionally absent. V32 is not required by any capability in the
+current manifest. The manifest records the exact SQL asset for every required
+version. Central V162 `bound_tenant_push_delivery_retry_state` is a
 separate migration in the Modern central schema; this manifest applies Tenant
 V23 to the Tenant database. Missing assets, unapplied versions, or a manifest digest
 mismatch keep the Tenant binding out of `READY`. The CLI repeats these
@@ -130,7 +188,13 @@ marks the binding `READY` with a compare-and-set version transition. Any
 failure after provisioning begins attempts the same version-checked transition
 to `FAILED`. Retry a `FAILED` binding only with `--retry-failed` and the same
 Tenant, Workspace, port, and private local credentials. A `READY` binding is
-left unchanged by subsequent invocations.
+left unchanged while its verified schema-manifest digest matches the active
+manifest. When `modern-up.sh` detects a changed digest, it requeues only the
+matching `READY` provisioning task for that `READY` Tenant binding. The worker
+migrates the existing local database, preserving its identity, port, volume,
+and Workspace anchors; routing stays fail-closed until the binding is verified
+`READY` with the new digest. This reconciliation is part of the local setup
+flow; no production provisioning worker or cutover is claimed.
 
 `READY` means the local physical database, schema versions in the active
 capability manifest, identity, Workspace anchor, runtime role, and dedicated

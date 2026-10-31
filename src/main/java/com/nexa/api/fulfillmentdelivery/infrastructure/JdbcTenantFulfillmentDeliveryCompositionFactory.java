@@ -90,7 +90,7 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
 
         JdbcDispatchReadinessQueryAdapter readinessQuery = new JdbcDispatchReadinessQueryAdapter(jdbc);
         DispatchReadinessService readiness = new DispatchReadinessService(readinessQuery,
-                bindings.physicalAllocations(), access, clock);
+                bindings.physicalAllocations(), access, clock, orders, accounts);
         JdbcOutgoingGoodsCheckAdapter outgoingPersistence = new JdbcOutgoingGoodsCheckAdapter(jdbc);
         OutgoingGoodsCheckService outgoing = new OutgoingGoodsCheckService(readiness, bindings.physicalAllocations(),
                 outgoingPersistence, clock);
@@ -107,11 +107,11 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
                 bindings.traceabilityCommands(), clock);
         FulfillmentWorkListService workList = new FulfillmentWorkListService(readinessQuery,
                 bindings.physicalAllocations(),
-                access, clock);
+                access, clock, orders);
         DriverDeliveryService driverDeliveries = new DriverDeliveryService(
                 new JdbcDriverDeliveryPersistenceAdapter(jdbc, false), lifecycle, clock);
         DriverTrackingService driverTracking = new DriverTrackingService(new JdbcDriverTrackingAdapter(jdbc),
-                workforce, accounts, orders, clock);
+                workforce, accounts, orders, readiness, clock);
         BuyerDeliveryTrackingService buyerTracking = new BuyerDeliveryTrackingService(
                 new JdbcBuyerDeliveryTrackingQueryAdapter(jdbc, orders), accounts, orders);
         var operationalExceptions = new JdbcOperationalExceptionPersistenceAdapter(jdbc);
@@ -146,10 +146,11 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
                 handoffNotifications, orders, accounts);
         LogisticsOperationsService logistics = new LogisticsOperationsService(dispatchQueries, dispatchCommands,
                 accounts, new com.nexa.api.fulfillmentdelivery.application.service.StartDispatchRouteService(
-                routeStart, warehouseHandoff), handoff);
+                routeStart, warehouseHandoff), handoff, access);
         MobileDeliveryContractService mobileDeliveryContracts = new MobileDeliveryContractService(
-                new JdbcMobileDeliveryContractAdapter(jdbc, orders), accounts,
-                bindings.traceabilityCommands(), clock, handoffTtl);
+                new JdbcMobileDeliveryContractAdapter(jdbc, orders, bindings.canonicalOutbox()), accounts,
+                bindings.traceabilityCommands(), bindings.salesOrderCommands(),
+                orders, clock, handoffTtl);
 
         DispatchWorkflowCommands dispatchWorkflowCommands = (context, reservationId, version, key) ->
                 logistics.create(context, reservationId, version, key);

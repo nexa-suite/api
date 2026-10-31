@@ -4,7 +4,7 @@ import com.nexa.api.businessdocuments.application.model.BusinessDocumentModels;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
@@ -50,6 +50,12 @@ public final class TenantBoundBusinessDocumentPort implements BusinessDocumentUs
     public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext context,
             int page, int size, String documentType, String status) {
         return execute(context, docs -> docs.list(context, page, size, documentType, status));
+    }
+
+    @Override
+    public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext context,
+            int page, int size, String documentType, String status, String subjectType, UUID subjectId) {
+        return execute(context, docs -> docs.list(context, page, size, documentType, status, subjectType, subjectId));
     }
 
     @Override

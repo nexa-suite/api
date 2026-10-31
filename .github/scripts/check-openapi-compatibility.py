@@ -164,6 +164,10 @@ def _requirement_is_no_more_restrictive(new_requirement, old_requirement):
 def _security_breaks(old_security, new_security, location):
     if old_security == new_security:
         return []
+    if new_security and any(not requirement for requirement in new_security):
+        if not old_security or any(not requirement for requirement in old_security):
+            return []
+        return [f"{location}: anonymous security alternative introduced"]
     if old_security is None:
         return [f"{location}: security requirement introduced"] if new_security else []
     if new_security is None:

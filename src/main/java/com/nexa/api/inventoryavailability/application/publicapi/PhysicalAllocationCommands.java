@@ -155,7 +155,20 @@ public interface PhysicalAllocationCommands {
 
     record Line(UUID id, UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId, UUID lotId,
                 BigDecimal quantity, BigDecimal releasedQuantity, BigDecimal consumedQuantity,
-                String unit, java.time.LocalDate expirationDate) {
+                String unit, java.time.LocalDate expirationDate,
+                String productName, String skuCode, String imageFileName, String presentation, String brandName,
+                String warehouseName, String zoneName, String batchNumber) {
+        public Line(UUID id, UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId, UUID lotId,
+                    BigDecimal quantity, BigDecimal releasedQuantity, BigDecimal consumedQuantity,
+                    String unit, java.time.LocalDate expirationDate) {
+            this(id, skuId, catalogItemId, warehouseId, zoneId, lotId, quantity, releasedQuantity, consumedQuantity,
+                    unit, expirationDate, null, null, null, null, null, null, null, null);
+        }
+        public Line withDisplayMetadata(String name, String code, String image, String displayPresentation,
+                                        String brand, String warehouse, String zone, String batch) {
+            return new Line(id, skuId, catalogItemId, warehouseId, zoneId, lotId, quantity, releasedQuantity,
+                    consumedQuantity, unit, expirationDate, name, code, image, displayPresentation, brand, warehouse, zone, batch);
+        }
         public Line(UUID skuId, String catalogItemId, UUID warehouseId, UUID zoneId, UUID lotId,
                     BigDecimal quantity, BigDecimal releasedQuantity, BigDecimal consumedQuantity,
                     String unit, java.time.LocalDate expirationDate) {

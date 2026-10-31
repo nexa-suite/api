@@ -6,7 +6,7 @@ source_root=/source
 projection_root=/projection
 api_uid=10001
 api_gid=10001
-credential_files='credentials.properties state.properties policy-snapshot-writer.properties wallet-recharge-worker.properties business-documents-worker.properties payment-callback-worker.properties business-traceability-worker.properties'
+credential_files='credentials.properties state.properties policy-snapshot-writer.properties wallet-recharge-worker.properties business-documents-worker.properties payment-callback-worker.properties business-traceability-worker.properties reservation-expiry-worker.properties'
 
 fail() {
 	printf '%s\n' "$1" >&2

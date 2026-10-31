@@ -69,8 +69,36 @@ public class WarehousePhysicalAllocationAdapter implements PhysicalAllocationCom
                 tenantId, workspaceId, fulfillmentId).stream().findFirst()
                 .orElseThrow(() -> error("PHYSICAL_ALLOCATION_NOT_FOUND", true));
         requireAllocationWarehouseGrants(tenantId, workspaceId, actorMembershipId, allocation.id());
-        return load(tenantId, workspaceId, allocation.id());
+        return withDisplayMetadata(tenantId, workspaceId, load(tenantId, workspaceId, allocation.id()));
     }
+
+    private AllocationResult withDisplayMetadata(UUID tenant, UUID workspace, AllocationResult allocation) {
+        if (allocation.lines().isEmpty()) return allocation;
+        var policies = sellableSkus.findInventoryPolicies(tenant, workspace,
+                allocation.lines().stream().map(Line::skuId).distinct().toList()).stream()
+                .collect(java.util.stream.Collectors.toMap(SellableSkuQuery.InventorySkuSnapshot::id, java.util.function.Function.identity()));
+        var locations = jdbc.query("select l.id,w.name warehouse_name,z.name zone_name,lot.batch_number "
+                        + "from warehouse.physical_allocation_line l "
+                        + "join warehouse.warehouse w on w.tenant_id=l.tenant_id and w.workspace_id=l.workspace_id and w.id=l.warehouse_id "
+                        + "left join warehouse.storage_zone z on z.tenant_id=l.tenant_id and z.workspace_id=l.workspace_id and z.id=l.zone_id "
+                        + "left join warehouse.inventory_lot lot on lot.tenant_id=l.tenant_id and lot.workspace_id=l.workspace_id and lot.id=l.lot_id "
+                        + "where l.tenant_id=? and l.workspace_id=? and l.physical_allocation_id=?",
+                (rs, row) -> new DisplayLocation(rs.getObject("id", UUID.class), rs.getString("warehouse_name"),
+                        rs.getString("zone_name"), rs.getString("batch_number")), tenant, workspace, allocation.allocationId())
+                .stream().collect(java.util.stream.Collectors.toMap(DisplayLocation::id, java.util.function.Function.identity()));
+        var lines = allocation.lines().stream().map(line -> {
+            var product = policies.get(line.skuId());
+            var location = locations.get(line.id());
+            return line.withDisplayMetadata(product == null ? null : product.productName(),
+                    product == null ? null : product.skuCode(), product == null ? null : product.imageFileName(),
+                    product == null ? null : product.presentation(), product == null ? null : product.brandName(),
+                    location == null ? null : location.warehouseName(), location == null ? null : location.zoneName(),
+                    location == null ? null : location.batchNumber());
+        }).toList();
+        return new AllocationResult(allocation.allocationId(), allocation.inventoryBackingId(), allocation.status(), lines, allocation.version());
+    }
+
+    private record DisplayLocation(UUID id, String warehouseName, String zoneName, String batchNumber) { }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)

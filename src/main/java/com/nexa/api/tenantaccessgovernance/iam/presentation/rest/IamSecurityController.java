@@ -3,6 +3,7 @@ package com.nexa.api.tenantaccessgovernance.iam.presentation.rest;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurityException;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.IamSecurityModels;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SystemOperatorContext;
+import com.nexa.api.tenantaccessgovernance.iam.application.model.PasswordResetDeliveryChannel;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ActivateOrganizationRegistrationCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.ChangeOwnPasswordCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.GetOrganizationRegistrationStatusQuery;
@@ -15,10 +16,15 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RevokeOtherSe
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RevokeOwnSessionCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SubmitOrganizationRegistrationCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.UpdateOwnProfileCommand;
+import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.AuthenticationTransport;
+import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.PasswordResetRequestTransport;
 import com.nexa.api.shared.context.ClientAddressResolver;
 import com.nexa.api.shared.context.RequestMetadata;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import com.fasterxml.jackson.annotation.JsonSetter;
@@ -95,6 +101,7 @@ public final class IamSecurityController {
 	@Operation(summary = "Update the authenticated user's own profile")
 	@SecurityRequirement(name = "bearerAuth")
 	public ResponseEntity<ProfileResponse> updateProfile(Authentication authentication, HttpServletRequest httpRequest,
+			@Parameter(name = "If-Match", in = ParameterIn.HEADER, required = true, description = "Current profile ETag")
 			@RequestHeader(value = "If-Match", required = false) String ifMatch, @Valid @RequestBody ProfileRequest request) {
 		long version = version(ifMatch);
 		var value = updateProfile.update(actor(authentication, correlation(httpRequest), trace(httpRequest)),
@@ -107,6 +114,7 @@ public final class IamSecurityController {
 
 	@PostMapping("/me/password-changes")
 	@Operation(summary = "Change the authenticated user's password")
+	@ApiResponse(responseCode = "204", description = "Password changed; other sessions revoked")
 	@SecurityRequirement(name = "bearerAuth")
 	public ResponseEntity<Void> changePassword(Authentication authentication, HttpServletRequest httpRequest,
 			@Valid @RequestBody PasswordChangeRequest request) {
@@ -124,6 +132,7 @@ public final class IamSecurityController {
 
 	@DeleteMapping("/me/sessions/{sessionId}")
 	@Operation(summary = "Revoke one of the authenticated user's sessions")
+	@ApiResponse(responseCode = "204", description = "Owned session revoked")
 	@SecurityRequirement(name = "bearerAuth")
 	public ResponseEntity<Void> revokeSession(Authentication authentication, HttpServletRequest request, @PathVariable UUID sessionId) {
 		revokeSession.revoke(actor(authentication, correlation(request), trace(request)), sessionId);
@@ -132,6 +141,7 @@ public final class IamSecurityController {
 
 	@PostMapping("/me/session-revocations")
 	@Operation(summary = "Revoke all sessions except the current one")
+	@ApiResponse(responseCode = "204", description = "Other sessions revoked")
 	@SecurityRequirement(name = "bearerAuth")
 	public ResponseEntity<Void> revokeOtherSessions(Authentication authentication, HttpServletRequest request) {
 		revokeOtherSessions.revokeOthers(actor(authentication, correlation(request), trace(request)));
@@ -141,20 +151,32 @@ public final class IamSecurityController {
 	@PostMapping("/auth/password-reset-requests")
 	@Operation(summary = "Request a generic password reset response")
 	public ResetResponse requestReset(HttpServletRequest httpRequest, @Valid @RequestBody ResetRequest request) {
-		return new ResetResponse(requestReset.request(request.email(), request.surface(),
+		boolean nativePortalRequest = PasswordResetRequestTransport.isNativePortalRequest(httpRequest.getMethod(), httpRequest.getHeader("Origin"),
+				httpRequest.getHeader(AuthenticationTransport.NATIVE_CLIENT_HEADER),
+				httpRequest.getHeader(PasswordResetRequestTransport.SURFACE_HEADER), httpRequest.getRequestURI());
+		if (nativePortalRequest && !"PORTAL".equals(request.surface())) {
+			throw new IllegalArgumentException("Native password reset requests must target the Portal surface");
+		}
+		PasswordResetDeliveryChannel channel = nativePortalRequest
+				? PasswordResetDeliveryChannel.NATIVE : PasswordResetDeliveryChannel.WEB;
+		return new ResetResponse(requestReset.request(request.email(), request.surface(), channel,
 				clientAddressResolver.resolve(httpRequest.getRemoteAddr(), httpRequest.getHeader("X-Forwarded-For")),
 				correlation(httpRequest), trace(httpRequest)));
 	}
 
 	@PostMapping("/auth/password-resets")
 	@Operation(summary = "Consume a password reset token")
+	@ApiResponse(responseCode = "204", description = "Password reset completed")
 	public ResponseEntity<Void> resetPassword(HttpServletRequest httpRequest, @Valid @RequestBody ResetPasswordRequest request) {
-		resetPassword.reset(request.token(), request.newPassword(), correlation(httpRequest), trace(httpRequest));
+		resetPassword.reset(request.token(), request.newPassword(),
+				clientAddressResolver.resolve(httpRequest.getRemoteAddr(), httpRequest.getHeader("X-Forwarded-For")),
+				correlation(httpRequest), trace(httpRequest));
 		return ResponseEntity.noContent().build();
 	}
 
 	@PostMapping("/tenant-management/organization-registrations")
-	@Operation(summary = "Submit a public organization registration")
+	@Operation(deprecated = true, summary = "Submit a public organization registration",
+			description = "Compatibility flow. New clients should use the versioned organization-registration-drafts workflow.")
 	public RegistrationResponse register(HttpServletRequest httpRequest, @Valid @RequestBody RegistrationRequest request) {
 		return toResponse(submitRegistration.submit(new IamSecurityModels.RegistrationRequest(request.legalName(), request.displayName(), request.businessIdentifier(),
 				request.operationCategory(), request.storageSiteName(), request.storageSiteAddress(), request.founderEmail(), request.founderDisplayName(),
@@ -162,7 +184,8 @@ public final class IamSecurityController {
 	}
 
 	@GetMapping("/tenant-management/organization-registrations/{registrationId}")
-	@Operation(summary = "Read the public pending organization registration state")
+	@Operation(deprecated = true, summary = "Read the public pending organization registration state",
+			description = "Compatibility flow paired with the legacy one-shot registration endpoint.")
 	public RegistrationResponse registration(@PathVariable UUID registrationId, @RequestParam @NotBlank String statusToken) {
 		return toResponse(registrationStatus.get(registrationId, statusToken));
 	}

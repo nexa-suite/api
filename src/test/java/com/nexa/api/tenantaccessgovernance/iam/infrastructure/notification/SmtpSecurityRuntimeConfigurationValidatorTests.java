@@ -82,6 +82,26 @@ class SmtpSecurityRuntimeConfigurationValidatorTests {
     }
 
     @Test
+    void rejectsInsecureNativeResetLink() {
+        MockEnvironment environment = smtpEnvironment();
+        environment.setProperty("spring.mail.properties[mail.smtp.starttls.enable]", "true");
+        environment.setProperty("spring.mail.properties[mail.smtp.starttls.required]", "true");
+        environment.setProperty("nexa.security.reset.portal-native-url", "nexa://buyer/reset-password");
+
+        assertInvalidLink(environment, "nexa.security.reset.portal-native-url");
+    }
+
+    @Test
+    void rejectsMissingNativeResetLinkWhenSmtpIsConfigured() {
+        MockEnvironment environment = smtpEnvironment();
+        environment.setProperty("spring.mail.properties[mail.smtp.starttls.enable]", "true");
+        environment.setProperty("spring.mail.properties[mail.smtp.starttls.required]", "true");
+        environment.setProperty("nexa.security.reset.platform-native-url", "");
+
+        assertInvalidLink(environment, "nexa.security.reset.platform-native-url");
+    }
+
+    @Test
     void doesNotRequireTransportOrHttpsLinksWhenSmtpDeliveryIsInactive() {
         new SmtpSecurityRuntimeConfigurationValidator(new MockEnvironment());
     }
@@ -114,6 +134,8 @@ class SmtpSecurityRuntimeConfigurationValidatorTests {
         environment.setProperty("nexa.security.smtp.host", "smtp.nexa.example");
         environment.setProperty("nexa.security.reset.platform-url", "https://platform.nexa.com/reset-password");
         environment.setProperty("nexa.security.reset.portal-url", "https://portal.nexa.com/reset-password");
+        environment.setProperty("nexa.security.reset.platform-native-url", "https://operations.nexa.com/reset-password");
+        environment.setProperty("nexa.security.reset.portal-native-url", "https://buyer.nexa.com/reset-password");
         return environment;
     }
 

@@ -56,9 +56,13 @@ class PaymentTransactionBoundaryArchitectureTests {
                 "RlsRequestScope.enableCrossScopeWorkspaceScan()", "RlsRequestScope.clearCrossScopeWorkspaceScan()",
                 "MAX_RECONCILIATION_ATTEMPTS",
                 "operator override is required", "result_json is null");
-        assertThat(Files.readString(Path.of("src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceDirectory.java")))
-                .contains("(tenant_id,id) > (?,?)", "order by tenant_id,id limit ?",
-                        "Math.min(100", "Propagation.MANDATORY", "crossScopeWorkspaceScanEnabled()");
+        String workspaceDirectory = Files.readString(Path.of(
+                "src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceDirectory.java"));
+        assertThat(workspaceDirectory).contains("scopeReader().scanAfter", "crossScopeWorkspaceScanEnabled()");
+        String scopeReader = Files.readString(Path.of(
+                "src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceScopeReader.java"));
+        assertThat(scopeReader).contains("(w.tenant_id,w.id) > (?,?)", "ORDER BY w.tenant_id,w.id LIMIT ?",
+                "limit < 1 || limit > 100", "PROPAGATION_REQUIRES_NEW", "crossScopeWorkspaceScanEnabled()");
         assertThat(Files.readString(Path.of("src/main/resources/db/migration/V87__close_foundation_claim_fencing.sql")))
                 .doesNotContain("UPDATE payments.payment_reconciliation_case");
     }

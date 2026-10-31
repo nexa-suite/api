@@ -36,6 +36,7 @@ public final class SalesOrderQueryController {
 	@Operation(operationId = "listSalesOrders")
 	public SalesOrderPageResponse list(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)PENDING|CONFIRMED|IN_FULFILLMENT|PARTIALLY_FULFILLED|FULFILLED|PARTIALLY_DELIVERED|COMPLETED|REJECTED|CANCELLED") String status,
+			@RequestParam(required = false) @Size(max = 9) List<@Pattern(regexp = "(?i)PENDING|CONFIRMED|IN_FULFILLMENT|PARTIALLY_FULFILLED|FULFILLED|PARTIALLY_DELIVERED|COMPLETED|REJECTED|CANCELLED") String> statuses,
 			@RequestParam(required = false) @Pattern(regexp = "(?i)NORMAL|HIGH|URGENT") String priority,
 			@RequestParam(required = false) String clientAccountId, @RequestParam(required = false) @Size(max = 160) String search,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdFrom,
@@ -46,7 +47,7 @@ public final class SalesOrderQueryController {
 			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
 			@RequestParam(defaultValue = "createdAt,desc") @Pattern(regexp = "(?i)(createdAt|updatedAt|orderNumber|priority|total|requestedDeliveryDate),(asc|desc)") String sort) {
 		return mapper.page(sales.list(context, new SalesOrderFilter(status, priority, clientAccountId, search, createdFrom, createdTo,
-				requestedDeliveryFrom, requestedDeliveryTo, page, size, sort)));
+				requestedDeliveryFrom, requestedDeliveryTo, page, size, sort, statuses)));
 	}
 	@GetMapping("/api/v1/sales-orders/{id}")
 	@Operation(operationId = "getSalesOrder")

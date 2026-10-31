@@ -11,6 +11,7 @@ public record OperationalSettings(String defaultWarehouseSelectionPolicy, String
 		String fulfillmentDefaults, String inventoryVisibilityPolicy, String buyerAvailabilityPolicy,
 		LocalTime operatingHoursStart, LocalTime operatingHoursEnd, int orderCutoffMinutes,
 		boolean thermalLogRequired, long version) {
+
 	public OperationalSettings {
 		defaultWarehouseSelectionPolicy = normalized(defaultWarehouseSelectionPolicy, Set.of("MANUAL", "PREFERRED"), "warehouse selection policy");
 		orderCutoffPolicy = normalized(orderCutoffPolicy, Set.of("WORKSPACE_HOURS", "FIXED_TIME"), "order cutoff policy");

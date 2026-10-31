@@ -2,6 +2,7 @@ package com.nexa.api.support;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding;
+import com.nexa.api.bootstrap.runtime.database.tenant.local.LocalTenantBusinessDatabaseCredentialsProvider;
 import com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
@@ -45,6 +46,8 @@ final class TenantBusinessIntegrationFixture {
 	private static final String PAYMENTS_WORKER_PASSWORD = "test-only-payments-worker-password";
 	private static final String TRACEABILITY_WORKER_USERNAME = "nexa_business_traceability_worker";
 	private static final String TRACEABILITY_WORKER_PASSWORD = "test-only-traceability-worker-password";
+	private static final String RESERVATION_EXPIRY_WORKER_USERNAME = "nexa_warehouse_reservation_expiry_worker";
+	private static final String RESERVATION_EXPIRY_WORKER_PASSWORD = "test-only-reservation-expiry-worker-password";
 	private static final String CREDENTIAL_REFERENCE_PREFIX = "test-tenant-business:";
 	private static final Path CREDENTIAL_DIRECTORY = privateCredentialDirectory();
 	private static final PostgreSQLContainer TENANT_POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
@@ -52,6 +55,7 @@ final class TenantBusinessIntegrationFixture {
 			.withUsername(ADMIN_USERNAME)
 			.withPassword(ADMIN_PASSWORD);
 	private static final ConcurrentMap<UUID, String> DATABASE_NAMES = new ConcurrentHashMap<>();
+	private static final ConcurrentMap<String, LocalTenantBusinessDatabaseCredentialsProvider> LOCAL_CREDENTIAL_PROVIDERS = new ConcurrentHashMap<>();
 	private static boolean started;
 
 	private TenantBusinessIntegrationFixture() { }
@@ -80,6 +84,8 @@ final class TenantBusinessIntegrationFixture {
 	}
 
 	static TenantBusinessDatabaseCredentials credentials(String reference) {
+		LocalTenantBusinessDatabaseCredentialsProvider localProvider = LOCAL_CREDENTIAL_PROVIDERS.get(reference);
+		if (localProvider != null) return localProvider.requireHostCredentials(reference);
 		UUID tenantId = tenantIdFromReference(reference);
 		String databaseName = DATABASE_NAMES.get(tenantId);
 		if (databaseName == null) {
@@ -96,6 +102,11 @@ final class TenantBusinessIntegrationFixture {
 	static TenantBusinessDatabaseCredentials traceabilityWorkerCredentials(String reference) {
 		return workerCredentials(reference, "local-tenant-business-traceability-worker:",
 				TRACEABILITY_WORKER_USERNAME, TRACEABILITY_WORKER_PASSWORD);
+	}
+
+	static TenantBusinessDatabaseCredentials reservationExpiryWorkerCredentials(String reference) {
+		return workerCredentials(reference, "local-tenant-inventory-reservation-expiry-worker:",
+				RESERVATION_EXPIRY_WORKER_USERNAME, RESERVATION_EXPIRY_WORKER_PASSWORD);
 	}
 
 	static TenantBusinessDatabaseCredentials paymentCallbackWorkerCredentials(String reference) {
@@ -119,6 +130,18 @@ final class TenantBusinessIntegrationFixture {
 
 	static String credentialDirectory() {
 		return CREDENTIAL_DIRECTORY.toString();
+	}
+
+	static AutoCloseable registerLocalCredentials(String reference, Path credentialDirectory) {
+		if (reference == null || !reference.matches(
+				"local-tenant-db:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) {
+			throw new IllegalArgumentException("Local Tenant credential reference is invalid");
+		}
+		var provider = new LocalTenantBusinessDatabaseCredentialsProvider(credentialDirectory);
+		if (LOCAL_CREDENTIAL_PROVIDERS.putIfAbsent(reference, provider) != null) {
+			throw new IllegalStateException("Local Tenant credential reference is already registered");
+		}
+		return () -> LOCAL_CREDENTIAL_PROVIDERS.remove(reference, provider);
 	}
 
 	private static Path privateCredentialDirectory() {
@@ -157,13 +180,14 @@ final class TenantBusinessIntegrationFixture {
 	private static void provisionRoles() {
 		try (Connection connection = DriverManager.getConnection(jdbcUrl(DATABASE_TEMPLATE), ADMIN_USERNAME, ADMIN_PASSWORD);
 			 Statement statement = connection.createStatement()) {
-			createRole(statement, MIGRATOR_USERNAME, MIGRATOR_PASSWORD, false, false);
+			createRole(statement, MIGRATOR_USERNAME, MIGRATOR_PASSWORD, true, false);
 			createRole(statement, TEST_USERNAME, TEST_PASSWORD, false, true);
-			createRole(statement, RUNTIME_USERNAME, RUNTIME_PASSWORD, false, false);
+			createRole(statement, RUNTIME_USERNAME, RUNTIME_PASSWORD, true, false);
 			createRole(statement, POLICY_WRITER_USERNAME, POLICY_WRITER_PASSWORD, true, false);
 			createRole(statement, DOCUMENTS_WORKER_USERNAME, DOCUMENTS_WORKER_PASSWORD, true, false);
 			createRole(statement, PAYMENTS_WORKER_USERNAME, PAYMENTS_WORKER_PASSWORD, true, false);
 			createRole(statement, TRACEABILITY_WORKER_USERNAME, TRACEABILITY_WORKER_PASSWORD, true, false);
+			createRole(statement, RESERVATION_EXPIRY_WORKER_USERNAME, RESERVATION_EXPIRY_WORKER_PASSWORD, true, false);
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + MIGRATOR_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + TEST_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + RUNTIME_USERNAME);
@@ -171,6 +195,7 @@ final class TenantBusinessIntegrationFixture {
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + DOCUMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + PAYMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + TRACEABILITY_WORKER_USERNAME);
+			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + RESERVATION_EXPIRY_WORKER_USERNAME);
 			statement.execute("GRANT CREATE ON SCHEMA public TO " + MIGRATOR_USERNAME);
 		} catch (SQLException exception) {
 			throw new IllegalStateException("Could not provision Tenant integration database roles", exception);
@@ -204,6 +229,7 @@ final class TenantBusinessIntegrationFixture {
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + DOCUMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + PAYMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + TRACEABILITY_WORKER_USERNAME);
+			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + RESERVATION_EXPIRY_WORKER_USERNAME);
 		} catch (SQLException exception) {
 			throw new IllegalStateException("Could not create the physical Tenant integration database", exception);
 		}
@@ -265,11 +291,18 @@ final class TenantBusinessIntegrationFixture {
 			(result, row) -> new BindingState(result.getObject("database_identity", UUID.class),
 					result.getString("credential_secret_reference"), result.getString("lifecycle_state"),
 					result.getString("verified_schema_manifest_sha256")), tenantId);
-		if (binding.size() != 1 || !databaseIdentity.equals(binding.getFirst().databaseIdentity())
-				|| !credentialReference.equals(binding.getFirst().credentialReference())
-				|| !"READY".equals(binding.getFirst().state())
-				|| !manifestDigest.equals(binding.getFirst().manifestDigest())) {
-			throw new IllegalStateException("Central Tenant integration binding conflicts with the verified fixture");
+		boolean hasSingleBinding = binding.size() == 1;
+		boolean identityMatches = hasSingleBinding && databaseIdentity.equals(binding.getFirst().databaseIdentity());
+		boolean credentialReferenceMatches = hasSingleBinding
+				&& credentialReference.equals(binding.getFirst().credentialReference());
+		boolean readyStateMatches = hasSingleBinding && "READY".equals(binding.getFirst().state());
+		boolean manifestDigestMatches = hasSingleBinding && manifestDigest.equals(binding.getFirst().manifestDigest());
+		if (!identityMatches || !credentialReferenceMatches || !readyStateMatches || !manifestDigestMatches) {
+			throw new IllegalStateException("Central Tenant integration binding conflicts with the verified fixture "
+					+ "(identityMatches=" + identityMatches
+					+ ", credentialReferenceMatches=" + credentialReferenceMatches
+					+ ", readyStateMatches=" + readyStateMatches
+					+ ", manifestDigestMatches=" + manifestDigestMatches + ")");
 		}
 	}
 

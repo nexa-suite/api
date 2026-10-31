@@ -22,7 +22,8 @@ public final class LocalTenantBusinessDatabasePolicySnapshotWriterCredentialsPro
 	private static final Set<String> ALLOWED_STATE_KEYS = Set.of(
 			"tenant-id", "workspace-id", "database-identity", "credential-secret-reference", "database-port",
 			"wallet-recharge-callback-credential-reference", "business-documents-worker-credential-reference",
-			"payment-callback-worker-credential-reference", "business-traceability-worker-credential-reference");
+			"payment-callback-worker-credential-reference", "business-traceability-worker-credential-reference",
+			"reservation-expiry-worker-credential-reference");
 	private static final Set<String> WRITER_CREDENTIAL_KEYS = Set.of("jdbc-url", "api-jdbc-url", "username", "password");
 	private static final String WRITER_ROLE = "nexa_policy_snapshot_writer";
 

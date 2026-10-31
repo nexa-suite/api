@@ -1,5 +1,6 @@
 package com.nexa.api;
 
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Container;
@@ -26,8 +27,7 @@ class ModernPostgresNormalizationRegressionTests {
 	void centralAndTenantMigrationsRemoveOnlyMutableGeneratedBusinessValues() throws Exception {
 		createTenantMigrationRolesAndDatabase();
 
-		Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-				.locations("classpath:db/migration").load().migrate();
+		CentralMigrationTestBootstrap.migrateToCurrent(POSTGRES);
 		try (var connection = POSTGRES.createConnection("")) {
 			assertDerivedColumnsAbsent(connection);
 			assertThat(generatedColumns(connection, "payments", "financial_adjustment"))
@@ -50,6 +50,8 @@ class ModernPostgresNormalizationRegressionTests {
 					"nexa_payments_worker", "nexa_business_traceability_worker")) {
 				statement.execute("create role " + role);
 			}
+			statement.execute("create role nexa_warehouse_reservation_expiry_worker NOLOGIN NOINHERIT "
+					+ "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("create database nexa_tenant");
 		}
 	}

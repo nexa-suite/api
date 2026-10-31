@@ -85,6 +85,10 @@ payments.buyer_wallet_reservation	BC08	V148__buyer_wallet_ledger_and_reservation
 payments.buyer_wallet_reservation_event	BC08	V148__buyer_wallet_ledger_and_reservations.sql:110 CREATE TABLE; append-only reservation history owned by BC08.
 payments.buyer_wallet_recharge	BC08	db/tenant-migration/V9__buyer_wallet_provider_recharges.sql:3 CREATE TABLE; Tenant-local Stripe recharge intent owned by BC08.
 payments.buyer_wallet_recharge_processed_event	BC08	db/tenant-migration/V9__buyer_wallet_provider_recharges.sql:42 CREATE TABLE; append-only Tenant-local verified provider callback evidence owned by BC08.
+payments.buyer_payment_provider_profile	BC08	db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:7 CREATE TABLE; Buyer-membership scoped provider Customer reference owned by BC08.
+payments.buyer_payment_method_setup_attempt	BC08	db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:31 CREATE TABLE; idempotent server-issued tokenization attempt owned by BC08.
+payments.buyer_saved_payment_method	BC08	db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:67 CREATE TABLE; tokenized provider reference and safe card display summary owned by BC08.
+payments.buyer_payment_method_setup_event	BC08	db/tenant-migration/V36__add_buyer_saved_payment_methods.sql:104 CREATE TABLE; signature-verified callback evidence owned by BC08.
 payments.credit_account	BC07	V43__create_receivables_credit_and_payments.sql:3 CREATE TABLE; explicit Credit & Receivables ownership exception.
 payments.credit_reservation	BC07	V43__create_receivables_credit_and_payments.sql:135 CREATE TABLE; explicit Credit & Receivables ownership exception.
 payments.financial_adjustment	BC07	V91__fulfillment_financial_completion.sql:870 CREATE TABLE; explicit Credit & Receivables ownership exception.
@@ -103,6 +107,9 @@ reference_data.department	GLOBAL_REFERENCE	V36__create_business_commerce_foundat
 reference_data.district	GLOBAL_REFERENCE	V36__create_business_commerce_foundations.sql:180 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 reference_data.province	GLOBAL_REFERENCE	V36__create_business_commerce_foundations.sql:172 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 reference_data.road_type	GLOBAL_REFERENCE	V36__create_business_commerce_foundations.sql:189 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
+sales.buyer_catalog_favorite	BC02	db/tenant-migration/V29__create_buyer_catalog_offer_favorites.sql:7 CREATE TABLE; membership-owned Buyer offer preference requested by Owner; not an accepted Blueprint feature.
+sales.buyer_address	BC02	db/tenant-migration/V38__create_buyer_personal_addresses.sql:17 CREATE TABLE; personal Buyer address book belongs to the Buyer relationship bounded context.
+sales.buyer_sales_message	BC02	db/tenant-migration/V34__create_buyer_sales_account_messages.sql:9 CREATE TABLE; Buyer-Sales conversation persistence belongs to the Buyer relationship bounded context.
 sales.client_account	BC02	V10__create_sales_client_accounts.sql:3 CREATE TABLE; explicit Customer & Buyer Relationships ownership exception.
 sales.client_account_address	BC02	V36__create_business_commerce_foundations.sql:200 CREATE TABLE; explicit Customer & Buyer Relationships ownership exception.
 sales.client_account_membership	BC02	V10__create_sales_client_accounts.sql:29 CREATE TABLE; explicit Customer & Buyer Relationships ownership exception.

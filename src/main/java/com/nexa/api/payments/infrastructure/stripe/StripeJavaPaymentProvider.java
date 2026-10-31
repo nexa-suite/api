@@ -13,7 +13,9 @@ import com.stripe.model.Event;
 import com.stripe.model.StripeObject;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.PaymentIntentCreateParams;
+import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.RefundCreateParams;
+import com.stripe.param.SetupIntentCreateParams;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -152,6 +154,86 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
     }
 
     @Override
+    public boolean supportsBuyerPaymentMethodSetup() { return true; }
+
+    @Override
+    public StripePaymentProvider.ProviderCustomer createCustomer(CustomerRequest request) {
+        TechnicalMetricsPort.TimerSample timer = start("create_buyer_payment_customer");
+        try {
+            CustomerCreateParams params = CustomerCreateParams.builder()
+                    .putAllMetadata(request.metadata())
+                    .build();
+            com.stripe.model.Customer customer = client.customers().create(params, options(request.idempotencyKey()));
+            stop(timer, "success");
+            return new StripePaymentProvider.ProviderCustomer(customer.getId(), customer.getMetadata());
+        } catch (StripeException exception) {
+            stop(timer, category(exception));
+            throw translate("create customer", exception);
+        }
+    }
+
+    @Override
+    public Optional<StripePaymentProvider.ProviderCustomer> retrieveCustomer(String providerId) {
+        if (providerId == null || providerId.isBlank()) return Optional.empty();
+        try {
+            com.stripe.model.Customer customer = client.customers().retrieve(providerId, options(null));
+            if (Boolean.TRUE.equals(customer.getDeleted())) return Optional.empty();
+            return Optional.of(new StripePaymentProvider.ProviderCustomer(customer.getId(), customer.getMetadata()));
+        } catch (StripeException exception) {
+            throw translate("retrieve customer", exception);
+        }
+    }
+
+    @Override
+    public StripePaymentProvider.ProviderSetupIntent createSetupIntent(SetupIntentRequest request) {
+        TechnicalMetricsPort.TimerSample timer = start("create_buyer_payment_setup_intent");
+        try {
+            SetupIntentCreateParams params = SetupIntentCreateParams.builder()
+                    .setCustomer(request.customerId())
+                    .addPaymentMethodType("card")
+                    .setUsage(SetupIntentCreateParams.Usage.ON_SESSION)
+                    .putAllMetadata(request.metadata())
+                    .build();
+            com.stripe.model.SetupIntent intent = client.setupIntents().create(params, options(request.idempotencyKey()));
+            stop(timer, "success");
+            return setupIntent(intent);
+        } catch (StripeException exception) {
+            stop(timer, category(exception));
+            throw translate("create SetupIntent", exception);
+        }
+    }
+
+    @Override
+    public Optional<StripePaymentProvider.ProviderSetupIntent> retrieveSetupIntent(String providerId) {
+        if (providerId == null || providerId.isBlank()) return Optional.empty();
+        try {
+            return Optional.of(setupIntent(client.setupIntents().retrieve(providerId, options(null))));
+        } catch (StripeException exception) {
+            throw translate("retrieve SetupIntent", exception);
+        }
+    }
+
+    @Override
+    public Optional<StripePaymentProvider.ProviderPaymentMethod> retrievePaymentMethod(String providerId) {
+        if (providerId == null || providerId.isBlank()) return Optional.empty();
+        try {
+            return Optional.of(paymentMethod(client.paymentMethods().retrieve(providerId, options(null))));
+        } catch (StripeException exception) {
+            throw translate("retrieve payment method", exception);
+        }
+    }
+
+    @Override
+    public StripePaymentProvider.ProviderPaymentMethod detachPaymentMethod(String providerId) {
+        if (providerId == null || providerId.isBlank()) throw new IllegalArgumentException("Stripe PaymentMethod id is required");
+        try {
+            return paymentMethod(client.paymentMethods().detach(providerId, options(null)));
+        } catch (StripeException exception) {
+            throw translate("detach payment method", exception);
+        }
+    }
+
+    @Override
     public StripeWebhookEvent verifyWebhook(String payload, String signature) {
         try {
             Event event = client.constructEvent(payload, signature, webhookSecret);
@@ -167,6 +249,11 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
                 Map<String, String> metadata = intent.getMetadata() == null ? Map.of() : intent.getMetadata();
                 return new StripeWebhookEvent(event.getId(), event.getType(), intent.getId(), intent.getStatus(), intent.getAmount(), intent.getCurrency(), metadata);
             }
+            if (object instanceof com.stripe.model.SetupIntent intent) {
+                Map<String, String> metadata = intent.getMetadata() == null ? Map.of() : intent.getMetadata();
+                return new StripeWebhookEvent(event.getId(), event.getType(), null, intent.getStatus(), null, null,
+                        metadata, intent.getId(), intent.getCustomer(), intent.getPaymentMethod());
+            }
             return new StripeWebhookEvent(event.getId(), event.getType(), null, null, null, null, Map.of());
         } catch (SignatureVerificationException exception) {
             throw new IllegalArgumentException("Stripe webhook signature is invalid", exception);
@@ -179,6 +266,19 @@ public final class StripeJavaPaymentProvider implements StripePaymentProvider {
         var builder = RequestOptions.builder();
         if (idempotencyKey != null && !idempotencyKey.isBlank()) builder.setIdempotencyKey(idempotencyKey);
         return builder.build();
+    }
+
+    private static StripePaymentProvider.ProviderSetupIntent setupIntent(com.stripe.model.SetupIntent intent) {
+        return new StripePaymentProvider.ProviderSetupIntent(intent.getId(), intent.getCustomer(),
+                intent.getClientSecret(), intent.getStatus(), intent.getPaymentMethod(), intent.getMetadata());
+    }
+
+    private static StripePaymentProvider.ProviderPaymentMethod paymentMethod(com.stripe.model.PaymentMethod method) {
+        com.stripe.model.PaymentMethod.Card card = method.getCard();
+        if (card == null) return new StripePaymentProvider.ProviderPaymentMethod(method.getId(),
+                method.getCustomer(), method.getType(), null, null, null, null);
+        return new StripePaymentProvider.ProviderPaymentMethod(method.getId(), method.getCustomer(), method.getType(),
+                card.getBrand(), card.getLast4(), card.getExpMonth(), card.getExpYear());
     }
 
     private TechnicalFailureException translate(String operation, StripeException exception) {

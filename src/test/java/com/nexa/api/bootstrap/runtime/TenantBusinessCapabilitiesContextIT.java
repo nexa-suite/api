@@ -309,6 +309,88 @@ class TenantBusinessCapabilitiesContextIT extends NexaWorkflowIntegrationSupport
         }
     }
 
+    @Test
+    void tenantInboxReceiptsAreForcedAndScopedForTraceabilityWorker() {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID otherWorkspace = UUID.randomUUID();
+        UUID workspaceReceipt = UUID.randomUUID();
+        UUID otherWorkspaceReceipt = UUID.randomUUID();
+        UUID workerReceipt = UUID.randomUUID();
+        UUID rejectedReceipt = UUID.randomUUID();
+        String consumer = "tenant-inbox-rls-" + UUID.randomUUID();
+        JdbcTemplate tenantTestJdbc = tenantJdbcFor(tenant);
+
+        try {
+            tenantTestJdbc.update("insert into nexa_platform.tenant_workspace_scope_anchor (tenant_id,workspace_id) values (?,?)",
+                    tenant, otherWorkspace);
+            tenantTestJdbc.update("insert into integration.inbox_event "
+                            + "(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) "
+                            + "values (?,?,?,?,current_timestamp,'PROCESSED')",
+                    consumer, workspaceReceipt, tenant, workspace);
+            tenantTestJdbc.update("insert into integration.inbox_event "
+                            + "(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) "
+                            + "values (?,?,?,?,current_timestamp,'IGNORED')",
+                    consumer, otherWorkspaceReceipt, tenant, otherWorkspace);
+
+            traceabilityWorkerRouter.inTransaction(tenant, workspace, (tenantJdbc, ignored) -> {
+                assertThat(tenantJdbc.queryForList("select event_id from integration.inbox_event "
+                                + "where consumer_name=? and event_id in (?,?) order by event_id",
+                        UUID.class, consumer, workspaceReceipt, otherWorkspaceReceipt))
+                        .as("traceability reads see inbox receipts from the explicit Workspace only")
+                        .containsExactly(workspaceReceipt);
+
+                assertThat(tenantJdbc.queryForObject("select relation.relrowsecurity and relation.relforcerowsecurity "
+                                + "from pg_class relation join pg_namespace ns on ns.oid=relation.relnamespace "
+                                + "where ns.nspname='integration' and relation.relname='inbox_event'",
+                        Boolean.class)).as("Tenant inbox has FORCE RLS").isTrue();
+                assertThat(tenantJdbc.queryForList("select policyname from pg_policies "
+                                + "where schemaname='integration' and tablename='inbox_event' order by policyname",
+                        String.class))
+                        .containsExactly("inbox_event_direct_scope_insert", "inbox_event_direct_scope_select");
+
+                assertThat(tenantJdbc.queryForObject("select current_user='nexa_business_traceability_worker' "
+                                + "and has_column_privilege(current_user,'integration.inbox_event','consumer_name','SELECT') "
+                                + "and has_column_privilege(current_user,'integration.inbox_event','tenant_id','SELECT') "
+                                + "and has_column_privilege(current_user,'integration.inbox_event','processed_at','INSERT') "
+                                + "and not has_table_privilege(current_user,'integration.inbox_event','SELECT') "
+                                + "and not has_table_privilege(current_user,'integration.inbox_event','INSERT') "
+                                + "and not has_table_privilege(current_user,'integration.inbox_event','UPDATE') "
+                                + "and not has_table_privilege(current_user,'integration.inbox_event','DELETE')",
+                        Boolean.class)).as("worker retains its narrow receipt column grants").isTrue();
+                assertThat(tenantJdbc.queryForObject("select not has_table_privilege('nexa_runtime',"
+                                + "'integration.inbox_event','SELECT') "
+                                + "and not has_table_privilege('nexa_runtime','integration.inbox_event','INSERT') "
+                                + "and not has_table_privilege('nexa_runtime','integration.inbox_event','UPDATE') "
+                                + "and not has_table_privilege('nexa_runtime','integration.inbox_event','DELETE') "
+                                + "and not has_any_column_privilege('nexa_runtime','integration.inbox_event','SELECT') "
+                                + "and not has_any_column_privilege('nexa_runtime','integration.inbox_event','INSERT') "
+                                + "and not has_any_column_privilege('nexa_runtime','integration.inbox_event','UPDATE')",
+                        Boolean.class)).as("the unused application runtime has no physical Tenant inbox grants").isTrue();
+
+                assertThat(tenantJdbc.update("insert into integration.inbox_event "
+                                + "(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) "
+                                + "values (?,?,?,?,current_timestamp,'PROCESSED')",
+                        consumer, workerReceipt, tenant, workspace))
+                        .as("the scoped traceability worker can append a receipt").isEqualTo(1);
+                return null;
+            });
+
+            assertThatThrownBy(() -> traceabilityWorkerRouter.inTransaction(tenant, workspace,
+                    (tenantJdbc, ignored) -> tenantJdbc.update("insert into integration.inbox_event "
+                                    + "(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) "
+                                    + "values (?,?,?,?,current_timestamp,'PROCESSED')",
+                            consumer, rejectedReceipt, tenant, otherWorkspace)))
+                    .satisfies(failure -> assertThat(failure.getCause())
+                            .hasMessageContaining("new row violates row-level security policy"));
+        } finally {
+            tenantTestJdbc.update("delete from integration.inbox_event where consumer_name=? and event_id in (?,?,?,?)",
+                    consumer, workspaceReceipt, otherWorkspaceReceipt, workerReceipt, rejectedReceipt);
+            tenantTestJdbc.update("delete from nexa_platform.tenant_workspace_scope_anchor where tenant_id=? and workspace_id=?",
+                    tenant, otherWorkspace);
+        }
+    }
+
     /** Exercises the legacy worker consumer with a canonical event fixture; the HTTP approval action does not emit one. */
     @Test
     void approvedWorkerValidatesExpiryPolicyAndCommitsExpiredReleaseInItsScopedCallback() throws Exception {

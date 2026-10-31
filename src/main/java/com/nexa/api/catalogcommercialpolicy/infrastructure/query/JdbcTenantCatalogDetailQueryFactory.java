@@ -56,9 +56,26 @@ public final class JdbcTenantCatalogDetailQueryFactory implements TenantCatalogD
                 return catalog.filterOptions(scope(tenantId, workspaceId), kind, search, page, size);
             }
 
+            @Override
+            public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+                    UUID tenantId, UUID workspaceId, String kind, String search, int page, int size, UUID familyId) {
+                return catalog.filterOptions(scope(tenantId, workspaceId), kind, search, page, size, familyId);
+            }
+
 			@Override
 			public CatalogItemDetail getByCatalogItemId(UUID tenantId, UUID workspaceId, String catalogItemId) {
 				return catalog.getByCatalogItemId(scope(tenantId, workspaceId), catalogItemId);
+			}
+
+			@Override
+			public Optional<CatalogItemDetail> findBySellableSkuId(UUID tenantId, UUID workspaceId, UUID sellableSkuId) {
+				return catalog.findBySellableSkuId(scope(tenantId, workspaceId), sellableSkuId);
+			}
+
+			@Override
+			public java.util.List<CatalogItemDetail> findBySellableSkuIds(UUID tenantId, UUID workspaceId,
+					java.util.List<UUID> sellableSkuIds) {
+				return catalog.findBySellableSkuIds(scope(tenantId, workspaceId), sellableSkuIds);
 			}
 
 			@Override

@@ -31,6 +31,7 @@ public interface WarehouseOperationsService {
                           String zoneId, String status, int page, int size, String sort);
     Page<MovementSummary> movements(CurrentAccessContext context, String lotId, int page, int size, String sort);
     LotSummary lot(CurrentAccessContext context, String id);
+    TemperatureReadingsSummary temperatureReadings(CurrentAccessContext context, String lotId, int page, int size);
     LotSummary receive(CurrentAccessContext context, Receipt receipt, String key, String correlation);
     LotSummary adjust(CurrentAccessContext context, String lotId, BigDecimal quantity, boolean inbound,
                       String reason, long expected, String key, String correlation);
@@ -119,14 +120,40 @@ public interface WarehouseOperationsService {
         }
     }
     public record ZoneSummary(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
-    public record LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId, LocalDate productionDate) {
+    public record LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId, LocalDate productionDate, BigDecimal confirmedReceivedQuantity,
+                             String productName, String skuCode, String warehouseName, String zoneName, String imageFileName) {
+        public LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId, LocalDate productionDate, BigDecimal confirmedReceivedQuantity) {
+            this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, skuId, productionDate, confirmedReceivedQuantity, null, null, null, null, null);
+        }
+        public LotSummary withDisplayNames(String name, String code, String warehouse, String zone, String image) {
+            return new LotSummary(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt,
+                    onHand, reserved, available, unit, status, version, skuId, productionDate, confirmedReceivedQuantity,
+                    name, code, warehouse, zone, image);
+        }
+        public LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId, LocalDate productionDate) {
+            this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, skuId, productionDate, null);
+        }
         public LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId) {
-            this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, skuId, null);
+            this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, skuId, null, null);
         }
         public LotSummary(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version) {
-            this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, null);
+            this(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt, onHand, reserved, available, unit, status, version, null, null, null);
+        }
+        public LotSummary withConfirmedReceivedQuantity(BigDecimal quantity) {
+            return new LotSummary(id, warehouseId, zoneId, catalogItemId, batchNumber, expirationDate, receivedAt,
+                    onHand, reserved, available, unit, status, version, skuId, productionDate, quantity, productName, skuCode, warehouseName, zoneName, imageFileName);
         }
     }
+    public record TemperatureReadingsSummary(String lotId, String warehouseId, ReceivingTemperatureReading receiving,
+                                             Page<TemperatureEvaluationSummary> evaluations) { }
+    public record ReceivingTemperatureReading(BigDecimal valueCelsius, Instant recordedAt,
+                                              String recordedByMembershipId, String evidenceObjectId) { }
+    public record TemperatureEvaluationSummary(String id, BigDecimal valueCelsius, String sourceType,
+                                              BigDecimal expectedMinimumCelsius, BigDecimal expectedMaximumCelsius,
+                                              String status, String disposition, String resolutionReason,
+                                              Instant createdAt, Instant resolvedAt, String evidenceObjectId,
+                                              BigDecimal affectedQuantity, String actorMembershipId,
+                                              boolean blocksCommittedExecution) { }
     public record SafetyStockCommand(String warehouseId, String skuId, String catalogItemId,
                                      BigDecimal quantity, String unit) { }
     public record SafetyStockSummary(String id, String warehouseId, String skuId, String catalogItemId,

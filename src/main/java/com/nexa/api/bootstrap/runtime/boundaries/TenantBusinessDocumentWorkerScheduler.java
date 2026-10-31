@@ -6,7 +6,7 @@ import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorke
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.Scope;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerPort;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

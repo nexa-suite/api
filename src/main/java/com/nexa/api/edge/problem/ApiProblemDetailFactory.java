@@ -180,6 +180,7 @@ public final class ApiProblemDetailFactory {
 					case DELIVERY_HANDOFF_REQUEST_INVALID -> "Delivery handoff request is invalid";
 					case DELIVERY_HANDOFF_NOT_ACTIVE -> "Delivery handoff is not active";
 					case DELIVERY_HANDOFF_DRIVER_NOT_ASSIGNED -> "Driver is not assigned to this delivery";
+					case DELIVERY_HANDOFF_POD_SEALED -> "Delivery proof of delivery is already sealed";
 					case DELIVERY_HANDOFF_TOKEN_INVALID -> "Delivery handoff token is invalid";
 					case DELIVERY_HANDOFF_EXPIRED -> "Delivery handoff token has expired";
 					case DELIVERY_ATTEMPT_NOT_FOUND -> "Delivery attempt not found";

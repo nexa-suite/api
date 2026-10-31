@@ -12,6 +12,12 @@ public interface TenantCatalogHttpReadPort {
         throw new UnsupportedOperationException("Catalog filter choices are unavailable");
     }
 
+    default com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+            CurrentAccessContext context, String kind, String search, int page, int size, java.util.UUID familyId) {
+        if (familyId != null) throw new UnsupportedOperationException("Family-scoped variant choices are unavailable");
+        return filterOptions(context, kind, search, page, size);
+    }
+
 	CatalogPage<CatalogItemSummary> list(CurrentAccessContext accessContext, CatalogSearchCriteria criteria);
 
 	CatalogItemDetail getByCatalogItemId(CurrentAccessContext accessContext, String catalogItemId);

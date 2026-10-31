@@ -1,7 +1,9 @@
 package com.nexa.api.salescommitment.application.salesorder.export.model;
 
 import java.util.Locale;
+import org.springframework.modulith.NamedInterface;
 
+@NamedInterface("sales-public")
 public enum SalesOrderSummaryExportFormat {
 	PDF("application/pdf", "pdf"),
 	CSV("text/csv;charset=UTF-8", "csv");

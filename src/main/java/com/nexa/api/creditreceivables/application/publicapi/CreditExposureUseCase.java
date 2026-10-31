@@ -14,5 +14,5 @@ public interface CreditExposureUseCase {
     record CreditExposureView(String clientAccountId, String currency, BigDecimal creditLimit,
                               BigDecimal ledgerExposure, BigDecimal outstandingReceivables,
                               BigDecimal reservedExposure, BigDecimal used, BigDecimal availableCredit,
-                              boolean active, Instant asOf) { }
+                              boolean active, boolean creditEligible, Instant asOf) { }
 }

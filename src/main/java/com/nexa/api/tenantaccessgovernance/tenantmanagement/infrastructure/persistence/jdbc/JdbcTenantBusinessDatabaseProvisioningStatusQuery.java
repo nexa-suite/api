@@ -3,9 +3,6 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.pers
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatusQuery;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -18,21 +15,17 @@ import org.springframework.security.access.AccessDeniedException;
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public final class JdbcTenantBusinessDatabaseProvisioningStatusQuery
         implements TenantBusinessDatabaseProvisioningStatusQuery {
-    private final JdbcTemplate jdbc;
-    private final TransactionTemplate transactions;
+    private final InternalOperatorJdbcOperations operatorDatabase;
 
-    public JdbcTenantBusinessDatabaseProvisioningStatusQuery(JdbcTemplate jdbc,
-            PlatformTransactionManager transactionManager) {
-        this.jdbc = Objects.requireNonNull(jdbc);
-        this.transactions = new TransactionTemplate(Objects.requireNonNull(transactionManager));
-        this.transactions.setReadOnly(true);
+    public JdbcTenantBusinessDatabaseProvisioningStatusQuery(InternalOperatorJdbcOperations operatorDatabase) {
+        this.operatorDatabase = Objects.requireNonNull(operatorDatabase);
     }
 
     @Override
     public List<TenantBusinessDatabaseProvisioningStatus> listRecent(UUID internalOperatorId, int limit) {
         if (internalOperatorId == null) throw new AccessDeniedException("An authenticated internal operator is required");
         int boundedLimit = Math.max(1, Math.min(100, limit));
-        return Objects.requireNonNull(transactions.execute(status -> {
+        return operatorDatabase.readOnly(jdbc -> {
             jdbc.queryForObject("select set_config('app.current_internal_operator_id', ?, true)",
                     String.class, internalOperatorId.toString());
             return jdbc.query("select task.tenant_id,task.workspace_id,task.status,task.attempt_count,task.updated_at,"
@@ -46,6 +39,6 @@ public final class JdbcTenantBusinessDatabaseProvisioningStatusQuery
                             rs.getString("status"), rs.getInt("attempt_count"), rs.getTimestamp("updated_at").toInstant(),
                             rs.getString("registry_lifecycle_state")),
                     boundedLimit);
-        }));
+        });
     }
 }

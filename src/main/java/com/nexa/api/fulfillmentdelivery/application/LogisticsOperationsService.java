@@ -6,6 +6,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.DispatchCommandPersiste
 import com.nexa.api.fulfillmentdelivery.application.port.DispatchQueryPersistencePort;
 import com.nexa.api.fulfillmentdelivery.application.port.OperationalHandoffPort;
 import com.nexa.api.fulfillmentdelivery.application.service.StartDispatchRouteService;
+import com.nexa.api.fulfillmentdelivery.application.model.DispatchSalesOwnerScope;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -13,12 +14,15 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Acc
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 public class LogisticsOperationsService implements com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperations {
     private final DispatchQueryPersistencePort queries;
@@ -26,29 +30,64 @@ public class LogisticsOperationsService implements com.nexa.api.fulfillmentdeliv
     private final CustomerAccountQuery accounts;
     private final StartDispatchRouteService startDispatchRoute;
     private final OperationalHandoffPort handoff;
+    private final WarehouseObjectAccess warehouseAccess;
 
     public LogisticsOperationsService(DispatchQueryPersistencePort queries, DispatchCommandPersistencePort commands, CustomerAccountQuery accounts,
                                       StartDispatchRouteService startDispatchRoute) {
-        this(queries, commands, accounts, startDispatchRoute, null);
+        this(queries, commands, accounts, startDispatchRoute, null, null);
     }
 
     public LogisticsOperationsService(DispatchQueryPersistencePort queries, DispatchCommandPersistencePort commands, CustomerAccountQuery accounts,
                                       StartDispatchRouteService startDispatchRoute,
                                       OperationalHandoffPort handoff) {
-        this.queries = queries; this.commands = commands; this.accounts = accounts; this.startDispatchRoute = startDispatchRoute;
-        this.handoff = handoff;
+        this(queries, commands, accounts, startDispatchRoute, handoff, null);
     }
 
-    public Page<DispatchView> list(CurrentAccessContext context, String status, int page, int size, String sort) {
+    public LogisticsOperationsService(DispatchQueryPersistencePort queries, DispatchCommandPersistencePort commands,
+                                      CustomerAccountQuery accounts, StartDispatchRouteService startDispatchRoute,
+                                      OperationalHandoffPort handoff, WarehouseObjectAccess warehouseAccess) {
+        this.queries = queries; this.commands = commands; this.accounts = accounts; this.startDispatchRoute = startDispatchRoute;
+        this.handoff = handoff; this.warehouseAccess = warehouseAccess;
+    }
+
+    @Transactional public Page<DispatchView> list(CurrentAccessContext context, String status, int page, int size, String sort) {
+        if (salesOwnerScoped(context)) {
+            Page<DispatchView> value = queries.listForSalesOwner(tenant(context), workspace(context), status,
+                    page, size, sort, salesOwnerScope(context, warehouseGrants(context)));
+            return new Page<>(value.items().stream().map(item -> safe(context, item)).toList(),
+                    value.page(), value.size(), value.total());
+        }
         String client = readScope(context);
-        Page<DispatchView> value = queries.list(tenant(context), workspace(context), client, status, page, size, sort);
+        Set<UUID> grants = warehouseGrants(context);
+        Page<DispatchView> value = queries.list(tenant(context), workspace(context), client, status,
+                page, size, sort, grants);
         return new Page<>(value.items().stream().map(item -> safe(context, item)).toList(), value.page(), value.size(), value.total());
     }
-    public DispatchView detail(CurrentAccessContext context, String id) { return safe(context, queries.detail(tenant(context), workspace(context), readScope(context), id)); }
-    public List<DispatchEventView> events(CurrentAccessContext context, String id) { return queries.events(tenant(context), workspace(context), readScope(context), id).stream().map(event -> safeEvent(context, event)).toList(); }
+    @Transactional public DispatchView detail(CurrentAccessContext context, String id) {
+        if (salesOwnerScoped(context)) {
+            return safe(context, queries.detailForSalesOwner(tenant(context), workspace(context), id,
+                    salesOwnerScope(context, warehouseGrants(context))));
+        }
+        String client = readScope(context);
+        Set<UUID> grants = warehouseGrants(context);
+        DispatchView value = queries.detail(tenant(context), workspace(context), client, id, grants);
+        return safe(context, value);
+    }
+    @Transactional public List<DispatchEventView> events(CurrentAccessContext context, String id) {
+        if (salesOwnerScoped(context)) {
+            return queries.eventsForSalesOwner(tenant(context), workspace(context), id,
+                    salesOwnerScope(context, warehouseGrants(context))).stream()
+                    .map(event -> safeEvent(context, event)).toList();
+        }
+        String client = readScope(context);
+        Set<UUID> grants = warehouseGrants(context);
+        List<DispatchEventView> values = queries.events(tenant(context), workspace(context), client, id, grants);
+        return values.stream().map(event -> safeEvent(context, event)).toList();
+    }
     public List<HandoffNoteView> handoffNotes(CurrentAccessContext context, String id) {
         handoffRead(context);
-        return requireHandoff().notes(tenant(context), workspace(context), null, id);
+        Set<UUID> grants = warehouseGrants(context);
+        return requireHandoff().notes(tenant(context), workspace(context), null, id, grants);
     }
 
     @Transactional public DispatchView create(CurrentAccessContext c, String reservationId, long version, String key) { write(c); requireKey(key); return commands.create(tenant(c), workspace(c), reservationId, version, actor(c), key, now()); }
@@ -65,15 +104,44 @@ public class LogisticsOperationsService implements com.nexa.api.fulfillmentdeliv
     @Transactional public DispatchView partial(CurrentAccessContext c, String id, long version, String key, List<DeliveryLineCommand> deliveredLines, Instant completedAt, String notes) { write(c); requireKey(key); if (deliveredLines == null || deliveredLines.isEmpty() || notes != null && notes.trim().length() > 2000) throw error("INVALID_REQUEST", false); return commands.partial(tenant(c), workspace(c), id, version, actor(c), key, deliveredLines, completedAt, notes, now()); }
     @Transactional public DispatchView complete(CurrentAccessContext c, String id, long version, String key, String receiver, Instant completedAt, String notes, boolean photo, boolean signature) { write(c); requireKey(key); return commands.complete(tenant(c), workspace(c), id, version, actor(c), key, receiver, completedAt, notes, photo, signature, now()); }
     @Transactional public HandoffNoteView appendHandoffNote(CurrentAccessContext c, String id, long version, String key, String note) {
-        handoffWrite(c);
+        Set<UUID> handoffWarehouseGrants = null;
+        if (c.allows(Permission.WAREHOUSE_WRITE)) {
+            c.requirePermission(Permission.WAREHOUSE_WRITE);
+            handoffWarehouseGrants = requiredWarehouseGrants(c);
+        } else if (c.allows(Permission.LOGISTICS_WRITE)) {
+            c.requirePermission(Permission.LOGISTICS_WRITE);
+        } else {
+            throw new AccessPolicyViolation("Operational handoff write access is not available");
+        }
         requireKey(key);
         if (note == null || note.isBlank()) throw error("INVALID_REQUEST", false);
-        return requireHandoff().append(tenant(c), workspace(c), id, version, actor(c), key, note, now());
+        return requireHandoff().append(tenant(c), workspace(c), id, version, actor(c), key, note,
+                handoffWarehouseGrants, now());
     }
 
-    public DashboardView dashboard(CurrentAccessContext c) { logisticsRead(c); return queries.dashboard(tenant(c), workspace(c)); }
-    public AnalyticsView analytics(CurrentAccessContext c, Instant from, Instant to) { logisticsRead(c); Instant end = to == null ? Instant.now() : to; Instant start = from == null ? end.minus(30, ChronoUnit.DAYS) : from; if (!start.isBefore(end) || start.plus(366, ChronoUnit.DAYS).isBefore(end)) throw error("INVALID_REQUEST", false); return queries.analytics(tenant(c), workspace(c), start, end); }
-    public Page<ProofOfDeliveryView> proofOfDelivery(CurrentAccessContext c, String status, int page, int size) { logisticsRead(c); return queries.proofOfDelivery(tenant(c), workspace(c), status, page, size); }
+    public DashboardView dashboard(CurrentAccessContext c) {
+        logisticsRead(c);
+        Set<UUID> grants = warehouseGrants(c);
+        return queries.dashboard(tenant(c), workspace(c), grants);
+    }
+    public AnalyticsView analytics(CurrentAccessContext c, Instant from, Instant to) {
+        logisticsRead(c);
+        Instant end = to == null ? Instant.now() : to;
+        Instant start = from == null ? end.minus(30, ChronoUnit.DAYS) : from;
+        if (!start.isBefore(end) || start.plus(366, ChronoUnit.DAYS).isBefore(end)) throw error("INVALID_REQUEST", false);
+        Set<UUID> grants = warehouseGrants(c);
+        return queries.analytics(tenant(c), workspace(c), start, end, grants);
+    }
+    public Page<ProofOfDeliveryView> proofOfDelivery(CurrentAccessContext c, String status, int page, int size) {
+        logisticsRead(c);
+        Set<UUID> grants = warehouseGrants(c);
+        return queries.proofOfDelivery(tenant(c), workspace(c), status, page, size, grants);
+    }
+    public DispatchDeliveriesView dispatchDeliveries(CurrentAccessContext c, String dispatchOrderId) {
+        logisticsRead(c);
+        Set<UUID> grants = warehouseGrants(c);
+        return queries.dispatchDeliveries(tenant(c), workspace(c), dispatchOrderId, grants);
+    }
     public List<AssigneeView> assignees(CurrentAccessContext c) { logisticsRead(c); return queries.assignees(tenant(c), workspace(c)); }
 
     private String readScope(CurrentAccessContext c) {
@@ -87,8 +155,30 @@ public class LogisticsOperationsService implements com.nexa.api.fulfillmentdeliv
         if (c.hasRole(MembershipRole.COMPANY_OWNER) && !operationalRead) {
             throw new AccessPolicyViolation("Company Owner does not have operational logistics access");
         }
-        if (c.allows(PermissionKey.SALES_ORDER_READ) || c.allows(Permission.FULFILLMENT_READ) || c.allows(Permission.LOGISTICS_READ)) return null;
+        if (c.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER)
+                || c.allows(PermissionKey.LOGISTICS_READ) || c.allows(PermissionKey.DISPATCH_READ)
+                || c.allows(Permission.FULFILLMENT_READ) || c.allows(PermissionKey.SALES_ORDER_READ)
+                || c.allows(Permission.FULFILLMENT_READ) || c.allows(Permission.LOGISTICS_READ)) return null;
         throw new AccessPolicyViolation("Logistics access is not available");
+    }
+    private Set<UUID> warehouseGrants(CurrentAccessContext context) {
+        if (warehouseAccess == null) return Set.of();
+        Set<UUID> grants = warehouseAccess.activeWarehouseIds(context);
+        return grants == null ? Set.of() : Set.copyOf(grants);
+    }
+    private boolean salesOwnerScoped(CurrentAccessContext context) {
+        return context.allows(PermissionKey.SALES_ORDER_READ)
+                && !context.hasRole(MembershipRole.COMPANY_OWNER)
+                && !context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER);
+    }
+    private DispatchSalesOwnerScope salesOwnerScope(CurrentAccessContext context, Set<UUID> activeWarehouseIds) {
+        Set<UUID> accountIds = accounts.lockActiveSalesOwnerAccountIds(tenant(context), workspace(context), actor(context))
+                .stream().map(UUID::fromString).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return new DispatchSalesOwnerScope(accountIds, activeWarehouseIds);
+    }
+    private Set<UUID> requiredWarehouseGrants(CurrentAccessContext context) {
+        Set<UUID> grants = warehouseGrants(context);
+        return grants == null ? Set.of() : grants;
     }
     private static void logisticsRead(CurrentAccessContext c) { c.requirePermission(Permission.LOGISTICS_READ); }
     private static void write(CurrentAccessContext c) { c.requirePermission(Permission.LOGISTICS_WRITE); }
@@ -96,11 +186,6 @@ public class LogisticsOperationsService implements com.nexa.api.fulfillmentdeliv
         if (c.allows(Permission.FULFILLMENT_READ)) c.requirePermission(Permission.FULFILLMENT_READ);
         else if (c.allows(Permission.LOGISTICS_READ)) c.requirePermission(Permission.LOGISTICS_READ);
         else throw new AccessPolicyViolation("Operational handoff access is not available");
-    }
-    private static void handoffWrite(CurrentAccessContext c) {
-        if (c.allows(Permission.WAREHOUSE_WRITE)) c.requirePermission(Permission.WAREHOUSE_WRITE);
-        else if (c.allows(Permission.LOGISTICS_WRITE)) c.requirePermission(Permission.LOGISTICS_WRITE);
-        else throw new AccessPolicyViolation("Operational handoff write access is not available");
     }
     private OperationalHandoffPort requireHandoff() {
         if (handoff == null) throw error("HANDOFF_UNAVAILABLE", false);

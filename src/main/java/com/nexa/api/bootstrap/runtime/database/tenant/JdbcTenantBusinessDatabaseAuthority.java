@@ -1,5 +1,7 @@
 package com.nexa.api.bootstrap.runtime.database.tenant;
 
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
+
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;

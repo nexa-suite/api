@@ -16,6 +16,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -200,59 +201,71 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
     }
 
     @Test void nativeIdentitySignInAutomaticallyEstablishesTheOnlyCurrentContextAndProjectsNames() throws Exception {
-        String payload = "{\"identifier\":\"" + SALES_EMAIL + "\",\"password\":\"" + TEST_PASSWORD
-                + "\",\"surface\":\"PLATFORM\"}";
-        mockMvc.perform(post("/api/v1/authentication/identity-sign-in")
-                        .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
-                        .header("X-Nexa-Client", "NATIVE")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/authentication/identity-sign-in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
-                .andExpect(status().isForbidden());
+        IsolatedIdentity identity = createIsolatedSalesIdentity();
+        try {
+            String payload = "{\"identifier\":\"" + identity.email() + "\",\"password\":\"" + TEST_PASSWORD
+                    + "\",\"surface\":\"PLATFORM\"}";
+            mockMvc.perform(post("/api/v1/authentication/identity-sign-in")
+                            .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
+                            .header("X-Nexa-Client", "NATIVE")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(payload))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/api/v1/authentication/identity-sign-in")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(payload))
+                    .andExpect(status().isForbidden());
 
-        MvcResult login = mockMvc.perform(post("/api/v1/authentication/identity-sign-in")
-                        .header("X-Nexa-Client", "NATIVE")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
-                .andExpect(status().isOk())
-                .andReturn();
-        var response = tools.jackson.databind.json.JsonMapper.shared().readTree(login.getResponse().getContentAsString());
-        assertThat(response.get("outcome").asText()).isEqualTo("SESSION_ESTABLISHED");
-        assertThat(response.get("session").get("accessToken").asText()).isNotBlank();
-        String accessToken = response.get("session").get("accessToken").asText();
-        String refreshToken = login.getResponse().getHeader("X-Nexa-Refresh-Token");
-        assertThat(refreshToken).isNotBlank();
-        assertThat(login.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
+            MvcResult login = mockMvc.perform(post("/api/v1/authentication/identity-sign-in")
+                            .header("X-Nexa-Client", "NATIVE")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(payload))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            var response = tools.jackson.databind.json.JsonMapper.shared().readTree(login.getResponse().getContentAsString());
+            assertThat(response.get("outcome").asText()).isEqualTo("SESSION_ESTABLISHED");
+            assertThat(response.get("session").get("accessToken").asText()).isNotBlank();
+            String accessToken = response.get("session").get("accessToken").asText();
+            String refreshToken = login.getResponse().getHeader("X-Nexa-Refresh-Token");
+            assertThat(refreshToken).isNotBlank();
+            assertThat(login.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
 
-        var current = mockMvc.perform(get("/api/v1/session").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
-                .andExpect(status().isOk())
-                .andReturn();
-        var session = tools.jackson.databind.json.JsonMapper.shared().readTree(current.getResponse().getContentAsString());
-        assertThat(session.at("/tenant/tenantName").asText()).isEqualTo("ICISA Test");
-        assertThat(session.at("/workspace/workspaceName").asText()).isEqualTo("ICISA Test Workspace");
+            var current = mockMvc.perform(get("/api/v1/session").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            var session = tools.jackson.databind.json.JsonMapper.shared().readTree(current.getResponse().getContentAsString());
+            assertThat(session.at("/tenant/tenantName").asText()).isEqualTo("ICISA Test");
+            assertThat(session.at("/workspace/workspaceName").asText()).isEqualTo("ICISA Test Workspace");
 
-        mockMvc.perform(post("/api/v1/authentication/refresh")
-                        .header("X-Nexa-Client", "NATIVE")
-                        .header("X-Nexa-Surface", "PLATFORM")
-                        .header("X-Nexa-Refresh-Token", refreshToken))
-                .andExpect(status().isOk())
-                .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+            mockMvc.perform(post("/api/v1/authentication/refresh")
+                            .header("X-Nexa-Client", "NATIVE")
+                            .header("X-Nexa-Surface", "PLATFORM")
+                            .header("X-Nexa-Refresh-Token", refreshToken))
+                    .andExpect(status().isOk())
+                    .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+        } finally {
+            deleteIsolatedIdentity(identity);
+        }
     }
 
     @Test void nativeIdentitySignInReturnsNoWorkContextWhenEveryMembershipIsInactive() throws Exception {
-        String membership = membershipId(SALES_EMAIL);
-        Integer previousSessions = jdbc.queryForObject("select count(*) from iam.refresh_session where user_id=(select id from iam.user_account where normalized_email=?)", Integer.class, SALES_EMAIL);
-        Integer previousTickets = jdbc.queryForObject("select count(*) from iam.access_context_selection_ticket where user_id=(select id from iam.user_account where normalized_email=?)", Integer.class, SALES_EMAIL);
-        jdbc.update("update tenant_management.workspace_membership set status='DISABLED' where id=?",
-                java.util.UUID.fromString(membership));
+        IsolatedIdentity identity = createIsolatedSalesIdentity();
         try {
+            Integer previousSessions = jdbc.queryForObject("select count(*) from iam.refresh_session where user_id=?",
+                    Integer.class, identity.userId());
+            Integer previousTickets = jdbc.queryForObject("select count(*) from iam.access_context_selection_ticket where user_id=?",
+                    Integer.class, identity.userId());
+            jdbc.update("update tenant_management.workspace_membership set status='DISABLED',version=version+1 "
+                            + "where user_id=? and status='ACTIVE'", identity.userId());
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.workspace_membership m "
+                            + "join tenant_management.workspace w on w.id=m.workspace_id "
+                            + "join tenant_management.tenant t on t.id=w.tenant_id "
+                            + "where m.user_id=? and m.status='ACTIVE' and w.status='ACTIVE' and t.status='ACTIVE'",
+                    Integer.class, identity.userId())).isZero();
             var result = mockMvc.perform(post("/api/v1/authentication/identity-sign-in")
                             .header("X-Nexa-Client", "NATIVE")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"identifier\":\"" + SALES_EMAIL + "\",\"password\":\"" + TEST_PASSWORD
+                            .content("{\"identifier\":\"" + identity.email() + "\",\"password\":\"" + TEST_PASSWORD
                                     + "\",\"surface\":\"PLATFORM\"}"))
                     .andExpect(status().isOk())
                     .andReturn();
@@ -263,11 +276,12 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
             assertThat(response.has("accessContextTicket")).isFalse();
             assertThat(result.getResponse().getHeader("X-Nexa-Context-Ticket")).isNull();
             assertThat(result.getResponse().getHeader("X-Nexa-Refresh-Token")).isNull();
-            assertThat(jdbc.queryForObject("select count(*) from iam.refresh_session where user_id=(select id from iam.user_account where normalized_email=?)", Integer.class, SALES_EMAIL)).isEqualTo(previousSessions);
-            assertThat(jdbc.queryForObject("select count(*) from iam.access_context_selection_ticket where user_id=(select id from iam.user_account where normalized_email=?)", Integer.class, SALES_EMAIL)).isEqualTo(previousTickets);
+            assertThat(jdbc.queryForObject("select count(*) from iam.refresh_session where user_id=?",
+                    Integer.class, identity.userId())).isEqualTo(previousSessions);
+            assertThat(jdbc.queryForObject("select count(*) from iam.access_context_selection_ticket where user_id=?",
+                    Integer.class, identity.userId())).isEqualTo(previousTickets);
         } finally {
-            jdbc.update("update tenant_management.workspace_membership set status='ACTIVE' where id=?",
-                    java.util.UUID.fromString(membership));
+            deleteIsolatedIdentity(identity);
         }
     }
 
@@ -303,8 +317,10 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                     .andReturn();
             var contexts = tools.jackson.databind.json.JsonMapper.shared().readTree(listed.getResponse().getContentAsString())
                     .get("accessContexts");
-            assertThat(contexts).hasSize(2);
-            assertThat(contexts.toString()).contains("tenantName", "workspaceName", extraMembershipId);
+            assertThat(contexts.toString()).contains("tenantName", "workspaceName");
+            assertThat(contexts.findValues("membershipId").stream()
+                    .map(tools.jackson.databind.JsonNode::asText).toList())
+                    .contains(membershipId(SALES_EMAIL), extraMembershipId);
 
             jdbc.update("update tenant_management.workspace_membership set status='SUSPENDED' where id=?",
                     java.util.UUID.fromString(extraMembershipId));
@@ -547,8 +563,9 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                     .andExpect(status().isOk())
                     .andReturn();
             var options = json(listed).get("accessContexts");
-            assertThat(options).hasSize(2);
-            assertThat(options.toString()).contains(secondContext.membershipId());
+            assertThat(options.findValues("membershipId").stream()
+                    .map(tools.jackson.databind.JsonNode::asText).toList())
+                    .contains(membershipId(SALES_EMAIL), secondContext.membershipId());
 
             MvcResult selected = mockMvc.perform(post("/api/v1/me/access-context-selections")
                             .header(HttpHeaders.ORIGIN, ALLOWED_ORIGIN)
@@ -660,6 +677,48 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
         }
     }
 
+    private IsolatedIdentity createIsolatedSalesIdentity() {
+        UUID userId = UUID.randomUUID();
+        UUID isolatedMembershipId = UUID.randomUUID();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID sourceMembership = UUID.fromString(membershipId(SALES_EMAIL));
+        UUID sourceUser = jdbc.queryForObject("select user_id from tenant_management.workspace_membership where id=?",
+                UUID.class, sourceMembership);
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        String email = "identity-flow-" + suffix + "@icisa-test.local";
+        String username = "identity-flow-" + suffix;
+
+        jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,"
+                        + "display_name,preferred_language,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,?,?,'es','ACTIVE',current_timestamp,current_timestamp,0)",
+                userId, email, email, username, username, "Identity Flow " + suffix);
+        jdbc.update("insert into iam.password_credential (user_id,password_hash,algorithm,changed_at) "
+                        + "select ?,password_hash,algorithm,changed_at from iam.password_credential where user_id=?",
+                userId, sourceUser);
+        jdbc.update("insert into tenant_management.workspace_membership "
+                        + "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+                isolatedMembershipId, tenant, workspace, userId);
+        jdbc.update("insert into tenant_management.membership_role_definition "
+                        + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+                        + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
+                        + "where membership_id=?",
+                isolatedMembershipId, tenant, workspace, sourceMembership);
+        return new IsolatedIdentity(userId, isolatedMembershipId, email);
+    }
+
+    private void deleteIsolatedIdentity(IsolatedIdentity identity) {
+        jdbc.update("delete from iam.access_context_selection_ticket where user_id=?", identity.userId());
+        jdbc.update("update iam.refresh_session set replaced_by_session_id=null where user_id=?", identity.userId());
+        jdbc.update("delete from iam.refresh_session where user_id=?", identity.userId());
+        jdbc.update("delete from tenant_management.workspace_membership where id=?", identity.membershipId());
+        jdbc.update("delete from iam.password_credential where user_id=?", identity.userId());
+        jdbc.update("delete from iam.user_account where id=?", identity.userId());
+    }
+
+    private record IsolatedIdentity(UUID userId, UUID membershipId, String email) { }
+
     private CreatedContext createSecondWorkspaceMembership(String email) {
         java.util.UUID user = jdbc.queryForObject("select id from iam.user_account where normalized_email=?", java.util.UUID.class, email);
         java.util.UUID sourceMembership = java.util.UUID.fromString(membershipId(email));
@@ -675,10 +734,10 @@ class AuthenticationFlowIT extends PostgresIntegrationSupport {
                         + "values (?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
                 extraWorkspace, tenant, "Second identity workspace", slug);
         jdbc.update("insert into tenant_management.workspace_membership "
-                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "select ?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
+						+ "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+						+ "select ?,?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
                         + "from tenant_management.workspace_membership where id=?",
-                extraMembership, extraWorkspace, sourceMembership);
+						extraMembership, tenant, extraWorkspace, sourceMembership);
         jdbc.update("insert into tenant_management.membership_role_definition "
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "

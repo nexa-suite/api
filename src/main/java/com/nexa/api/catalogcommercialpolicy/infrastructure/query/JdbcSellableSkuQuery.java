@@ -50,11 +50,17 @@ public class JdbcSellableSkuQuery implements SellableSkuQuery {
         List<Object> args = new ArrayList<>(List.of(tenantId, workspaceId));
         args.addAll(distinct);
         String placeholders = distinct.stream().map(ignored -> "?").collect(Collectors.joining(","));
-        return jdbc.query("select id,legacy_catalog_item_id,sku_code,status,temperature_min,temperature_max "
-                        + "from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and " + column
-                        + " in (" + placeholders + ") order by id",
+        return jdbc.query("select s.id,s.legacy_catalog_item_id,s.sku_code,s.status,s.temperature_min,s.temperature_max,f.name,asset.file_name,s.presentation,b.name "
+                        + "from catalog_management.sellable_sku s join catalog_management.product_family f "
+                        + "on f.tenant_id=s.tenant_id and f.workspace_id=s.workspace_id and f.id=s.family_id "
+                        + "left join catalog_management.brand b on b.tenant_id=f.tenant_id and b.workspace_id=f.workspace_id and b.id=f.brand_id "
+                        + "left join lateral (select file_name from catalog_management.product_asset_reference pa "
+                        + "where pa.tenant_id=s.tenant_id and pa.workspace_id=s.workspace_id and pa.product_id=s.legacy_product_id "
+                        + "order by pa.sort_order,pa.id limit 1) asset on true "
+                        + "where s.tenant_id=? and s.workspace_id=? and s." + column
+                        + " in (" + placeholders + ") order by s.id",
                 (rs, row) -> new InventorySkuSnapshot(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
-                        rs.getString(4), rs.getBigDecimal(5), rs.getBigDecimal(6)), args.toArray());
+                        rs.getString(4), rs.getBigDecimal(5), rs.getBigDecimal(6), rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10)), args.toArray());
     }
 
     @Override

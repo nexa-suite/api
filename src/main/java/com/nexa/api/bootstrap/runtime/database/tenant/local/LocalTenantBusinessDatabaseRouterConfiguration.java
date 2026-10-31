@@ -35,6 +35,7 @@ import java.nio.file.Path;
                 + "'${nexa.tenant-business.buyer-wallet-recharge.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.purchase-request.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.catalog-detail-read.enabled:false}' == 'true' or "
+                + "'${nexa.tenant-business.catalog-favorites.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.catalog-management.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.payments.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.fulfillment-delivery.enabled:false}' == 'true' or "
@@ -118,4 +119,5 @@ public class LocalTenantBusinessDatabaseRouterConfiguration {
         return new TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver(
                 centralSettings, router, authority, writerDataSources);
     }
+
 }

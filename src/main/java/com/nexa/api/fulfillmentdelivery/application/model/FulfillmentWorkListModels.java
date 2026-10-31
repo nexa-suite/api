@@ -15,5 +15,13 @@ public final class FulfillmentWorkListModels {
     }
 
     public record Item(UUID fulfillmentId, UUID salesOrderId, String status, long version,
-                       UUID physicalAllocationId, long allocationVersion, int lineCount) { }
+                       UUID physicalAllocationId, long allocationVersion, int lineCount, String orderNumber) {
+        public Item(UUID fulfillmentId, UUID salesOrderId, String status, long version,
+                    UUID physicalAllocationId, long allocationVersion, int lineCount) {
+            this(fulfillmentId, salesOrderId, status, version, physicalAllocationId, allocationVersion, lineCount, null);
+        }
+        public Item withOrderNumber(String number) {
+            return new Item(fulfillmentId, salesOrderId, status, version, physicalAllocationId, allocationVersion, lineCount, number);
+        }
+    }
 }

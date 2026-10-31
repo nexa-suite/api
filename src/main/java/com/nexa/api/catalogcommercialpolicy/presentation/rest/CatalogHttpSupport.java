@@ -5,6 +5,8 @@ import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogIdempot
 import com.nexa.api.catalogcommercialpolicy.application.exception.CatalogPreconditionRequiredException;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogHttpReadPort;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.beans.factory.ObjectProvider;
@@ -41,7 +43,21 @@ public final class CatalogHttpSupport {
             Supplier<T> legacy, Function<TenantCatalogCommercialPolicyRequestPort.Request, T> tenantWork) {
         TenantCatalogCommercialPolicyRequestPort tenant = tenantRequests == null
                 ? null : tenantRequests.getIfAvailable();
-        return tenant == null ? legacy.get() : tenant.inRequest(context, tenantWork::apply);
+        if (tenant == null) throw tenantDatabaseUnavailable();
+        return tenant.inRequest(context, tenantWork::apply);
+    }
+
+    public static <T> T tenantCatalogReadRequest(CurrentAccessContext context,
+            ObjectProvider<TenantCatalogHttpReadPort> tenantReads,
+            Function<TenantCatalogHttpReadPort, T> tenantWork) {
+        TenantCatalogHttpReadPort tenant = tenantReads == null ? null : tenantReads.getIfAvailable();
+        if (tenant == null) throw tenantDatabaseUnavailable();
+        return tenantWork.apply(tenant);
+    }
+
+    private static TechnicalFailureException tenantDatabaseUnavailable() {
+        return new TechnicalFailureException(TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE,
+                "Tenant catalog database routing is unavailable");
     }
 
     public static long version(String value) {

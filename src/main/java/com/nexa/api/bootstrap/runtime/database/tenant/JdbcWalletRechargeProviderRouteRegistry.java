@@ -1,5 +1,7 @@
 package com.nexa.api.bootstrap.runtime.database.tenant;
 
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
+
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;

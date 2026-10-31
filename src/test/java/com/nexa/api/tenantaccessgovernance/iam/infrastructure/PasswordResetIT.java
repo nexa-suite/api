@@ -63,6 +63,65 @@ class PasswordResetIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void acceptsNativePortalRequestWithGenericUnknownAccountResponse() throws Exception {
+        var response = mockMvc.perform(post("/api/v1/auth/password-reset-requests")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .header("X-Nexa-Surface", "PORTAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"unknown-" + uuid() + "@example.test\",\"surface\":\"PORTAL\"}"))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(response).get("message").asText()).doesNotContain("unknown");
+    }
+
+    @Test
+    void rejectsNativePortalRequestWhoseBodyTargetsAnotherSurface() throws Exception {
+        var response = mockMvc.perform(post("/api/v1/auth/password-reset-requests")
+                        .header("X-Nexa-Client", "NATIVE")
+                        .header("X-Nexa-Surface", "PORTAL")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"unknown-" + uuid() + "@example.test\",\"surface\":\"PLATFORM\"}"))
+                .andExpect(status().isBadRequest()).andReturn();
+        assertThat(json(response).get("code").asText()).isEqualTo("INVALID_REQUEST");
+    }
+
+    @Test
+    void expiredTokenCannotChangePassword() throws Exception {
+        String originalHash = jdbc.queryForObject("select password_hash from iam.password_credential where user_id=(select id from iam.user_account where normalized_email=?)",
+                String.class, BUYER_EMAIL);
+        jdbc.update("insert into iam.password_reset_request (id,normalized_email,surface,token_hash,status,attempts,expires_at,created_at) values (gen_random_uuid(),?,'PORTAL',?,'PENDING',0,?,?)",
+                BUYER_EMAIL, sha256(RESET_TOKEN), java.sql.Timestamp.from(Instant.now().minusSeconds(60)),
+                java.sql.Timestamp.from(Instant.now().minusSeconds(1800)));
+        mockMvc.perform(post("/api/v1/auth/password-resets").header("Origin", ALLOWED_ORIGIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + RESET_TOKEN + "\",\"newPassword\":\"integration-reset-password-2026\"}"))
+                .andExpect(status().isBadRequest());
+        assertThat(jdbc.queryForObject("select password_hash from iam.password_credential where user_id=(select id from iam.user_account where normalized_email=?)",
+                String.class, BUYER_EMAIL)).isEqualTo(originalHash);
+    }
+
+    @Test
+    void persistsInvalidTokenAttemptsAndLimitsFurtherConsumption() throws Exception {
+        for (int attempt = 0; attempt < 10; attempt++) {
+            mockMvc.perform(post("/api/v1/auth/password-resets")
+                            .with(request -> { request.setRemoteAddr("198.51.100.42"); return request; })
+                            .header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"token\":\"invalid-reset-token-" + attempt
+                                    + "\",\"newPassword\":\"integration-reset-password-2026\"}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        mockMvc.perform(post("/api/v1/auth/password-resets")
+                        .with(request -> { request.setRemoteAddr("198.51.100.42"); return request; })
+                        .header("Origin", ALLOWED_ORIGIN).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"another-invalid-reset-token\",\"newPassword\":\"integration-reset-password-2026\"}"))
+                .andExpect(status().isTooManyRequests());
+
+        assertThat(jdbc.queryForObject(
+                "select max(request_count) from iam.password_reset_throttle_bucket where throttle_dimension='IP'",
+                Integer.class)).isEqualTo(11);
+    }
+
     private static String sha256(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (Exception exception) { throw new IllegalStateException(exception); }

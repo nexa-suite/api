@@ -90,6 +90,23 @@ class OpenApiCompatibilityFixtures(unittest.TestCase):
         new = document(operation(security=[{"bearerAuth": [], "refreshCookie": []}]))
         self.assertFail(old, new)
 
+    def test_h1_optional_auth_alternative_remains_compatible(self):
+        old = document(operation())
+        new = document(operation(security=[{"bearerAuth": []}, {}]))
+        self.assertPass(old, new)
+
+    def test_h2_anonymous_alternative_does_not_remove_existing_authentication(self):
+        old = document(operation(security=[{"bearerAuth": []}]))
+        new = document(operation(security=[{"bearerAuth": []}, {}]))
+        self.assertFail(old, new)
+
+    def test_h3_anonymous_alternative_does_not_remove_inherited_global_authentication(self):
+        old = document(operation())
+        old["security"] = [{"bearerAuth": []}]
+        new = document(operation(security=[{"bearerAuth": []}, {}]))
+        new["security"] = [{"bearerAuth": []}]
+        self.assertFail(old, new)
+
     def test_i_referenced_property_type_changes_fails(self):
         old = document(operation(), {"Item": item_schema(properties={
             "id": {"type": "string"}})})

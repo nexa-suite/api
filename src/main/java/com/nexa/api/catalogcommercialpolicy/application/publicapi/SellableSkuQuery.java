@@ -85,7 +85,17 @@ public interface SellableSkuQuery {
     }
 
     record InventorySkuSnapshot(UUID id, String legacyCatalogItemId, String skuCode, String status,
-                                BigDecimal temperatureMin, BigDecimal temperatureMax) { }
+                                BigDecimal temperatureMin, BigDecimal temperatureMax, String productName,
+                                String imageFileName, String presentation, String brandName) {
+        public InventorySkuSnapshot(UUID id, String legacyCatalogItemId, String skuCode, String status,
+                                    BigDecimal temperatureMin, BigDecimal temperatureMax, String productName) {
+            this(id, legacyCatalogItemId, skuCode, status, temperatureMin, temperatureMax, productName, null, null, null);
+        }
+        public InventorySkuSnapshot(UUID id, String legacyCatalogItemId, String skuCode, String status,
+                                    BigDecimal temperatureMin, BigDecimal temperatureMax) {
+            this(id, legacyCatalogItemId, skuCode, status, temperatureMin, temperatureMax, null);
+        }
+    }
 
     record SellableSkuReference(UUID skuId, UUID familyId, String familyCode, String skuCode,
                                 String legacyCatalogItemId, String familyName, String presentation,

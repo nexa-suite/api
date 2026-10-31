@@ -13,6 +13,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.io.IOException;
+import java.io.File;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +24,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,14 +40,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static final Path REPOSITORY_ROOT = Path.of("").toAbsolutePath().normalize();
 	private static final Path PROVISIONER = REPOSITORY_ROOT.resolve("ops/scripts/provision-local-tenant-database.sh");
+	private static final Path WORKER = REPOSITORY_ROOT.resolve("ops/scripts/tenant-business-database-provisioning-worker.sh");
 	private static final Path TENANT_COMPOSE = REPOSITORY_ROOT.resolve("ops/compose/tenant-business.local.compose.yml");
 	private static final String CENTRAL_PASSWORD = "tenant-e2e-central-only-test-password";
+	private static final String TENANT_DATABASE_PROVISIONER_PASSWORD = "-__7__v_-__7__v_-__7__v_-__7__v_-__7__v_-_8";
 	private static final String BOOTSTRAP_PASSWORD = "tenant-e2e-bootstrap-only-test-password";
 	private static final String MIGRATOR_PASSWORD = "tenant-e2e-migrator-only-test-password";
 	private static final String RUNTIME_PASSWORD = "tenant-e2e-runtime-only-test-password";
 	private static final String POLICY_SNAPSHOT_WRITER_PASSWORD = "tenant-e2e-policy-snapshot-writer-only-test-password";
 	private static final String WRONG_RUNTIME_PASSWORD = "tenant-e2e-wrong-runtime-only-test-password";
 	private static String apiContainerName;
+	private static String apiComposeProject;
 	private static boolean apiContainerStarted;
 	private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS = Set.of(
 			PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
@@ -56,13 +61,16 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static final PostgreSQLContainer CENTRAL = new PostgreSQLContainer("postgres:18.4-alpine")
 			.withDatabaseName("nexa_central_e2e")
 			.withUsername("nexa_central_e2e_admin")
-			.withPassword(CENTRAL_PASSWORD);
+			.withPassword(CENTRAL_PASSWORD)
+			.withLabel("com.nexa.local-provisioning.disposable-test", "true");
 
 	@BeforeAll
 	static void startApiNetworkAnchor() throws Exception {
 		apiContainerName = "nexa-modern-api-it-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+		apiComposeProject = "nexa-tenant-provisioning-it-"
+				+ UUID.randomUUID().toString().replace("-", "").substring(0, 12);
 		Process process = new ProcessBuilder("docker", "run", "--detach", "--name", apiContainerName,
-				"--label", "com.docker.compose.project=nexa-modern",
+				"--label", "com.docker.compose.project=" + apiComposeProject,
 				"--label", "com.docker.compose.service=modern-api",
 				"postgres:18.4-alpine", "sh", "-ec", "sleep infinity")
 				.redirectOutput(ProcessBuilder.Redirect.DISCARD)
@@ -74,6 +82,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		}
 		assertThat(process.exitValue()).as("the disposable API network-anchor container should start").isZero();
 		apiContainerStarted = true;
+		migrateCentral();
 	}
 
 	@AfterAll
@@ -99,7 +108,6 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		Path resolvedProvisioner = PROVISIONER.toRealPath();
 		assertThat(resolvedProvisioner).isEqualTo(
 				resolvedRepositoryRoot.resolve("ops/scripts/provision-local-tenant-database.sh"));
-		migrateCentral();
 		Path centralConfig = temporaryDirectory.resolve("central.config");
 		writePrivateFile(centralConfig, "container-id=" + CENTRAL.getContainerId() + "\n");
 		assertThat(Files.getPosixFilePermissions(centralConfig)).isEqualTo(PRIVATE_FILE_PERMISSIONS);
@@ -161,6 +169,10 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			ProcessResult failed = runProvisioner(temporaryDirectory, centralConfig, retryStateDirectory,
 					retryTenantId, retryWorkspaceId, retryPort, false);
 			assertThat(failed.exitCode()).isNotZero();
+			assertThat(redactedProvisionerDiagnostic(failed.output()))
+					.as("the seeded wrong runtime password should fail authentication after database provisioning; output tail:\n%s",
+							redactedProvisionerDiagnostic(failed.output()))
+					.contains("SQLSTATE 28P01");
 			assertThat(redact(failed.output())).contains("central binding was marked FAILED");
 			assertNoTestCredentialsInOutput(failed.output());
 			Binding failedBinding = readBinding(retryTenantId);
@@ -174,6 +186,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 
 			writePrivateFile(retryTenantDirectory.resolve("credentials.properties"), runtimeCredentials(
 					retryPort, retryTenantId, retryCredentialReference, RUNTIME_PASSWORD));
+			makeTenantRuntimeAndMigratorInherit(retryPort);
 			ProcessResult retry = runProvisioner(temporaryDirectory, centralConfig, retryStateDirectory,
 					retryTenantId, retryWorkspaceId, retryPort, true);
 			assertProvisionSucceeded(retry);
@@ -182,6 +195,10 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			assertThat(retriedBinding.version()).isEqualTo(4);
 			assertThat(retriedBinding.databaseIdentity()).isEqualTo(retryDatabaseIdentity);
 			assertThat(retriedBinding.credentialSecretReference()).isEqualTo(retryCredentialReference);
+			Binding firstTenantBinding = readBinding(readyTenantId);
+			assertThat(firstTenantBinding.lifecycleState()).isEqualTo("READY");
+			assertThat(retriedBinding.databaseIdentity()).isNotEqualTo(firstTenantBinding.databaseIdentity());
+			assertThat(retriedBinding.credentialSecretReference()).isNotEqualTo(firstTenantBinding.credentialSecretReference());
 			assertTenantScope(retryStateDirectory, retryTenantId, retryWorkspaceId, retriedBinding);
 			assertThat(volumeExists(retryVolume)).isTrue();
 
@@ -195,18 +212,157 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		}
 	}
 
+	@Test
+	@Timeout(value = 240, unit = TimeUnit.SECONDS)
+	void oneShotWorkerClaimsOnlyRequestedTaskWithDisposableState(@TempDir Path temporaryDirectory) throws Exception {
+		Files.setPosixFilePermissions(temporaryDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
+		Path centralConfig = temporaryDirectory.resolve("worker-central.config");
+		writePrivateFile(centralConfig, "container-id=" + CENTRAL.getContainerId() + "\n");
+		Path invalidStateDirectory = temporaryDirectory.resolve("worker-tenant-state-nonempty");
+		Files.createDirectory(invalidStateDirectory);
+		Files.setPosixFilePermissions(invalidStateDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
+		writePrivateFile(invalidStateDirectory.resolve("preserve-me"), "fixture\n");
+		Path dockerShimDirectory = temporaryDirectory.resolve("docker-shim");
+		Files.createDirectory(dockerShimDirectory);
+		Files.setPosixFilePermissions(dockerShimDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
+		Path dockerMarker = temporaryDirectory.resolve("docker-was-called");
+		Path dockerShim = dockerShimDirectory.resolve("docker");
+		Files.writeString(dockerShim, "#!/bin/sh\ncase \"${1:-}:${2:-}\" in\n"
+				+ "  context:show) printf '%s\\n' default ;;\n"
+				+ "  context:inspect) printf '%s\\n' unix:///var/run/docker.sock ;;\n"
+				+ "  info:) exit 0 ;;\n"
+				+ "  inspect:*) printf '%s\\n' \"$ONE_SHOT_INSPECT_RESULT\" ;;\n"
+				+ "  exec:*) printf '%s\\n' invoked > \"$ONE_SHOT_DOCKER_MARKER\"; exit 97 ;;\n"
+				+ "  *) exit 98 ;;\nesac\n",
+				StandardCharsets.UTF_8);
+		Files.setPosixFilePermissions(dockerShim, Set.of(PosixFilePermission.OWNER_READ,
+				PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE));
+		ProcessResult rejected = runWorkerOnce(temporaryDirectory, centralConfig, invalidStateDirectory,
+				UUID.randomUUID(), dockerShimDirectory, dockerMarker);
+		assertThat(rejected.exitCode()).isNotZero();
+		assertThat(redact(rejected.output())).contains("The one-shot local state directory must be empty.");
+		assertThat(Files.exists(dockerMarker)).isFalse();
+		assertThat(Files.readString(invalidStateDirectory.resolve("preserve-me"), StandardCharsets.UTF_8))
+				.isEqualTo("fixture\n");
+
+		Path composeRejectedStateDirectory = temporaryDirectory.resolve("worker-tenant-state-compose-rejected");
+		Files.createDirectory(composeRejectedStateDirectory);
+		Files.setPosixFilePermissions(composeRejectedStateDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
+		String composeInspection = CENTRAL.getContainerId()
+				+ "|running|postgres:18.4-alpine|nexa-modern|modern-postgres|true";
+		ProcessResult composeRejected = runWorkerOnce(temporaryDirectory, centralConfig,
+				composeRejectedStateDirectory, UUID.randomUUID(), dockerShimDirectory, dockerMarker, composeInspection);
+		assertThat(composeRejected.exitCode()).isNotZero();
+		assertThat(redact(composeRejected.output())).contains("One-shot Tenant provisioning refuses Compose-managed PostgreSQL containers.");
+		assertThat(Files.exists(dockerMarker)).isFalse();
+
+		Path unmarkedStateDirectory = temporaryDirectory.resolve("worker-tenant-state-unmarked");
+		Files.createDirectory(unmarkedStateDirectory);
+		Files.setPosixFilePermissions(unmarkedStateDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
+		String unmarkedInspection = CENTRAL.getContainerId() + "|running|postgres:18.4-alpine|||false";
+		ProcessResult unmarkedRejected = runWorkerOnce(temporaryDirectory, centralConfig,
+				unmarkedStateDirectory, UUID.randomUUID(), dockerShimDirectory, dockerMarker, unmarkedInspection);
+		assertThat(unmarkedRejected.exitCode()).isNotZero();
+		assertThat(redact(unmarkedRejected.output()).toLowerCase())
+				.contains("explicitly disposable");
+		assertThat(Files.exists(dockerMarker)).isFalse();
+
+		Path localStateDirectory = temporaryDirectory.resolve("worker-tenant-state");
+		Files.createDirectory(localStateDirectory);
+		Files.setPosixFilePermissions(localStateDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
+
+		UUID earlierTenantId = UUID.randomUUID();
+		UUID earlierWorkspaceId = UUID.randomUUID();
+		UUID earlierTaskId = UUID.randomUUID();
+		seedTenantAndWorkspace(earlierTenantId, earlierWorkspaceId);
+		insertProvisioningTask(earlierTaskId, earlierTenantId, earlierWorkspaceId,
+				OffsetDateTime.now().minusHours(1).withNano(0));
+
+		UUID selectedTenantId = UUID.randomUUID();
+		UUID selectedWorkspaceId = UUID.randomUUID();
+		UUID selectedTaskId = UUID.randomUUID();
+		UUID selectedAnchorTaskId = UUID.randomUUID();
+		seedTenantAndWorkspace(selectedTenantId, selectedWorkspaceId);
+		OffsetDateTime selectedCreatedAt = OffsetDateTime.now().withNano(0);
+		insertProvisioningTask(selectedTaskId, selectedTenantId, selectedWorkspaceId, selectedCreatedAt);
+		insertWorkspaceAnchorTask(selectedAnchorTaskId, selectedTenantId, selectedWorkspaceId, selectedCreatedAt);
+		String selectedVolume = volumeName(selectedTenantId);
+		assertThat(volumeExists(selectedVolume)).isFalse();
+		try {
+			ProcessResult worker = runWorkerOnce(temporaryDirectory, centralConfig, localStateDirectory, selectedTaskId);
+			assertThat(worker.exitCode()).as("one-shot worker output: %s", redact(worker.output())).isZero();
+			assertNoTestCredentialsInOutput(worker.output());
+			assertThat(redact(worker.output())).contains("Provisioning task " + selectedTaskId + " reached READY");
+
+			ProvisioningTask selected = readProvisioningTask(selectedTaskId);
+			assertThat(selected.status()).isEqualTo("READY");
+			assertThat(selected.attemptCount()).isEqualTo(1);
+			assertThat(selected.databasePort()).isNotNull();
+			assertThat(selected.claimToken()).isNull();
+			assertThat(readBinding(selectedTenantId).lifecycleState()).isEqualTo("READY");
+
+			ProvisioningTask earlier = readProvisioningTask(earlierTaskId);
+			assertThat(earlier.status()).isEqualTo("PENDING");
+			assertThat(earlier.attemptCount()).isZero();
+			assertThat(earlier.databasePort()).isNull();
+			assertThat(earlier.claimToken()).isNull();
+			WorkspaceAnchorTask anchor = readWorkspaceAnchorTask(selectedAnchorTaskId);
+			assertThat(anchor.status()).isEqualTo("PENDING");
+			assertThat(anchor.attemptCount()).isZero();
+			assertThat(anchor.claimToken()).isNull();
+			assertThat(Files.getPosixFilePermissions(centralConfig)).isEqualTo(PRIVATE_FILE_PERMISSIONS);
+			assertThat(readPrivateValue(centralConfig, "container-id")).isEqualTo(CENTRAL.getContainerId());
+			assertThat(Files.exists(localStateDirectory.resolve("worker.pid"))).isFalse();
+			assertThat(Files.exists(localStateDirectory.resolve("worker.ready"))).isFalse();
+			assertThat(volumeExists(selectedVolume)).isTrue();
+		} finally {
+			stopTenantDatabase(localStateDirectory, selectedTenantId);
+		}
+	}
+
 	private static void migrateCentral() {
+		try (Connection connection = centralConnection(); var statement = connection.createStatement()) {
+			statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '"
+					+ RUNTIME_PASSWORD + "'");
+			statement.execute("CREATE ROLE nexa_migrator LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '"
+					+ MIGRATOR_PASSWORD + "'");
+			statement.execute("CREATE ROLE nexa_tenant_database_provisioner LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '"
+					+ TENANT_DATABASE_PROVISIONER_PASSWORD + "'");
+		} catch (Exception exception) {
+			throw new IllegalStateException("Could not create the disposable Tenant database provisioner role", exception);
+		}
 		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
-				.locations("classpath:db/migration").target("162").load().migrate();
+				.locations("classpath:db/migration").target("168").load().migrate();
+		try (Connection connection = centralConnection(); var statement = connection.createStatement()) {
+			statement.execute(Files.readString(REPOSITORY_ROOT.resolve("ops/database/prepare-v169-tenant-provisioner.sql")));
+		} catch (Exception exception) {
+			throw new IllegalStateException("Could not provision exact V169 scope-helper grants", exception);
+		}
+		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), "nexa_migrator", MIGRATOR_PASSWORD)
+				.locations("classpath:db/migration").target("169").load().migrate();
 		try (Connection connection = centralConnection();			 PreparedStatement statement = connection.prepareStatement(
 					"SELECT max(version::INTEGER) FROM flyway_schema_history WHERE success = TRUE");
 				 ResultSet result = statement.executeQuery()) {
-			if (!result.next() || result.getInt(1) != 162) {
-				throw new IllegalStateException("The disposable central database did not reach V162");
+			if (!result.next() || result.getInt(1) != 169) {
+				throw new IllegalStateException("The disposable central database did not reach V169");
 			}
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not verify disposable central migration version", exception);
 		}
+			try (Connection connection = centralConnection();
+				 PreparedStatement statement = connection.prepareStatement("""
+						 SELECT pg_get_userbyid(p.proowner), r.rolsuper, r.rolbypassrls
+						 FROM pg_proc p JOIN pg_roles r ON r.rolname='nexa_migrator'
+						 WHERE p.oid='tenant_management.provisioner_scope_exists(uuid, uuid)'::regprocedure
+						 """);
+				 ResultSet result = statement.executeQuery()) {
+				if (!result.next() || !"nexa_migrator".equals(result.getString(1))
+						|| result.getBoolean(2) || result.getBoolean(3)) {
+					throw new IllegalStateException("The central scope helper is not owned by a restricted migration role");
+				}
+			} catch (Exception exception) {
+				throw new IllegalStateException("Could not verify central scope helper owner", exception);
+			}
 	}
 
 	private static void seedTenantAndWorkspace(UUID tenantId, UUID workspaceId) throws Exception {
@@ -248,6 +404,76 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			statement.setObject(2, databaseIdentity);
 			statement.setString(3, credentialReference);
 			statement.executeUpdate();
+		}
+	}
+
+	private static void insertProvisioningTask(UUID taskId, UUID tenantId, UUID workspaceId, OffsetDateTime createdAt)
+			throws Exception {
+		try (Connection connection = centralConnection();
+				 PreparedStatement statement = connection.prepareStatement("""
+					 INSERT INTO tenant_management.tenant_business_database_provisioning_task
+					     (task_id,tenant_id,workspace_id,created_at,updated_at)
+					 VALUES (?,?,?,?,?)
+					 """)) {
+			statement.setObject(1, taskId);
+			statement.setObject(2, tenantId);
+			statement.setObject(3, workspaceId);
+			statement.setObject(4, createdAt);
+			statement.setObject(5, createdAt);
+			statement.executeUpdate();
+		}
+	}
+
+	private static void insertWorkspaceAnchorTask(UUID taskId, UUID tenantId, UUID workspaceId,
+			OffsetDateTime createdAt) throws Exception {
+		try (Connection connection = centralConnection();
+				 PreparedStatement statement = connection.prepareStatement("""
+					 INSERT INTO tenant_management.tenant_business_database_workspace_anchor_task
+					     (task_id,tenant_id,workspace_id,created_at,updated_at)
+					 VALUES (?,?,?,?,?)
+					 """)) {
+			statement.setObject(1, taskId);
+			statement.setObject(2, tenantId);
+			statement.setObject(3, workspaceId);
+			statement.setObject(4, createdAt);
+			statement.setObject(5, createdAt);
+			statement.executeUpdate();
+		}
+	}
+
+	private static ProvisioningTask readProvisioningTask(UUID taskId) throws Exception {
+		try (Connection connection = centralConnection();
+				 PreparedStatement statement = connection.prepareStatement("""
+					 SELECT status,attempt_count,database_port,claim_token
+					 FROM tenant_management.tenant_business_database_provisioning_task WHERE task_id=?
+					 """)) {
+			statement.setObject(1, taskId);
+			try (ResultSet result = statement.executeQuery()) {
+				if (!result.next()) throw new IllegalStateException("The provisioning task was not persisted");
+				int portValue = result.getInt("database_port");
+				Integer port = result.wasNull() ? null : portValue;
+				ProvisioningTask task = new ProvisioningTask(result.getString("status"),
+						result.getInt("attempt_count"), port, result.getObject("claim_token", UUID.class));
+				if (result.next()) throw new IllegalStateException("The provisioning task id is not unique");
+				return task;
+			}
+		}
+	}
+
+	private static WorkspaceAnchorTask readWorkspaceAnchorTask(UUID taskId) throws Exception {
+		try (Connection connection = centralConnection();
+				 PreparedStatement statement = connection.prepareStatement("""
+					 SELECT status,attempt_count,claim_token
+					 FROM tenant_management.tenant_business_database_workspace_anchor_task WHERE task_id=?
+					 """)) {
+			statement.setObject(1, taskId);
+			try (ResultSet result = statement.executeQuery()) {
+				if (!result.next()) throw new IllegalStateException("The Workspace anchor task was not persisted");
+				WorkspaceAnchorTask task = new WorkspaceAnchorTask(result.getString("status"),
+						result.getInt("attempt_count"), result.getObject("claim_token", UUID.class));
+				if (result.next()) throw new IllegalStateException("The Workspace anchor task id is not unique");
+				return task;
+			}
 		}
 	}
 
@@ -329,10 +555,27 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 				assertThat(result.getObject(2, UUID.class)).isEqualTo(workspaceId);
 				assertThat(result.next()).isFalse();
 			}
+			try (PreparedStatement roleInheritance = connection.prepareStatement("""
+					SELECT COUNT(*)=2 AND bool_and(NOT rolinherit)
+					FROM pg_roles WHERE rolname IN ('nexa_runtime', 'nexa_migrator')
+					""");
+				 ResultSet result = roleInheritance.executeQuery()) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getBoolean(1)).as("Tenant runtime and migrator roles must be NOINHERIT").isTrue();
+			}
 		}
 		assertThat(Files.getPosixFilePermissions(tenantDirectory.resolve("credentials.properties")))
 				.isEqualTo(PRIVATE_FILE_PERMISSIONS);
 		assertPolicySnapshotWriterCredentials(stateRoot, tenantId, workspaceId, binding);
+	}
+
+	private static void makeTenantRuntimeAndMigratorInherit(int port) throws Exception {
+		try (Connection connection = DriverManager.getConnection(jdbcUrl(port), "nexa_tenant_bootstrap_admin",
+				BOOTSTRAP_PASSWORD);
+			 Statement statement = connection.createStatement()) {
+			statement.execute("ALTER ROLE nexa_runtime INHERIT");
+			statement.execute("ALTER ROLE nexa_migrator INHERIT");
+		}
 	}
 
 	private static void assertPolicySnapshotWriterCredentials(Path stateRoot, UUID tenantId, UUID workspaceId,
@@ -430,11 +673,60 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		if (retryFailed) command.add("--retry-failed");
 		ProcessBuilder processBuilder = new ProcessBuilder(command).directory(REPOSITORY_ROOT.toFile())
 				.redirectErrorStream(true).redirectOutput(log.toFile());
+		processBuilder.environment().put("NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD", TENANT_DATABASE_PROVISIONER_PASSWORD);
 		processBuilder.environment().put("NEXA_LOCAL_API_CONTAINER_NAME", apiContainerName);
+		processBuilder.environment().put("NEXA_LOCAL_API_COMPOSE_PROJECT", apiComposeProject);
 		Process process = processBuilder.start();
 		if (!process.waitFor(240, TimeUnit.SECONDS)) {
 			process.destroyForcibly();
 			throw new IllegalStateException("The local Tenant provisioner did not finish within four minutes");
+		}
+		String output = Files.readString(log, StandardCharsets.UTF_8);
+		assertNoTestCredentialsInOutput(output);
+		return new ProcessResult(process.exitValue(), output);
+	}
+
+	private static ProcessResult runWorkerOnce(Path temporaryDirectory, Path centralConfig, Path localStateDirectory,
+			UUID taskId) throws Exception {
+		return runWorkerOnce(temporaryDirectory, centralConfig, localStateDirectory, taskId, null, null);
+	}
+
+	private static ProcessResult runWorkerOnce(Path temporaryDirectory, Path centralConfig, Path localStateDirectory,
+			UUID taskId, Path dockerShimDirectory, Path dockerMarker) throws Exception {
+		return runWorkerOnce(temporaryDirectory, centralConfig, localStateDirectory, taskId,
+				dockerShimDirectory, dockerMarker, null);
+	}
+
+	private static ProcessResult runWorkerOnce(Path temporaryDirectory, Path centralConfig, Path localStateDirectory,
+			UUID taskId, Path dockerShimDirectory, Path dockerMarker, String dockerInspection) throws Exception {
+		Path log = temporaryDirectory.resolve("worker-once-" + taskId + ".log");
+		writePrivateFile(log, "");
+		List<String> command = List.of("bash", WORKER.toString(), "--once", "--task-id", taskId.toString(),
+				"--central-configfile", centralConfig.toString(), "--local-state-dir", localStateDirectory.toString());
+		ProcessBuilder processBuilder = new ProcessBuilder(command).directory(REPOSITORY_ROOT.toFile())
+				.redirectErrorStream(true).redirectOutput(log.toFile());
+		processBuilder.environment().put("NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD", TENANT_DATABASE_PROVISIONER_PASSWORD);
+		processBuilder.environment().put("NEXA_LOCAL_API_CONTAINER_NAME", apiContainerName);
+		processBuilder.environment().put("NEXA_LOCAL_API_COMPOSE_PROJECT", apiComposeProject);
+		if (dockerShimDirectory != null && dockerMarker != null) {
+			String path = processBuilder.environment().getOrDefault("PATH", "");
+			processBuilder.environment().put("PATH", dockerShimDirectory + File.pathSeparator + path);
+			processBuilder.environment().put("ONE_SHOT_DOCKER_MARKER", dockerMarker.toString());
+			processBuilder.environment().put("ONE_SHOT_INSPECT_RESULT", dockerInspection == null ? "" : dockerInspection);
+		}
+		Process process = processBuilder.start();
+		if (!process.waitFor(180, TimeUnit.SECONDS)) {
+			List<ProcessHandle> descendants = process.toHandle().descendants().toList();
+			process.destroy();
+			process.waitFor(15, TimeUnit.SECONDS);
+			descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroy);
+			for (int attempt = 0; attempt < 50 && descendants.stream().anyMatch(ProcessHandle::isAlive); attempt++) {
+				Thread.sleep(100);
+			}
+			descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
+			if (process.isAlive()) process.destroyForcibly();
+			process.waitFor(10, TimeUnit.SECONDS);
+			throw new IllegalStateException("The one-shot Tenant provisioning worker timed out and its process tree was stopped");
 		}
 		String output = Files.readString(log, StandardCharsets.UTF_8);
 		assertNoTestCredentialsInOutput(output);
@@ -447,6 +739,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 
 	private static void assertNoTestCredentialsInOutput(String output) {
 		assertThat(output.contains(CENTRAL_PASSWORD)).isFalse();
+		assertThat(output.contains(TENANT_DATABASE_PROVISIONER_PASSWORD)).isFalse();
 		assertThat(output.contains(BOOTSTRAP_PASSWORD)).isFalse();
 		assertThat(output.contains(MIGRATOR_PASSWORD)).isFalse();
 		assertThat(output.contains(RUNTIME_PASSWORD)).isFalse();
@@ -465,6 +758,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 
 	private static String redact(String output) {
 		return output.replace(CENTRAL_PASSWORD, "[redacted]")
+				.replace(TENANT_DATABASE_PROVISIONER_PASSWORD, "[redacted]")
 				.replace(BOOTSTRAP_PASSWORD, "[redacted]")
 				.replace(MIGRATOR_PASSWORD, "[redacted]")
 				.replace(RUNTIME_PASSWORD, "[redacted]")
@@ -515,16 +809,117 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static void stopTenantDatabase(Path stateRoot, UUID tenantId) throws Exception {
 		Path composeEnvironment = stateRoot.resolve(tenantId.toString()).resolve("compose.env");
 		if (!Files.isRegularFile(composeEnvironment)) return;
-		Process process = new ProcessBuilder("docker", "compose", "--project-name", "nexa-tenant-db-" + tenantId,
+		disconnectTestApiAnchorFromTenantNetwork(stateRoot, tenantId);
+		String projectName = "nexa-tenant-db-" + tenantId;
+		ProcessResult cleanup = runDockerCommand(stateRoot, List.of("compose", "--project-name", projectName,
 				"--env-file", composeEnvironment.toString(), "-f", TENANT_COMPOSE.toString(), "down", "-v",
-				"--remove-orphans").redirectOutput(ProcessBuilder.Redirect.DISCARD)
-				.redirectError(ProcessBuilder.Redirect.DISCARD).start();
-		if (!process.waitFor(60, TimeUnit.SECONDS)) {
-			process.destroyForcibly();
-			throw new IllegalStateException("Disposable Tenant Compose cleanup timed out");
+				"--remove-orphans"), 60);
+		boolean volumeRemains = volumeExists(volumeName(tenantId));
+		boolean networkRemains = dockerNetworkExists(stateRoot, tenantNetworkName(tenantId));
+		if (cleanup.exitCode() != 0 || volumeRemains || networkRemains) {
+			String networkDiagnostic = networkRemains
+					? inspectTenantNetworkEndpoints(stateRoot, tenantNetworkName(tenantId)) : "absent";
+			throw new IllegalStateException("Disposable Tenant Compose cleanup was incomplete for " + tenantId
+					+ " (compose exit=" + cleanup.exitCode() + ", volume remains=" + volumeRemains
+					+ ", network remains=" + networkRemains + ", remaining endpoints="
+					+ redactedProvisionerDiagnostic(networkDiagnostic) + ", compose output="
+					+ redactedProvisionerDiagnostic(cleanup.output()) + ")");
+	}
+	}
+
+	private static void disconnectTestApiAnchorFromTenantNetwork(Path diagnosticDirectory, UUID tenantId)
+			throws Exception {
+		String networkName = tenantNetworkName(tenantId);
+		if (!dockerNetworkExists(diagnosticDirectory, networkName)) return;
+
+		String expectedProject = "nexa-tenant-db-" + tenantId;
+		ProcessResult networkInspection = runDockerCommand(diagnosticDirectory, List.of("network", "inspect",
+				"--format", "{{.Id}}|{{.Driver}}|{{index .Labels \"com.docker.compose.project\"}}|"
+						+ "{{index .Labels \"com.docker.compose.network\"}}", networkName), 30);
+		if (networkInspection.exitCode() != 0) {
+			throw new IllegalStateException("Could not verify the disposable Tenant test network " + networkName
+					+ " before cleanup: " + redactedProvisionerDiagnostic(networkInspection.output()));
 		}
-		if (process.exitValue() != 0 || volumeExists(volumeName(tenantId))) {
-			throw new IllegalStateException("Disposable Tenant Compose resources were not removed");
+		String[] networkIdentity = networkInspection.output().strip().split("\\|", -1);
+		if (networkIdentity.length != 4 || !networkIdentity[1].equals("bridge")
+				|| !networkIdentity[2].equals(expectedProject) || !networkIdentity[3].equals("tenant-database")) {
+			throw new IllegalStateException("Refusing to disconnect the test API anchor from an unverified Tenant network "
+					+ networkName + " (expected project=" + expectedProject + ", network=tenant-database, bridge; actual="
+					+ redactedProvisionerDiagnostic(networkInspection.output()) + ")");
+		}
+
+		if (apiContainerName == null || apiComposeProject == null) return;
+		ProcessResult apiInspection = runDockerCommand(diagnosticDirectory, List.of("inspect", "--format",
+				"{{.Id}}|{{index .Config.Labels \"com.docker.compose.service\"}}|"
+						+ "{{index .Config.Labels \"com.docker.compose.project\"}}|"
+						+ "{{with index .NetworkSettings.Networks \"" + networkName + "\"}}{{.NetworkID}}{{end}}",
+				apiContainerName), 30);
+		if (apiInspection.exitCode() != 0) {
+			throw new IllegalStateException("Could not verify the disposable API anchor before Tenant test cleanup: "
+					+ redactedProvisionerDiagnostic(apiInspection.output()));
+		}
+		String[] apiIdentity = apiInspection.output().strip().split("\\|", -1);
+		if (apiIdentity.length != 4 || !apiIdentity[1].equals("modern-api")
+				|| !apiIdentity[2].equals(apiComposeProject)) {
+			throw new IllegalStateException("Refusing to disconnect a container that is not this test's API anchor "
+					+ apiContainerName + " (expected Compose project=" + apiComposeProject + ", service=modern-api; actual="
+					+ redactedProvisionerDiagnostic(apiInspection.output()) + ")");
+		}
+		String networkId = networkIdentity[0];
+		String attachedNetworkId = apiIdentity[3];
+		if (attachedNetworkId.isEmpty()) return;
+		if (!attachedNetworkId.equals(networkId)) {
+			throw new IllegalStateException("The disposable API anchor reports an unexpected network identity for "
+					+ networkName + "; refusing to alter Docker networking.");
+		}
+
+		ProcessResult disconnect = runDockerCommand(diagnosticDirectory,
+				List.of("network", "disconnect", "--force", networkName, apiContainerName), 30);
+		if (disconnect.exitCode() != 0) {
+			throw new IllegalStateException("Could not disconnect this test's API anchor from " + networkName + ": "
+					+ redactedProvisionerDiagnostic(disconnect.output()));
+		}
+	}
+
+	private static boolean dockerNetworkExists(Path diagnosticDirectory, String networkName) throws Exception {
+		ProcessResult networks = runDockerCommand(diagnosticDirectory, List.of("network", "ls", "--format", "{{.Name}}"),
+				30);
+		if (networks.exitCode() != 0) {
+			throw new IllegalStateException("Could not inspect Docker networks during disposable Tenant cleanup: "
+					+ redactedProvisionerDiagnostic(networks.output()));
+		}
+		return networks.output().lines().map(String::strip).anyMatch(networkName::equals);
+	}
+
+	private static String inspectTenantNetworkEndpoints(Path diagnosticDirectory, String networkName) throws Exception {
+		ProcessResult inspection = runDockerCommand(diagnosticDirectory, List.of("network", "inspect", "--format",
+				"{{range $id, $container := .Containers}}{{$container.Name}} {{end}}", networkName), 30);
+		return inspection.exitCode() == 0 ? inspection.output().strip()
+				: "network inspection failed (exit=" + inspection.exitCode() + ")";
+	}
+
+	private static String tenantNetworkName(UUID tenantId) {
+		return "nexa-tenant-business-" + tenantId;
+	}
+
+	private static ProcessResult runDockerCommand(Path diagnosticDirectory, List<String> arguments, long timeoutSeconds)
+			throws Exception {
+		Path outputFile = diagnosticDirectory.resolve(".docker-cleanup-" + UUID.randomUUID() + ".log");
+		writePrivateFile(outputFile, "");
+		List<String> command = new ArrayList<>();
+		command.add("docker");
+		command.addAll(arguments);
+		try {
+			Process process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(outputFile.toFile())
+					.start();
+			if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+				process.destroy();
+				if (!process.waitFor(5, TimeUnit.SECONDS)) process.destroyForcibly();
+				throw new IllegalStateException("Docker command timed out during disposable Tenant cleanup");
+			}
+			return new ProcessResult(process.exitValue(), Files.readString(outputFile, StandardCharsets.UTF_8));
+		} finally {
+			Files.deleteIfExists(outputFile);
 		}
 	}
 
@@ -547,5 +942,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 
 	private record Binding(UUID databaseIdentity, String credentialSecretReference, String lifecycleState,
 			long version, String verifiedSchemaManifestSha256) { }
+	private record ProvisioningTask(String status, int attemptCount, Integer databasePort, UUID claimToken) { }
+	private record WorkspaceAnchorTask(String status, int attemptCount, UUID claimToken) { }
 	private record ProcessResult(int exitCode, String output) { }
 }

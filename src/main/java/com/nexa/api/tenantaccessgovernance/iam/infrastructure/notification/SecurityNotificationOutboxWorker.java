@@ -1,5 +1,6 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure.notification;
 
+import com.nexa.api.tenantaccessgovernance.iam.application.model.PasswordResetDeliveryChannel;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.PasswordResetDeliveryPort;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -45,9 +46,10 @@ public final class SecurityNotificationOutboxWorker {
             try {
                 String payload = outbox.decrypt(row.payload(), row.keyVersion());
                 if ("PASSWORD_RESET".equals(row.type())) {
-                    String token = payload.substring(payload.indexOf("token=") + 6, payload.indexOf('\n'));
-                    String expires = payload.substring(payload.indexOf("expiresAt=") + 10);
-                    delivery.sendReset(row.recipient(), row.surface(), token, Instant.parse(expires), row.deliveryKey());
+                    PasswordResetDeliveryChannel channel = resetChannel(payload);
+                    String token = requiredValue(payload, "token=");
+                    String expires = requiredValue(payload, "expiresAt=");
+                    delivery.sendReset(row.recipient(), row.surface(), channel, token, Instant.parse(expires), row.deliveryKey());
                 } else if ("PASSWORD_CHANGED".equals(row.type())) {
                     delivery.sendPasswordChanged(row.recipient(), row.surface(), row.deliveryKey());
                 } else if ("ORGANIZATION_INVITATION".equals(row.type())) {
@@ -64,6 +66,24 @@ public final class SecurityNotificationOutboxWorker {
 						status, status, attempts, attempts, exception.getClass().getSimpleName(), row.id(), row.claimToken());
             }
         }
+    }
+
+    private static java.util.Optional<String> value(String payload, String prefix) {
+        int start = payload.indexOf(prefix);
+        if (start < 0) return java.util.Optional.empty();
+        start += prefix.length();
+        int end = payload.indexOf('\n', start);
+        return java.util.Optional.of(end < 0 ? payload.substring(start) : payload.substring(start, end));
+    }
+
+    static PasswordResetDeliveryChannel resetChannel(String payload) {
+        return value(payload, "channel=").map(PasswordResetDeliveryChannel::valueOf)
+                .orElse(PasswordResetDeliveryChannel.WEB);
+    }
+
+    private static String requiredValue(String payload, String prefix) {
+        return value(payload, prefix).filter(value -> !value.isBlank())
+                .orElseThrow(() -> new IllegalStateException("Security notification payload is incomplete"));
     }
 
     private record Row(UUID id, String type, String recipient, String surface, String payload, String keyVersion,

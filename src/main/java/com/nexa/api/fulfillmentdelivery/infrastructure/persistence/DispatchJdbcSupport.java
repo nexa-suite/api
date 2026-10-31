@@ -33,6 +33,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -94,6 +95,30 @@ abstract class DispatchJdbcSupport {
                 clientAccountId == null ? null : uuid(clientAccountId), false);
         if (row == null) throw error("RESOURCE_NOT_FOUND", true);
         return view(row, clientAccountId != null);
+    }
+
+    protected LogisticsOperationsModels.DispatchView detailViewForWarehouses(
+            String tenantId, String workspaceId, String clientAccountId, String dispatchId,
+            Set<UUID> grantedWarehouseIds) {
+        UUID tenant = uuid(tenantId);
+        UUID workspace = uuid(workspaceId);
+        UUID dispatch = uuid(dispatchId);
+        DispatchRow row = load(tenant, workspace, dispatch,
+                clientAccountId == null ? null : uuid(clientAccountId), false);
+        if (row == null) throw error("RESOURCE_NOT_FOUND", true);
+        // Buyer reads use server-resolved Client Account scope; all other reads require Warehouse grants.
+        if (clientAccountId == null && !warehouseVisible(tenant, workspace, row.reservationId(), row.salesOrderId(),
+                grantedWarehouseIds)) throw error("RESOURCE_NOT_FOUND", true);
+        return view(row, clientAccountId != null);
+    }
+
+    protected boolean warehouseVisible(UUID tenant, UUID workspace, UUID reservationId, UUID salesOrderId,
+                                       Set<UUID> grantedWarehouseIds) {
+        if (reservationId == null || salesOrderId == null || grantedWarehouseIds == null
+                || grantedWarehouseIds.isEmpty()) return false;
+        var reference = new WarehouseLogisticsFulfillmentPort.ReservationOrderReference(reservationId, salesOrderId);
+        return warehouseFulfillment.visibleReservationReferences(tenant.toString(), workspace.toString(),
+                Set.of(reference), grantedWarehouseIds).contains(reference);
     }
 
     protected String selectSql() {
