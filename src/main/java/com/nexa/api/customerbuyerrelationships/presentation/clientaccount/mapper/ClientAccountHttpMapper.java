@@ -36,10 +36,10 @@ public class ClientAccountHttpMapper {
 				view.contactPerson(), view.contactEmail(), view.phone(), view.deliveryProfile(),
 				view.paymentCondition(), view.status(), view.buyerMembershipId(), view.version(), view.accountType());
 	}
-	public BuyerClientAccountSelfResponse buyerSelf(ClientAccountView view, String membershipId) {
+	public BuyerClientAccountSelfResponse buyerSelf(ClientAccountView view) {
 		return new BuyerClientAccountSelfResponse(view.id(), view.code(), view.businessName(), view.commercialName(),
-				view.countryCode(), view.taxType(), view.taxValue(), view.segment(), null, null, null,
-				view.deliveryProfile(), view.paymentCondition(), view.status(), membershipId, view.version(),
+				view.countryCode(), view.taxType(), view.taxValue(), view.segment(), view.deliveryProfile(),
+				view.paymentCondition(), view.status(), view.version(),
 				view.accountType());
 	}
 	public ClientAccountSummaryResponse summary(ClientAccountView view) { return new ClientAccountSummaryResponse(view.id(), view.code(), view.businessName(), view.commercialName(), view.segment(), view.status(), view.buyerMembershipId(), view.version(), view.accountType(), view.salesOwnerMembershipId()); }

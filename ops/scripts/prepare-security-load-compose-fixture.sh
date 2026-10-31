@@ -172,7 +172,7 @@ central_psql() {
 		trap "exit 143" TERM
 		chmod 600 "$passfile" || exit 70
 		IFS= read -r password || exit 70
-		case "$password" in ''|*[!A-Fa-f0-9]*) exit 70 ;; esac
+		case "$password" in *[!A-Fa-f0-9]*) exit 70 ;; esac
 		[ "${#password}" -eq 64 ] || exit 70
 		printf "localhost:*:*:nexa_runtime:%s\\n" "$password" > "$passfile" || exit 70
 		unset password

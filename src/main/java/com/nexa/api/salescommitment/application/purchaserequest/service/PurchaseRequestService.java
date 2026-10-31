@@ -292,7 +292,6 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PaymentOption paymentValue = PaymentOption.from(paymentOption);
 		if (paymentValue == PaymentOption.WALLET) requireWalletTenderBuyer(context);
 		new RequestedDeliveryDate(deliveryDate);
-		DELIVERY_LEAD_POLICY.validate(deliveryDate, clock);
 		new DeliveryProfileSnapshot(deliveryProfile);
 		new RequestComment(comment);
 

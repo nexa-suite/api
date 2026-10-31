@@ -44,16 +44,14 @@ class ClientAccountHttpMapperTests {
 				"ACTIVE", "second-membership-id", 5, ClientAccountType.BUSINESS);
 		var mapper = new ClientAccountHttpMapper();
 
-		for (var entry : java.util.List.of(
-				java.util.Map.entry(firstBuyerView, "first-membership-id"),
-				java.util.Map.entry(secondBuyerView, "second-membership-id"))) {
-			var response = JSON.readTree(JSON.writeValueAsString(mapper.buyerSelf(entry.getKey(), entry.getValue())));
+		for (var view : java.util.List.of(firstBuyerView, secondBuyerView)) {
+			var response = JSON.readTree(JSON.writeValueAsString(mapper.buyerSelf(view)));
 			assertThat(response.path("id").asText()).isEqualTo("account-id");
 			assertThat(response.path("businessName").asText()).isEqualTo("Buyer Co");
 			assertThat(response.has("contactPerson")).isFalse();
 			assertThat(response.has("contactEmail")).isFalse();
 			assertThat(response.has("phone")).isFalse();
-			assertThat(response.path("buyerMembershipId").asText()).isEqualTo(entry.getValue());
+			assertThat(response.has("buyerMembershipId")).isFalse();
 			assertThat(response.path("accountType").asText()).isEqualTo("BUSINESS");
 		}
 	}
