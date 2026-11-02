@@ -19,6 +19,9 @@ service topology or runtime behavior.
 The opt-in per-Tenant local business database workflow is documented in
 [Local Tenant business database provisioning](./tenant-business-database-local.md).
 
+The disabled, incomplete cloud routing foundation and its remaining gates are
+documented in [Cloud Tenant database routing foundation](./tenant-business-database-cloud.md).
+
 ## Academic Render and Neon deployment
 
 The Render service uses GitHub `main`, the Free plan and the existing Neon

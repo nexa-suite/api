@@ -1,0 +1,6 @@
+nexa:
+  tenant-business:
+    cloud-router:
+      enabled: ${NEXA_TENANT_BUSINESS_CLOUD_ROUTER_ENABLED:false}
+      runtime-credentials-directory: ${NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_CREDENTIALS_DIRECTORY:}
+      policy-writer-credentials-directory: ${NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_CREDENTIALS_DIRECTORY:}
