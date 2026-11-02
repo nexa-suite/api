@@ -565,6 +565,14 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions")).isTrue();
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions/{subscriptionId}/disable")).isTrue();
         assertThat(document.get("paths").has("/api/v1/notifications/push-subscriptions/{subscriptionId}")).isTrue();
+        assertSchemaRef(document, "/api/v1/catalog/pricing-preview", "post", "requestBody",
+                "#/components/schemas/CatalogPricingPreviewRequest");
+        assertThat(document.at("/components/schemas/CatalogPricingPreviewRequest/properties/items/items/$ref")
+                .asText()).isEqualTo("#/components/schemas/Item");
+        assertThat(document.at("/components/schemas/CatalogPricingPreviewRequest/properties/asOf/format")
+                .asText()).isEqualTo("date-time");
+        assertThat(document.at("/components/schemas/CatalogPricingPreviewRequest/properties").has("requestType"))
+                .isFalse();
         assertSchemaRef(document, "/api/v1/public/contact-requests", "post", "requestBody",
                 "#/components/schemas/Request");
         assertThat(document.at("/components/schemas/Request/properties").has("requestType")).isTrue();

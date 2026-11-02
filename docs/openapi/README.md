@@ -20,7 +20,7 @@ El test `OpenApiContractIT` compara `/v3/api-docs` con snapshot. Si runtime camb
 
 La compatibilidad de operaciones, parámetros, respuestas y schemas se valida en CI con `.github/scripts/check-openapi-compatibility.py` contra snapshot de rama base.
 
-El snapshot heredado contiene una colisión previa en `CatalogPricingPreviewController.Request`: `/api/v1/catalog/pricing-preview` referencia el schema genérico `Request`, cuyos campos publicados corresponden a contacto público (`requestType`, `name`, `email`, `companyName`, `message`) y no al DTO de precios (`items`, `asOf`). Este desacuerdo ya existe en la rama base. Se conserva el contrato publicado y se documenta como deuda del snapshot; corregirlo requiere una decisión explícita de compatibilidad.
+La rama candidata configura la distinción de la colisión previa: `/api/v1/catalog/pricing-preview` usa `CatalogPricingPreviewRequest` (`items`, `asOf`) y `/api/v1/public/contact-requests` conserva el schema `Request` de contacto público. El snapshot diagnóstico aún refleja la referencia heredada y debe regenerarse desde runtime en CI. Esta corrección no aprueba automáticamente el impacto de compatibilidad frente a snapshots publicados; requiere revisión explícita conforme a la política de releases.
 
 El contrato de instrucciones operativas Driver/Dispatch y sus límites de autorización está descrito en [`delivery-instructions.md`](./delivery-instructions.md).
 
