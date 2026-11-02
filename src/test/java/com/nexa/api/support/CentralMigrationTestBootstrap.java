@@ -94,6 +94,12 @@ public final class CentralMigrationTestBootstrap {
 				"tenant_management.apply_v186_bom_inventory_temperature_audit_read()");
 		verifyBomTemperatureAuditPermission(postgres);
 
+		prepareV187MinimumDeliveryLeadDays(postgres);
+		Flyway.configure().dataSource(postgres.getJdbcUrl(), MIGRATOR_USERNAME, MIGRATOR_PASSWORD)
+				.locations("classpath:db/migration").target("187").load().migrate();
+		verifyOwnerBoundHelper(postgres, "tenant_management.permission_definition",
+				"tenant_management.apply_v187_minimum_delivery_lead_days_permissions()");
+
 		String activeAttemptAccess = tableAccessSnapshot(postgres, "logistics.delivery_active_attempt");
 		String activeAttemptRls = tableRlsSnapshot(postgres, "logistics.delivery_active_attempt");
 		String handoffTokenAccess = tableAccessSnapshot(postgres, "logistics.delivery_handoff_token");
@@ -292,6 +298,14 @@ public final class CentralMigrationTestBootstrap {
 			statement.execute(Files.readString(Path.of("ops/database/prepare-v186-bom-inventory-temperature-audit-read.sql")));
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not prepare the fixed V186 BOM temperature-audit permission helper", exception);
+		}
+	}
+
+	private static void prepareV187MinimumDeliveryLeadDays(PostgreSQLContainer postgres) {
+		try (Connection connection = adminConnection(postgres); Statement statement = connection.createStatement()) {
+			statement.execute(Files.readString(Path.of("ops/database/prepare-v187-minimum-delivery-lead-days.sql")));
+		} catch (Exception exception) {
+			throw new IllegalStateException("Could not prepare the fixed V187 owner-bound helpers", exception);
 		}
 	}
 

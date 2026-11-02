@@ -776,6 +776,14 @@ if [ "$flyway_version" -eq 185 ]; then
 fi
 
 if [ "$flyway_version" -eq 186 ]; then
+	# V187 restores the historical settings schema through fixed owner-bound helpers.
+	docker compose --env-file "$env_file" -f "$compose_file" exec -T modern-postgres \
+		psql -q -v ON_ERROR_STOP=1 -U "$NEXA_MODERN_POSTGRES_USER" -d "$NEXA_MODERN_POSTGRES_DB" \
+		< "$api_dir/ops/database/prepare-v187-minimum-delivery-lead-days.sql"
+	apply_staged_flyway_migration 187 187
+fi
+
+if [ "$flyway_version" -eq 187 ]; then
 	# V188 links Buyer handoff tokens to the active delivery attempt through an
 	# owner-bound, one-shot helper without changing either table's ACL or RLS.
 	docker compose --env-file "$env_file" -f "$compose_file" exec -T modern-postgres \
