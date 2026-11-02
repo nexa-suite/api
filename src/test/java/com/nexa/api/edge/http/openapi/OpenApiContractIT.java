@@ -314,15 +314,16 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
         assertThat(document.get("paths").has("/api/v1/catalog-items/filter-options")).isTrue();
         assertThat(document.get("paths").get("/api/v1/catalog-items/filter-options").has("get")).isTrue();
         assertThat(document.at("/paths/~1api~1v1~1tenant-management~1organization-registration-drafts/post/responses").has("201")).isTrue();
-        assertRequiredHeader(document,
-                "/api/v1/tenant-management/organization-registration-drafts/{registrationId}", "get", "X-Resume-Token");
-        assertRequiredHeader(document,
-                "/api/v1/tenant-management/organization-registration-drafts/{registrationId}/steps/{step}", "put", "X-Resume-Token");
-        assertRequiredHeader(document,
-                "/api/v1/tenant-management/organization-registration-drafts/{registrationId}/submit", "post", "X-Resume-Token");
+        for (var route : java.util.List.of(
+                java.util.Map.entry("/api/v1/tenant-management/organization-registration-drafts/{registrationId}", "get"),
+                java.util.Map.entry("/api/v1/tenant-management/organization-registration-drafts/{registrationId}/steps/{step}", "put"),
+                java.util.Map.entry("/api/v1/tenant-management/organization-registration-drafts/{registrationId}/submit", "post"))) {
+            assertHeaderRequired(document, route.getKey(), route.getValue(), "X-Resume-Token", false);
+            assertHeaderRequired(document, route.getKey(), route.getValue(), "X-Organization-Registration-Token", false);
+        }
         assertHeaderDescription(document,
                 "/api/v1/tenant-management/organization-registration-drafts/{registrationId}", "get", "X-Resume-Token",
-                "Read the draft using its resume token; accepted compatibility alias: X-Organization-Registration-Token.");
+                "Read the draft using its resume token; accepted compatibility alias: X-Organization-Registration-Token. Supply this header or X-Organization-Registration-Token; a nonblank X-Resume-Token takes precedence.");
         assertThat(document.at("/paths/~1api~1v1~1skus~1{skuId}~1prices/post/responses").has("201")).isTrue();
         for (String operationId : java.util.List.of("createReceivable", "createReceivablePaymentIntent",
                 "createCreditLinePayment", "createBankTransferPayment", "createBuyerWalletRecharge",

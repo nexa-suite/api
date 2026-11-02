@@ -408,9 +408,22 @@ public class OpenApiConfiguration {
 						io.swagger.v3.oas.models.parameters.Parameter tokenHeader = matching.isEmpty()
 								? new io.swagger.v3.oas.models.parameters.Parameter().name("X-Resume-Token").in("header")
 								: matching.get(0);
-						tokenHeader.required(true).description(operations.get(operation.getOperationId()))
+						tokenHeader.required(false).description(operations.get(operation.getOperationId())
+								+ " Supply this header or X-Organization-Registration-Token; a nonblank X-Resume-Token takes precedence.")
 								.schema(new StringSchema());
 						if (matching.isEmpty()) parameters.add(tokenHeader);
+						List<io.swagger.v3.oas.models.parameters.Parameter> aliases = parameters.stream()
+								.filter(parameter -> "header".equalsIgnoreCase(parameter.getIn())
+										&& "X-Organization-Registration-Token".equalsIgnoreCase(parameter.getName())).toList();
+						if (aliases.size() > 1) {
+							throw new IllegalStateException("Duplicate X-Organization-Registration-Token header for " + operation.getOperationId());
+						}
+						var aliasHeader = aliases.isEmpty() ? new io.swagger.v3.oas.models.parameters.Parameter()
+								.name("X-Organization-Registration-Token").in("header") : aliases.get(0);
+						aliasHeader.required(false)
+								.description("Compatibility alias required when X-Resume-Token is absent or blank. At least one resume-token header is required.")
+								.schema(new StringSchema());
+						if (aliases.isEmpty()) parameters.add(aliasHeader);
 						operation.setParameters(parameters);
 						found.add(operation.getOperationId());
 					});

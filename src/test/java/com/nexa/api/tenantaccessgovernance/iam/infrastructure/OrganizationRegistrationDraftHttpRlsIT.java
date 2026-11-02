@@ -184,6 +184,13 @@ class OrganizationRegistrationDraftHttpRlsIT {
         mockMvc.perform(get(path).header("X-Organization-Registration-Token", resumeToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.registrationId").value(createdRegistration.toString()));
+        mockMvc.perform(get(path).header("X-Resume-Token", " ")
+                        .header("X-Organization-Registration-Token", resumeToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(path).header("X-Resume-Token", resumeToken + "-altered")
+                        .header("X-Organization-Registration-Token", resumeToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("DRAFT_NOT_FOUND"));
     }
 
     private static void createRuntimeRole() {
