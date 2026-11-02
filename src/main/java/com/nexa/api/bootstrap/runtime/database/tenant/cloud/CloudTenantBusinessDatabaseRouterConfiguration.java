@@ -25,12 +25,12 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 
-/** Disabled-by-default cloud routing foundation; business capabilities are not yet cloud-wired. */
+/** Explicit cloud routing with a bounded, read-only delivery composition. */
 @Configuration(proxyBeanMethods = false)
 @Profile("tenant-cloud")
 public class CloudTenantBusinessDatabaseRouterConfiguration {
 	private static final List<String> UNSUPPORTED_CAPABILITIES = List.of(
-			"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request", "catalog-detail-read",
+			"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request",
 			"catalog-favorites", "catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
 			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability", "notifications");
 
@@ -46,6 +46,12 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 			if (enabled(environment, "nexa.tenant-business." + capability + ".enabled")) {
 				throw new IllegalStateException("Cloud Tenant business capabilities require cloud composition before activation");
 			}
+		}
+		boolean readEnabled = enabled(environment, "nexa.tenant-business.cloud-read.enabled");
+		boolean catalogEnabled = enabled(environment, "nexa.tenant-business.catalog-detail-read.enabled");
+		if ((readEnabled || catalogEnabled) && (!readEnabled || !catalogEnabled
+				|| !enabled(environment, "nexa.tenant-business.cloud-router.enabled"))) {
+			throw new IllegalStateException("Cloud reads require the explicit cloud router and catalog read composition");
 		}
 		if (enabled(environment, "nexa.tenant-business.cloud-router.enabled")
 				&& !environment.getProperty("nexa.database.require-least-privilege-runtime", Boolean.class, false)) {
@@ -64,6 +70,22 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 	@ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-router", name = "enabled", havingValue = "true")
 	static class EnabledRouter {
 		@Bean
+		CloudCredentialSources cloudCredentialSources(Environment environment) {
+			return switch (environment.getProperty("nexa.tenant-business.cloud-router.credentials-source", "files")) {
+				case "files" -> new CloudCredentialSources(
+						new CloudTenantBusinessDatabaseCredentialsProvider(requireDirectory(environment.getProperty(
+								"nexa.tenant-business.cloud-router.runtime-credentials-directory"))),
+						new CloudTenantBusinessDatabasePolicySnapshotWriterCredentialsProvider(requireDirectory(environment.getProperty(
+								"nexa.tenant-business.cloud-router.policy-writer-credentials-directory"))));
+				case "environment" -> {
+					var credentials = new CloudTenantDatabaseEnvironmentCredentials(environment);
+					yield new CloudCredentialSources(credentials, credentials);
+				}
+				default -> throw CloudTenantDatabaseSecretFiles.unavailable();
+			};
+		}
+
+		@Bean
 		@Primary
 		TenantBusinessDatabaseBindingRegistry cloudTenantBusinessDatabaseBindingRegistry(JdbcTemplate centralJdbc) {
 			return new JdbcTenantBusinessDatabaseBindingRegistry(centralJdbc);
@@ -77,8 +99,8 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 
 		@Bean
 		TenantBusinessDatabaseCredentialsProvider cloudTenantBusinessDatabaseCredentialsProvider(
-				@Value("${nexa.tenant-business.cloud-router.runtime-credentials-directory:}") String directory) {
-			return new CloudTenantBusinessDatabaseCredentialsProvider(requireDirectory(directory));
+				CloudCredentialSources sources) {
+			return sources.runtime();
 		}
 
 		@Bean(destroyMethod = "close")
@@ -95,9 +117,9 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 
 		@Bean
 		TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory cloudTenantPolicySnapshotWriterDataSourceFactory(
-				@Value("${nexa.tenant-business.cloud-router.policy-writer-credentials-directory:}") String directory) {
+				CloudCredentialSources sources) {
 			return new DriverManagerTenantBusinessDatabasePolicySnapshotWriterDataSourceFactory(
-					new CloudTenantBusinessDatabasePolicySnapshotWriterCredentialsProvider(requireDirectory(directory)));
+					sources.writer());
 		}
 
 		private static Path requireDirectory(String directory) {
@@ -107,4 +129,7 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 			return Path.of(directory);
 		}
 	}
+
+	record CloudCredentialSources(TenantBusinessDatabaseCredentialsProvider runtime,
+			com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePolicySnapshotWriterCredentialsProvider writer) { }
 }

@@ -29,7 +29,7 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
 
     @Bean
     @Primary
-    @Conditional(CentralCustomerRelationshipsRouteNotSelected.class)
+    @Conditional(CentralClientAccountRouteNotSelected.class)
     ClientAccountUseCase centralFallbackClientAccountUseCase(
             @Qualifier("clientAccountUseCase") ClientAccountUseCase delegate,
             CentralTenantBusinessDataAccessGuard guard) {
@@ -108,6 +108,17 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
         @Override
         public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
             return !tenantRouteSelected(context, CUSTOMER_RELATIONSHIPS_ROUTE);
+        }
+    }
+
+    static final class CentralClientAccountRouteNotSelected implements Condition {
+        @Override
+        public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            boolean cloudRead = context.getEnvironment().acceptsProfiles(Profiles.of("tenant-cloud"))
+                    && context.getEnvironment().getProperty("nexa.tenant-business.cloud-router.enabled", Boolean.class, false)
+                    && context.getEnvironment().getProperty("nexa.tenant-business.cloud-read.enabled", Boolean.class, false)
+                    && context.getEnvironment().getProperty("nexa.tenant-business.catalog-detail-read.enabled", Boolean.class, false);
+            return !tenantRouteSelected(context, CUSTOMER_RELATIONSHIPS_ROUTE) && !cloudRead;
         }
     }
 

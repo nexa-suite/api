@@ -66,13 +66,47 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 	}
 
 	@ParameterizedTest
-	@ValueSource(strings = { "buyer-wallet-read", "buyer-wallet-recharge", "purchase-request", "catalog-detail-read",
+	@ValueSource(strings = { "buyer-wallet-read", "buyer-wallet-recharge", "purchase-request",
 			"catalog-favorites", "catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
 			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability", "notifications" })
 	void refusesBusinessCapabilitiesUntilCloudCompositionIsImplemented(String capability) throws IOException {
 		context().withPropertyValues("nexa.tenant-business." + capability + ".enabled=true")
 				.run(context -> assertThat(context).hasFailed().getFailure()
 						.hasRootCauseMessage("Cloud Tenant business capabilities require cloud composition before activation"));
+	}
+
+	@Test
+	void requiresTheCompleteExplicitReadCompositionAndAcceptsNoOtherCapabilities() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.catalog-detail-read.enabled=true")
+				.run(context -> assertThat(context).hasFailed());
+		context().withPropertyValues("nexa.tenant-business.cloud-read.enabled=true")
+				.run(context -> assertThat(context).hasFailed());
+		context().withPropertyValues("nexa.tenant-business.cloud-read.enabled=true",
+				"nexa.tenant-business.catalog-detail-read.enabled=true")
+				.run(context -> assertThat(context).hasFailed());
+		context().withPropertyValues("nexa.tenant-business.cloud-read.enabled=true",
+				"nexa.tenant-business.catalog-detail-read.enabled=true", "nexa.tenant-business.cloud-router.enabled=true")
+				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
+	}
+
+	@Test
+	void environmentSourceIsExplicitAndNeverFallsBackToMountedOrLocalCredentials() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.cloud-router.enabled=true",
+				"nexa.tenant-business.cloud-router.credentials-source=unknown")
+				.run(context -> assertThat(context).hasFailed());
+		context().withPropertyValues("nexa.tenant-business.cloud-router.enabled=true",
+				"nexa.tenant-business.cloud-router.credentials-source=environment")
+				.run(context -> assertThat(context).hasFailed());
+		var environment = CloudTenantDatabaseEnvironmentCredentialsTests.environment();
+		context().withPropertyValues("nexa.tenant-business.cloud-router.enabled=true",
+				"nexa.tenant-business.cloud-router.credentials-source=environment",
+				"nexa.tenant-business.cloud-router.runtime-credentials-directory=",
+				"nexa.tenant-business.cloud-router.policy-writer-credentials-directory=")
+				.withInitializer(context -> context.getEnvironment().getPropertySources()
+						.addFirst(environment.getPropertySources().get("mockProperties")))
+				.run(context -> assertThat(context).hasNotFailed()
+						.getBean(TenantBusinessDatabaseCredentialsProvider.class)
+						.isInstanceOf(CloudTenantDatabaseEnvironmentCredentials.class));
 	}
 
 	@ParameterizedTest

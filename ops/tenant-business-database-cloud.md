@@ -1,21 +1,38 @@
 # Cloud Tenant database routing foundation
 
-Status: **incomplete implementation foundation, disabled by default**. This
-does not make Buyer or Operations cloud workflows available, provision Neon
-databases, migrate existing Tenants or authorize cutover. `render.yaml` is
-unchanged. No managed deployment or database verification is claimed.
+Status: **bounded read composition implemented, disabled by default**. This
+does not provision Neon databases, migrate existing Tenants or authorize cutover.
+`render.yaml` is unchanged. No managed deployment, database verification or
+authenticated device acceptance is claimed by this document.
 
 The `tenant-cloud` Spring profile adds an explicit
 `NEXA_TENANT_BUSINESS_CLOUD_ROUTER_ENABLED` opt-in, defaulting to `false`.
+For the existing Render service, retain its S3 storage profile by setting
+`SPRING_PROFILES_ACTIVE=s3,tenant-cloud` when this delivery is enabled.
 Combining this profile with `local`, `test` or `local-fixtures` fails startup.
-Development bootstrap, demo fixtures and every currently implemented
-`nexa.tenant-business.<capability>.enabled` flag are rejected in this profile.
-Those capabilities still require complete cloud composition, including their
-workers and callback adapters, before activation. Keep the router disabled in
-deployed services until the remaining gates below have evidence.
+Development bootstrap and demo fixtures are rejected in this profile. The
+explicit read composition requires all three switches:
+
+- `NEXA_TENANT_BUSINESS_CLOUD_ROUTER_ENABLED=true`
+- `NEXA_TENANT_BUSINESS_CLOUD_READ_ENABLED=true`
+- `NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED=true`
+
+Partial read activation fails startup. The composition uses the existing
+Tenant-routed catalog list, detail and filter queries and the existing
+authorized Buyer self-account read (`GET /api/v1/client-accounts/me`). It does
+not enable Client Account administration, management reads, addresses or
+mutations: the cloud self-account wrapper rejects every other
+`ClientAccountUseCase` method. Native authentication, context selection and
+personal-profile access continue through their existing central authority.
+All other Tenant business capability flags remain rejected. Those capabilities
+still require their complete cloud composition, workers and callback adapters.
+Keep this profile disabled in deployed services until the remaining gates below
+have evidence.
 
 When explicitly enabled in an isolated verification environment, the foundation
-requires `nexa.database.require-least-privilege-runtime=true` and two absolute
+requires `nexa.database.require-least-privilege-runtime=true` (environment:
+`NEXA_DATABASE_REQUIRE_LEAST_PRIVILEGE_RUNTIME=true`). The default
+`NEXA_TENANT_BUSINESS_CLOUD_CREDENTIALS_SOURCE=files` requires two absolute
 secret directory paths:
 
 - `NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_CREDENTIALS_DIRECTORY`
@@ -82,10 +99,45 @@ and Neon endpoint. Direct endpoints preserve the existing session-scope
 checkout/cleanup contract; compatibility with transaction-mode external
 poolers has not been established.
 
+## Explicit environment secret source
+
+When mounted secret ownership or permissions do not satisfy the file contract,
+the runtime may explicitly select
+`NEXA_TENANT_BUSINESS_CLOUD_CREDENTIALS_SOURCE=environment`. This is an independent
+source, not a fallback. An unknown source or incomplete material fails startup;
+files, local credentials and owner logins are never tried after a failure.
+
+This bounded provider accepts exactly one configured Tenant database binding:
+
+| Environment variable | Value |
+| --- | --- |
+| `NEXA_TENANT_BUSINESS_CLOUD_CREDENTIAL_REFERENCE` | Authoritative `cloud-tenant-db:<opaque>` reference with the same token restrictions as files |
+| `NEXA_TENANT_BUSINESS_CLOUD_TENANT_ID` | Exact canonical Tenant UUID |
+| `NEXA_TENANT_BUSINESS_CLOUD_DATABASE_IDENTITY` | Exact physical database identity UUID |
+| `NEXA_TENANT_BUSINESS_CLOUD_JDBC_URL` | Restricted direct Neon JDBC URL above |
+| `NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_USERNAME` | `nexa_runtime` |
+| `NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_PASSWORD` | Dedicated Tenant runtime secret |
+| `NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_USERNAME` | `nexa_policy_snapshot_writer` |
+| `NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_PASSWORD` | Different dedicated policy-writer secret |
+
+An unknown runtime reference or a different writer Tenant/database pair is
+refused. Runtime and writer passwords must differ from each other and from
+the configured central runtime/migrator passwords. Errors and credential
+`toString` output redact connection material. Configure secrets only in the
+deployment's protected environment; do not put them in Git, logs or release
+notes. Environment source does not change the physical-identity, manifest,
+Workspace or RLS checks.
+
+PostgreSQL roles belong to a cluster. Since both central and Tenant databases
+use the restricted role name `nexa_runtime`, a separate Neon branch/compute is
+required to keep their passwords and grants independent under this contract.
+Two databases in one branch do not provide that credential separation.
+
 ## Remaining cloud gates
 
-- Complete each requested capability's cloud boundary composition, callbacks,
-  workers and scoped credentials, together with the central-fallback guards.
+- Verify this bounded read composition against the exact deployed central and
+  Tenant snapshots and APKs. Other capability composition, callbacks and workers
+  remain outside this read delivery.
 - Provide a managed provisioning/verification path that proves exact Tenant
   and Workspace identities, immutable migrations, manifest attestation,
   restricted role flags/effective grants and binding state transitions.
@@ -93,6 +145,13 @@ poolers has not been established.
   failure recovery, rotation and rollback/roll-forward before any cutover.
 - Verify Render secret permissions, secure runtime configuration, Neon TLS and
   driver compatibility, then run authenticated Buyer and Operations flows.
+
+For an isolated read rehearsal, disable scheduled work using
+`NEXA_SCHEDULING_ENABLED=false` and `SPRING_MODULITH_MOMENTS_ENABLED=false`.
+Do not replay copied pending outbox, provisioning, password-reset or push work.
+The read paths do not refresh or rewrite purchase-request expiry snapshots;
+purchase-request commands remain disabled. A copied timestamp must not be
+presented as a fresh policy attestation.
 
 Unit/context tests and compilation are Technical Verification evidence only;
 they do not establish cloud delivery, Product/UX Acceptance, System Acceptance
