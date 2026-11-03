@@ -24,6 +24,8 @@ not enable Client Account administration, management reads, addresses or
 mutations: the cloud self-account wrapper rejects every other
 `ClientAccountUseCase` method. Native authentication, context selection and
 personal-profile access continue through their existing central authority.
+An independent `NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED=true` opt-in enables the existing Tenant-routed HTTP inbox, unread count, read-state and personal-preference operations. Workspace notification-settings writes remain unavailable in cloud because their central security audit is outside the Tenant transaction. Push delivery, background projections and callbacks are not enabled or verified by this composition.
+
 All other Tenant business capability flags remain rejected. Those capabilities
 still require their complete cloud composition, workers and callback adapters.
 Keep this profile disabled in deployed services until the remaining gates below

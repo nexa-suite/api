@@ -115,6 +115,29 @@ class OpenApiMigrationFixtures(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("not listed", reason)
 
+    def test_distinct_baseline_metadata_requires_its_own_exact_reviewed_record(self):
+        self.review_fixture()
+        changed_base = copy.deepcopy(self.base)
+        changed_base["info"]["version"] = "1.2.0"
+        backmerge_ref = "d" * 40
+        allowed, reason, findings = self.evaluate(
+            base=changed_base, base_ref=backmerge_ref, commit=backmerge_ref)
+        self.assertFalse(allowed)
+        self.assertIn("not listed", reason)
+        self.assertEqual(self.manifest["baselines"][0]["findings"], findings)
+        self.manifest["baselines"].append({
+            "ref": backmerge_ref, "commit": backmerge_ref,
+            "sha256": GATE.sha256(raw(changed_base)), "findings": findings,
+        })
+        allowed, reason, _ = self.evaluate(
+            base=changed_base, base_ref=backmerge_ref, commit=backmerge_ref)
+        self.assertTrue(allowed)
+        self.assertIn("exact reviewed migration", reason)
+        allowed, reason, _ = self.evaluate(
+            base_ref=backmerge_ref, commit=backmerge_ref)
+        self.assertFalse(allowed)
+        self.assertIn("base SHA256", reason)
+
     def test_an_additional_removal_fails(self):
         self.review_fixture()
         changed = document(["id"])
@@ -239,7 +262,8 @@ class OpenApiMigrationFixtures(unittest.TestCase):
         manifest_raw = (root / GATE.DEFAULT_MANIFEST).read_bytes()
         manifest = GATE.validate_manifest(manifest_raw)
         reviewed = manifest["approval"]["status"] == "reviewed"
-        expected_refs = {"689be612d96079feb02a155fbe76d829a10bdeb1", "v0.17.1", "v0.18.0",
+        expected_refs = {"689be612d96079feb02a155fbe76d829a10bdeb1",
+                         "acbb76f56deba09fcb0ee31ea6854238dcb7486b", "v0.17.1", "v0.18.0",
                          "v0.19.0", "v0.20.0", "v0.21.0"}
         self.assertEqual(expected_refs, {baseline["ref"] for baseline in manifest["baselines"]})
         candidate_raw = (root / GATE.SNAPSHOT).read_bytes()

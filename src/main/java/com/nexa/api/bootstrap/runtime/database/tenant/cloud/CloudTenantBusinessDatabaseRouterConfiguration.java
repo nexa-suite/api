@@ -32,7 +32,7 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 	private static final List<String> UNSUPPORTED_CAPABILITIES = List.of(
 			"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request",
 			"catalog-favorites", "catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
-			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability", "notifications");
+			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability");
 
 	public CloudTenantBusinessDatabaseRouterConfiguration(Environment environment) {
 		if (environment.acceptsProfiles(Profiles.of("local", "test", "local-fixtures"))) {
