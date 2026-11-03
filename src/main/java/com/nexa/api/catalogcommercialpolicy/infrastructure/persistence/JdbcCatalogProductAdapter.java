@@ -60,12 +60,12 @@ public class JdbcCatalogProductAdapter implements CatalogProductPort {
             args.add(normalized);
         }
         if (brand != null && !brand.isBlank()) {
-            where.append(" and lower(b.name) like lower(?)");
-            args.add("%" + brand.strip() + "%");
+            where.append(" and lower(b.name)=lower(?)");
+            args.add(brand.strip());
         }
         if (category != null && !category.isBlank()) {
-            where.append(" and lower(c.name) like lower(?)");
-            args.add("%" + category.strip() + "%");
+            where.append(" and lower(c.name)=lower(?)");
+            args.add(category.strip());
         }
         List<Object> pageArgs = new ArrayList<>(args);
         pageArgs.add(size);

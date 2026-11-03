@@ -298,7 +298,8 @@ public final class LocalTenantBusinessDatabaseProvisioningCli {
 				                   OR roleid=(SELECT oid FROM pg_roles WHERE rolname='nexa_runtime')),
 				        EXISTS (SELECT 1 FROM pg_auth_members
 				                WHERE member=(SELECT oid FROM pg_roles WHERE rolname='nexa_migrator')
-				                   OR roleid=(SELECT oid FROM pg_roles WHERE rolname='nexa_migrator'))
+				                   OR roleid=(SELECT oid FROM pg_roles WHERE rolname='nexa_migrator')),
+				        runtime.rolinherit, migrator.rolinherit
 				 FROM pg_roles runtime, pg_roles migrator
 				 WHERE runtime.rolname='nexa_runtime' AND migrator.rolname='nexa_migrator'
 			 """)) {
@@ -311,7 +312,7 @@ public final class LocalTenantBusinessDatabaseProvisioningCli {
 					|| result.getBoolean(15) || !result.getBoolean(16) || result.getBoolean(17)
 				|| !result.getBoolean(18) || result.getBoolean(19) || !result.getBoolean(20)
 				|| result.getBoolean(21) || !result.getBoolean(22) || result.getBoolean(23)
-				|| result.getBoolean(24)) {
+				|| result.getBoolean(24) || result.getBoolean(25) || result.getBoolean(26)) {
 				throw new IllegalStateException("Tenant runtime or migrator role privileges are not least-privileged");
 			}
 		}

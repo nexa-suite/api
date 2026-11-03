@@ -23,9 +23,17 @@ public interface SalesOrderFulfillmentQuery {
     OrderReferencePage findReferencesByClientAccount(UUID tenantId, UUID workspaceId,
                                                       UUID clientAccountId, int page, int size);
 
-    record Header(UUID id, String number, UUID clientAccountId, String priority) { }
+    record Header(UUID id, String number, UUID clientAccountId, String priority, String status) {
+        public Header(UUID id, String number, UUID clientAccountId, String priority) {
+            this(id, number, clientAccountId, priority, null);
+        }
+    }
 
-    record OrderReference(UUID id, String number, Instant createdAt) { }
+    record OrderReference(UUID id, String number, Instant createdAt, String status) {
+        public OrderReference(UUID id, String number, Instant createdAt) {
+            this(id, number, createdAt, null);
+        }
+    }
 
     record OrderReferencePage(List<OrderReference> items, int page, int size, boolean hasMore) {
         public OrderReferencePage {

@@ -175,6 +175,10 @@ class SalesOrderConversionIT extends NexaWorkflowIntegrationSupport {
         assertThat(tenantJdbc().queryForObject("select product_family_code_snapshot from sales.sales_order_line where sales_order_id=?",
                 String.class, UUID.fromString(order.id()))).isEqualTo(expectedFamilyCode);
 
+        String warehouseMembership = membershipId(WAREHOUSE_EMAIL);
+        for (UUID backingWarehouseId : dispatchBackingWarehouseIds(order.id())) {
+            grantWarehouseAccess(backingWarehouseId.toString(), warehouseMembership);
+        }
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult fulfillment = mockMvc.perform(post("/api/v1/sales-orders/" + order.id() + "/fulfillments")
                         .header("Authorization", "Bearer " + warehouse)

@@ -4,6 +4,7 @@ import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogSkuUseCas
 import com.nexa.api.catalogcommercialpolicy.application.port.in.SkuIdentifierResolutionUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogAuthorizationPort;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogSkuPort;
+import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogVariantPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SkuIdentifierResolutionQuery;
 import com.nexa.api.catalogcommercialpolicy.application.service.CatalogSkuServiceFacade;
 import com.nexa.api.catalogcommercialpolicy.application.service.SkuIdentifierResolutionService;
@@ -19,9 +20,9 @@ import java.time.Clock;
 @Profile("!test")
 public class CatalogSkuRuntimeConfiguration {
     @Bean
-    CatalogSkuUseCase catalogSkuUseCase(CatalogSkuPort port, CatalogAuthorizationPort authorization,
-            Clock clock, PlatformTransactionManager transactionManager) {
-        return CatalogTransactionalProxy.required(new CatalogSkuServiceFacade(port, authorization, clock),
+    CatalogSkuUseCase catalogSkuUseCase(CatalogSkuPort port, CatalogVariantPort variants,
+            CatalogAuthorizationPort authorization, Clock clock, PlatformTransactionManager transactionManager) {
+        return CatalogTransactionalProxy.required(new CatalogSkuServiceFacade(port, variants, authorization, clock),
                 CatalogSkuUseCase.class, transactionManager);
     }
 

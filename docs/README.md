@@ -19,6 +19,7 @@ contexts.
 
 ## HTTP and OpenAPI contracts
 
+- [Backend preparado para frontend — brechas, contratos y decisiones abiertas](./backend-preparado-para-frontend.md)
 - [Operations contract closure and implementation boundaries](./operations-contract-closure.md)
 - [Buyer delivery lead policy](./integration/buyer-delivery-lead-policy.md)
 

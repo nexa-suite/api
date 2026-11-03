@@ -2,7 +2,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.businesstraceability.application.model.AuditModels.AuditEventView;
 import com.nexa.api.businesstraceability.application.model.AuditModels.AuditPage;
 import com.nexa.api.businesstraceability.application.port.in.AuditViewerUseCase;

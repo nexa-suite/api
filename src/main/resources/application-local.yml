@@ -37,6 +37,8 @@ nexa:
       wallet-tender-enabled: ${NEXA_TENANT_BUSINESS_PURCHASE_REQUEST_WALLET_TENDER_ENABLED:false}
     catalog-detail-read:
       enabled: ${NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED:false}
+    catalog-favorites:
+      enabled: ${NEXA_TENANT_BUSINESS_CATALOG_FAVORITES_ENABLED:false}
     fulfillment-delivery:
       enabled: ${NEXA_TENANT_BUSINESS_FULFILLMENT_DELIVERY_ENABLED:false}
     warehouse-operations:
@@ -114,6 +116,8 @@ nexa:
       ttl: ${NEXA_PASSWORD_RESET_TTL:PT30M}
       platform-url: ${NEXA_PLATFORM_RESET_URL:http://localhost:4200/reset-password}
       portal-url: ${NEXA_PORTAL_RESET_URL:http://localhost:4300/reset-password}
+      platform-native-url: ${NEXA_PLATFORM_NATIVE_RESET_URL:}
+      portal-native-url: ${NEXA_PORTAL_NATIVE_RESET_URL:}
       throttle-key: ${NEXA_PASSWORD_RESET_THROTTLE_KEY:}
     system-operator-token: ${NEXA_SYSTEM_OPERATOR_TOKEN:}
     notification-outbox-key: ${NEXA_NOTIFICATION_OUTBOX_KEY:}

@@ -15,6 +15,15 @@ public interface BusinessDocumentUseCase {
     BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext context,
             int page, int size, String documentType, String status);
 
+    /** Filters at persistence before pagination; unsupported adapters must not return an unfiltered page. */
+    default BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(CurrentAccessContext context,
+            int page, int size, String documentType, String status, String subjectType, UUID subjectId) {
+        if (subjectType != null || subjectId != null) {
+            throw new UnsupportedOperationException("Subject-filtered document reads are unavailable");
+        }
+        return list(context, page, size, documentType, status);
+    }
+
     BusinessDocumentModels.DocumentView get(CurrentAccessContext context, UUID documentId);
 
     List<BusinessDocumentModels.DocumentEventView> events(CurrentAccessContext context, UUID documentId);

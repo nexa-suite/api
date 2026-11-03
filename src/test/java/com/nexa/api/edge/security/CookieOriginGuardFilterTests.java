@@ -51,6 +51,30 @@ class CookieOriginGuardFilterTests {
 		assertNativeRejected("/api/v1/authentication/identity-sign-in", "https://app.example");
 	}
 
+	@Test
+	void allowsOnlyNativePortalPasswordResetRequestsWithoutOrigin() throws Exception {
+		MockHttpServletRequest nativeRequest = request("POST", "/api/v1/auth/password-reset-requests", null);
+		nativeRequest.addHeader("X-Nexa-Client", "NATIVE");
+		nativeRequest.addHeader("X-Nexa-Surface", "PORTAL");
+		assertAllowed(nativeRequest);
+
+		assertNativePortalResetRejected(null, "PLATFORM", "/api/v1/auth/password-reset-requests", null,
+				"ORIGIN_NOT_ALLOWED");
+		assertNativePortalResetRejected("NATIVE", null, "/api/v1/auth/password-reset-requests", null,
+				"ORIGIN_NOT_ALLOWED");
+		assertNativePortalResetRejected("NATIVE", "PORTAL", "/api/v1/auth/password-reset-requests", "",
+				"ORIGIN_NOT_ALLOWED");
+		assertNativePortalResetRejected("NATIVE", "PORTAL", "/api/v1/auth/password-resets", null,
+				"ORIGIN_NOT_ALLOWED");
+		assertNativePortalResetRejected("NATIVE", "PORTAL", "/api/v1/auth/password-reset-requests", "https://evil.example",
+				"ORIGIN_NOT_ALLOWED");
+
+		MockHttpServletRequest browserRequest = request("POST", "/api/v1/auth/password-reset-requests", ALLOWED_ORIGIN);
+		browserRequest.addHeader("X-Nexa-Client", "NATIVE");
+		browserRequest.addHeader("X-Nexa-Surface", "PORTAL");
+		assertAllowed(browserRequest);
+	}
+
     private static void assertRejected(String path, String origin) throws Exception {
         MockHttpServletRequest request = request("POST", path, origin);
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -62,6 +86,10 @@ class CookieOriginGuardFilterTests {
 
 	private static void assertAllowed(String path, String origin) throws Exception {
 		MockHttpServletRequest request = request("POST", path, origin);
+		assertAllowed(request);
+	}
+
+	private static void assertAllowed(MockHttpServletRequest request) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         filter().doFilter(request, response, chain);
@@ -135,6 +163,19 @@ class CookieOriginGuardFilterTests {
 		MockFilterChain chain = new MockFilterChain();
 		filter().doFilter(request, response, chain);
 		assertThat(response.getStatus()).isEqualTo(403);
+		assertThat(chain.getRequest()).isNull();
+	}
+
+	private static void assertNativePortalResetRejected(String client, String surface, String path, String origin,
+			String expectedCode) throws Exception {
+		MockHttpServletRequest request = request("POST", path, origin);
+		if (client != null) request.addHeader("X-Nexa-Client", client);
+		if (surface != null) request.addHeader("X-Nexa-Surface", surface);
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		MockFilterChain chain = new MockFilterChain();
+		filter().doFilter(request, response, chain);
+		assertThat(response.getStatus()).isEqualTo(403);
+		assertThat(problemCode(response)).isEqualTo(expectedCode);
 		assertThat(chain.getRequest()).isNull();
 	}
 

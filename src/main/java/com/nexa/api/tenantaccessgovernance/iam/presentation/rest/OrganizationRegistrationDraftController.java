@@ -4,10 +4,13 @@ import com.nexa.api.tenantaccessgovernance.iam.application.onboarding.Organizati
 import com.nexa.api.tenantaccessgovernance.iam.application.onboarding.OrganizationRegistrationDraftPort;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.OrganizationRegistrationDraftException;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,6 +32,10 @@ public final class OrganizationRegistrationDraftController {
 
     @PostMapping
     @Operation(operationId = "createOrganizationRegistrationDraft")
+    @ApiResponse(responseCode = "201", description = "Organization registration draft created",
+            headers = {@Header(name = "Location", description = "URI of the created registration draft"),
+                    @Header(name = "ETag", description = "Current draft version")},
+            content = @Content(schema = @Schema(implementation = DraftResponse.class)))
     public ResponseEntity<DraftResponse> create() {
         var value = drafts.create();
         return ResponseEntity.created(URI.create("/api/v1/tenant-management/organization-registration-drafts/" + value.draft().registrationId()))
@@ -37,20 +44,18 @@ public final class OrganizationRegistrationDraftController {
 
     @GetMapping("/{registrationId}")
     @Operation(operationId = "getOrganizationRegistrationDraft")
-    @SuppressWarnings("unused")
     public ResponseEntity<DraftResponse> get(@PathVariable UUID registrationId,
-            HttpServletRequest request, HttpHeaders headers) {
+			HttpServletRequest request) {
         var value = drafts.get(registrationId, token(request));
         return ResponseEntity.ok().eTag(etag(value.version())).body(response(value, null));
     }
 
     @PutMapping("/{registrationId}/steps/{step}")
     @Operation(operationId = "updateOrganizationRegistrationDraftStep")
-    @SuppressWarnings("unused")
     public ResponseEntity<DraftResponse> updateStep(@PathVariable UUID registrationId, @PathVariable int step,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            HttpServletRequest request, HttpHeaders headers,
+			HttpServletRequest request,
             @RequestBody(required = false) Map<String, Object> values) {
         var value = drafts.updateStep(registrationId, token(request), version(ifMatch), step,
                 values == null ? Map.of() : values, idempotencyKey);
@@ -59,11 +64,10 @@ public final class OrganizationRegistrationDraftController {
 
     @PostMapping("/{registrationId}/submit")
     @Operation(operationId = "submitOrganizationRegistrationDraft")
-    @SuppressWarnings("unused")
     public ResponseEntity<DraftResponse> submit(@PathVariable UUID registrationId,
             @RequestHeader(name = "If-Match", required = false) String ifMatch,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            HttpServletRequest request, HttpHeaders headers) {
+			HttpServletRequest request) {
         var value = drafts.submit(registrationId, token(request), version(ifMatch), idempotencyKey);
         return ResponseEntity.ok().eTag(etag(value.version())).body(response(value, null));
     }

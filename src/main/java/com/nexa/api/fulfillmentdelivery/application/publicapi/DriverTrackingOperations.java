@@ -16,5 +16,7 @@ public interface DriverTrackingOperations {
                                             Instant capturedAt);
     DriverTrackingModels.Coordinate ownLocation(CurrentAccessContext context);
     DriverTrackingModels.Coordinate dispatchLocation(CurrentAccessContext context, UUID driverMembershipId);
+    DriverTrackingModels.Coordinate dispatchLocation(CurrentAccessContext context, UUID driverMembershipId,
+                                                     UUID deliveryId);
     DriverTrackingModels.DeliveryTracking buyerLocation(CurrentAccessContext context, UUID deliveryId);
 }

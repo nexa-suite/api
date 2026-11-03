@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -192,6 +193,82 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 Integer.class, "inbound-cross-scope-" + suffix)).isZero();
     }
 
+    @Test void bomCanReadLotTemperatureFactsWithoutWarehouseGrantButCannotCrossTenant() throws Exception {
+        String suffix = suffix();
+        String warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String warehouseId = createWarehouse(warehouseToken, "WH-TEMP-AUDIT-" + suffix);
+        warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String zoneId = mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/zones")
+                        .header("Authorization", "Bearer " + warehouseToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"C-TEMP-" + suffix + "\",\"name\":\"Chilled audit\","
+                                + "\"type\":\"CHILLED\",\"temperatureMin\":-999,\"temperatureMax\":999}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String zone = tools.jackson.databind.json.JsonMapper.shared().readTree(zoneId).get("id").asText();
+        var bounds = tenantJdbc().query("select temperature_min,temperature_max from catalog_management.sellable_sku "
+                        + "where tenant_id=? and workspace_id=? and legacy_catalog_item_id='CAT-0002'",
+                (rs, row) -> new java.math.BigDecimal[]{rs.getBigDecimal(1), rs.getBigDecimal(2)},
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId())).getFirst();
+        java.math.BigDecimal lower = bounds[0] == null ? java.math.BigDecimal.valueOf(-5) : bounds[0];
+        java.math.BigDecimal upper = bounds[1] == null ? java.math.BigDecimal.valueOf(5) : bounds[1];
+        java.math.BigDecimal receivingValue = lower.add(upper).divide(java.math.BigDecimal.valueOf(2));
+        String lotResponse = postReceipt(warehouseToken, "bom-audit-receipt-" + suffix,
+                        receiptBody(warehouseId, zone, "B-TEMP-AUDIT-" + suffix, "2", receivingValue))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String lotId = tools.jackson.databind.json.JsonMapper.shared().readTree(lotResponse).get("id").asText();
+
+        AuditIdentity bom = createBomMembership();
+        try {
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.role_permission rp "
+                            + "join tenant_management.role_definition r on r.id=rp.role_id "
+                            + "where r.tenant_id is null and r.workspace_id is null "
+                            + "and r.code='business_operations_manager' "
+                            + "and rp.permission_key='inventory.temperature.audit.read'",
+                    Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                            + "where tenant_id=? and workspace_id=? and membership_id=? and warehouse_id=? and status='ACTIVE'",
+                    Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), bom.membershipId(),
+                    UUID.fromString(warehouseId))).isZero();
+            String bomToken = accessToken(bom.email(), "PLATFORM");
+            mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", lotId)
+                            .header("Authorization", "Bearer " + bomToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.lotId").value(lotId))
+                    .andExpect(jsonPath("$.warehouseId").value(warehouseId))
+                    .andExpect(jsonPath("$.receiving.valueCelsius").value(receivingValue.doubleValue()))
+                    .andExpect(jsonPath("$.evaluations.total").value(0));
+
+            String salesToken = accessToken(SALES_EMAIL, "PLATFORM");
+            mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", lotId)
+                            .header("Authorization", "Bearer " + salesToken))
+                    .andExpect(status().isForbidden());
+
+            WorkspaceScope otherScope = createAdditionalTenantAndWorkspace(WAREHOUSE_EMAIL, suffix);
+            String otherWarehouseToken = accessTokenForWorkspace(WAREHOUSE_EMAIL, "PLATFORM", otherScope.slug());
+            String otherOwnerToken = accessTokenForWorkspace(OWNER_EMAIL, "PLATFORM", otherScope.slug());
+            String otherWarehouse = createWarehouse(otherWarehouseToken, "WH-TEMP-OTHER-" + suffix,
+                    otherOwnerToken, otherScope.warehouseMembershipId());
+            otherWarehouseToken = accessTokenForWorkspace(WAREHOUSE_EMAIL, "PLATFORM", otherScope.slug());
+            String otherZoneResponse = mockMvc.perform(post("/api/v1/warehouses/" + otherWarehouse + "/zones")
+                            .header("Authorization", "Bearer " + otherWarehouseToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"code\":\"C-OTHER-" + suffix + "\",\"name\":\"Other chilled audit\","
+                                    + "\"type\":\"CHILLED\",\"temperatureMin\":-999,\"temperatureMax\":999}"))
+                    .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+            String otherZone = tools.jackson.databind.json.JsonMapper.shared().readTree(otherZoneResponse).get("id").asText();
+            String otherLotResponse = postReceipt(otherWarehouseToken, "bom-audit-other-receipt-" + suffix,
+                            receiptBody(otherWarehouse, otherZone, "B-TEMP-OTHER-" + suffix, "2", receivingValue))
+                    .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+            String otherLotId = tools.jackson.databind.json.JsonMapper.shared().readTree(otherLotResponse).get("id").asText();
+            mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", otherLotId)
+                            .header("Authorization", "Bearer " + bomToken))
+                    .andExpect(status().isNotFound());
+
+        } finally {
+            cleanupAuditIdentity(bom);
+        }
+    }
+
     @Test void outOfRangeReceiptRequiresExactWarehousePhotoThenCreatesAtomicPreventiveHold() throws Exception {
         String token = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         String suffix = java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();
@@ -229,15 +306,22 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         java.math.BigDecimal acceptedMaximum = skuMaximum == null ? zoneMaximum : skuMaximum.min(zoneMaximum);
         assertThat(acceptedMinimum).isLessThanOrEqualTo(acceptedMaximum);
 
+        java.math.BigDecimal inRangeValue = acceptedMinimum.add(acceptedMaximum)
+                .divide(java.math.BigDecimal.valueOf(2));
         MvcResult inRange = postReceipt(token, "in-range-receipt-" + suffix,
-                receiptBody(warehouseId, zoneId, "I-" + suffix, "10",
-                        acceptedMinimum.add(acceptedMaximum).divide(java.math.BigDecimal.valueOf(2))))
+                receiptBody(warehouseId, zoneId, "I-" + suffix, "10", inRangeValue))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AVAILABLE"))
                 .andReturn();
         String inRangeLotId = tools.jackson.databind.json.JsonMapper.shared()
                 .readTree(inRange.getResponse().getContentAsString()).get("id").asText();
         assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_temperature_evaluation where lot_id=?",
                 Integer.class, UUID.fromString(inRangeLotId))).isZero();
+        mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", inRangeLotId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.receiving.valueCelsius").value(inRangeValue.doubleValue()))
+                .andExpect(jsonPath("$.receiving.recordedByMembershipId").isString())
+                .andExpect(jsonPath("$.evaluations.total").value(0));
 
         int lotsBefore = scopedWarehouseLotCount(warehouseId);
         int movementsBefore = tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where tenant_id=? and workspace_id=? and movement_type='INBOUND_RECEIPT'",
@@ -282,6 +366,26 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .andReturn();
         String heldLotId = tools.jackson.databind.json.JsonMapper.shared()
                 .readTree(heldReceipt.getResponse().getContentAsString()).get("id").asText();
+        UUID fulfillmentEvaluationId = insertTemperatureEvaluation(UUID.fromString(heldLotId), "FULFILLMENT");
+        UUID stockEvidenceEvaluationId = insertTemperatureEvaluation(UUID.fromString(heldLotId), "STOCK_EVIDENCE");
+        try {
+            mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", heldLotId)
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.receiving.valueCelsius").value(excursionReading.doubleValue()))
+                    .andExpect(jsonPath("$.receiving.evidenceObjectId").value(evidenceId))
+                    .andExpect(jsonPath("$.evaluations.total").value(1))
+                    .andExpect(jsonPath("$.evaluations.items.length()").value(1))
+                    .andExpect(jsonPath("$.evaluations.items[0].valueCelsius").value(excursionReading.doubleValue()))
+                    .andExpect(jsonPath("$.evaluations.items[0].sourceType").value("RECEIVING"))
+                    .andExpect(jsonPath("$.evaluations.items[0].status").value("OPEN"))
+                    .andExpect(jsonPath("$.evaluations.items[0].evidenceObjectId").value(evidenceId));
+        } finally {
+            tenantJdbc().update("delete from warehouse.inventory_temperature_evaluation where tenant_id=? "
+                            + "and workspace_id=? and id in (?,?)",
+                    UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                    fulfillmentEvaluationId, stockEvidenceEvaluationId);
+        }
         assertThat(tenantJdbc().queryForObject("select temperature_evidence_object_id from warehouse.inventory_lot where id=?",
                 UUID.class, UUID.fromString(heldLotId))).isEqualTo(UUID.fromString(evidenceId));
         assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where id=? "
@@ -293,6 +397,18 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 Integer.class, UUID.fromString(heldLotId), UUID.fromString(evidenceId))).isEqualTo(1);
         assertThat(tenantJdbc().queryForObject("select count(*) from warehouse.stock_movement where lot_id=? and movement_type='INBOUND_RECEIPT'",
                 Integer.class, UUID.fromString(heldLotId))).isEqualTo(1);
+        mockMvc.perform(delete("/api/v1/warehouses/" + warehouseId + "/access-grants/" + membershipId(WAREHOUSE_EMAIL))
+                        .header("Authorization", "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM"))
+                        .header("If-Match", "\"0\""))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", heldLotId)
+                        .header("Authorization", "Bearer " + accessToken(WAREHOUSE_EMAIL, "PLATFORM")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("INVENTORY_LOT_NOT_FOUND"));
+        mockMvc.perform(get("/api/v1/inventory/lots/{lotId}/temperature-readings", UUID.randomUUID())
+                        .header("Authorization", "Bearer " + accessToken(WAREHOUSE_EMAIL, "PLATFORM")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("INVENTORY_LOT_NOT_FOUND"));
     }
 
     private String createWarehouse(String token, String code) throws Exception {
@@ -315,6 +431,49 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"membershipId\":\"" + targetMembershipId + "\"}"))
                 .andExpect(status().isOk());
+    }
+
+    private AuditIdentity createBomMembership() {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID userId = UUID.randomUUID();
+        UUID membershipId = UUID.randomUUID();
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 14);
+        String email = "bom-temp-audit-" + suffix + "@icisa-test.local";
+        String username = "bom_temp_audit_" + suffix;
+        jdbc.update("insert into iam.user_account (id,email,normalized_email,username,normalized_username,"
+                        + "display_name,preferred_language,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,?,?,'es','ACTIVE',current_timestamp,current_timestamp,0)",
+                userId, email, email, username, username, "Synthetic temperature auditor");
+        jdbc.update("insert into iam.password_credential (user_id,password_hash,algorithm,changed_at) "
+                        + "select ?,password_hash,algorithm,changed_at from iam.password_credential where user_id=?",
+                userId, UUID.fromString(membershipUserId(BUYER_EMAIL)));
+        jdbc.update("insert into tenant_management.workspace_membership "
+                        + "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+                membershipId, tenant, workspace, userId);
+        assertThat(jdbc.update("insert into tenant_management.membership_role_definition "
+                        + "(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
+                        + "select ?,?,?,r.id,?,current_timestamp from tenant_management.role_definition r "
+                        + "where r.tenant_id is null and r.workspace_id is null and r.code='business_operations_manager'",
+                membershipId, tenant, workspace, UUID.fromString(membershipId(OWNER_EMAIL))))
+                .isEqualTo(1);
+        return new AuditIdentity(userId, membershipId, email);
+    }
+
+    private void cleanupAuditIdentity(AuditIdentity identity) {
+        jdbc.update("delete from iam.refresh_session where membership_id=?", identity.membershipId());
+        jdbc.update("delete from tenant_management.membership_authorization_state where membership_id=?", identity.membershipId());
+        jdbc.update("delete from tenant_management.membership_role_definition where membership_id=?", identity.membershipId());
+        jdbc.update("delete from tenant_management.workspace_membership where id=?", identity.membershipId());
+        jdbc.update("delete from iam.password_credential where user_id=?", identity.userId());
+        jdbc.update("delete from iam.user_account where id=?", identity.userId());
+    }
+
+    private String membershipUserId(String email) {
+        return jdbc.queryForObject("select user_id::text from tenant_management.workspace_membership m "
+                        + "join iam.user_account u on u.id=m.user_id where u.normalized_email=? and m.workspace_id=?",
+                String.class, email, UUID.fromString(workspaceId()));
     }
 
     private String createZone(String token, String warehouseId, String code) throws Exception {
@@ -344,6 +503,19 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                 .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
+    private UUID insertTemperatureEvaluation(UUID lotId, String sourceType) {
+        UUID id = UUID.randomUUID();
+        tenantJdbc().update("insert into warehouse.inventory_temperature_evaluation "
+                        + "(id,tenant_id,workspace_id,lot_id,received_value,expected_min,expected_max,status,disposition,"
+                        + "created_at,evidence_object_id,affected_quantity,actor_membership_id,observed_value,source_type,"
+                        + "source_subject_id,source_subject_version,temperature_evidence_id,expected_lot_version) "
+                        + "values (?,?,?, ?,null,-5,5,'OPEN','HOLD',current_timestamp,?,?,?,10,?,?,0,?,0)",
+                id, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), lotId,
+                UUID.randomUUID(), java.math.BigDecimal.ONE, UUID.fromString(membershipId(WAREHOUSE_EMAIL)),
+                sourceType, UUID.randomUUID(), UUID.randomUUID());
+        return id;
+    }
+
     private int scopedWarehouseLotCount(String warehouseId) {
         return tenantJdbc().queryForObject("select count(*) from warehouse.inventory_lot where tenant_id=? and workspace_id=? and warehouse_id=?",
                 Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), UUID.fromString(warehouseId));
@@ -370,10 +542,10 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
                         + "values (?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
                 workspaceId, tenantId, "Receiving isolation workspace", slug);
         jdbc.update("insert into tenant_management.workspace_membership "
-                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "select ?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
+						+ "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+						+ "select ?,?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
                         + "from tenant_management.workspace_membership where id=?",
-                newMembership, workspaceId, sourceMembership);
+						newMembership, tenantId, workspaceId, sourceMembership);
         jdbc.update("insert into tenant_management.membership_role_definition "
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
@@ -387,10 +559,10 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
         UUID sourceMembership = UUID.fromString(membershipId(email));
         UUID newMembership = UUID.randomUUID();
         jdbc.update("insert into tenant_management.workspace_membership "
-                        + "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "select ?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
+						+ "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+						+ "select ?,?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
                         + "from tenant_management.workspace_membership where id=?",
-                newMembership, workspaceId, sourceMembership);
+						newMembership, tenantId, workspaceId, sourceMembership);
         jdbc.update("insert into tenant_management.membership_role_definition "
                         + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
                         + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
@@ -403,4 +575,5 @@ class WarehouseApiIntegrationTests extends PostgresIntegrationSupport {
     }
 
     private record WorkspaceScope(String tenantId, String workspaceId, String slug, String warehouseMembershipId) { }
+    private record AuditIdentity(UUID userId, UUID membershipId, String email) { }
 }

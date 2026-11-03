@@ -53,7 +53,7 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	@Override public int saveWorkspaceIdempotency(String tenantId, String idempotencyKey, String requestHash, java.util.UUID workspaceId) { return jdbc.update("insert into tenant_management.workspace_creation_idempotency (tenant_id,idempotency_key,request_hash,workspace_id,created_at) values (?,?,?,?,current_timestamp) on conflict (tenant_id,idempotency_key) do nothing", uuid(tenantId), idempotencyKey, requestHash, workspaceId); }
 	@Override public void createWorkspaceMembership(String tenantId, String workspaceId, java.util.UUID userId, java.util.Set<String> roles, java.time.Instant createdAt) {
 		java.util.UUID membershipId = java.util.UUID.randomUUID();
-		jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)", membershipId, uuid(workspaceId), userId, java.sql.Timestamp.from(createdAt), java.sql.Timestamp.from(createdAt));
+		jdbc.update("insert into tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'INTERNAL','ACTIVE',?,?,0)", membershipId, uuid(tenantId), uuid(workspaceId), userId, java.sql.Timestamp.from(createdAt), java.sql.Timestamp.from(createdAt));
 		replaceCanonicalRoleDefinitions(uuid(tenantId), membershipId, roles);
 		ensureSystemWorkflowActor(uuid(tenantId), uuid(workspaceId));
 	}
@@ -125,7 +125,7 @@ public class JdbcOrganizationAdministrationAdapter implements OrganizationAdmini
 	}
 	private void ensureSystemWorkflowActor(java.util.UUID tenantId, java.util.UUID workspaceId) {
 		String membership = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid", String.class, workspaceId);
-		int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, workspaceId);
+		int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, tenantId, workspaceId);
 		if (inserted == 1) {
 			jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?::uuid,?::uuid,?::uuid,'22222222-2222-4222-8222-222222222222'::uuid,current_timestamp) on conflict do nothing", membership, tenantId, workspaceId);
 			jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?::uuid,?::uuid,?::uuid,0,current_timestamp) on conflict (membership_id) do nothing", membership, tenantId, workspaceId);

@@ -4,7 +4,9 @@
                 "BC-01-tenant-access-governance :: access-contracts",
                 "BC-01-tenant-access-governance :: access-values",
                 "BC-01-tenant-access-governance :: governance-queries",
+                "BC-11-business-traceability :: traceability-public",
                 "BC-03-catalog-commercial-policy :: sales-catalog",
+                "BC-03-catalog-commercial-policy :: catalog-management-models",
                 "shared :: shared-error-primitives"
         })
 package com.nexa.api.customerbuyerrelationships;

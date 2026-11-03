@@ -6,6 +6,8 @@ import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogProductUs
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogTaxonomyUseCase;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.ObjectProvider;
@@ -136,10 +138,15 @@ public final class CatalogManagementController {
             @PathVariable UUID id, @RequestHeader(name = "If-Match", required = false) String ifMatch) { return brandStatus(context, id, "INACTIVE", ifMatch); }
 
     @GetMapping("/products")
+    @Operation(description = "The search parameter uses partial text matching. Brand and category filters require exact, case-insensitive taxonomy names.")
     public CatalogManagementModels.Page<CatalogManagementModels.ProductView> productList(@RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
+            @Parameter(description = "Partial, case-insensitive match against product name, code, legacy catalog item ID, or slug.")
             @RequestParam(required = false) String search, @RequestParam(required = false) String status,
-            @RequestParam(required = false) String brand, @RequestParam(required = false) String category) {
+            @Parameter(description = "Exact, case-insensitive brand name.")
+            @RequestParam(required = false) String brand,
+            @Parameter(description = "Exact, case-insensitive category name.")
+            @RequestParam(required = false) String category) {
         return CatalogHttpSupport.tenantRequest(context, tenantRequests,
                 () -> products.products(CatalogHttpSupport.scope(context), page, size, search, status, brand, category),
                 request -> request.products().products(request.scope(), page, size, search, status, brand, category));

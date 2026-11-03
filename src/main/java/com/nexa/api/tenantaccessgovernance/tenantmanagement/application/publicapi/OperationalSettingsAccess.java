@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publica
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
 
 import java.time.LocalTime;
 import java.util.Optional;

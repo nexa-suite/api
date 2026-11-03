@@ -188,9 +188,18 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
                 attemptId, request.tenantId(), request.workspaceId(), request.deliveryId(), attemptNumber, attemptStatus,
                 failureReason, bounded(request.notes()), Timestamp.from(attemptedAt), Timestamp.from(attemptedAt),
                 request.outcome().name(), Timestamp.from(attemptedAt));
-        if (activeAttempt != null && jdbc.update("delete from logistics.delivery_active_attempt where tenant_id=? and workspace_id=? and delivery_id=? and id=?",
-                request.tenantId(), request.workspaceId(), request.deliveryId(), activeAttempt.id()) != 1) {
-            throw error("CONCURRENCY_CONFLICT");
+        if (activeAttempt != null) {
+            boolean buyerAcceptanceEligible = request.outcome() == DeliveryAttemptOutcome.DELIVERED
+                    || request.outcome() == DeliveryAttemptOutcome.PARTIAL;
+            jdbc.update("update logistics.delivery_handoff_token set delivery_attempt_id=?,delivery_active_attempt_id=null,"
+                            + "status=case when ? then status when status='ACTIVE' then 'REPLACED' else status end "
+                            + "where tenant_id=? and workspace_id=? and delivery_id=? and delivery_active_attempt_id=?",
+                    attemptId, buyerAcceptanceEligible, request.tenantId(), request.workspaceId(),
+                    request.deliveryId(), activeAttempt.id());
+            if (jdbc.update("delete from logistics.delivery_active_attempt where tenant_id=? and workspace_id=? and delivery_id=? and id=?",
+                    request.tenantId(), request.workspaceId(), request.deliveryId(), activeAttempt.id()) != 1) {
+                throw error("CONCURRENCY_CONFLICT");
+            }
         }
 
         BigDecimal finalAdjustment = BigDecimal.ZERO;
@@ -431,13 +440,20 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
         return sealed;
     }
 
-    /** The canonical completion fact is owned by immutable POD finalization, not the earlier driver outcome. */
+    /** Delivery completion is published only after an immutable Buyer receipt is bound to the POD. */
     private void publishDeliveryCompleted(PodSealRequest request, PodView pod) {
         if (!"SEALED".equals(pod.status()) || pod.sealedAt() == null || pod.deliveryId() == null) return;
-        String finalizationKey = pod.id().toString();
-        canonicalOutbox.append("DeliveryCompleted.v1", "Delivery", pod.deliveryId(), request.tenantId(),
-                request.workspaceId(), pod.sealedAt(), finalizationKey, null, "1.0", finalizationKey,
-                Map.of("deliveryId", pod.deliveryId(), "podId", pod.id()));
+        BuyerReceiptOutboxFact receipt = jdbc.query("select receipt.id,receipt.occurred_at "
+                        + "from logistics.proof_of_delivery pod join logistics.buyer_receipt_fact receipt "
+                        + "on receipt.tenant_id=pod.tenant_id and receipt.workspace_id=pod.workspace_id "
+                        + "and receipt.id=pod.buyer_receipt_fact_id "
+                        + "where pod.tenant_id=? and pod.workspace_id=? and pod.id=?",
+                (rs, row) -> new BuyerReceiptOutboxFact(rs.getObject("id", UUID.class),
+                        instant(rs, "occurred_at")),
+                request.tenantId(), request.workspaceId(), pod.id()).stream().findFirst().orElse(null);
+        if (receipt == null) return;
+        DeliveryCompletedOutbox.append(canonicalOutbox, request.tenantId(), request.workspaceId(),
+                pod.deliveryId(), pod.id(), receipt.id(), receipt.occurredAt());
     }
 
     @Override
@@ -952,6 +968,7 @@ public class JdbcDeliveryOutcomeAdapter implements DeliveryPersistencePort {
 
     private record IdempotencyRow(String requestHash, UUID resourceId) { }
     private record PodRow(UUID id, UUID deliveryId, String status) { }
+    private record BuyerReceiptOutboxFact(UUID id, Instant occurredAt) { }
     private record PodIdentity(UUID id, UUID attemptId, String receiverName, Instant capturedAt, String notes) { }
     private record DriverPodRow(UUID id, UUID attemptId, String status,
                                 UUID photoEvidenceObjectId, UUID signatureEvidenceObjectId) { }

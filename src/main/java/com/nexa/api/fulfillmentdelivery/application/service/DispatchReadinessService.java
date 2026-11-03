@@ -14,6 +14,8 @@ import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperati
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -44,16 +46,20 @@ public class DispatchReadinessService implements com.nexa.api.fulfillmentdeliver
     private final PhysicalAllocationCommands physicalAllocations;
     private final WarehouseObjectAccess warehouseAccess;
     private final Clock clock;
+    private final SalesOrderFulfillmentQuery orders;
+    private final CustomerAccountQuery customers;
 
     public DispatchReadinessService(DispatchReadinessPersistencePort query,
                                     PhysicalAllocationCommands physicalAllocations,
                                     WarehouseObjectAccess warehouseAccess,
-                                    Clock clock) {
+                                    Clock clock, SalesOrderFulfillmentQuery orders, CustomerAccountQuery customers) {
         this.query = Objects.requireNonNull(query, "Dispatch-readiness query is required");
         this.physicalAllocations = Objects.requireNonNull(physicalAllocations,
                 "Physical allocation facts are required");
         this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse access is required");
         this.clock = Objects.requireNonNull(clock, "Clock is required");
+        this.orders = Objects.requireNonNull(orders, "Sales order headers are required");
+        this.customers = Objects.requireNonNull(customers, "Customer references are required");
     }
 
     /** Filters current Warehouse grants before calculating the response count and page. */
@@ -67,18 +73,21 @@ public class DispatchReadinessService implements com.nexa.api.fulfillmentdeliver
         }
 
         List<Readiness> visible = new ArrayList<>();
+        Map<UUID, UUID> salesOrderIds = new HashMap<>();
         for (DispatchReadinessPersistencePort.PreparedFulfillment candidate :
                 query.candidates(context.tenantId().value(), context.workspaceId().value())) {
             AllocationResult allocation = authorizedAllocation(context, candidate.id(), grantedWarehouses);
             if (allocation == null) continue;
             visible.add(evaluate(context, candidate, allocation, grantedWarehouses));
+            if (candidate.salesOrderId() != null) salesOrderIds.put(candidate.id(), candidate.salesOrderId());
         }
 
         long from = (long) page * size;
         List<Readiness> items = from >= visible.size()
                 ? List.of()
                 : List.copyOf(visible.subList((int) from, (int) Math.min(from + size, visible.size())));
-        return new DispatchReadinessModels.Page(items, page, size, visible.size(), clock.instant());
+        return new DispatchReadinessModels.Page(withOrderHeaders(context, items, salesOrderIds), page, size,
+                visible.size(), clock.instant());
     }
 
     /** Loads one prepared Fulfillment inside current tenant, workspace and Warehouse grant scope. */
@@ -103,7 +112,35 @@ public class DispatchReadinessService implements com.nexa.api.fulfillmentdeliver
         Set<UUID> grantedWarehouses = warehouseAccess.activeWarehouseIds(context);
         AllocationResult allocation = authorizedAllocation(context, candidate.id(), grantedWarehouses);
         if (allocation == null) throw notFound();
-        return evaluate(context, candidate, allocation, grantedWarehouses);
+        Readiness result = evaluate(context, candidate, allocation, grantedWarehouses);
+        return candidate.salesOrderId() == null ? result : withOrderHeaders(context, List.of(result),
+                Map.of(candidate.id(), candidate.salesOrderId())).getFirst();
+    }
+
+    private List<Readiness> withOrderHeaders(CurrentAccessContext context, List<Readiness> visible,
+                                             Map<UUID, UUID> salesOrderIds) {
+        if (visible.isEmpty()) return visible;
+        var ids = visible.stream().map(item -> salesOrderIds.get(item.fulfillmentId()))
+                .filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) return visible;
+        var headers = orders.findHeaders(context.tenantId().value(), context.workspaceId().value(), ids);
+        Map<UUID, String> customerNames = new HashMap<>();
+        return visible.stream().map(item -> {
+            var header = headers.get(salesOrderIds.get(item.fulfillmentId()));
+            if (header == null) return item;
+            String name = null;
+            if (header.clientAccountId() != null) {
+                if (!customerNames.containsKey(header.clientAccountId())) {
+                    String customerName = customers.findHistoricalDetails(context.tenantId().toString(),
+                            context.workspaceId().toString(), header.clientAccountId().toString())
+                            .map(customer -> customer.commercialName() != null && !customer.commercialName().isBlank()
+                                    ? customer.commercialName() : customer.businessName()).orElse(null);
+                    customerNames.put(header.clientAccountId(), customerName);
+                }
+                name = customerNames.get(header.clientAccountId());
+            }
+            return item.withOrderHeader(header.number(), name, header.priority());
+        }).toList();
     }
 
     private Readiness evaluate(CurrentAccessContext context,
@@ -216,7 +253,7 @@ public class DispatchReadinessService implements com.nexa.api.fulfillmentdeliver
                 allocation.allocationId(), allocation.status(), allocation.version(), candidate.deliveryId(),
                 candidate.deliveryStatus(), candidate.deliveryVersion(), candidate.windowStart(), candidate.windowEnd(),
                 candidate.windowSource(), allocationComplete, pickingComplete,
-                pickingEvidenceComplete, reasons.isEmpty(), reasons, lines, asOf);
+                pickingEvidenceComplete, reasons.isEmpty(), reasons, lines, asOf, null, null, null);
     }
 
     private AllocationResult authorizedAllocation(CurrentAccessContext context, UUID fulfillmentId,

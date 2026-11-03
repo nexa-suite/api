@@ -8,6 +8,11 @@ import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientA
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
@@ -55,10 +60,16 @@ public final class CatalogSkuController {
     }
 
     @GetMapping("/product-families")
-    @Operation(operationId = "listProductFamilies")
+    @Operation(operationId = "listProductFamilies",
+            description = "The search parameter uses partial text matching. Brand and category filters require exact, case-insensitive taxonomy names.")
     public CatalogSkuModels.Page<CatalogSkuModels.FamilyView> families(@RequestAttribute(ACCESS) CurrentAccessContext context,
-            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search,
-            @RequestParam(required = false) String brand, @RequestParam(required = false) String category) {
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
+            @Parameter(description = "Partial, case-insensitive match against family name or family code.")
+            @RequestParam(required = false) String search,
+            @Parameter(description = "Exact, case-insensitive brand name.")
+            @RequestParam(required = false) String brand,
+            @Parameter(description = "Exact, case-insensitive category name.")
+            @RequestParam(required = false) String category) {
         return CatalogHttpSupport.tenantRequest(context, tenantRequests,
                 () -> service.families(readScope(context), page, size, search, brand, category),
                 request -> request.skus().families(request.readScope(), page, size, search, brand, category));
@@ -130,10 +141,13 @@ public final class CatalogSkuController {
     }
     @GetMapping("/skus")
     @Operation(operationId = "listSellableSkus")
-    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(@RequestAttribute(ACCESS) CurrentAccessContext context, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String search, @RequestParam(required = false) UUID familyId) {
+    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(@RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String search, @RequestParam(required = false) UUID familyId,
+            @RequestParam(required = false) UUID variantId) {
         return CatalogHttpSupport.tenantRequest(context, tenantRequests,
-                () -> service.skus(readScope(context), page, size, search, familyId),
-                request -> request.skus().skus(request.readScope(), page, size, search, familyId));
+                () -> service.skus(readScope(context), page, size, search, familyId, variantId),
+                request -> request.skus().skus(request.readScope(), page, size, search, familyId, variantId));
     }
     @GetMapping("/skus/{skuId}")
     @Operation(operationId = "getSellableSku")
@@ -146,8 +160,8 @@ public final class CatalogSkuController {
     @Operation(operationId = "createSellableSku")
     public ResponseEntity<CatalogSkuModels.SkuView> createSku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID familyId, @RequestBody SkuRequest request) {
         CatalogSkuModels.SkuView value = CatalogHttpSupport.tenantRequest(context, tenantRequests,
-                () -> service.createSku(CatalogHttpSupport.scope(context), familyId, request.skuCode(), request.gtin(), request.presentation(), request.packagingType(), request.unitOfMeasure(), request.netWeight(), request.grossWeight(), request.packQuantity(), request.temperatureMin(), request.temperatureMax(), request.shelfLifeDays(), request.minimumRemainingShelfLifeDays(), request.lotTrackingRequired(), request.expiryTrackingRequired(), request.taxCategory()),
-                scoped -> scoped.skus().createSku(scoped.scope(), familyId, request.skuCode(), request.gtin(), request.presentation(), request.packagingType(), request.unitOfMeasure(), request.netWeight(), request.grossWeight(), request.packQuantity(), request.temperatureMin(), request.temperatureMax(), request.shelfLifeDays(), request.minimumRemainingShelfLifeDays(), request.lotTrackingRequired(), request.expiryTrackingRequired(), request.taxCategory()));
+                () -> service.createSku(CatalogHttpSupport.scope(context), familyId, request.variantId(), request.skuCode(), request.gtin(), request.presentation(), request.packagingType(), request.unitOfMeasure(), request.netWeight(), request.grossWeight(), request.packQuantity(), request.temperatureMin(), request.temperatureMax(), request.shelfLifeDays(), request.minimumRemainingShelfLifeDays(), request.lotTrackingRequired(), request.expiryTrackingRequired(), request.taxCategory()),
+                scoped -> scoped.skus().createSku(scoped.scope(), familyId, request.variantId(), request.skuCode(), request.gtin(), request.presentation(), request.packagingType(), request.unitOfMeasure(), request.netWeight(), request.grossWeight(), request.packQuantity(), request.temperatureMin(), request.temperatureMax(), request.shelfLifeDays(), request.minimumRemainingShelfLifeDays(), request.lotTrackingRequired(), request.expiryTrackingRequired(), request.taxCategory()));
         return ResponseEntity.created(URI.create("/api/v1/skus/" + value.id())).eTag(CatalogHttpSupport.etag(value.version())).body(value);
     }
     @PostMapping("/skus/{skuId}/deactivations")
@@ -158,6 +172,9 @@ public final class CatalogSkuController {
     public ResponseEntity<CatalogSkuModels.SkuView> activateSku(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId, @RequestHeader(HttpHeaders.IF_MATCH) String ifMatch) { return statusSku(context, skuId, "ACTIVE", ifMatch); }
     @PostMapping("/skus/{skuId}/prices")
     @Operation(operationId = "createSkuPrice")
+    @ApiResponse(responseCode = "201", description = "SKU price created",
+            headers = @Header(name = "Location", description = "URI of the created SKU price"),
+            content = @Content(schema = @Schema(implementation = CatalogSkuModels.PriceView.class)))
     public ResponseEntity<CatalogSkuModels.PriceView> createPrice(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID skuId,
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey, @RequestBody PriceRequest request) {
         CatalogHttpSupport.requireIdempotency(idempotencyKey);
@@ -200,7 +217,7 @@ public final class CatalogSkuController {
     }
 
     public record FamilyRequest(String code, String name, String description, UUID categoryId, UUID brandId, String countryOfOrigin, String manufacturerReference, String supplierReference, String storageFamily) { }
-    public record SkuRequest(String skuCode, String gtin, String presentation, String packagingType, String unitOfMeasure, BigDecimal netWeight, BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax, int shelfLifeDays, int minimumRemainingShelfLifeDays, boolean lotTrackingRequired, boolean expiryTrackingRequired, String taxCategory) { }
+    public record SkuRequest(String skuCode, String gtin, String presentation, String packagingType, String unitOfMeasure, BigDecimal netWeight, BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax, int shelfLifeDays, int minimumRemainingShelfLifeDays, boolean lotTrackingRequired, boolean expiryTrackingRequired, String taxCategory, UUID variantId) { }
     public record VariantRequest(String code, String name, String description) { }
     public record PriceRequest(BigDecimal amount, String currency, Instant validFrom, Instant validUntil, String sourceCode, String sourceDescription) { }
 }

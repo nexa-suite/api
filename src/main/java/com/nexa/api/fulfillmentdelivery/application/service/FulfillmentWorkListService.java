@@ -33,15 +33,23 @@ public class FulfillmentWorkListService implements com.nexa.api.fulfillmentdeliv
     private final PhysicalAllocationCommands allocations;
     private final WarehouseObjectAccess warehouseAccess;
     private final Clock clock;
+    private final com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery orders;
 
     public FulfillmentWorkListService(DispatchReadinessPersistencePort fulfillments,
-                                      PhysicalAllocationCommands allocations,
-                                      WarehouseObjectAccess warehouseAccess,
+                                      PhysicalAllocationCommands allocations, WarehouseObjectAccess warehouseAccess,
                                       Clock clock) {
+        this(fulfillments, allocations, warehouseAccess, clock, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public FulfillmentWorkListService(DispatchReadinessPersistencePort fulfillments,
+                                      PhysicalAllocationCommands allocations, WarehouseObjectAccess warehouseAccess,
+                                      Clock clock, com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery orders) {
         this.fulfillments = Objects.requireNonNull(fulfillments, "Fulfillment query is required");
         this.allocations = Objects.requireNonNull(allocations, "Physical allocation facts are required");
         this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse access is required");
         this.clock = Objects.requireNonNull(clock, "Clock is required");
+        this.orders = orders;
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -81,6 +89,14 @@ public class FulfillmentWorkListService implements com.nexa.api.fulfillmentdeliv
         List<FulfillmentWorkListModels.Item> items = from >= visible.size()
                 ? List.of()
                 : List.copyOf(visible.subList((int) from, (int) Math.min(from + size, visible.size())));
+        if (orders != null && !items.isEmpty()) {
+            var headers = orders.findHeaders(context.tenantId().value(), context.workspaceId().value(),
+                    items.stream().map(FulfillmentWorkListModels.Item::salesOrderId).distinct().toList());
+            items = items.stream().map(item -> {
+                var header = headers.get(item.salesOrderId());
+                return item.withOrderNumber(header == null ? null : header.number());
+            }).toList();
+        }
         return new FulfillmentWorkListModels.Page(items, page, size, visible.size(), clock.instant());
     }
 

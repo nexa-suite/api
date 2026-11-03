@@ -224,7 +224,6 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
     @Test
     void replacingLinesInvalidatesSnapshotsAndBlocksSubmissionUntilRouteIsRecalculated() throws Exception {
         String buyer = accessToken(BUYER_EMAIL, "PORTAL");
-        String sales = accessToken(SALES_EMAIL, "PLATFORM");
         String clientId = buyerClientAccountId();
         List<String> skuIds = tenantJdbc().query("""
                 select s.id::text
@@ -250,7 +249,7 @@ class PurchaseRequestDraftIT extends PostgresIntegrationSupport {
         assertThat(skuIds).as("two serviceable SKUs in one warehouse").hasSize(2);
 
         MvcResult address = mockMvc.perform(post("/api/v1/client-accounts/" + clientId + "/addresses")
-                        .header("Authorization", "Bearer " + sales)
+                        .header("Authorization", "Bearer " + buyer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"label\":\"Canonical draft " + uuid().substring(0, 8) + "\",\"defaultAddress\":false,\"address\":{" +
                                 "\"addressType\":\"STREET\",\"line\":\"Av. Lima 123\",\"reference\":\"Draft dock\"," +

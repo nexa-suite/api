@@ -6,6 +6,7 @@ import com.nexa.api.inventoryavailability.application.WarehouseOperationsService
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -68,7 +69,8 @@ public final class WarehouseController {
     }
 
     @GetMapping("/warehouses/{id}/locations")
-    @Operation(operationId = "getWarehouseLocationLegacyAlias")
+    @Operation(operationId = "getWarehouseLocationLegacyAlias", deprecated = true,
+            description = "Deprecated compatibility alias. Use GET /api/v1/warehouses/{id}/location.")
     public ResponseEntity<LocationResponse> locationsAlias(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
         return location(c, id);
     }
@@ -81,7 +83,8 @@ public final class WarehouseController {
     }
 
     @GetMapping("/warehouses/{id}/operational-profile")
-    @Operation(operationId = "getWarehouseOperationalProfileLegacyAlias")
+    @Operation(operationId = "getWarehouseOperationalProfileLegacyAlias", deprecated = true,
+            description = "Deprecated compatibility alias. Use GET /api/v1/warehouses/{id}/profile.")
     public ResponseEntity<OperationalProfileResponse> operationalProfileAlias(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
         return operationalProfile(c, id);
     }
@@ -122,7 +125,8 @@ public final class WarehouseController {
     }
 
     @PatchMapping("/warehouses/{id}/operational-profile")
-    @Operation(operationId = "updateWarehouseOperationalProfileLegacyAlias")
+    @Operation(operationId = "updateWarehouseOperationalProfileLegacyAlias", deprecated = true,
+            description = "Deprecated compatibility alias. Use PATCH /api/v1/warehouses/{id}/profile.")
     public ResponseEntity<OperationalProfileResponse> updateOperationalProfileAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                                       @PathVariable String id,
                                                                                       @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -212,7 +216,8 @@ public final class WarehouseController {
     }
 
     @PatchMapping("/warehouses/{id}/locations")
-    @Operation(operationId = "updateWarehouseLocationLegacyAlias")
+    @Operation(operationId = "updateWarehouseLocationLegacyAlias", deprecated = true,
+            description = "Deprecated compatibility alias. Use PATCH /api/v1/warehouses/{id}/location.")
     public ResponseEntity<LocationResponse> updateLocationsAlias(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                                    @PathVariable String id,
                                                                    @RequestHeader(name = "If-Match", required = false) String ifMatch,
@@ -254,6 +259,18 @@ public final class WarehouseController {
         return execute(c, service -> lot(service.lot(c, lotId)));
     }
 
+    @GetMapping("/inventory/lots/{lotId}/temperature-readings")
+    @Operation(operationId = "getInventoryLotTemperatureReadings",
+            description = "Reads the receiving observation and BC-05 temperature evaluations with source type RECEIVING. Warehouse readers need the current active grant for the lot's Warehouse. A Business Operations Manager needs inventory.temperature.audit.read and is limited to the active Tenant and Workspace. Fulfillment and stock-evidence evaluations are excluded, and this route has no write operation.")
+    public TemperatureReadingsResponse temperatureReadings(
+            @RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId,
+            @Parameter(description = "Zero-based evaluation page.", schema = @Schema(implementation = Integer.class, minimum = "0", defaultValue = "0"))
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Evaluation page size; maximum 100.", schema = @Schema(implementation = Integer.class, minimum = "1", maximum = "100", defaultValue = "25"))
+            @RequestParam(defaultValue = "25") int size) {
+        return execute(c, service -> temperatureReadings(service.temperatureReadings(c, lotId, page, size)));
+    }
+
     @GetMapping("/inventory/movements")
     public PageResponse<MovementResponse> movements(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String lotId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "occurredAt,desc") String sort) {
         return execute(c, service -> page(service.movements(c, lotId, page, size, sort), this::movement));
@@ -261,8 +278,12 @@ public final class WarehouseController {
 
     @PostMapping("/inventory/inbound-receipts")
     public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = execute(c, service -> lot(service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId(), r.temperatureEvidenceObjectId(), r.productionDate(), r.receivedAt()), key, String.valueOf(correlation))));
-        return ResponseEntity.status(201).eTag(etag(result.version())).body(result);
+        var result = execute(c, service -> service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId(), r.temperatureEvidenceObjectId(), r.productionDate(), r.receivedAt()), key, String.valueOf(correlation)));
+        var response = ResponseEntity.status(201).eTag(etag(result.version()));
+        if (result.confirmedReceivedQuantity() != null) {
+            response.header("X-Nexa-Received-Quantity", result.confirmedReceivedQuantity().toPlainString());
+        }
+        return response.body(lot(result));
     }
 
     @PostMapping("/inventory/adjustments")
@@ -505,7 +526,20 @@ public final class WarehouseController {
                 physical.longitude(), AddressDetails.from(physical.addressDetails()));
     }
     private ZoneResponse zone(WarehouseOperationsService.ZoneSummary x) { return new ZoneResponse(x.id(), x.warehouseId(), x.code(), x.name(), x.type(), x.temperatureMin(), x.temperatureMax(), x.status(), x.version()); }
-    private LotResponse lot(WarehouseOperationsService.LotSummary x) { return new LotResponse(x.id(), x.warehouseId(), x.zoneId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.receivedAt(), x.onHand(), x.reserved(), x.available(), x.unit(), x.status(), x.version(), x.skuId(), x.productionDate()); }
+    private LotResponse lot(WarehouseOperationsService.LotSummary x) { return new LotResponse(x.id(), x.warehouseId(), x.zoneId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.receivedAt(), x.onHand(), x.reserved(), x.available(), x.unit(), x.status(), x.version(), x.skuId(), x.productionDate(), x.productName(), x.skuCode(), x.warehouseName(), x.zoneName(), x.imageFileName()); }
+    private TemperatureReadingsResponse temperatureReadings(WarehouseOperationsService.TemperatureReadingsSummary x) {
+        var receiving = x.receiving() == null ? null : new ReceivingTemperatureReadingResponse(
+                x.receiving().valueCelsius(), x.receiving().recordedAt(), x.receiving().recordedByMembershipId(),
+                x.receiving().evidenceObjectId());
+        return new TemperatureReadingsResponse(x.lotId(), x.warehouseId(), receiving,
+                page(x.evaluations(), this::temperatureEvaluation));
+    }
+    private TemperatureEvaluationResponse temperatureEvaluation(WarehouseOperationsService.TemperatureEvaluationSummary x) {
+        return new TemperatureEvaluationResponse(x.id(), x.valueCelsius(), x.sourceType(),
+                x.expectedMinimumCelsius(), x.expectedMaximumCelsius(), x.status(), x.disposition(),
+                x.resolutionReason(), x.createdAt(), x.resolvedAt(), x.evidenceObjectId(), x.affectedQuantity(),
+                x.actorMembershipId(), x.blocksCommittedExecution());
+    }
     private MovementResponse movement(WarehouseOperationsService.MovementSummary x) { return new MovementResponse(x.id(), x.lotId(), x.catalogItemId(), x.type(), x.quantity(), x.unit(), x.quantityBefore(), x.quantityAfter(), x.reservedBefore(), x.reservedAfter(), x.reason(), x.occurredAt(), x.skuId()); }
     private SafetyStockResponse safetyStock(WarehouseOperationsService.SafetyStockSummary x) { return new SafetyStockResponse(x.id(), x.warehouseId(), x.skuId(), x.catalogItemId(), x.quantity(), x.unit(), x.version(), x.updatedAt()); }
     private TransferResponse transfer(WarehouseOperationsService.TransferSummary x) { return new TransferResponse(x.id(), x.sourceWarehouseId(), x.sourceZoneId(), x.sourceLotId(), x.destinationWarehouseId(), x.destinationZoneId(), x.destinationLotId(), x.skuId(), x.catalogItemId(), x.batchNumber(), x.expirationDate(), x.requestedQuantity(), x.transferredQuantity(), x.unit(), x.mode(), x.status(), x.reason(), x.createdAt(), x.sourceVersionBefore(), x.sourceVersionAfter(), x.destinationVersionAfter(), x.version(), x.dispatchedAt(), x.receivedAt()); }
@@ -538,7 +572,26 @@ public final class WarehouseController {
                                          LocalTime operatingHoursStart, LocalTime operatingHoursEnd,
                                          boolean serviceable) { }
     public record ZoneResponse(String id, String warehouseId, String code, String name, String type, BigDecimal temperatureMin, BigDecimal temperatureMax, String status, long version) { }
-    public record LotResponse(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId, LocalDate productionDate) { }
+    public record LotResponse(String id, String warehouseId, String zoneId, String catalogItemId, String batchNumber, LocalDate expirationDate, Instant receivedAt, BigDecimal onHand, BigDecimal reserved, BigDecimal available, String unit, String status, long version, String skuId, LocalDate productionDate, String productName, String skuCode, String warehouseName, String zoneName, String imageFileName) { }
+    @Schema(description = "Tenant and Workspace scoped temperature data persisted by BC-05 for one inventory lot.")
+    public record TemperatureReadingsResponse(String lotId, String warehouseId,
+                                              @Schema(nullable = true) ReceivingTemperatureReadingResponse receiving,
+                                              PageResponse<TemperatureEvaluationResponse> evaluations) { }
+    @Schema(description = "Manual receiving temperature observation recorded on the inventory lot, in Celsius.")
+    public record ReceivingTemperatureReadingResponse(BigDecimal valueCelsius,
+            @Schema(nullable = true) Instant recordedAt,
+            @Schema(nullable = true) String recordedByMembershipId,
+            @Schema(nullable = true) String evidenceObjectId) { }
+    @Schema(description = "Receiving temperature evaluation fact persisted by BC-05 for the inventory lot.")
+    public record TemperatureEvaluationResponse(String id, BigDecimal valueCelsius, String sourceType,
+            @Schema(nullable = true) BigDecimal expectedMinimumCelsius,
+            @Schema(nullable = true) BigDecimal expectedMaximumCelsius,
+            String status, String disposition, @Schema(nullable = true) String resolutionReason,
+            Instant createdAt, @Schema(nullable = true) Instant resolvedAt,
+            @Schema(nullable = true) String evidenceObjectId,
+            @Schema(nullable = true) BigDecimal affectedQuantity,
+            @Schema(nullable = true) String actorMembershipId,
+                                                boolean blocksCommittedExecution) { }
     public record MovementResponse(String id, String lotId, String catalogItemId, String type, BigDecimal quantity, String unit, BigDecimal quantityBefore, BigDecimal quantityAfter, BigDecimal reservedBefore, BigDecimal reservedAfter, String reason, Instant occurredAt, String skuId) { }
     public record AvailabilityResponse(String catalogItemId, String status, Instant asOf,
                                        BigDecimal physicalQuantity, BigDecimal safetyStock, BigDecimal sellableQuantity) {

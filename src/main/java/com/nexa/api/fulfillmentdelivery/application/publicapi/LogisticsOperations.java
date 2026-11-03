@@ -58,5 +58,7 @@ public interface LogisticsOperations {
     LogisticsOperationsModels.AnalyticsView analytics(CurrentAccessContext context, Instant from, Instant to);
     LogisticsOperationsModels.Page<LogisticsOperationsModels.ProofOfDeliveryView> proofOfDelivery(
             CurrentAccessContext context, String status, int page, int size);
+    LogisticsOperationsModels.DispatchDeliveriesView dispatchDeliveries(CurrentAccessContext context,
+                                                                         String dispatchOrderId);
     List<LogisticsOperationsModels.AssigneeView> assignees(CurrentAccessContext context);
 }

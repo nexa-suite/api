@@ -33,6 +33,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registr
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.WorkspaceSlug;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.WorkspacePreviewQueryPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.JdbcInvitationPersistenceAdapter;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceScopeReader;
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.flywaydb.core.Flyway;
@@ -45,6 +47,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import tools.jackson.databind.json.JsonMapper;
 
+import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -113,6 +116,179 @@ class RlsRuntimeDatabaseIsolationIT {
         } finally {
             deleteFixture(fixture);
             RlsRequestScope.clear();
+        }
+    }
+
+    @Test
+    void inboxReceiptsAreForceScopedAndAppendOnlyForRuntime() throws Exception {
+        Fixture fixture = insertFixture();
+        ScopedRow owner = fixture.rows().getFirst();
+        ScopedRow foreign = fixture.rows().get(1);
+        String consumer = "rls-inbox-" + UUID.randomUUID();
+        UUID ownerReceipt = UUID.randomUUID();
+        UUID foreignReceipt = UUID.randomUUID();
+        UUID rejectedReceipt = UUID.randomUUID();
+        try {
+            try (Connection connection = openRuntimeConnection()) {
+                assertRuntimeIdentityAndPrivileges(connection);
+                setSessionScope(connection, owner.scope());
+                assertThat(execute(connection, "insert into integration.inbox_event "
+                                + "(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) "
+                                + "values (?,?,?,?,current_timestamp,'PROCESSED')",
+                        consumer, ownerReceipt, owner.scope().tenantId(), owner.scope().workspaceId()))
+                        .as("runtime may append a receipt inside its current scope").isEqualTo(1);
+
+                setSessionScope(connection, foreign.scope());
+                assertThat(execute(connection, "insert into integration.inbox_event "
+                                + "(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) "
+                                + "values (?,?,?,?,current_timestamp,'IGNORED')",
+                        consumer, foreignReceipt, foreign.scope().tenantId(), foreign.scope().workspaceId()))
+                        .as("runtime may append a receipt inside the second current scope").isEqualTo(1);
+
+                setSessionScope(connection, owner.scope());
+                assertThat(count(connection, "select count(*) from integration.inbox_event "
+                                + "where consumer_name=? and event_id=?", consumer, ownerReceipt))
+                        .as("the receipt is visible in its exact Tenant/Workspace scope").isEqualTo(1);
+                assertThat(count(connection, "select count(*) from integration.inbox_event "
+                                + "where consumer_name=? and event_id=?", consumer, foreignReceipt))
+                        .as("a receipt in a different Tenant/Workspace scope stays invisible").isZero();
+                assertThat(sqlState(connection, "insert into integration.inbox_event "
+                                + "(consumer_name,event_id,tenant_id,workspace_id,processed_at,result) "
+                                + "values (?,?,?,?,current_timestamp,'PROCESSED')",
+                        consumer, rejectedReceipt, foreign.scope().tenantId(), foreign.scope().workspaceId()))
+                        .as("the INSERT policy rejects a row outside the active Tenant/Workspace")
+                        .isEqualTo("42501");
+                assertThat(sqlState(connection, "update integration.inbox_event set result='IGNORED' "
+                                + "where consumer_name=? and event_id=?", consumer, ownerReceipt))
+                        .as("runtime has no receipt UPDATE privilege").isEqualTo("42501");
+                assertThat(sqlState(connection, "delete from integration.inbox_event "
+                                + "where consumer_name=? and event_id=?", consumer, ownerReceipt))
+                        .as("runtime has no receipt DELETE privilege").isEqualTo("42501");
+
+                clearSessionScope(connection);
+                assertThat(count(connection, "select count(*) from integration.inbox_event where consumer_name=?", consumer))
+                        .as("missing Tenant/Workspace scope fails closed for receipt reads").isZero();
+
+                try (PreparedStatement statement = connection.prepareStatement("""
+                        select relation.relrowsecurity,
+                               relation.relforcerowsecurity,
+                               has_table_privilege(current_user, 'integration.inbox_event', 'SELECT'),
+                               has_table_privilege(current_user, 'integration.inbox_event', 'INSERT'),
+                               has_table_privilege(current_user, 'integration.inbox_event', 'UPDATE'),
+                               has_any_column_privilege(current_user, 'integration.inbox_event', 'UPDATE'),
+                               has_table_privilege(current_user, 'integration.inbox_event', 'DELETE'),
+                               exists (select 1 from pg_policies where schemaname='integration'
+                                   and tablename='inbox_event' and policyname='inbox_event_direct_scope_select'
+                                   and qual like '%app.current_tenant_id%' and qual like '%app.current_workspace_id%'),
+                               exists (select 1 from pg_policies where schemaname='integration'
+                                   and tablename='inbox_event' and policyname='inbox_event_direct_scope_insert'
+                                   and with_check like '%app.current_tenant_id%' and with_check like '%app.current_workspace_id%')
+                          from pg_class relation
+                          join pg_namespace ns on ns.oid=relation.relnamespace
+                         where ns.nspname='integration' and relation.relname='inbox_event'
+                        """)) {
+                    try (ResultSet result = statement.executeQuery()) {
+                        assertThat(result.next()).isTrue();
+                        assertThat(result.getBoolean(1)).as("central inbox RLS is enabled").isTrue();
+                        assertThat(result.getBoolean(2)).as("central inbox RLS is forced").isTrue();
+                        assertThat(result.getBoolean(3)).as("runtime retains scoped receipt reads").isTrue();
+                        assertThat(result.getBoolean(4)).as("runtime retains scoped receipt inserts").isTrue();
+                        assertThat(result.getBoolean(5)).as("runtime cannot update receipts").isFalse();
+                        assertThat(result.getBoolean(6)).as("runtime has no column-level update grant").isFalse();
+                        assertThat(result.getBoolean(7)).as("runtime cannot delete receipts").isFalse();
+                        assertThat(result.getBoolean(8)).as("SELECT policy uses both scope GUCs").isTrue();
+                        assertThat(result.getBoolean(9)).as("INSERT policy checks both scope GUCs").isTrue();
+                        assertThat(result.next()).isFalse();
+                    }
+                }
+            }
+        } finally {
+            try (Connection connection = openMigratorConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    setSessionScope(connection, owner.scope());
+                    execute(connection, "delete from integration.inbox_event where consumer_name=? and event_id=?",
+                            consumer, ownerReceipt);
+                    setSessionScope(connection, foreign.scope());
+                    execute(connection, "delete from integration.inbox_event where consumer_name=? and event_id=?",
+                            consumer, foreignReceipt);
+                    connection.commit();
+                } catch (SQLException exception) {
+                    connection.rollback();
+                    throw exception;
+                }
+            } finally {
+                deleteFixture(fixture);
+                RlsRequestScope.clear();
+            }
+        }
+    }
+
+    @Test
+    void membershipKeepsIdentityDiscoveryAcrossTenantsAndRejectsTenantWorkspaceMismatch() throws Exception {
+        Fixture fixture = insertFixture();
+        ScopedRow identity = fixture.rows().getFirst();
+        ScopedRow otherIdentity = fixture.rows().get(1);
+        UUID secondTenant = UUID.randomUUID();
+        UUID secondWorkspace = UUID.randomUUID();
+        UUID secondMembership = UUID.randomUUID();
+        UUID rejectedMembership = UUID.randomUUID();
+        Timestamp now = Timestamp.from(Instant.now());
+        try {
+            try (Connection connection = openMigratorConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    setSessionScope(connection, new Scope(secondTenant, secondWorkspace));
+                    execute(connection, "insert into tenant_management.tenant(id,name,slug,status,created_at,updated_at) values (?,?,?,'ACTIVE',?,?)",
+                            secondTenant, "Membership discovery tenant", "membership-discovery-" + secondTenant, now, now);
+                    execute(connection, "insert into tenant_management.workspace(id,tenant_id,name,slug,status,created_at,updated_at) values (?,?,?,?,'ACTIVE',?,?)",
+                            secondWorkspace, secondTenant, "Membership discovery workspace",
+                            "membership-discovery-" + secondWorkspace, now, now);
+                    execute(connection, "insert into tenant_management.workspace_membership(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,?,'ACTIVE',?,?,0)",
+                            secondMembership, secondTenant, secondWorkspace, identity.userId(), "BUYER", now, now);
+                    connection.commit();
+                } catch (SQLException exception) {
+                    connection.rollback();
+                    throw exception;
+                }
+            }
+
+            try (Connection connection = openRuntimeConnection()) {
+                clearSessionScope(connection);
+                setSessionSetting(connection, "app.access_context_user_id", identity.userId().toString());
+                assertThat(count(connection,
+                        "select count(*) from tenant_management.workspace_membership where user_id=?",
+                        identity.userId()))
+                        .as("identity discovery returns the same account's memberships across two Tenants")
+                        .isEqualTo(2);
+
+                setSessionScope(connection, identity.scope().tenantId().toString(), secondWorkspace.toString());
+                assertThat(sqlState(connection, """
+                        insert into tenant_management.workspace_membership
+                            (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version)
+                        values (?,?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)
+                        """, rejectedMembership, secondTenant, secondWorkspace, otherIdentity.userId(), "BUYER"))
+                        .as("a Workspace match with the wrong Tenant context fails the V174 write policy")
+                        .isEqualTo("42501");
+            }
+        } finally {
+            try (Connection connection = openMigratorConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    setSessionScope(connection, new Scope(secondTenant, secondWorkspace));
+                    execute(connection, "delete from tenant_management.workspace_membership where id=?", secondMembership);
+                    execute(connection, "delete from tenant_management.workspace where id=?", secondWorkspace);
+                    setSessionScope(connection, secondTenant.toString(), "");
+                    execute(connection, "delete from tenant_management.tenant where id=?", secondTenant);
+                    connection.commit();
+                } catch (SQLException exception) {
+                    connection.rollback();
+                    throw exception;
+                }
+            } finally {
+                deleteFixture(fixture);
+                RlsRequestScope.clear();
+            }
         }
     }
 
@@ -339,8 +515,6 @@ class RlsRuntimeDatabaseIsolationIT {
 
     @Test
     void tenantOnlyConfigurationAndTenantWorkspaceIdentityRowsUseTheirExistingScopePaths() throws Exception {
-        int workspaceCountBeforeFixture = countRuntimeRowsWithCrossScopeScan("tenant_management.workspace");
-        int tenantCountBeforeFixture = countRuntimeRowsWithCrossScopeScan("tenant_management.tenant");
         Fixture fixture = insertFixture();
         UUID tenantWideRoleId = UUID.randomUUID();
         try (Connection connection = openRuntimeConnection()) {
@@ -426,9 +600,11 @@ class RlsRuntimeDatabaseIsolationIT {
 
             setSessionSetting(connection, "app.cross_scope_workspace_scan", "true");
             assertThat(count(connection, "select count(*) from tenant_management.workspace"))
-                    .isEqualTo(workspaceCountBeforeFixture + fixture.rows().size());
+                    .as("setting the scan GUC does not grant the runtime role cross-Tenant Workspace enumeration")
+                    .isZero();
             assertThat(count(connection, "select count(*) from tenant_management.tenant"))
-                    .isEqualTo(tenantCountBeforeFixture + fixture.tenantIds().size());
+                    .as("setting the scan GUC does not grant the runtime role cross-Tenant enumeration")
+                    .isZero();
             setSessionSetting(connection, "app.cross_scope_workspace_scan", "");
 
             setSessionScope(connection, "", owner.scope().workspaceId().toString());
@@ -547,10 +723,11 @@ class RlsRuntimeDatabaseIsolationIT {
     void invitationExpiryWorkerTraversesScopesUnderForcedRlsWithBoundedBatches() throws Exception {
         Fixture fixture = insertFixture();
         RlsRequestScope.clear();
-        try (HikariDataSource pool = runtimePool()) {
+        try (HikariDataSource pool = runtimePool(); HikariDataSource workspaceScopeReaderPool = createWorkspaceScopeReaderPool()) {
+            JdbcWorkspaceScopeReader workspaceScopeReader = createWorkspaceScopeReader(workspaceScopeReaderPool);
             RlsScopedDataSource scopedDataSource = new RlsScopedDataSource(pool);
             JdbcInvitationPersistenceAdapter invitations = new JdbcInvitationPersistenceAdapter(
-                    new JdbcTemplate(scopedDataSource), new DataSourceTransactionManager(scopedDataSource));
+                    new JdbcTemplate(scopedDataSource), new DataSourceTransactionManager(scopedDataSource), workspaceScopeReader);
             assertThat(invitations.expirePending(Instant.now().plusSeconds(1), 2))
                     .as("the cross-scope worker expires no more than its batch limit").isEqualTo(2);
             int expiredAfterFirstBatch = 0;
@@ -599,15 +776,17 @@ class RlsRuntimeDatabaseIsolationIT {
     void catalogStartupReconcilersAndWorkflowActorBootstrapUseWorkspaceScopes() throws Exception {
         Fixture fixture = insertFixture();
         RlsRequestScope.clear();
-        try (HikariDataSource pool = runtimePool()) {
+        try (HikariDataSource pool = runtimePool(); HikariDataSource workspaceScopeReaderPool = createWorkspaceScopeReaderPool()) {
+            JdbcWorkspaceScopeReader workspaceScopeReader = createWorkspaceScopeReader(workspaceScopeReaderPool);
             RlsScopedDataSource scopedDataSource = new RlsScopedDataSource(pool);
             JdbcTemplate jdbc = new JdbcTemplate(scopedDataSource);
             TransactionTemplate transaction = new TransactionTemplate(new DataSourceTransactionManager(scopedDataSource));
             var mapper = JsonMapper.shared();
-            CatalogPersistenceBootstrap catalog = new CatalogPersistenceBootstrap(jdbc, new CatalogSeedLoader(mapper), new com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory(jdbc));
+            var workspaces = new com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory(jdbc, workspaceScopeReader);
+            CatalogPersistenceBootstrap catalog = new CatalogPersistenceBootstrap(jdbc, new CatalogSeedLoader(mapper), workspaces);
             CatalogSkuPersistenceBootstrap sku = new CatalogSkuPersistenceBootstrap(jdbc,
-                    new CatalogFamilySkuMappingLoader(mapper), new CatalogVariantMappingLoader(mapper), new com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.JdbcWorkspaceDirectory(jdbc));
-            SystemWorkflowActorBootstrap actor = new SystemWorkflowActorBootstrap(jdbc);
+                    new CatalogFamilySkuMappingLoader(mapper), new CatalogVariantMappingLoader(mapper), workspaces);
+            SystemWorkflowActorBootstrap actor = new SystemWorkflowActorBootstrap(jdbc, workspaceScopeReader);
 
             transaction.executeWithoutResult(status -> catalog.importDeterministicSeed());
             transaction.executeWithoutResult(status -> sku.reconcile());
@@ -634,7 +813,6 @@ class RlsRuntimeDatabaseIsolationIT {
 
     @Test
     void pooledRuntimeConnectionClearsScopeBeforeTheSameConnectionIsReused() throws Exception {
-        int workspaceCountBeforeFixture = countRuntimeRowsWithCrossScopeScan("tenant_management.workspace");
         Fixture fixture = insertFixture();
         RlsRequestScope.clear();
         try (HikariDataSource pool = runtimePool()) {
@@ -678,8 +856,8 @@ class RlsRuntimeDatabaseIsolationIT {
             RlsRequestScope.enableCrossScopeWorkspaceScan();
             int scanBackendPid = scopedJdbc.queryForObject("select pg_backend_pid()", Integer.class);
             assertThat(scopedJdbc.queryForObject("select count(*) from tenant_management.workspace", Integer.class))
-                    .as("named startup and maintenance paths can enumerate workspace scopes")
-                    .isEqualTo(workspaceCountBeforeFixture + fixture.rows().size());
+                    .as("the runtime role cannot enumerate Workspace scopes even when the caller sets the GUC")
+                    .isZero();
             RlsRequestScope.clearCrossScopeWorkspaceScan();
             assertThat(scopedJdbc.queryForObject("select pg_backend_pid()", Integer.class)).isEqualTo(scanBackendPid);
             assertThat(scopedJdbc.queryForObject("select current_setting('app.cross_scope_workspace_scan', true)", String.class))
@@ -1070,6 +1248,23 @@ class RlsRuntimeDatabaseIsolationIT {
         return new HikariDataSource(config);
     }
 
+    private static HikariDataSource createWorkspaceScopeReaderPool() {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(runtimeJdbcUrl());
+        config.setUsername("nexa_workspace_scope_reader_login");
+        config.setPassword(CentralMigrationTestBootstrap.WORKSPACE_SCOPE_READER_PASSWORD);
+        config.setMaximumPoolSize(1);
+        config.setMinimumIdle(0);
+        config.setReadOnly(true);
+        config.setConnectionTimeout(5_000);
+        return new HikariDataSource(config);
+    }
+
+    private static JdbcWorkspaceScopeReader createWorkspaceScopeReader(DataSource pool) {
+        DataSource scoped = RlsScopedDataSource.forCurrentCentralScope(pool);
+        return new JdbcWorkspaceScopeReader(() -> scoped);
+    }
+
     private static RuntimeSecurityFixture insertRuntimeSecurityFixture() throws SQLException {
         UUID tenantId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
@@ -1093,8 +1288,8 @@ class RlsRuntimeDatabaseIsolationIT {
                         workspaceId, tenantId, "RLS worker workspace", "rls-worker-workspace-" + workspaceId, now, now);
                 execute(connection, "insert into iam.user_account(id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',?,?,0)",
                         userId, "rls-worker-" + userId + "@example.test", "rls-worker-" + userId + "@example.test", "rls-worker-" + userId, "rls-worker-" + userId, "RLS worker", "es", now, now);
-                execute(connection, "insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)",
-                        membershipId, workspaceId, userId, now, now);
+                execute(connection, "insert into tenant_management.workspace_membership(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'INTERNAL','ACTIVE',?,?,0)",
+                        membershipId, tenantId, workspaceId, userId, now, now);
                 execute(connection, "insert into notifications.push_subscription(id,tenant_id,workspace_id,recipient_membership_id,user_id,surface,installation_id,platform,provider_token_hash,status,created_at,updated_at,last_seen_at,version) values (?,?,?,?,?,'PLATFORM',?,'IOS',?,'ENABLED',?,?,?,0)",
                         pushSubscriptionId, tenantId, workspaceId, membershipId, userId, "rls-installation-" + pushSubscriptionId,
                         "a".repeat(64), now, now, now);
@@ -1228,7 +1423,7 @@ class RlsRuntimeDatabaseIsolationIT {
         }
         assertThat(forceRlsTables)
                 .as("RLS must be enabled and forced for every table used by this isolation proof")
-                .containsExactlyInAnyOrder("logistics.customer_instruction_revision", "logistics.customer_instruction_set", "logistics.delivery_active_attempt", "logistics.delivery_execution_disposition", "logistics.delivery_execution_hold", "logistics.delivery_execution_temperature_evidence", "logistics.delivery_instruction_acknowledgement", "logistics.delivery_instruction_revision", "logistics.delivery_load", "logistics.delivery_load_command_idempotency", "logistics.delivery_load_event", "logistics.delivery_load_stop", "logistics.dispatch_handoff_identity", "logistics.driver_coordinate", "logistics.driver_delivery_incident", "logistics.driver_delivery_incident_evidence", "logistics.driver_workday", "logistics.driver_workday_event", "logistics.fulfillment_dispatch_window_plan", "logistics.fulfillment_driver_assignment", "logistics.fulfillment_handoff_evidence", "logistics.fulfillment_outgoing_discrepancy_resolution", "logistics.fulfillment_outgoing_goods_check", "logistics.fulfillment_outgoing_goods_check_line", "logistics.operational_exception_coordination_transition", "sales.field_visit_evidence", "warehouse.inbound_receiving_discrepancy_case", "warehouse.inventory_cycle_count", "warehouse.inventory_cycle_count_correction", "warehouse.inventory_transfer_receipt_observation", "warehouse.physical_allocation_substitution_request", "tenant_management.warehouse_access_grant", "business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object",
+                        .containsExactlyInAnyOrder("logistics.customer_instruction_revision", "logistics.customer_instruction_set", "logistics.delivery_active_attempt", "logistics.delivery_execution_disposition", "logistics.delivery_execution_hold", "logistics.delivery_execution_temperature_evidence", "logistics.delivery_instruction_acknowledgement", "logistics.delivery_instruction_revision", "logistics.delivery_load", "logistics.delivery_load_command_idempotency", "logistics.delivery_load_event", "logistics.delivery_load_stop", "logistics.dispatch_handoff_identity", "logistics.driver_coordinate", "logistics.driver_delivery_incident", "logistics.driver_delivery_incident_evidence", "logistics.driver_workday", "logistics.driver_workday_event", "logistics.fulfillment_dispatch_window_plan", "logistics.fulfillment_driver_assignment", "logistics.fulfillment_handoff_evidence", "logistics.fulfillment_outgoing_discrepancy_resolution", "logistics.fulfillment_outgoing_goods_check", "logistics.fulfillment_outgoing_goods_check_line", "logistics.operational_exception_coordination_transition", "sales.field_visit_evidence", "warehouse.inbound_receiving_discrepancy_case", "warehouse.inventory_cycle_count", "warehouse.inventory_cycle_count_correction", "warehouse.inventory_transfer_receipt_observation", "warehouse.physical_allocation_substitution_request", "tenant_management.warehouse_access_grant", "business_documents.business_document", "business_documents.evidence_object", "business_documents.object_storage_object", "integration.change_event", "integration.inbox_event",
                         "notifications.inbox_item", "notifications.push_subscription", "notifications.push_subscription_command_idempotency", "notifications.push_delivery_attempt", "notifications.push_delivery_claim",
                         "payments.credit_account", "payments.credit_reservation", "payments.payment", "payments.payment_attempt", "payments.payment_event", "payments.payment_reconciliation_case", "payments.reconciliation_refund_idempotency", "payments.receivable", "payments.receivable_allocation",
                         "warehouse.warehouse", "warehouse.storage_zone", "warehouse.inventory_lot", "warehouse.stock_movement", "warehouse.inventory_event", "warehouse.inventory_reservation", "warehouse.command_idempotency", "warehouse.warehouse_service_configuration", "warehouse.selection_snapshot", "warehouse.inventory_lot_disposition", "warehouse.inventory_temperature_evaluation", "warehouse.physical_allocation", "warehouse.physical_allocation_line", "warehouse.physical_allocation_event", "warehouse.physical_allocation_command_idempotency",
@@ -1245,7 +1440,13 @@ class RlsRuntimeDatabaseIsolationIT {
                         "payments.buyer_wallet_reservation", "payments.buyer_wallet_reservation_event",
                         "tenant_management.tenant_business_database_provisioning_task",
                         "tenant_management.tenant_business_database_workspace_anchor_task",
-                        "tenant_management.wallet_recharge_provider_route");
+                        "tenant_management.wallet_recharge_provider_route",
+                        "sales.purchase_request_line", "sales.sales_order_line",
+                        "tenant_management.notification_preference", "tenant_management.operational_settings",
+                        "tenant_management.organization_invitation_role", "tenant_management.role_permission",
+                        "tenant_management.workspace_settings", "tenant_management.workspace_membership",
+                        "warehouse.inventory_reservation_allocation", "warehouse.inventory_reservation_line",
+                        "warehouse.reservation_shortage");
     }
 
     private static void assertVisibleRows(Connection connection, ScopedRow expected, List<ScopedRow> allRows) throws SQLException {
@@ -1335,13 +1536,15 @@ class RlsRuntimeDatabaseIsolationIT {
                         workspaceId, tenantId, "RLS V1 workspace " + label, "rls-v1-workspace-" + workspaceId, now, now);
                 execute(connection, "insert into iam.user_account(id,email,normalized_email,username,normalized_username,display_name,preferred_language,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,'ACTIVE',?,?,0)",
                         userId, "rls-v1-" + userId + "@example.test", "rls-v1-" + userId + "@example.test", "rls-v1-" + userId, "rls-v1-" + userId, "RLS V1 Test", "es", now, now);
-                execute(connection, "insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)",
-                        membershipId, workspaceId, userId, now, now);
+                execute(connection, "insert into tenant_management.workspace_membership(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'INTERNAL','ACTIVE',?,?,0)",
+                        membershipId, tenantId, workspaceId, userId, now, now);
                 execute(connection, "insert into catalog_management.category(id,tenant_id,workspace_id,slug,name,status,version,created_at,updated_at) values (?,?,?,?,'RLS V1 category','ACTIVE',0,?,?)",
                         categoryId, tenantId, workspaceId, "rls-v1-" + label, now, now);
                 execute(connection, "insert into sales.client_account(id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         accountId, tenantId, workspaceId, "RLSV1-" + label + "-" + accountId.toString().substring(0, 8),
-                        "RLS V1 business " + label, "RLS V1 commercial " + label, "PE", "RUC", "RLSV1" + accountId.toString().replace("-", "").substring(0, 10),
+                        "RLS V1 business " + label, "RLS V1 commercial " + label, "PE", "RUC",
+                        "20" + String.format(java.util.Locale.ROOT, "%09d",
+                                Math.floorMod(accountId.getMostSignificantBits(), 1_000_000_000L)),
                         "STANDARD", "RLS V1 Test", "rls-v1-" + label + "@example.test", "+51000000000", "STANDARD", "CREDIT", "ACTIVE", now, now);
                 execute(connection, "insert into sales.client_account_address(id,tenant_id,workspace_id,client_account_id,label,recipient_name,address_line,source,default_address,status,created_at,updated_at) values (?,?,?,?,?,?,?,'MANUAL',true,'ACTIVE',?,?)",
                         addressId, tenantId, workspaceId, accountId, "RLS V1 address " + label, "RLS V1 recipient", "RLS V1 address line", now, now);
@@ -1509,13 +1712,6 @@ class RlsRuntimeDatabaseIsolationIT {
                 result.next();
                 return result.getInt(1);
             }
-        }
-    }
-
-    private static int countRuntimeRowsWithCrossScopeScan(String tableName) throws SQLException {
-        try (Connection connection = openRuntimeConnection()) {
-            setSessionSetting(connection, "app.cross_scope_workspace_scan", "true");
-            return count(connection, "select count(*) from " + tableName);
         }
     }
 

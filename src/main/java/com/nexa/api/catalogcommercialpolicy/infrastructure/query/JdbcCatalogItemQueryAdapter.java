@@ -61,6 +61,7 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
     @Override
     public CatalogPage<CatalogItemSummary> search(CatalogScope scope, CatalogSearchCriteria criteria) {
+        validateFamilyVariant(scope, criteria);
         String predicate = predicate(scope, criteria);
         List<Object> baseArgs = args(scope, criteria);
         String order = switch (criteria.sortField()) {
@@ -71,16 +72,51 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         };
         String direction = criteria.sortDirection() == SortDirection.DESC ? " desc" : " asc";
         String nullOrdering = criteria.sortField() == CatalogSortField.UNIT_PRICE ? " nulls last" : "";
-        String sql = selectSql() + fromClause() + predicate + " order by " + order + direction + nullOrdering
-                + ",s.legacy_catalog_item_id asc nulls last,s.id asc limit ? offset ?";
-        List<Object> pageArgs = new ArrayList<>(baseArgs);
-        pageArgs.add(criteria.size());
-        pageArgs.add((long) criteria.page() * criteria.size());
-        List<Row> rows = jdbc.query(sql, this::row, pageArgs.toArray());
-        Long total = jdbc.queryForObject("select count(*) " + fromClause() + predicate, Long.class, baseArgs.toArray());
-        Enrichment enrichment = enrich(scope, rows);
+        String orderedSql = selectSql() + fromClause() + predicate + " order by " + order + direction + nullOrdering
+                + ",s.legacy_catalog_item_id asc nulls last,s.id asc";
+        List<Row> rows;
+        long total;
+        Enrichment enrichment;
+        if (criteria.availableOnly()) {
+            long pageStart = (long) criteria.page() * criteria.size();
+            long pageEnd = pageStart + criteria.size();
+            long candidateOffset = 0;
+            long availableCount = 0;
+            rows = new ArrayList<>(criteria.size());
+            Map<String, ProductAvailabilityPort.Snapshot> pageAvailability = new java.util.HashMap<>();
+            int batchSize = CatalogSearchCriteria.MAX_SIZE;
+            while (true) {
+                List<Object> batchArgs = new ArrayList<>(baseArgs);
+                batchArgs.add(batchSize);
+                batchArgs.add(candidateOffset);
+                List<Row> candidates = jdbc.query(orderedSql + " limit ? offset ?", this::row, batchArgs.toArray());
+                if (candidates.isEmpty()) break;
+                Map<String, ProductAvailabilityPort.Snapshot> batchAvailability = availability(scope, candidates);
+                for (Row candidate : candidates) {
+                    if (!hasSellableAvailability(candidate, batchAvailability)) continue;
+                    if (availableCount >= pageStart && availableCount < pageEnd) {
+                        rows.add(candidate);
+                        ProductAvailabilityPort.Snapshot snapshot = batchAvailability.get(candidate.catalogItemId());
+                        if (snapshot != null) pageAvailability.put(candidate.catalogItemId(), snapshot);
+                    }
+                    availableCount++;
+                }
+                if (candidates.size() < batchSize) break;
+                candidateOffset += batchSize;
+            }
+            total = availableCount;
+            enrichment = enrich(scope, rows, Map.of(), pageAvailability);
+        } else {
+            List<Object> pageArgs = new ArrayList<>(baseArgs);
+            pageArgs.add(criteria.size());
+            pageArgs.add((long) criteria.page() * criteria.size());
+            rows = jdbc.query(orderedSql + " limit ? offset ?", this::row, pageArgs.toArray());
+            Long count = jdbc.queryForObject("select count(*) " + fromClause() + predicate, Long.class, baseArgs.toArray());
+            total = count == null ? 0 : count;
+            enrichment = enrich(scope, rows);
+        }
         List<CatalogItemSummary> items = rows.stream().map(row -> summary(row, enrichment)).toList();
-        return new CatalogPage<>(items, criteria.page(), criteria.size(), total == null ? 0 : total,
+        return new CatalogPage<>(items, criteria.page(), criteria.size(), total,
                 criteria.sortField(), criteria.sortDirection());
     }
 
@@ -98,6 +134,31 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         if (rows.isEmpty()) return Optional.empty();
         return Optional.of(detail(rows.getFirst(), enrich(scope, rows,
                 Map.of(rows.getFirst().sellableSkuId(), quantity == null ? BigDecimal.ONE : quantity))));
+    }
+
+    @Override
+    public Optional<CatalogItemDetail> findBySellableSkuId(CatalogScope scope, UUID sellableSkuId) {
+        String predicate = " where s.tenant_id=? and s.workspace_id=? and s.id=? and s.status='ACTIVE' and s.visible=true"
+                + buyerVisibility(scope);
+        List<Row> rows = jdbc.query(selectSql() + fromClause() + predicate, this::row,
+                scope.tenantId(), scope.workspaceId(), sellableSkuId);
+        if (rows.isEmpty()) return Optional.empty();
+        return Optional.of(detail(rows.getFirst(), enrich(scope, rows)));
+    }
+
+    @Override
+    public List<CatalogItemDetail> findBySellableSkuIds(CatalogScope scope, List<UUID> sellableSkuIds) {
+        if (sellableSkuIds == null || sellableSkuIds.isEmpty()) return List.of();
+        List<UUID> ids = sellableSkuIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) return List.of();
+        String placeholders = ids.stream().map(ignored -> "?").collect(Collectors.joining(","));
+        String predicate = " where s.tenant_id=? and s.workspace_id=? and s.id in (" + placeholders + ")"
+                + " and s.status='ACTIVE' and s.visible=true" + buyerVisibility(scope);
+        List<Object> parameters = new ArrayList<>(List.of(scope.tenantId(), scope.workspaceId()));
+        parameters.addAll(ids);
+        List<Row> rows = jdbc.query(selectSql() + fromClause() + predicate, this::row, parameters.toArray());
+        Enrichment enrichment = enrich(scope, rows);
+        return rows.stream().map(row -> detail(row, enrichment)).toList();
     }
 
     @Override
@@ -172,14 +233,12 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
     private Enrichment enrich(CatalogScope scope, List<Row> rows, Map<UUID, BigDecimal> requestedQuantities) {
         if (rows.isEmpty()) return new Enrichment(Map.of(), Map.of());
-        List<String> catalogItemIds = rows.stream().map(Row::catalogItemId)
-                .filter(value -> value != null && !value.isBlank()).distinct().toList();
-        Map<String, ProductAvailabilityPort.Snapshot> availabilityById = catalogItemIds.isEmpty() ? Map.of()
-                : availability.findWithPolicies(scope, catalogItemIds, rows.stream().map(row ->
-                        new com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery.InventorySkuSnapshot(
-                                row.sellableSkuId(), row.catalogItemId(), row.skuCode(), row.status(),
-                                row.temperatureMin(), row.temperatureMax())).toList()).stream().collect(Collectors.toMap(
-                        ProductAvailabilityPort.Snapshot::catalogItemId, value -> value, (left, right) -> left));
+        return enrich(scope, rows, requestedQuantities, availability(scope, rows));
+    }
+
+    private Enrichment enrich(CatalogScope scope, List<Row> rows, Map<UUID, BigDecimal> requestedQuantities,
+            Map<String, ProductAvailabilityPort.Snapshot> availabilityById) {
+        if (rows.isEmpty()) return new Enrichment(Map.of(), Map.of());
         Instant asOf = clock.instant();
         List<UUID> skuIds = rows.stream().map(Row::sellableSkuId).filter(java.util.Objects::nonNull).distinct().toList();
         Map<UUID, BigDecimal> quantities = skuIds.stream().collect(Collectors.toUnmodifiableMap(id -> id,
@@ -206,19 +265,57 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         return new Enrichment(availabilityById, prices);
     }
 
+    private Map<String, ProductAvailabilityPort.Snapshot> availability(CatalogScope scope, List<Row> rows) {
+        if (rows.isEmpty()) return Map.of();
+        List<String> catalogItemIds = rows.stream().map(Row::catalogItemId)
+                .filter(value -> value != null && !value.isBlank()).distinct().toList();
+        return catalogItemIds.isEmpty() ? Map.of()
+                : availability.findWithPolicies(scope, catalogItemIds, rows.stream().map(row ->
+                        new com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery.InventorySkuSnapshot(
+                                row.sellableSkuId(), row.catalogItemId(), row.skuCode(), row.status(),
+                                row.temperatureMin(), row.temperatureMax())).toList()).stream().collect(Collectors.toMap(
+                        ProductAvailabilityPort.Snapshot::catalogItemId, value -> value, (left, right) -> left));
+    }
+
+    private static boolean hasSellableAvailability(Row row,
+            Map<String, ProductAvailabilityPort.Snapshot> availabilityById) {
+        ProductAvailabilityPort.Snapshot snapshot = availabilityById.get(row.catalogItemId());
+        return snapshot != null && snapshot.sellableAvailability() != null
+                && snapshot.sellableAvailability().signum() > 0;
+    }
+
 
     @Override
-    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CatalogScope scope, String kind, String search, int page, int size) {
-        boolean brand = "brand".equals(kind);
-        if (!brand && !"category".equals(kind)) throw new IllegalArgumentException("Unknown catalog filter kind");
-        String alias = brand ? "b" : "c";
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+            CatalogScope scope, String kind, String search, int page, int size) {
+        return filterOptions(scope, kind, search, page, size, null);
+    }
+
+    @Override
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+            CatalogScope scope, String kind, String search, int page, int size, UUID familyId) {
+        String alias = switch (kind) {
+            case "brand" -> "b";
+            case "category" -> "c";
+            case "family" -> "f";
+            case "variant" -> "v";
+            default -> throw new IllegalArgumentException("Unknown catalog filter kind");
+        };
+        if (familyId != null && !"variant".equals(kind)) {
+            throw new IllegalArgumentException("familyId is only valid for variant filter options");
+        }
         String where = predicate(scope, new CatalogSearchCriteria()) + " and " + alias + ".status='ACTIVE'";
         java.util.List<Object> args = new java.util.ArrayList<>(java.util.List.of(scope.tenantId(), scope.workspaceId()));
+        if (familyId != null) {
+            where += " and f.id=?";
+            args.add(familyId);
+        }
         if (search != null && !search.isBlank()) {
             where += " and lower(" + alias + ".name) like lower(?)";
             args.add("%" + search.trim() + "%");
         }
-        String choices = "select distinct " + alias + ".id," + alias + ".name " + fromClause() + where;
+        String choices = "select distinct " + alias + ".id," + alias + ".name " + fromClause() + where
+                + ("variant".equals(kind) ? " and v.id is not null" : "");
         Long total = jdbc.queryForObject("select count(*) from (" + choices + ") choices", Long.class, args.toArray());
         args.add(size);
         args.add((long) page * size);
@@ -251,10 +348,24 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
         StringBuilder sql = new StringBuilder(" where s.tenant_id=? and s.workspace_id=? and s.status='ACTIVE' and s.visible=true");
         sql.append(buyerVisibility(scope));
         if (criteria.query() != null && !criteria.query().isBlank()) sql.append(" and (lower(f.name) like lower(?) or lower(coalesce(v.name,'')) like lower(?) or lower(coalesce(p.name,'')) like lower(?) or lower(coalesce(p.description,'')) like lower(?) or lower(s.sku_code) like lower(?) or lower(s.presentation) like lower(?) or lower(coalesce(s.legacy_catalog_item_id,'')) like lower(?))");
-        if (criteria.brand() != null) sql.append(" and lower(b.name) like lower(?)");
-        if (criteria.category() != null) sql.append(" and lower(c.name) like lower(?)");
+        if (criteria.brandId() != null) sql.append(" and b.id=?");
+        else if (criteria.brand() != null) sql.append(" and lower(b.name)=lower(?)");
+        if (criteria.categoryId() != null) sql.append(" and c.id=?");
+        else if (criteria.category() != null) sql.append(" and lower(c.name)=lower(?)");
+        if (criteria.familyId() != null) sql.append(" and s.family_id=?");
+        if (criteria.variantId() != null) sql.append(" and s.variant_id=?");
         if (criteria.coldChainRequirement() != null) sql.append(" and f.storage_family=?");
         return sql.toString();
+    }
+
+    private void validateFamilyVariant(CatalogScope scope, CatalogSearchCriteria criteria) {
+        if (criteria.familyId() == null || criteria.variantId() == null) return;
+        Boolean belongs = jdbc.queryForObject("select exists(select 1 from catalog_management.product_variant "
+                        + "where tenant_id=? and workspace_id=? and id=? and family_id=?)",
+                Boolean.class, scope.tenantId(), scope.workspaceId(), criteria.variantId(), criteria.familyId());
+        if (!Boolean.TRUE.equals(belongs)) {
+            throw new IllegalArgumentException("Variant does not belong to the selected product family");
+        }
     }
 
     private static String buyerVisibility(CatalogScope scope) {
@@ -269,8 +380,12 @@ public class JdbcCatalogItemQueryAdapter implements CatalogItemQueryPort {
             String value = "%" + criteria.query() + "%";
             args.add(value); args.add(value); args.add(value); args.add(value); args.add(value); args.add(value); args.add(value);
         }
-        if (criteria.brand() != null) args.add("%" + criteria.brand() + "%");
-        if (criteria.category() != null) args.add("%" + criteria.category() + "%");
+        if (criteria.brandId() != null) args.add(criteria.brandId());
+        else if (criteria.brand() != null) args.add(criteria.brand());
+        if (criteria.categoryId() != null) args.add(criteria.categoryId());
+        else if (criteria.category() != null) args.add(criteria.category());
+        if (criteria.familyId() != null) args.add(criteria.familyId());
+        if (criteria.variantId() != null) args.add(criteria.variantId());
         if (criteria.coldChainRequirement() != null) args.add(criteria.coldChainRequirement().name());
         return args;
     }

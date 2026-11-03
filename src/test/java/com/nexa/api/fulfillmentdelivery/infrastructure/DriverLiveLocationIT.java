@@ -70,7 +70,13 @@ class DriverLiveLocationIT extends NexaWorkflowIntegrationSupport {
                         .header("Authorization", driverAuth).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk());
         assertThat(tenantJdbc().queryForObject("select count(*) from logistics.driver_coordinate where sample_id=?", Integer.class, sample)).isEqualTo(1);
-        tenantJdbc().update("update logistics.delivery set status='DELIVERED',delivered_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=?", tenant, workspace, delivery);
+        int delivered = tenantJdbc().update("update logistics.delivery set status='DELIVERED',delivered_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? and id=?", tenant, workspace, delivery);
+        assertThat(delivered).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery d "
+                        + "where d.tenant_id=? and d.workspace_id=? and d.status in ('DISPATCHED','IN_TRANSIT') "
+                        + "and exists (select 1 from logistics.delivery_assignment a where a.tenant_id=d.tenant_id "
+                        + "and a.workspace_id=d.workspace_id and a.delivery_id=d.id and a.responsible_membership_id=?)",
+                Integer.class, tenant, workspace, driver)).isZero();
         mockMvc.perform(get("/api/v1/buyer/deliveries/" + delivery + "/live-location").header("Authorization", buyerAuth))
                 .andExpect(status().isNotFound());
         String lateBody = body.replace(sample.toString(), UUID.randomUUID().toString());

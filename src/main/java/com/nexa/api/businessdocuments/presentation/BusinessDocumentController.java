@@ -36,8 +36,18 @@ public final class BusinessDocumentController {
     public BusinessDocumentController(BusinessDocumentServiceFacade service) { this.service = service; }
 
     @GetMapping("/business-documents")
-    @Operation(operationId = "listBusinessDocuments")
-    public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(@RequestAttribute(ACCESS) CurrentAccessContext context, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(required = false) String documentType, @RequestParam(required = false) String status) { return service.list(context, page, size, documentType, status); }
+    @Operation(operationId = "listBusinessDocuments", description = "Optionally filters by subjectType and subjectId "
+            + "supplied together, before pagination. Existing document, Buyer-account and warehouse authorization applies.")
+    public BusinessDocumentModels.Page<BusinessDocumentModels.DocumentView> list(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String documentType,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String subjectType,
+            @RequestParam(required = false) UUID subjectId) {
+        return service.list(context, page, size, documentType, status, subjectType, subjectId);
+    }
     @GetMapping("/business-documents/{documentId}")
     @Operation(operationId = "getBusinessDocument")
     public BusinessDocumentModels.DocumentView get(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID documentId) { return service.get(context, documentId); }

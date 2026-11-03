@@ -215,6 +215,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PurchaseRequest aggregate = rehydrate(current);
 		aggregate.acceptProposedChanges();
 			MaterialChangeTerms accepted = revalidateProposal(context, current.clientAccountId(), proposal.proposedTerms());
+		DELIVERY_LEAD_POLICY.validate(accepted.requestedDeliveryDate(), clock);
 		if (PaymentOption.WALLET.name().equals(accepted.paymentOption())) requireWalletTenderEnabled();
 		PurchaseRequestView result = materialChanges().accept(scope(context), workspace(context), buyerAccount(context),
 				id, proposalId, version, actor, accepted,
@@ -328,6 +329,8 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 		PurchaseRequestView current = canEdit(context, id);
 		if (deliveryDate != null) DELIVERY_LEAD_POLICY.validate(deliveryDate, clock);
 		PurchaseRequest aggregate = rehydrate(current);
+		DELIVERY_LEAD_POLICY.validate(
+				deliveryDate == null ? current.requestedDeliveryDate() : deliveryDate, clock);
 		PaymentOption selectedPayment = paymentOption == null ? aggregate.paymentOption() : PaymentOption.from(paymentOption);
 		if (selectedPayment == PaymentOption.WALLET) {
 			requireWalletTenderEnabled();
@@ -446,7 +449,10 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			// Review and approval are workflow actions, not persisted Purchase Request states.
 			return current;
 		}
-		if ("submit".equals(normalized)) assertCurrentPrices(context, current);
+		if ("submit".equals(normalized)) {
+			assertCurrentPrices(context, current);
+			DELIVERY_LEAD_POLICY.validate(current.requestedDeliveryDate(), clock);
+		}
 		PurchaseRequest aggregate = rehydrate(current);
 		String target = switch (normalized) {
 			case "submit" -> { aggregate.submit(); yield PurchaseRequestStatus.SUBMITTED.name(); }
@@ -506,6 +512,7 @@ public class PurchaseRequestService implements PurchaseRequestUseCase {
 			String comment, List<RequestedLine> requestedLines) {
 		String normalizedPriority = priority == null ? current.priority() : PurchaseRequestPriority.from(priority).name();
 		LocalDate normalizedDate = deliveryDate == null ? current.requestedDeliveryDate() : new RequestedDeliveryDate(deliveryDate).value();
+		DELIVERY_LEAD_POLICY.validate(normalizedDate, clock);
 		String normalizedDelivery = deliveryProfile == null ? current.deliveryProfileSnapshot()
 				: new DeliveryProfileSnapshot(deliveryProfile).value();
 		String normalizedPayment = paymentOption == null ? current.paymentOption()

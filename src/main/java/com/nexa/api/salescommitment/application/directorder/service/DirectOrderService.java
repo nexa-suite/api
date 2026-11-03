@@ -2,7 +2,9 @@ package com.nexa.api.salescommitment.application.directorder.service;
 
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase;
+import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase.DirectOrderDeliveryPolicy;
 import com.nexa.api.salescommitment.application.exception.CommercialBusinessException;
+import com.nexa.api.salescommitment.application.exception.IdempotencyKeyRequiredException;
 import com.nexa.api.salescommitment.application.port.CommercialCommitmentPort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.IdempotencyPersistencePort;
 import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
@@ -12,7 +14,7 @@ import com.nexa.api.salescommitment.domain.model.purchaserequest.PaymentOption;
 import com.nexa.api.salescommitment.domain.model.purchaserequest.PurchaseRequestPriority;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
-import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -53,12 +55,21 @@ public class DirectOrderService implements DirectOrderUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public DirectOrderDeliveryPolicy deliveryPolicy(CurrentAccessContext context) {
+        context.requirePermission(PermissionKey.SALES_ORDER_CREATE_MANUAL);
+        return new DirectOrderDeliveryPolicy(BuyerDeliveryLeadBusinessPolicy.MINIMUM_DELIVERY_LEAD_BUSINESS_DAYS,
+                DELIVERY_LEAD_POLICY.minimumAllowedDeliveryDate(clock));
+    }
+
+    @Override
     @Transactional
     public SalesOrderView create(CurrentAccessContext context, String clientAccountId, String priority,
                                  java.time.LocalDate requestedDeliveryDate, String deliverySnapshot,
                                  String paymentOption, String notes, List<Line> lines, String idempotencyKey) {
         if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Direct Order is internal sales-only");
-        context.requirePermission(Permission.SALES_WRITE);
+        context.requirePermission(PermissionKey.SALES_ORDER_CREATE_MANUAL);
+        requireIdempotencyKey(idempotencyKey);
         if (clientAccountId == null || clientAccountId.isBlank() || lines == null || lines.isEmpty()) {
             throw new CommercialBusinessException("VALIDATION_ERROR");
         }
@@ -119,6 +130,9 @@ public class DirectOrderService implements DirectOrderUseCase {
         }
     }
     private static String normalizedUnit(String value) { return value == null || value.isBlank() ? "" : value.trim(); }
+    private static void requireIdempotencyKey(String key) {
+        if (key == null || key.isBlank() || key.length() > 160) throw new IdempotencyKeyRequiredException();
+    }
     private static String value(Object value) { return value == null ? "" : value.toString(); }
 
     private Line canonicalLine(java.util.UUID tenantId, java.util.UUID workspaceId, Line line) {

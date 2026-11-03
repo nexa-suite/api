@@ -28,6 +28,9 @@ import java.util.regex.Pattern;
 public final class DeterministicLocalStripePaymentProvider implements StripePaymentProvider {
     private final String webhookSecret;
     private final Map<String, PaymentIntent> intents = new ConcurrentHashMap<>();
+    private final Map<String, ProviderCustomer> customers = new ConcurrentHashMap<>();
+    private final Map<String, ProviderSetupIntent> setupIntents = new ConcurrentHashMap<>();
+    private final Map<String, ProviderPaymentMethod> paymentMethods = new ConcurrentHashMap<>();
 
     public DeterministicLocalStripePaymentProvider(@Value("${nexa.payments.webhook-secret:whsec_local_service_foundation}") String webhookSecret) {
         this.webhookSecret = webhookSecret;
@@ -43,6 +46,91 @@ public final class DeterministicLocalStripePaymentProvider implements StripePaym
 
     @Override
     public Optional<PaymentIntent> retrievePaymentIntent(String providerId) { return Optional.ofNullable(intents.get(providerId)); }
+
+    @Override
+    public boolean supportsBuyerPaymentMethodSetup() { return true; }
+
+    @Override
+    public boolean supportsLocalSetupIntentConfirmation() { return true; }
+
+    @Override
+    public ProviderCustomer createCustomer(CustomerRequest request) {
+        if (request == null || request.idempotencyKey() == null || request.idempotencyKey().isBlank()) {
+            throw new IllegalArgumentException("Local Buyer Customer idempotency key is required");
+        }
+        String id = "cus_local_" + stableId(request.idempotencyKey());
+        ProviderCustomer proposed = new ProviderCustomer(id, request.metadata());
+        ProviderCustomer existing = customers.putIfAbsent(id, proposed);
+        if (existing != null && !existing.equals(proposed)) {
+            throw new IllegalArgumentException("Local Buyer Customer idempotency key was reused with different metadata");
+        }
+        return existing == null ? proposed : existing;
+    }
+
+    @Override
+    public Optional<ProviderCustomer> retrieveCustomer(String providerId) {
+        return Optional.ofNullable(customers.get(providerId));
+    }
+
+    @Override
+    public ProviderSetupIntent createSetupIntent(SetupIntentRequest request) {
+        if (request == null || request.customerId() == null || request.idempotencyKey() == null
+                || request.idempotencyKey().isBlank() || !customers.containsKey(request.customerId())) {
+            throw new IllegalArgumentException("Local Buyer SetupIntent requires a known Customer and idempotency key");
+        }
+        String id = "seti_local_" + stableId(request.idempotencyKey());
+        ProviderSetupIntent proposed = new ProviderSetupIntent(id, request.customerId(), id + "_secret_local",
+                "requires_payment_method", null, request.metadata());
+        ProviderSetupIntent existing = setupIntents.putIfAbsent(id, proposed);
+        if (existing != null && (!request.customerId().equals(existing.customerId())
+                || !request.metadata().equals(existing.metadata()))) {
+            throw new IllegalArgumentException("Local SetupIntent idempotency key was reused with different scope");
+        }
+        return existing == null ? proposed : existing;
+    }
+
+    @Override
+    public Optional<ProviderSetupIntent> retrieveSetupIntent(String providerId) {
+        return Optional.ofNullable(setupIntents.get(providerId));
+    }
+
+    @Override
+    public Optional<ProviderPaymentMethod> retrievePaymentMethod(String providerId) {
+        return Optional.ofNullable(paymentMethods.get(providerId));
+    }
+
+    @Override
+    public ProviderPaymentMethod detachPaymentMethod(String providerId) {
+        return paymentMethods.remove(providerId);
+    }
+
+    /** Emits a synthetic local-only card result and an HMAC-signed callback; accepts no card data. */
+    @Override
+    public SignedProviderWebhook confirmLocalSetupIntent(String providerSetupIntentId) {
+        if (providerSetupIntentId == null || providerSetupIntentId.isBlank()) {
+            throw new IllegalArgumentException("Local SetupIntent id is required");
+        }
+        ProviderSetupIntent current = setupIntents.get(providerSetupIntentId);
+        if (current == null) throw new IllegalArgumentException("Local SetupIntent was not found");
+        if ("succeeded".equals(current.status())) {
+            return signedSetupWebhook(current);
+        }
+        String methodId = "pm_local_" + stableId(providerSetupIntentId);
+        ProviderPaymentMethod method = new ProviderPaymentMethod(methodId, current.customerId(), "card", "visa",
+                "4242", 12L, 2035L);
+        ProviderPaymentMethod existingMethod = paymentMethods.putIfAbsent(methodId, method);
+        if (existingMethod != null && !existingMethod.equals(method)) {
+            throw new IllegalStateException("Local SetupIntent PaymentMethod identity conflicts");
+        }
+        ProviderSetupIntent succeeded = new ProviderSetupIntent(current.providerId(), current.customerId(),
+                current.clientSecret(), "succeeded", methodId, current.metadata());
+        setupIntents.replace(providerSetupIntentId, current, succeeded);
+        ProviderSetupIntent saved = setupIntents.get(providerSetupIntentId);
+        if (!"succeeded".equals(saved.status()) || !methodId.equals(saved.paymentMethodId())) {
+            throw new IllegalStateException("Local SetupIntent confirmation did not reach a stable result");
+        }
+        return signedSetupWebhook(saved);
+    }
 
     @Override
     public Refund refundPayment(String providerId, long amountMinor, String currency, String idempotencyKey) {
@@ -64,7 +152,36 @@ public final class DeterministicLocalStripePaymentProvider implements StripePaym
         putIfPresent(metadata, "nexa_workspace_id", first(payload, "nexa_workspace_id", null));
         putIfPresent(metadata, "nexa_wallet_recharge_id", first(payload, "nexa_wallet_recharge_id", null));
         putIfPresent(metadata, "nexa_payment_route_id", first(payload, "nexa_payment_route_id", null));
-        return new StripeWebhookEvent(first(payload, "id", null), first(payload, "type", null), first(payload, "payment_intent_id", first(payload, "object_id", null)), first(payload, "status", null), number(payload, "amount"), optionalUpper(first(payload, "currency", null)), metadata);
+        putIfPresent(metadata, "nexa_buyer_membership_id", first(payload, "nexa_buyer_membership_id", null));
+        putIfPresent(metadata, "nexa_client_account_id", first(payload, "nexa_client_account_id", null));
+        putIfPresent(metadata, "nexa_setup_attempt_id", first(payload, "nexa_setup_attempt_id", null));
+        String eventType = first(payload, "type", null);
+        boolean setupEvent = eventType != null && eventType.startsWith("setup_intent.");
+        return new StripeWebhookEvent(first(payload, "id", null), eventType,
+                setupEvent ? null : first(payload, "payment_intent_id", first(payload, "object_id", null)),
+                first(payload, "status", null), number(payload, "amount"), optionalUpper(first(payload, "currency", null)),
+                metadata, setupEvent ? first(payload, "setup_intent_id", null) : null,
+                setupEvent ? first(payload, "customer_id", null) : null,
+                setupEvent ? first(payload, "payment_method_id", null) : null);
+    }
+
+    private SignedProviderWebhook signedSetupWebhook(ProviderSetupIntent intent) {
+        String eventId = "evt_local_setup_" + stableId(intent.providerId());
+        StringBuilder payload = new StringBuilder("{\"id\":\"").append(eventId)
+                .append("\",\"type\":\"setup_intent.succeeded\",\"setup_intent_id\":\"")
+                .append(intent.providerId()).append("\",\"customer_id\":\"").append(intent.customerId())
+                .append("\",\"payment_method_id\":\"").append(intent.paymentMethodId())
+                .append("\",\"status\":\"succeeded\"");
+        intent.metadata().forEach((key, value) -> payload.append(",\"").append(key).append("\":\"")
+                .append(value).append("\""));
+        payload.append('}');
+        String serialized = payload.toString();
+        String timestamp = Long.toString(Instant.now().getEpochSecond());
+        return new SignedProviderWebhook(serialized, "t=" + timestamp + ",v1=" + hmac(timestamp + "." + serialized));
+    }
+
+    private static String stableId(String value) {
+        return UUID.nameUUIDFromBytes(value.getBytes(StandardCharsets.UTF_8)).toString().replace("-", "");
     }
 
     private String hmac(String value) {

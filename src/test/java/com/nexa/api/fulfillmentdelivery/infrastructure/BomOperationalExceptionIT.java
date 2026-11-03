@@ -46,9 +46,8 @@ class BomOperationalExceptionIT extends NexaWorkflowIntegrationSupport {
                         + "and r.tenant_id is null and r.workspace_id is null where w.slug=? "
                         + "on conflict(membership_id,role_id) do nothing",
                 UUID.fromString(actorId), UUID.fromString(actorId), WORKSPACE_SLUG);
-        String managerToken = accessToken(LOGISTICS_EMAIL, "PLATFORM");
-
         ActiveDelivery delivery = createActiveDelivery();
+        String managerToken = accessToken(LOGISTICS_EMAIL, "PLATFORM");
         String incidentPath = "/api/v1/driver/deliveries/" + delivery.deliveryId() + "/attempts/"
                 + delivery.attemptId() + "/incidents";
         MvcResult incident = mockMvc.perform(post(incidentPath)

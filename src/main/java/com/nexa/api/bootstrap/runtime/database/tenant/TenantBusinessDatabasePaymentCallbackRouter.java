@@ -1,9 +1,12 @@
 package com.nexa.api.bootstrap.runtime.database.tenant;
 
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
+
 import com.nexa.api.bootstrap.runtime.database.RlsScopedDataSource;
 import com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements;
-import com.nexa.api.shared.context.RlsRequestScope;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -26,13 +29,117 @@ public final class TenantBusinessDatabasePaymentCallbackRouter implements AutoCl
     private static final String WORKER_ROLE = "nexa_payments_worker";
 
     private final JdbcPaymentProviderRouteRegistry routes;
+    private final TenantBusinessDatabaseBindingRegistry bindings;
     private final TenantBusinessDatabasePoolRegistry pools;
 
     public TenantBusinessDatabasePaymentCallbackRouter(JdbcPaymentProviderRouteRegistry routes,
             TenantBusinessDatabaseDataSourceFactory workerDataSources, int maximumCachedPools) {
+        this(routes, null, workerDataSources, maximumCachedPools);
+    }
+
+    public TenantBusinessDatabasePaymentCallbackRouter(JdbcPaymentProviderRouteRegistry routes,
+            TenantBusinessDatabaseBindingRegistry bindings, TenantBusinessDatabaseDataSourceFactory workerDataSources,
+            int maximumCachedPools) {
         this.routes = Objects.requireNonNull(routes, "Central payment route registry is required");
+        this.bindings = bindings;
         this.pools = new TenantBusinessDatabasePoolRegistry(Objects.requireNonNull(workerDataSources),
                 maximumCachedPools);
+    }
+
+    /** Runs a signature-verified SetupIntent callback under the matching Buyer membership RLS scope. */
+    public <T> T inBuyerPaymentMethodSetupTransaction(TenantId tenantId, WorkspaceId workspaceId,
+            java.util.UUID buyerMembershipId, BiFunction<JdbcTemplate, PlatformTransactionManager, T> work) {
+        Objects.requireNonNull(tenantId, "Buyer setup Tenant is required");
+        Objects.requireNonNull(workspaceId, "Buyer setup Workspace is required");
+        Objects.requireNonNull(buyerMembershipId, "Buyer membership is required");
+        Objects.requireNonNull(work, "Synchronous Buyer setup callback work is required");
+        if (bindings == null) throw new TenantBusinessDatabaseUnavailableException(
+                "Tenant payment callback binding registry is unavailable");
+        TenantBusinessDatabaseRouter.ensureRouteCanStart();
+        TenantBusinessDatabaseMigrationRequirements requirements = TenantBusinessDatabaseMigrationRequirements.load();
+        requirements.verifyRequiredSqlAssets();
+        RlsRequestScope.Scope previousScope = RlsRequestScope.current();
+        boolean previousCrossScope = RlsRequestScope.crossScopeWorkspaceScanEnabled();
+        T result;
+        try {
+            RlsRequestScope.clearCrossScopeWorkspaceScan();
+            RlsRequestScope.set(tenantId.value(), workspaceId.value());
+            TenantBusinessDatabaseBindingRegistry.PaymentCallbackBinding before = requireReadyCallbackBinding(
+                    tenantId, workspaceId, requirements);
+            if (!bindings.isActiveBuyerMembership(tenantId, workspaceId, buyerMembershipId)) {
+                throw new AccessPolicyViolation(
+                        "SetupIntent callback Buyer membership is no longer active");
+            }
+            TenantBusinessDatabaseBinding workerBinding = before.binding();
+            try (TenantBusinessDatabasePoolRegistry.Lease lease = pools.acquire(workerBinding)) {
+                DataSource tenantDataSource = RlsScopedDataSource.forVerifiedSystemTenant(
+                        lease.dataSource(workspaceId), tenantId, workspaceId);
+                JdbcTemplate jdbc = new JdbcTemplate(tenantDataSource);
+                DataSourceTransactionManager delegate = new DataSourceTransactionManager(tenantDataSource);
+                TransactionTemplate transaction = new TransactionTemplate(delegate);
+                transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+                TenantBusinessDatabaseRouter.enterRoutedTransaction(workerBinding);
+                try {
+                    result = transaction.execute(status -> {
+                        verifyWorkerRole(jdbc);
+                        requirePhysicalAnchor(jdbc, tenantId, workspaceId);
+                        String installed = jdbc.queryForObject(
+                                "select set_config('app.current_membership_id', ?, true)", String.class,
+                                buyerMembershipId.toString());
+                        if (!buyerMembershipId.toString().equals(installed)) {
+                            throw new TenantBusinessDatabaseUnavailableException(
+                                    "Buyer membership callback scope could not be applied");
+                        }
+                        T value = work.apply(jdbc, delegate);
+                        rejectEscapedResource(value);
+                        return value;
+                    });
+                    requirePhysicalAnchor(jdbc, tenantId, workspaceId);
+                } finally {
+                    TenantBusinessDatabaseRouter.exitRoutedTransaction();
+                }
+            }
+            TenantBusinessDatabaseBindingRegistry.PaymentCallbackBinding after = requireReadyCallbackBinding(
+                    tenantId, workspaceId, requirements);
+            requireSameCallbackBinding(before, after);
+            return result;
+        } catch (TenantBusinessDatabaseUnavailableException exception) {
+            pools.retireTenant(tenantId);
+            throw exception;
+        } finally {
+            RlsRequestScope.clear();
+            if (previousScope != null) RlsRequestScope.set(previousScope.tenantId(), previousScope.workspaceId());
+            if (previousCrossScope) RlsRequestScope.enableCrossScopeWorkspaceScan();
+        }
+    }
+
+    private TenantBusinessDatabaseBindingRegistry.PaymentCallbackBinding requireReadyCallbackBinding(
+            TenantId tenantId, WorkspaceId workspaceId,
+            TenantBusinessDatabaseMigrationRequirements requirements) {
+        TenantBusinessDatabaseBindingRegistry.PaymentCallbackBinding binding = bindings
+                .findReadyPaymentCallbackBinding(tenantId, workspaceId).orElseThrow(() ->
+                        new TenantBusinessDatabaseUnavailableException(
+                                "Tenant payment callback binding or READY Workspace anchor is unavailable"));
+        TenantBusinessDatabaseBinding value = binding.binding();
+        if (!tenantId.equals(value.tenantId()) || !workspaceId.equals(binding.workspaceId())
+                || !requirements.schemaManifestDigest().equals(value.verifiedSchemaManifestSha256())) {
+            throw new TenantBusinessDatabaseSchemaManifestMismatchException();
+        }
+        return binding;
+    }
+
+    private static void requireSameCallbackBinding(
+            TenantBusinessDatabaseBindingRegistry.PaymentCallbackBinding expected,
+            TenantBusinessDatabaseBindingRegistry.PaymentCallbackBinding actual) {
+        TenantBusinessDatabaseBinding a = expected.binding();
+        TenantBusinessDatabaseBinding b = actual.binding();
+        if (!expected.workspaceId().equals(actual.workspaceId()) || !a.tenantId().equals(b.tenantId())
+                || !a.databaseIdentity().equals(b.databaseIdentity())
+                || !a.credentialSecretReference().equals(b.credentialSecretReference())
+                || !Objects.equals(a.verifiedSchemaManifestSha256(), b.verifiedSchemaManifestSha256())) {
+            throw new TenantBusinessDatabaseUnavailableException(
+                    "Tenant payment callback binding changed while processing its webhook");
+        }
     }
 
     public <T> T inTransaction(JdbcPaymentProviderRouteRegistry.Route requestedRoute,

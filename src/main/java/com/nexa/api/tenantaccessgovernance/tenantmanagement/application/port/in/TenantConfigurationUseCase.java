@@ -9,7 +9,7 @@ import java.util.UUID;
 public interface TenantConfigurationUseCase {
 	TenantConfigurationModels.OrganizationProfileView organizationProfile(CurrentAccessContext context);
 	TenantConfigurationModels.OrganizationProfileView updateOrganizationProfile(CurrentAccessContext context,
-			TenantConfigurationModels.OrganizationProfileView request, long expectedVersion, String correlationId);
+			TenantConfigurationModels.OrganizationProfileUpdate request, long expectedVersion, String correlationId);
 	TenantConfigurationModels.WorkspaceSettingsView workspaceSettings(CurrentAccessContext context, String workspaceId);
 	TenantConfigurationModels.WorkspaceSettingsView updateWorkspaceSettings(CurrentAccessContext context, String workspaceId,
 			TenantConfigurationModels.WorkspaceSettingsView request, long expectedVersion, String correlationId);

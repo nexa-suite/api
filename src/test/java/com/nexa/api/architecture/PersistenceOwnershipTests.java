@@ -65,7 +65,8 @@ class PersistenceOwnershipTests {
         Map<String, Ownership> ownership = ownershipManifest();
         assertOwners(ownership, "BC01", "iam.user_account", "tenant_management.workspace",
                 "tenant_management.wallet_recharge_provider_route");
-        assertOwners(ownership, "BC02", "sales.client_account", "sales.client_account_address",
+        assertOwners(ownership, "BC02", "sales.buyer_catalog_favorite", "sales.buyer_address",
+                "sales.buyer_sales_message", "sales.client_account", "sales.client_account_address",
                 "sales.client_account_membership");
         assertOwners(ownership, "BC03", "catalog_management.sellable_sku");
         assertOwners(ownership, "BC04", "sales.sales_order");
@@ -78,7 +79,9 @@ class PersistenceOwnershipTests {
         assertOwners(ownership, "BC08", "payments.payment", "payments.buyer_wallet_account",
                 "payments.buyer_wallet_ledger_entry", "payments.buyer_wallet_reservation",
                 "payments.buyer_wallet_reservation_event", "payments.buyer_wallet_recharge",
-                "payments.buyer_wallet_recharge_processed_event");
+                "payments.buyer_wallet_recharge_processed_event", "payments.buyer_payment_provider_profile",
+                "payments.buyer_payment_method_setup_attempt", "payments.buyer_saved_payment_method",
+                "payments.buyer_payment_method_setup_event");
         assertOwners(ownership, "BC09", "business_documents.business_document");
         assertOwners(ownership, "BC10", "notifications.inbox_item", "tenant_management.notification_preference");
         assertOwners(ownership, "BC11", "audit.event");

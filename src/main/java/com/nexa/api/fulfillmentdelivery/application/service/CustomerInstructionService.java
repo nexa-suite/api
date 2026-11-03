@@ -70,10 +70,21 @@ public class CustomerInstructionService implements CustomerInstructionOperations
         var order = write ? orders.getForUpdate(c.tenantId().value(), c.workspaceId().value(), orderId)
                           : orders.get(c.tenantId().value(), c.workspaceId().value(), orderId);
         UUID account = order.clientAccountId();
-        if (account == null || customers.findReference(c.tenantId().toString(), c.workspaceId().toString(), account.toString()).isEmpty()
-                || buyer && !customers.hasBuyerRelationship(c.tenantId().toString(), c.workspaceId().toString(), c.membershipId().toString(), account.toString()))
+        String tenant = c.tenantId().toString();
+        String workspace = c.workspaceId().toString();
+        if (account == null || customers.findReference(tenant, workspace, account.toString()).isEmpty())
+            throw new FulfillmentOperationException("DELIVERY_NOT_FOUND", true);
+        if (!buyer && isSalesOwnerScoped(c) && customers.findSalesOwnerReference(
+                tenant, workspace, account.toString(), c.membershipId().toString()).isEmpty())
+            throw new FulfillmentOperationException("DELIVERY_NOT_FOUND", true);
+        if (buyer && !customers.hasBuyerRelationship(tenant, workspace, c.membershipId().toString(), account.toString()))
             throw new FulfillmentOperationException("DELIVERY_NOT_FOUND", true);
         return order;
+    }
+    private static boolean isSalesOwnerScoped(CurrentAccessContext context) {
+        return context.hasRole(MembershipRole.SALES)
+                && !context.hasRole(MembershipRole.COMPANY_OWNER)
+                && !context.hasRole(MembershipRole.BUSINESS_OPERATIONS_MANAGER);
     }
     private static boolean isActive(SalesOrderFulfillmentQuery.Snapshot order) {
         return !Set.of("CANCELLED", "REJECTED", "COMPLETED").contains(order.status());

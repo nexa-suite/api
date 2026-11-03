@@ -6,6 +6,7 @@ import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientA
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -60,6 +61,7 @@ public final class CatalogPricingPreviewController {
         return ResponseEntity.ok(Response.from(result));
     }
 
+    @Schema(name = "CatalogPricingPreviewRequest")
     public record Request(List<Item> items, Instant asOf) {
         public Request { items = items == null ? List.of() : List.copyOf(items); }
     }

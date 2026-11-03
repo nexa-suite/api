@@ -1,6 +1,7 @@
 package com.nexa.api.edge.security;
 
 import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.AuthenticationTransport;
+import com.nexa.api.tenantaccessgovernance.iam.presentation.transport.PasswordResetRequestTransport;
 import com.nexa.api.edge.problem.ApiErrorCode;
 import com.nexa.api.edge.problem.ApiProblemDetailFactory;
 import jakarta.servlet.FilterChain;
@@ -53,7 +54,8 @@ public final class CookieOriginGuardFilter extends OncePerRequestFilter {
 					|| request.getRequestURI().startsWith("/api/v1/auth/")
 					|| "/api/v1/me/access-context-selections".equals(request.getRequestURI()))) {
 			String origin = request.getHeader("Origin");
-			if ((origin == null || !allowedOrigins.contains(origin)) && !isNativeSessionTransport(request)) {
+			if ((origin == null || !allowedOrigins.contains(origin)) && !isNativeSessionTransport(request)
+					&& !isNativePortalPasswordResetRequest(request)) {
 				writeProblem(response, HttpStatus.FORBIDDEN, ApiErrorCode.ORIGIN_NOT_ALLOWED, "Request origin is not allowed", request);
 				return;
 			}
@@ -72,6 +74,12 @@ public final class CookieOriginGuardFilter extends OncePerRequestFilter {
 	public static boolean isNativeSessionTransport(HttpServletRequest request) {
 		return AuthenticationTransport.isNativeSessionTransport(request.getHeader("Origin"),
 				request.getHeader(NATIVE_CLIENT_HEADER), request.getRequestURI());
+	}
+
+	private static boolean isNativePortalPasswordResetRequest(HttpServletRequest request) {
+		return PasswordResetRequestTransport.isNativePortalRequest(request.getMethod(), request.getHeader("Origin"),
+				request.getHeader(AuthenticationTransport.NATIVE_CLIENT_HEADER),
+				request.getHeader(PasswordResetRequestTransport.SURFACE_HEADER), request.getRequestURI());
 	}
 
 	private static boolean hasValue(String value) { return value != null && !value.isBlank(); }

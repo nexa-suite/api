@@ -5,12 +5,14 @@ import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundE
 import com.nexa.api.salescommitment.application.publicapi.MapRoutingPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CustomerTermsQuery;
+import com.nexa.api.catalogcommercialpolicy.application.publicapi.CustomerTermsQuery.CustomerTermsSnapshot;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountDetails;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAddressQuery;
 import com.nexa.api.customerbuyerrelationships.contract.CustomerAddressReference;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseSelectionQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
+import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery.CreditExposureSnapshot;
 import com.nexa.api.salescommitment.application.salesorder.model.ManualSalesOrderDraftModels;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderDraftPersistencePort;
 import com.nexa.api.customerbuyerrelationships.contract.Address;
@@ -132,9 +134,11 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
         ClientRow client = activeClient(context, command.clientAccountId(), draftCurrency)
                 .orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
         if (!"ACTIVE".equalsIgnoreCase(client.status())) throw new IllegalArgumentException("Client account is not active");
-        String creditResult = creditResult(payment, client.availableCredit());
+        String creditResult = creditResult(payment, new CustomerTermsSnapshot(client.paymentTerms()),
+                client.creditExposure(), pricedTotal(context, draftId));
         String snapshot = json(clientSnapshot(client, creditResult));
-        boolean clientComplete = !"UNAVAILABLE".equals(creditResult);
+        boolean clientComplete = clientComplete(command.clientAccountId(), command.requestedDeliveryDate(), payment.name(),
+                creditResult, client.status());
         boolean itemsComplete = allAvailableLines(context, draftId);
         String status = status(clientComplete, itemsComplete, false);
         Instant now = Instant.now();
@@ -192,12 +196,19 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                     unit(line.command().unit(), sku.unit()), line.command().quantity(), sku.price(), sku.price(), BigDecimal.ZERO,
                     sku.currency(), line.availability(), line.command().notes(), timestamp, timestamp);
         }
-        boolean clientComplete = clientComplete(draft);
+        ClientRow client = historicalClient(context, draft.clientAccountId(), draft.currency())
+                .orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
+        String creditResult = creditResult(PaymentOption.from(draft.paymentPreference()),
+                new CustomerTermsSnapshot(client.paymentTerms()), client.creditExposure(), pricedTotal(context, draftId));
+        boolean clientComplete = clientComplete(draft.clientAccountId(), draft.requestedDeliveryDate(),
+                draft.paymentPreference(), creditResult, client.status());
+        String clientSnapshot = json(clientSnapshot(client, creditResult));
         String status = status(clientComplete, resolved.stream().allMatch(line -> "AVAILABLE".equals(line.availability())), false);
         int updated = jdbc.update("update sales.manual_sales_order_draft set delivery_address_id=null,delivery_address_snapshot=null,"
-                        + "route_snapshot=null,warehouse_id=null,warehouse_selection_snapshot=null,delivery_notes=null,status=?,"
+                        + "route_snapshot=null,warehouse_id=null,warehouse_selection_snapshot=null,delivery_notes=null,"
+                        + "credit_result=?,client_snapshot=?::jsonb,status=?,"
                         + "version=version+1,updated_at=? where tenant_id=? and workspace_id=? and id=? and version=?",
-                status, timestamp, tenant(context), workspace(context), draftId, expectedVersion);
+                creditResult, clientSnapshot, status, timestamp, tenant(context), workspace(context), draftId, expectedVersion);
         if (updated != 1) throw new PurchaseRequestDraftConcurrencyException();
         return get(context, draftId);
     }
@@ -223,14 +234,21 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
         String addressSnapshot = json(addressSnapshot(address));
         String routeSnapshot = json(routeSnapshot(route, warehouse.id()));
         String warehouseSnapshot = json(warehouseSelection(warehouse, now, route));
-        String status = clientComplete(draft) && allAvailableLines(context, draftId)
+        ClientRow client = historicalClient(context, draft.clientAccountId(), draft.currency())
+                .orElseThrow(() -> new SalesResourceNotFoundException("client-account"));
+        String creditResult = creditResult(PaymentOption.from(draft.paymentPreference()),
+                new CustomerTermsSnapshot(client.paymentTerms()), client.creditExposure(), pricedTotal(context, draftId));
+        String clientSnapshot = json(clientSnapshot(client, creditResult));
+        String status = clientComplete(draft.clientAccountId(), draft.requestedDeliveryDate(), draft.paymentPreference(),
+                creditResult, client.status()) && allAvailableLines(context, draftId)
                 ? ManualSalesOrderDraftStatus.READY_TO_CREATE.name() : ManualSalesOrderDraftStatus.DELIVERY_COMPLETE.name();
         Timestamp timestamp = Timestamp.from(now);
         int updated = jdbc.update("update sales.manual_sales_order_draft set delivery_address_id=?,delivery_address_snapshot=?::jsonb,"
-                        + "route_snapshot=?::jsonb,warehouse_id=?,warehouse_selection_snapshot=?::jsonb,delivery_notes=?,status=?,"
+                        + "route_snapshot=?::jsonb,warehouse_id=?,warehouse_selection_snapshot=?::jsonb,delivery_notes=?,"
+                        + "credit_result=?,client_snapshot=?::jsonb,status=?,"
                         + "version=version+1,updated_at=? where tenant_id=? and workspace_id=? and id=? and version=?",
-                address.id(), addressSnapshot, routeSnapshot, warehouse.id(), warehouseSnapshot, command.deliveryNotes(), status,
-                timestamp, tenant(context), workspace(context), draftId, expectedVersion);
+                address.id(), addressSnapshot, routeSnapshot, warehouse.id(), warehouseSnapshot, command.deliveryNotes(),
+                creditResult, clientSnapshot, status, timestamp, tenant(context), workspace(context), draftId, expectedVersion);
         if (updated != 1) throw new PurchaseRequestDraftConcurrencyException();
         return get(context, draftId);
     }
@@ -285,11 +303,13 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     }
 
     private ManualSalesOrderDraftModels.DraftView view(CurrentAccessContext context, DraftRow row) {
-        ManualSalesOrderDraftModels.ClientView client = row.clientAccountId() == null ? null
-                : historicalClient(context, row.clientAccountId(), row.currency()).map(value -> new ManualSalesOrderDraftModels.ClientView(
-                value.id().toString(), value.code(), value.businessName(), value.commercialName(), value.taxIdentifierType(),
-                value.taxIdentifierValue(), value.status(), value.paymentTerms(), value.creditLimit(), value.currentExposure(),
-                value.availableCredit())).orElse(null);
+        ClientRow clientRow = row.clientAccountId() == null ? null
+                : historicalClient(context, row.clientAccountId(), row.currency()).orElse(null);
+        ManualSalesOrderDraftModels.ClientView client = clientRow == null ? null
+                : new ManualSalesOrderDraftModels.ClientView(
+                clientRow.id().toString(), clientRow.code(), clientRow.businessName(), clientRow.commercialName(), clientRow.taxIdentifierType(),
+                clientRow.taxIdentifierValue(), clientRow.status(), clientRow.paymentTerms(), clientRow.creditLimit(), clientRow.currentExposure(),
+                clientRow.availableCredit());
         List<ManualSalesOrderDraftModels.LineView> lines = jdbc.query("select id,sku_id,catalog_item_id,product_family_name_snapshot,"
                         + "product_family_code_snapshot,sku_code_snapshot,presentation_snapshot,unit_of_measure,quantity,base_unit_price,"
                         + "effective_unit_price,discount_amount,currency,availability_status,notes from sales.manual_sales_order_draft_line "
@@ -304,9 +324,14 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                 ? null : new ManualSalesOrderDraftModels.DeliveryView(row.deliveryAddressId() == null ? null : row.deliveryAddressId().toString(),
                 row.deliveryAddressSnapshot(), row.routeSnapshot(), row.warehouseSelectionSnapshot(),
                 row.warehouseId() == null ? null : row.warehouseId().toString(), routeProvider(row.routeSnapshot()), row.deliveryNotes());
+        String currentCreditResult = clientRow == null ? row.creditResult()
+                : creditResult(PaymentOption.from(row.paymentPreference()),
+                new CustomerTermsSnapshot(clientRow.paymentTerms()), clientRow.creditExposure(), pricedTotal(lines));
         return new ManualSalesOrderDraftModels.DraftView(row.id().toString(), row.status(), row.version(), client,
-                row.requestedDeliveryDate(), row.priority(), row.paymentPreference(), row.currency(), row.notes(), row.creditResult(),
-                lines, delivery, ManualSalesOrderDraftStatus.READY_TO_CREATE.name().equals(row.status()),
+                row.requestedDeliveryDate(), row.priority(), row.paymentPreference(), row.currency(), row.notes(), currentCreditResult,
+                lines, delivery, ManualSalesOrderDraftStatus.READY_TO_CREATE.name().equals(row.status())
+                && client != null && "ACTIVE".equalsIgnoreCase(client.status())
+                && !"UNAVAILABLE".equalsIgnoreCase(currentCreditResult),
                 row.salesOrderId() == null ? null : row.salesOrderId().toString(), row.createdAt(), row.updatedAt(), row.submittedAt());
     }
 
@@ -410,18 +435,34 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
                 tenant(context), workspace(context), draftId));
     }
 
-    private static boolean clientComplete(DraftRow draft) {
-        return draft.clientAccountId() != null && draft.requestedDeliveryDate() != null && draft.paymentPreference() != null
-                && !"UNAVAILABLE".equalsIgnoreCase(draft.creditResult());
+    private BigDecimal pricedTotal(CurrentAccessContext context, UUID draftId) {
+        return jdbc.queryForObject("select coalesce(sum(quantity * effective_unit_price),0) "
+                        + "from sales.manual_sales_order_draft_line where tenant_id=? and workspace_id=? and draft_id=?",
+                BigDecimal.class, tenant(context), workspace(context), draftId);
+    }
+
+    private static BigDecimal pricedTotal(List<ManualSalesOrderDraftModels.LineView> lines) {
+        return lines.stream().map(line -> line.quantity().multiply(line.effectiveUnitPrice()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private static boolean clientComplete(UUID clientAccountId, LocalDate requestedDeliveryDate, String paymentPreference,
+                                          String creditResult, String clientStatus) {
+        return clientAccountId != null && requestedDeliveryDate != null && paymentPreference != null
+                && "ACTIVE".equalsIgnoreCase(clientStatus) && !"UNAVAILABLE".equalsIgnoreCase(creditResult);
     }
 
     private static String status(boolean client, boolean items, boolean delivery) {
         return ManualSalesOrderDraft.status(client, items, delivery).name();
     }
 
-    private static String creditResult(PaymentOption payment, BigDecimal availableCredit) {
+    static String creditResult(PaymentOption payment, CustomerTermsSnapshot terms,
+                               CreditExposureSnapshot exposure, BigDecimal pricedTotal) {
         if (payment != PaymentOption.CREDIT_LINE) return "NOT_APPLICABLE";
-        return availableCredit != null && availableCredit.signum() >= 0 ? "AVAILABLE" : "UNAVAILABLE";
+        if (terms == null || !terms.creditAllowed() || exposure == null || !exposure.active()
+                || pricedTotal == null || pricedTotal.signum() <= 0) return "UNAVAILABLE";
+        BigDecimal availableCredit = exposure.availableCredit();
+        return availableCredit.signum() > 0 && pricedTotal.compareTo(availableCredit) <= 0 ? "AVAILABLE" : "UNAVAILABLE";
     }
 
     private static String currency(String value) {
@@ -494,12 +535,11 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     private ClientRow clientRow(CurrentAccessContext context, CustomerAccountDetails value, String currency) {
         String tenantId = tenant(context).toString();
         String workspaceId = workspace(context).toString();
-        var terms = customerTerms.findTerms(tenantId, workspaceId, value.id())
-                .orElseThrow(() -> new IllegalStateException("Customer commercial terms are not configured"));
+        var terms = customerTerms.findTerms(tenantId, workspaceId, value.id()).orElse(null);
         var credit = creditExposure.find(tenantId, workspaceId, value.id(), currency == null ? "PEN" : currency);
         return new ClientRow(UUID.fromString(value.id()), value.code(), value.businessName(), value.commercialName(),
-                value.taxIdentifierType(), value.taxIdentifierValue(), value.status(), terms.code(),
-                credit.creditLimit(), credit.used(), credit.availableCredit());
+                value.taxIdentifierType(), value.taxIdentifierValue(), value.status(), terms == null ? null : terms.code(),
+                credit.creditLimit(), credit.used(), credit.availableCredit(), credit);
     }
 
     private static AddressRow addressRow(CustomerAddressReference reference) {
@@ -524,7 +564,7 @@ public class ManualSalesOrderDraftPersistenceAdapter implements ManualSalesOrder
     private record IdempotencyClaim(String requestHash, UUID draftId) { }
     private record ClientRow(UUID id, String code, String businessName, String commercialName, String taxIdentifierType,
                              String taxIdentifierValue, String status, String paymentTerms, BigDecimal creditLimit,
-                             BigDecimal currentExposure, BigDecimal availableCredit) { }
+                             BigDecimal currentExposure, BigDecimal availableCredit, CreditExposureSnapshot creditExposure) { }
     private record SkuRow(UUID id, String catalogItemId, UUID familyId, String familyCode, String familyName, String skuCode,
                           String presentation, String unit, BigDecimal price, String currency) { }
     private record ResolvedLine(SkuRow sku, ManualSalesOrderDraftModels.LineCommand command, String availability) { }

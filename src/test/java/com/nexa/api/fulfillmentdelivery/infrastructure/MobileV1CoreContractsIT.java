@@ -10,6 +10,7 @@ import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcFulfillmentDocumentSourceQuery;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
@@ -31,6 +32,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -530,7 +532,7 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .contains("HANDED_OVER")
                 .doesNotContain("actorMembershipId", "reason", "driverMembershipId", "operatorId");
 
-        MvcResult deliveryView = mockMvc.perform(get("/api/v1/deliveries/" + deliveryId)
+        MvcResult deliveryView = mockMvc.perform(get("/api/v1/driver/deliveries/" + deliveryId)
                         .header("Authorization", "Bearer " + logistics)).andExpect(status().isOk()).andReturn();
         MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/transit-starts")
                         .header("Authorization", "Bearer " + logistics).header("If-Match", deliveryView.getResponse().getHeader("ETag"))
@@ -538,11 +540,16 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isOk()).andReturn();
         String attemptBody = "{\"outcome\":\"PARTIAL\",\"lines\":[{\"fulfillmentLineId\":\"" + flow.fulfillmentLineId()
                 + "\",\"skuId\":\"" + flow.skuId() + "\",\"attemptedQuantity\":1,\"deliveredQuantity\":1,\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\"UNIT\"}]}";
-        MvcResult attempt = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/attempts")
+        MvcResult attempt = mockMvc.perform(post("/api/v1/driver/deliveries/" + deliveryId + "/attempts")
                         .header("Authorization", "Bearer " + logistics).header("If-Match", transit.getResponse().getHeader("ETag"))
-                        .header("Idempotency-Key", "handoff-attempt-" + uuid()).contentType(MediaType.APPLICATION_JSON).content(attemptBody))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.status").value("PARTIAL")).andReturn();
-        String attemptId = json(attempt).get("attemptId").asText();
+                        .header("Idempotency-Key", "handoff-attempt-" + uuid()).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.delivery.status").value("IN_TRANSIT"))
+                .andExpect(jsonPath("$.attempt.status").value("ACTIVE")).andReturn();
+        String attemptId = json(attempt).get("attempt").get("id").asText();
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_active_attempt "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and id=? and started_by_membership_id=?",
+                Integer.class, UUID.fromString(tenantId()), UUID.fromString(workspaceId()), delivery,
+                UUID.fromString(attemptId), UUID.fromString(membershipId(LOGISTICS_EMAIL)))).isEqualTo(1);
 
         String issueKey = "handoff-issue-" + uuid();
         String issueBody = "{\"attemptId\":\"" + attemptId + "\"}";
@@ -607,6 +614,67 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isNotEmpty()).andReturn();
         token = json(renewed).get("token").asText();
 
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + deliveryId + "/attempts/" + attemptId + "/outcomes")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", attempt.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "handoff-outcome-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(attemptBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.status").value("PARTIAL")).andReturn();
+
+        MvcResult terminalView = mockMvc.perform(get("/api/v1/driver/deliveries/" + deliveryId)
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PARTIAL"))
+                .andExpect(jsonPath("$.activeAttempt").doesNotExist())
+                .andExpect(jsonPath("$.lastAttempt.id").value(attemptId))
+                .andExpect(jsonPath("$.lastAttempt.attemptNumber").value(1))
+                .andExpect(jsonPath("$.lastAttempt.status").value("PARTIAL"))
+                .andExpect(jsonPath("$.lastAttempt.outcome").value("PARTIAL"))
+                .andExpect(jsonPath("$.lastAttempt.startedByMembershipId").value(membershipId(LOGISTICS_EMAIL)))
+                .andExpect(jsonPath("$.handoffRenewalEligible").value(true)).andReturn();
+        var driverDeliveries = json(mockMvc.perform(get("/api/v1/driver/deliveries")
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(driverDeliveries.toString()).contains(deliveryId);
+
+        String otherDriverEmail = createOtherLogisticsDriver();
+        String otherDriver = accessToken(otherDriverEmail, "PLATFORM");
+        mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + otherDriver)
+                        .header("Idempotency-Key", "handoff-wrong-driver-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(issueBody))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("DELIVERY_HANDOFF_DRIVER_NOT_ASSIGNED"));
+
+        String otherWorkspace = createWorkspaceForLogistics(UUID.randomUUID().toString());
+        String otherWorkspaceDriver = accessTokenForWorkspace(LOGISTICS_EMAIL, "PLATFORM", otherWorkspace);
+        mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + otherWorkspaceDriver)
+                        .header("Idempotency-Key", "handoff-wrong-workspace-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(issueBody))
+                .andExpect(status().isNotFound());
+
+        String terminalIssueKey = "handoff-terminal-renewal-" + uuid();
+        MvcResult terminalRenewal = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", terminalIssueKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(issueBody))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isNotEmpty()).andReturn();
+        token = json(terminalRenewal).get("token").asText();
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_handoff_token "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and delivery_attempt_id=? "
+                        + "and status='ACTIVE'", Integer.class, UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), delivery, UUID.fromString(attemptId))).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_handoff_token "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and delivery_attempt_id=? "
+                        + "and status='REPLACED'", Integer.class, UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), delivery, UUID.fromString(attemptId))).isGreaterThan(0);
+        MvcResult terminalReplay = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics).header("Idempotency-Key", terminalIssueKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(issueBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.token").doesNotExist()).andReturn();
+        assertThat(json(terminalReplay).get("handoffId").asText())
+                .isEqualTo(json(terminalRenewal).get("handoffId").asText());
+
         String validateBody = "{\"token\":\"" + token + "\"}";
         mockMvc.perform(post("/api/v1/delivery-handoff/validations").header("Authorization", "Bearer " + buyer)
                         .contentType(MediaType.APPLICATION_JSON).content(validateBody))
@@ -625,6 +693,12 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", receiptKey)
                         .contentType(MediaType.APPLICATION_JSON).content(receiptBody))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.decision").value("DISPUTED")).andReturn();
+        mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", "handoff-after-receipt-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(issueBody))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BUYER_RECEIPT_ALREADY_RECORDED"));
         MvcResult receiptReplay = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/buyer-receipts")
                         .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", receiptKey)
                         .contentType(MediaType.APPLICATION_JSON).content(receiptBody))
@@ -670,8 +744,10 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
         UUID buyerMembership = UUID.fromString(membershipId(BUYER_EMAIL));
         UUID clientAccount = UUID.fromString(buyerClientAccountId());
-        int detached = tenantJdbc().update("delete from sales.client_account_membership "
-                        + "where tenant_id=? and workspace_id=? and client_account_id=? and workspace_membership_id=?",
+        int detached = tenantJdbc().update("update sales.client_account_membership "
+                        + "set status='INACTIVE',updated_at=current_timestamp,version=version+1 "
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? "
+                        + "and workspace_membership_id=? and status='ACTIVE'",
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()), clientAccount, buyerMembership);
         assertThat(detached).isEqualTo(1);
         try {
@@ -683,10 +759,11 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                             .header("Authorization", "Bearer " + buyer))
                     .andExpect(status().isNotFound());
         } finally {
-            tenantJdbc().update("insert into sales.client_account_membership "
-                            + "(client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) "
-                            + "values (?,?,?,?,current_timestamp)",
-                    clientAccount, buyerMembership, UUID.fromString(tenantId()), UUID.fromString(workspaceId()));
+            tenantJdbc().update("update sales.client_account_membership "
+                            + "set status='ACTIVE',updated_at=current_timestamp,version=version+1 "
+                            + "where tenant_id=? and workspace_id=? and client_account_id=? "
+                            + "and workspace_membership_id=? and status='INACTIVE'",
+                    UUID.fromString(tenantId()), UUID.fromString(workspaceId()), clientAccount, buyerMembership);
         }
         mockMvc.perform(get("/api/v1/business-document-evidence")
                         .param("subjectType", "BUYER_RECEIPT").param("subjectId", receiptId)
@@ -725,6 +802,255 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         + "where id=? and requested_by_membership_id=? and subject_type='BUYER_RECEIPT' and subject_id=?",
                 Integer.class, UUID.fromString(evidenceId), buyerMembership, UUID.fromString(receiptId))).isEqualTo(1);
     }
+
+    @Test
+    void buyerQrAcceptanceConcurrentRetriesCompleteTheOrderOnce() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        DriverDeliveryFixture fixture = createDriverDelivery(warehouse, sales, driverMembership,
+                "buyer-qr-concurrency-" + uuid());
+        UUID salesOrderId = tenantJdbc().queryForObject("select f.sales_order_id from logistics.delivery d "
+                        + "join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id "
+                        + "and f.id=d.fulfillment_id where d.tenant_id=? and d.workspace_id=? and d.id=?",
+                UUID.class, tenant, workspace, fixture.deliveryId());
+        MvcResult current = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", current.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "buyer-qr-transit-" + uuid()))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult started = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", transit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "buyer-qr-attempt-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.attempt.status").value("ACTIVE")).andReturn();
+        UUID attemptId = UUID.fromString(json(started).get("attempt").get("id").asText());
+        String token = issueBuyerQrToken(fixture.deliveryId(), attemptId, logistics);
+        AttemptOutcomeLine line = tenantJdbc().queryForObject(
+                "select fl.id,fl.sku_id,fl.dispatched_quantity,fl.unit from logistics.fulfillment_line fl "
+                        + "join logistics.delivery d on d.tenant_id=fl.tenant_id and d.workspace_id=fl.workspace_id "
+                        + "and d.fulfillment_id=fl.fulfillment_id where d.tenant_id=? and d.workspace_id=? and d.id=?",
+                (rs, row) -> new AttemptOutcomeLine(rs.getObject("id", UUID.class),
+                        rs.getObject("sku_id", UUID.class), rs.getBigDecimal("dispatched_quantity"),
+                        rs.getString("unit")), tenant, workspace, fixture.deliveryId());
+        String outcomeBody = "{\"outcome\":\"DELIVERED\",\"lines\":[{\"fulfillmentLineId\":\""
+                + line.fulfillmentLineId() + "\",\"skuId\":\"" + line.skuId()
+                + "\",\"attemptedQuantity\":" + line.quantity().toPlainString()
+                + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
+                + ",\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\"" + line.unit() + "\"}]}";
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts/" + attemptId + "/outcomes")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", started.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "buyer-qr-outcome-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(outcomeBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.status").value("DELIVERED"));
+
+        String acceptanceKey = "buyer-qr-accept-" + uuid();
+        assertThat(tenantJdbc().queryForObject("select pg_get_constraintdef(oid) from pg_constraint "
+                        + "where conname='fk_pod_buyer_membership_v17'", String.class))
+                .contains("sales.client_account_membership").doesNotContain("tenant_management.workspace_membership");
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<MvcResult> firstScan;
+        Future<MvcResult> secondScan;
+        try {
+            firstScan = executor.submit(() -> acceptBuyerQr(buyer, token, ready, start, acceptanceKey));
+            secondScan = executor.submit(() -> acceptBuyerQr(buyer, token, ready, start, acceptanceKey));
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            MvcResult firstResult = firstScan.get(30, TimeUnit.SECONDS);
+            MvcResult secondResult = secondScan.get(30, TimeUnit.SECONDS);
+            assertThat(List.of(firstResult.getResponse().getStatus(), secondResult.getResponse().getStatus()))
+                    .contains(200, 201);
+            assertThat(json(firstResult).path("receiptId").asText())
+                    .isEqualTo(json(secondResult).path("receiptId").asText());
+            assertThat(json(firstResult).path("salesOrderStatus").asText()).isEqualTo("COMPLETED");
+            assertThat(json(secondResult).path("salesOrderStatus").asText()).isEqualTo("COMPLETED");
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+
+        assertThat(tenantJdbc().queryForObject("select status from sales.sales_order where tenant_id=? "
+                        + "and workspace_id=? and id=?", String.class, tenant, workspace, salesOrderId))
+                .isEqualTo("COMPLETED");
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.buyer_receipt_fact "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and decision='ACCEPTED'",
+                Integer.class, tenant, workspace, fixture.deliveryId())).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.proof_of_delivery "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and status='SEALED' "
+                        + "and buyer_membership_id=? and buyer_receipt_fact_id is not null",
+                Integer.class, tenant, workspace, fixture.deliveryId(),
+                UUID.fromString(membershipId(BUYER_EMAIL)))).isEqualTo(1);
+        assertThatThrownBy(() -> tenantJdbc().update("update logistics.proof_of_delivery "
+                        + "set sealed_at=sealed_at + interval '1 second' where tenant_id=? and workspace_id=? "
+                        + "and delivery_id=? and status='SEALED' and buyer_membership_id=? "
+                        + "and buyer_receipt_fact_id is not null",
+                tenant, workspace, fixture.deliveryId(), UUID.fromString(membershipId(BUYER_EMAIL))))
+                .isInstanceOf(DataAccessException.class);
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order_event where tenant_id=? "
+                        + "and workspace_id=? and sales_order_id=? and to_status='COMPLETED'",
+                Integer.class, tenant, workspace, salesOrderId)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event e "
+                        + "join logistics.proof_of_delivery p on p.tenant_id=e.tenant_id "
+                        + "and p.workspace_id=e.workspace_id and p.delivery_id=e.aggregate_id "
+                        + "where e.tenant_id=? and e.workspace_id=? and e.event_type='DeliveryCompleted.v1' "
+                        + "and e.aggregate_type='Delivery' and e.aggregate_id=? "
+                        + "and e.correlation_id=p.id::text "
+                        + "and e.payload=jsonb_build_object('deliveryId',e.aggregate_id,'podId',p.id)",
+                Integer.class, tenant, workspace, fixture.deliveryId())).isEqualTo(1);
+
+        MvcResult replay = mockMvc.perform(post("/api/v1/delivery-handoff/receipts")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", acceptanceKey)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"" + token + "\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.replayed").value(true)).andReturn();
+        assertThat(json(replay).path("receiptId").asText()).isNotBlank();
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.buyer_receipt_fact "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and decision='ACCEPTED'",
+                Integer.class, tenant, workspace, fixture.deliveryId())).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? "
+                        + "and workspace_id=? and event_type='DeliveryCompleted.v1' and aggregate_type='Delivery' "
+                        + "and aggregate_id=?",
+                Integer.class, tenant, workspace, fixture.deliveryId())).isEqualTo(1);
+    }
+
+    @Test
+    void bindingBuyerAcceptanceToSealedPodCannotChangeSealedAt() throws Exception {
+        ensureCommercialInventory();
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID buyerAccount = UUID.fromString(buyerClientAccountId());
+        UUID buyerMembership = UUID.fromString(membershipId(BUYER_EMAIL));
+        UUID driverMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        DriverDeliveryFixture delivery = createDriverDelivery(warehouse, sales, driverMembership,
+                "buyer-qr-sealed-pod-" + uuid());
+        ActiveDriverAttemptFixture active = startDriverDeliveryAttempt(delivery, logistics,
+                "buyer-qr-sealed-pod-attempt-" + uuid());
+        String token = issueBuyerQrToken(delivery.deliveryId(), active.attemptId(), logistics);
+        AttemptOutcomeLine line = tenantJdbc().queryForObject(
+                "select fl.id,fl.sku_id,fl.dispatched_quantity,fl.unit from logistics.fulfillment_line fl "
+                        + "join logistics.delivery d on d.tenant_id=fl.tenant_id and d.workspace_id=fl.workspace_id "
+                        + "and d.fulfillment_id=fl.fulfillment_id where d.tenant_id=? and d.workspace_id=? and d.id=?",
+                (rs, row) -> new AttemptOutcomeLine(rs.getObject("id", UUID.class),
+                        rs.getObject("sku_id", UUID.class), rs.getBigDecimal("dispatched_quantity"),
+                        rs.getString("unit")), tenant, workspace, delivery.deliveryId());
+        String outcomeBody = "{\"outcome\":\"DELIVERED\",\"lines\":[{\"fulfillmentLineId\":\""
+                + line.fulfillmentLineId() + "\",\"skuId\":\"" + line.skuId()
+                + "\",\"attemptedQuantity\":" + line.quantity().toPlainString()
+                + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
+                + ",\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\"" + line.unit() + "\"}]}";
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + delivery.deliveryId() + "/attempts/"
+                        + active.attemptId() + "/outcomes")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", active.deliveryEtag())
+                        .header("Idempotency-Key", "buyer-qr-sealed-pod-outcome-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(outcomeBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.status").value("DELIVERED"));
+        UUID handoffTokenId = tenantJdbc().queryForObject("select id from logistics.delivery_handoff_token "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=? and delivery_attempt_id=? and status='ACTIVE'",
+                UUID.class, tenant, workspace, delivery.deliveryId(), active.attemptId());
+        assertThat(tenantJdbc().update("update logistics.delivery_handoff_token set status='CONSUMED' "
+                        + "where tenant_id=? and workspace_id=? and id=? and status='ACTIVE'",
+                tenant, workspace, handoffTokenId)).isEqualTo(1);
+
+        // Seed a structurally valid ACCEPTED receipt fact for the consumed handoff.
+        // Its full scope and actor binding make the POD trigger's acceptance check true.
+        UUID receiptId = UUID.randomUUID();
+        Instant acceptedAt = Instant.now();
+        assertThat(tenantJdbc().update("insert into logistics.buyer_receipt_fact(id,tenant_id,workspace_id,delivery_id,"
+                        + "delivery_attempt_id,customer_account_id,buyer_membership_id,handoff_token_id,decision,"
+                        + "driver_delivered_quantity,accepted_quantity,reason,occurred_at,idempotency_key,request_hash) "
+                        + "values (?,?,?,?,?,?,?,?,'ACCEPTED',?,?,null,?,?,?)",
+                receiptId, tenant, workspace, delivery.deliveryId(), active.attemptId(), buyerAccount, buyerMembership,
+                handoffTokenId, line.quantity(), line.quantity(), java.sql.Timestamp.from(acceptedAt),
+                "buyer-qr-sealed-pod-receipt-" + uuid(), "a".repeat(64)))
+                .isEqualTo(1);
+
+        UUID podId = UUID.randomUUID();
+        java.sql.Timestamp sealedAt = java.sql.Timestamp.from(Instant.now());
+        assertThat(tenantJdbc().update("insert into logistics.proof_of_delivery(id,tenant_id,workspace_id,dispatch_order_id,"
+                        + "receiver_name,completed_at,status,created_at,delivery_id,attempt_id,sealed_at,buyer_membership_id,"
+                        + "buyer_receipt_fact_id) values (?,?,?,?,?,?,'SEALED',?,?,?,?,null,null)",
+                podId, tenant, workspace, null, "Legacy receiver", sealedAt, sealedAt,
+                delivery.deliveryId(), active.attemptId(), sealedAt)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.proof_of_delivery where tenant_id=? "
+                        + "and workspace_id=? and id=? and status='SEALED' and buyer_membership_id is null "
+                        + "and buyer_receipt_fact_id is null",
+                Integer.class, tenant, workspace, podId)).isEqualTo(1);
+
+        assertThatThrownBy(() -> tenantJdbc().update("update logistics.proof_of_delivery set buyer_membership_id=?, "
+                        + "buyer_receipt_fact_id=?, sealed_at=sealed_at + interval '1 second' "
+                        + "where tenant_id=? and workspace_id=? and id=?",
+                buyerMembership, receiptId, tenant, workspace, podId))
+                .isInstanceOf(DataAccessException.class)
+                .hasStackTraceContaining("Proof of delivery transition is invalid");
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.proof_of_delivery where tenant_id=? "
+                        + "and workspace_id=? and id=? and status='SEALED' and buyer_membership_id is null "
+                        + "and buyer_receipt_fact_id is null and sealed_at=?",
+                Integer.class, tenant, workspace, podId, sealedAt)).isEqualTo(1);
+
+        // The same valid Buyer binding is accepted when it preserves the seal time.
+        assertThat(tenantJdbc().update("update logistics.proof_of_delivery set buyer_membership_id=?,buyer_receipt_fact_id=? "
+                        + "where tenant_id=? and workspace_id=? and id=? and status='SEALED' "
+                        + "and buyer_membership_id is null and buyer_receipt_fact_id is null",
+                buyerMembership, receiptId, tenant, workspace, podId)).isEqualTo(1);
+    }
+
+    private MvcResult acceptBuyerQr(String buyer, String token, CountDownLatch ready,
+                                    CountDownLatch start, String key) throws Exception {
+        ready.countDown();
+        start.await();
+        return mockMvc.perform(post("/api/v1/delivery-handoff/receipts")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"" + token + "\"}"))
+                .andReturn();
+    }
+
+    private String issueBuyerQrToken(UUID deliveryId, UUID attemptId, String logistics) throws Exception {
+        MvcResult issued = mockMvc.perform(post("/api/v1/deliveries/" + deliveryId + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", "buyer-qr-issue-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attemptId\":\"" + attemptId + "\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        return json(issued).path("token").asText();
+    }
+
+    private ActiveDriverAttemptFixture startDriverDeliveryAttempt(DriverDeliveryFixture fixture,
+                                                                   String logistics, String key) throws Exception {
+        MvcResult current = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", current.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key + "-transit"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult started = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", transit.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", key + "-start")
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andReturn();
+        return new ActiveDriverAttemptFixture(UUID.fromString(json(started).get("attempt").get("id").asText()),
+                started.getResponse().getHeader("ETag"));
+    }
+
+    private record ActiveDriverAttemptFixture(UUID attemptId, String deliveryEtag) { }
 
     private org.springframework.test.web.servlet.ResultActions uploadBuyerReceiptEvidence(String token, String key,
             String receiptId, String filename, String contentType, byte[] bytes) throws Exception {
@@ -885,6 +1211,12 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 Integer.class, fixture.deliveryId())).isZero();
         assertThat(tenantJdbc().queryForObject("select count(*) from logistics.delivery_attempt where delivery_id=?",
                 Integer.class, fixture.deliveryId())).isEqualTo(1);
+        mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", "handoff-after-failed-attempt-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"attemptId\":\"" + attemptId + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DELIVERY_NOT_ATTEMPTABLE"));
     }
 
     @Test
@@ -1132,6 +1464,19 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .findFirst().orElseThrow();
         assertThat(completedDeliveryWork.path("deliveryStatus").asText()).isEqualTo("DELIVERED");
         assertThat(completedDeliveryWork.path("fulfillmentStatus").asText()).isEqualTo("COMPLETED");
+        mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lastAttempt.id").value(terminal.attemptId()))
+                .andExpect(jsonPath("$.lastAttempt.status").value("FINAL"))
+                .andExpect(jsonPath("$.lastAttempt.outcome").value("DELIVERED"))
+                .andExpect(jsonPath("$.handoffRenewalEligible").value(true));
+        mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", "handoff-final-terminal-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attemptId\":\"" + terminal.attemptId() + "\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.token").isNotEmpty());
         mockMvc.perform(get("/api/v1/deliveries/" + fixture.deliveryId() + "/pod")
                         .header("Authorization", "Bearer " + logistics))
                 .andExpect(status().isNoContent());
@@ -1294,17 +1639,37 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         .header("If-Match", capturedEtag).header("Idempotency-Key", sealKey))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(podId.toString()))
                 .andExpect(jsonPath("$.status").value("SEALED")).andReturn();
+        assertThat(tenantJdbc().queryForObject("select count(*) from logistics.buyer_receipt_fact "
+                        + "where tenant_id=? and workspace_id=? and delivery_id=?", Integer.class,
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId())).isZero();
+        mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/handoff-tokens")
+                        .header("Authorization", "Bearer " + logistics)
+                        .header("Idempotency-Key", "handoff-after-pod-seal-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"attemptId\":\"" + terminal.attemptId() + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DELIVERY_HANDOFF_POD_SEALED"));
+        MvcResult sealedDelivery = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lastAttempt.id").value(terminal.attemptId()))
+                .andExpect(jsonPath("$.handoffRenewalEligible").value(false)).andReturn();
+        assertThat(json(sealedDelivery).path("activeAttempt").isNull()).isTrue();
+        var currentDriverDeliveries = json(mockMvc.perform(get("/api/v1/driver/deliveries")
+                        .header("Authorization", "Bearer " + logistics))
+                .andExpect(status().isOk()).andReturn());
+        assertThat(currentDriverDeliveries.toString()).doesNotContain(fixture.deliveryId().toString());
         mockMvc.perform(get("/api/v1/deliveries/" + fixture.deliveryId() + "/pod")
                         .header("Authorization", "Bearer " + logistics))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SEALED"))
                 .andExpect(header().string("ETag", sealed.getResponse().getHeader("ETag")));
         String sealedAt = json(sealed).get("sealedAt").asText();
         assertThat(sealedAt).isNotBlank();
+        // Sealing Driver POD alone does not complete delivery without Buyer acceptance.
         assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? "
                         + "and workspace_id=? and aggregate_type='Delivery' and aggregate_id=? "
                         + "and event_type='DeliveryCompleted.v1' and payload->>'podId'=?", Integer.class,
                 UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId(), podId.toString()))
-                .isEqualTo(1);
+                .isZero();
         var documentPod = documentSource.findPod(UUID.fromString(tenantId()), UUID.fromString(workspaceId()), podId)
                 .orElseThrow();
         assertThat(documentPod.status()).isEqualTo("SEALED");
@@ -1326,26 +1691,12 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? "
                         + "and workspace_id=? and aggregate_type='Delivery' and aggregate_id=? "
                         + "and event_type='DeliveryCompleted.v1'", Integer.class,
-                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId())).isEqualTo(1);
+                UUID.fromString(tenantId()), UUID.fromString(workspaceId()), fixture.deliveryId())).isZero();
     }
 
     private TerminalAttemptFixture completeDriverDelivery(DriverDeliveryFixture fixture, String logistics,
                                                            String key) throws Exception {
-        MvcResult current = mockMvc.perform(get("/api/v1/driver/deliveries/" + fixture.deliveryId())
-                        .header("Authorization", "Bearer " + logistics))
-                .andExpect(status().isOk()).andReturn();
-        MvcResult transit = mockMvc.perform(post("/api/v1/deliveries/" + fixture.deliveryId() + "/transit-starts")
-                        .header("Authorization", "Bearer " + logistics)
-                        .header("If-Match", current.getResponse().getHeader("ETag"))
-                        .header("Idempotency-Key", key + "-transit"))
-                .andExpect(status().isOk()).andReturn();
-        MvcResult started = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId() + "/attempts")
-                        .header("Authorization", "Bearer " + logistics)
-                        .header("If-Match", transit.getResponse().getHeader("ETag"))
-                        .header("Idempotency-Key", key + "-start")
-                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().isCreated()).andReturn();
-        String attemptId = json(started).get("attempt").get("id").asText();
+        ActiveDriverAttemptFixture active = startDriverDeliveryAttempt(fixture, logistics, key);
         AttemptOutcomeLine line = tenantJdbc().queryForObject(
                 "select fl.id,fl.sku_id,fl.dispatched_quantity,fl.unit from logistics.fulfillment_line fl "
                         + "join logistics.fulfillment f on f.tenant_id=fl.tenant_id and f.workspace_id=fl.workspace_id "
@@ -1360,13 +1711,13 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
                 + ",\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\"" + line.unit() + "\"}]}";
         MvcResult completed = mockMvc.perform(post("/api/v1/driver/deliveries/" + fixture.deliveryId()
-                        + "/attempts/" + attemptId + "/outcomes")
+                        + "/attempts/" + active.attemptId() + "/outcomes")
                         .header("Authorization", "Bearer " + logistics)
-                        .header("If-Match", started.getResponse().getHeader("ETag"))
+                        .header("If-Match", active.deliveryEtag())
                         .header("Idempotency-Key", key + "-outcome")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk()).andReturn();
-        return new TerminalAttemptFixture(attemptId, completed.getResponse().getHeader("ETag"));
+        return new TerminalAttemptFixture(active.attemptId().toString(), completed.getResponse().getHeader("ETag"));
     }
 
     private UUID seedAvailablePodEvidence(UUID clientAccountId, UUID subjectId, UUID actorMembershipId) {
@@ -1448,9 +1799,9 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         jdbc.update("insert into iam.password_credential(user_id,password_hash,algorithm,changed_at) "
                         + "select ?,password_hash,algorithm,current_timestamp from iam.password_credential where user_id=?",
                 userId, sourceUser);
-        jdbc.update("insert into tenant_management.workspace_membership(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-                        + "values (?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
-                membershipId, workspace, userId);
+		jdbc.update("insert into tenant_management.workspace_membership(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+				+ "values (?,?,?,?,'INTERNAL','ACTIVE',current_timestamp,current_timestamp,0)",
+				membershipId, tenant, workspace, userId);
         jdbc.update("insert into tenant_management.membership_role_definition(membership_id,tenant_id,workspace_id,role_id,assigned_by_membership_id,assigned_at) "
                         + "select ?,?,?,r.id,?,current_timestamp from tenant_management.role_definition r "
                         + "where r.code='logistics' and r.tenant_id is null and r.workspace_id is null",
@@ -1459,6 +1810,34 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         + "values (?,?,?,0,current_timestamp) on conflict(membership_id) do nothing",
                 membershipId, tenant, workspace);
         return email;
+    }
+
+    private String createWorkspaceForLogistics(String suffix) {
+        UUID tenant = UUID.randomUUID();
+        UUID workspace = UUID.randomUUID();
+        UUID membership = UUID.randomUUID();
+        String normalized = suffix.replace("-", "").toLowerCase(java.util.Locale.ROOT);
+        String tenantSlug = "handoff-tenant-" + normalized;
+        String workspaceSlug = "handoff-workspace-" + normalized;
+        UUID sourceMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
+        jdbc.update("insert into tenant_management.tenant (id,name,slug,status,created_at,updated_at,version) "
+                        + "values (?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
+                tenant, "Handoff isolation tenant", tenantSlug);
+        jdbc.update("insert into tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at,version) "
+                        + "values (?,?,?,?,'ACTIVE',current_timestamp,current_timestamp,0)",
+                workspace, tenant, "Handoff isolation workspace", workspaceSlug);
+        jdbc.update("insert into tenant_management.workspace_membership "
+                        + "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+                        + "select ?,?,?,user_id,membership_type,'ACTIVE',current_timestamp,current_timestamp,0 "
+                        + "from tenant_management.workspace_membership where id=?",
+                membership, tenant, workspace, sourceMembership);
+        jdbc.update("insert into tenant_management.membership_role_definition "
+                        + "(membership_id,tenant_id,workspace_id,role_id,assigned_at) "
+                        + "select ?,?,?,role_id,current_timestamp from tenant_management.membership_role_definition "
+                        + "where membership_id=?",
+                membership, tenant, workspace, sourceMembership);
+        provisionTenantBusinessDatabase(tenant, workspace);
+        return workspaceSlug;
     }
 
     private void ensureActiveDriverWorkday(String logistics, String key) throws Exception {

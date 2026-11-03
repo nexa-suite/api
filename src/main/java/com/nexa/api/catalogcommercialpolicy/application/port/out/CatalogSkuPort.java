@@ -18,6 +18,15 @@ public interface CatalogSkuPort {
     CatalogSkuModels.FamilyView changeFamilyStatus(CatalogScope scope, UUID id, String status, long expectedVersion);
     CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(CatalogScope scope, int page, int size, String search, UUID familyId);
     CatalogSkuModels.Page<CatalogSkuModels.SkuView> skusByVariant(CatalogScope scope, int page, int size, String search, UUID variantId);
+    default CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(
+            CatalogScope scope, int page, int size, String search, UUID familyId, UUID variantId) {
+        if (familyId != null && variantId != null) {
+            throw new UnsupportedOperationException("Combined family and variant SKU filtering is unavailable");
+        }
+        return variantId == null
+                ? skus(scope, page, size, search, familyId)
+                : skusByVariant(scope, page, size, search, variantId);
+    }
     CatalogSkuModels.SkuView sku(CatalogScope scope, UUID id);
     CatalogSkuModels.SkuView insertSku(CatalogScope scope, SellableSku sku);
     CatalogSkuModels.SkuView changeSkuStatus(CatalogScope scope, UUID id, String status, long expectedVersion);

@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /** Owns the append-only Warehouse-to-Logistics handoff projection. */
@@ -36,12 +37,18 @@ public class OperationalHandoffPersistenceAdapter extends DispatchJdbcSupport im
     @Transactional(readOnly = true)
     public List<LogisticsOperationsModels.HandoffNoteView> notes(String tenantId, String workspaceId,
                                                                   String clientAccountId, String dispatchId) {
+        return notes(tenantId, workspaceId, clientAccountId, dispatchId, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<LogisticsOperationsModels.HandoffNoteView> notes(String tenantId, String workspaceId,
+                                                                  String clientAccountId, String dispatchId,
+                                                                  Set<UUID> grantedWarehouseIds) {
         UUID tenant = uuid(tenantId);
         UUID workspace = uuid(workspaceId);
         UUID dispatch = uuid(dispatchId);
-        if (load(tenant, workspace, dispatch, clientAccountId == null ? null : uuid(clientAccountId), false) == null) {
-            throw error("RESOURCE_NOT_FOUND", true);
-        }
+        detailViewForWarehouses(tenantId, workspaceId, clientAccountId, dispatchId, grantedWarehouseIds);
         String clientScope = clientAccountId == null ? "" : " and d.client_account_id=?";
         List<Object> args = new ArrayList<>(List.of(tenant, workspace, dispatch));
         if (clientAccountId != null) args.add(uuid(clientAccountId));
@@ -62,11 +69,14 @@ public class OperationalHandoffPersistenceAdapter extends DispatchJdbcSupport im
     public LogisticsOperationsModels.HandoffNoteView append(String tenantId, String workspaceId,
                                                               String dispatchId, long expectedVersion,
                                                               String actorMembershipId, String idempotencyKey,
-                                                              String note, long now) {
+                                                              String note, Set<UUID> grantedWarehouseIds, long now) {
         UUID tenant = uuid(tenantId);
         UUID workspace = uuid(workspaceId);
         UUID dispatch = uuid(dispatchId);
         UUID actor = uuid(actorMembershipId);
+        if (grantedWarehouseIds != null) {
+            detailViewForWarehouses(tenantId, workspaceId, null, dispatchId, grantedWarehouseIds);
+        }
         String requestHash = hash("dispatch-handoff-note", dispatchId, expectedVersion, note);
         LogisticsOperationsModels.HandoffNoteView replay = replayHandoff(tenant, workspace, idempotencyKey, requestHash);
         if (replay != null) return replay;

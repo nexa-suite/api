@@ -85,6 +85,9 @@ for tenant_directory in "$TENANT_ROOT"/*; do
 	if [[ -e "$tenant_directory/wallet-recharge-worker.properties" ]]; then
 		ensure_api_jdbc_url "$tenant_directory/wallet-recharge-worker.properties" "$tenant_api_url"
 	fi
+	if [[ -e "$tenant_directory/reservation-expiry-worker.properties" ]]; then
+		ensure_api_jdbc_url "$tenant_directory/reservation-expiry-worker.properties" "$tenant_api_url"
+	fi
 	project_name="nexa-tenant-db-$tenant_id"
 	network_name="nexa-tenant-business-$tenant_id"
 	docker compose --project-name "$project_name" --env-file "$compose_env" -f "$TENANT_COMPOSE_FILE" \

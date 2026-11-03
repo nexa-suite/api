@@ -7,6 +7,7 @@ import com.nexa.api.payments.application.port.PaymentPersistencePort;
 import com.nexa.api.payments.application.port.StripePaymentProvider;
 import com.nexa.api.payments.application.publicapi.PaymentUseCases;
 import com.nexa.api.payments.application.publicapi.TenantPaymentSession;
+import com.nexa.api.payments.application.publicapi.provider.PaymentProviderOperations;
 import com.nexa.api.payments.application.publicapi.webhooks.WalletRechargeWebhookIntake;
 import com.nexa.api.payments.application.publicapi.webhooks.PaymentWebhookIntake;
 import com.nexa.api.creditreceivables.application.publicapi.CreditPaymentCommands;
@@ -797,6 +798,370 @@ public class PaymentService implements PaymentPersistencePort, TenantPaymentSess
     }
 
     @Override
+    public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext context) {
+        UUID clientAccountId = requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_READ);
+        List<PaymentModels.BuyerSavedPaymentMethodView> result = transactionTemplate.execute(status -> {
+            setBuyerMembershipScope(context);
+            return jdbc.query("select id,payment_type,brand,last4,expiry_month,expiry_year,is_default,created_at "
+                            + "from payments.buyer_saved_payment_method where tenant_id=? and workspace_id=? "
+                            + "and buyer_membership_id=? and client_account_id=? "
+                            + "order by is_default desc,created_at desc,id",
+                    (rs, row) -> new PaymentModels.BuyerSavedPaymentMethodView(rs.getObject("id", UUID.class).toString(),
+                            rs.getString("payment_type"), rs.getString("brand"), rs.getString("last4"),
+                            rs.getInt("expiry_month"), rs.getInt("expiry_year"), rs.getBoolean("is_default"),
+                            rs.getTimestamp("created_at").toInstant()),
+                    tenant(context), workspace(context), context.membershipId().value(), clientAccountId);
+        });
+        return result == null ? List.of() : List.copyOf(result);
+    }
+
+    @Override
+    public TenantPaymentSession.BuyerPaymentMethodSetupPreparation prepareBuyerPaymentMethodSetup(
+            CurrentAccessContext context, String idempotencyKey) {
+        requireKey(idempotencyKey);
+        UUID clientAccountId = requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_CREATE);
+        String keyHash = sha256(idempotencyKey.trim());
+        UUID tenantId = tenant(context);
+        UUID workspaceId = workspace(context);
+        UUID membershipId = context.membershipId().value();
+        TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation = transactionTemplate.execute(status -> {
+            setBuyerMembershipScope(context);
+            jdbc.update("insert into payments.buyer_payment_provider_profile "
+                            + "(tenant_id,workspace_id,buyer_membership_id,client_account_id) values (?,?,?,?) "
+                            + "on conflict (tenant_id,workspace_id,buyer_membership_id) do nothing",
+                    tenantId, workspaceId, membershipId, clientAccountId);
+            BuyerPaymentProfileRow profile = jdbc.query("select client_account_id,provider_customer_id "
+                            + "from payments.buyer_payment_provider_profile where tenant_id=? and workspace_id=? "
+                            + "and buyer_membership_id=? for update",
+                    (rs, row) -> new BuyerPaymentProfileRow(rs.getObject("client_account_id", UUID.class),
+                            rs.getString("provider_customer_id")), tenantId, workspaceId, membershipId)
+                    .stream().findFirst().orElseThrow(() -> new IllegalStateException(
+                            "Buyer payment profile could not be initialized"));
+            if (!clientAccountId.equals(profile.clientAccountId())) {
+                throw new AccessPolicyViolation("Buyer payment profile is bound to another Client Account");
+            }
+
+            UUID proposedAttemptId = UUID.randomUUID();
+            jdbc.update("insert into payments.buyer_payment_method_setup_attempt "
+                            + "(id,tenant_id,workspace_id,buyer_membership_id,client_account_id,idempotency_key_hash) "
+                            + "values (?,?,?,?,?,?) on conflict "
+                            + "(tenant_id,workspace_id,buyer_membership_id,idempotency_key_hash) do nothing",
+                    proposedAttemptId, tenantId, workspaceId, membershipId, clientAccountId, keyHash);
+            BuyerPaymentSetupAttemptRow attempt = jdbc.query("select id,client_account_id,provider_customer_id,"
+                            + "provider_setup_intent_id,status from payments.buyer_payment_method_setup_attempt "
+                            + "where tenant_id=? and workspace_id=? and buyer_membership_id=? and idempotency_key_hash=? "
+                            + "for update",
+                    (rs, row) -> new BuyerPaymentSetupAttemptRow(rs.getObject("id", UUID.class),
+                            rs.getObject("client_account_id", UUID.class), rs.getString("provider_customer_id"),
+                            rs.getString("provider_setup_intent_id"), rs.getString("status")),
+                    tenantId, workspaceId, membershipId, keyHash).stream().findFirst()
+                    .orElseThrow(() -> new IllegalStateException("Buyer payment setup idempotency claim was lost"));
+            if (!clientAccountId.equals(attempt.clientAccountId())) {
+                throw new AccessPolicyViolation("Buyer payment setup attempt is bound to another Client Account");
+            }
+            String customerId = attempt.providerCustomerId() != null ? attempt.providerCustomerId()
+                    : profile.providerCustomerId();
+            if (customerId != null && attempt.providerCustomerId() == null) {
+                jdbc.update("update payments.buyer_payment_method_setup_attempt set provider_customer_id=? "
+                                + "where tenant_id=? and workspace_id=? and id=? and provider_customer_id is null",
+                        customerId, tenantId, workspaceId, attempt.id());
+            }
+            String customerKey = "nexa-buyer-customer:" + tenantId + ":" + workspaceId + ":" + membershipId;
+            String setupKey = "nexa-buyer-setup:" + attempt.id();
+            Map<String, String> metadata = Map.of(
+                    "nexa_tenant_id", tenantId.toString(),
+                    "nexa_workspace_id", workspaceId.toString(),
+                    "nexa_buyer_membership_id", membershipId.toString(),
+                    "nexa_client_account_id", clientAccountId.toString(),
+                    "nexa_setup_attempt_id", attempt.id().toString());
+            return new TenantPaymentSession.BuyerPaymentMethodSetupPreparation(tenantId, workspaceId,
+                    clientAccountId, membershipId, attempt.id(), keyHash, customerId,
+                    attempt.providerSetupIntentId(), customerKey, setupKey, metadata);
+        });
+        if (preparation == null) throw new IllegalStateException("Buyer payment setup could not be prepared");
+        return preparation;
+    }
+
+    @Override
+    public TenantPaymentSession.BuyerPaymentMethodSetupPreparation prepareBuyerPaymentMethodLocalConfirmation(
+            CurrentAccessContext context, String providerSetupIntentId) {
+        UUID clientAccountId = requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_CREATE);
+        if (blankOrTooLong(providerSetupIntentId, 255)) {
+            throw new IllegalArgumentException("Buyer SetupIntent id is invalid");
+        }
+        TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation = transactionTemplate.execute(status -> {
+            setBuyerMembershipScope(context);
+            return jdbc.query("select id,idempotency_key_hash,provider_customer_id,provider_setup_intent_id "
+                            + "from payments.buyer_payment_method_setup_attempt where tenant_id=? and workspace_id=? "
+                            + "and buyer_membership_id=? and client_account_id=? and provider_setup_intent_id=? "
+                            + "and status='PENDING' for update",
+                    (rs, row) -> {
+                        UUID attemptId = rs.getObject("id", UUID.class);
+                        String customerId = rs.getString("provider_customer_id");
+                        return new TenantPaymentSession.BuyerPaymentMethodSetupPreparation(tenant(context),
+                                workspace(context), clientAccountId, context.membershipId().value(), attemptId,
+                                rs.getString("idempotency_key_hash"), customerId,
+                                rs.getString("provider_setup_intent_id"),
+                                "nexa-buyer-customer:" + tenant(context) + ":" + workspace(context) + ":"
+                                        + context.membershipId().value(), "nexa-buyer-setup:" + attemptId,
+                                Map.of("nexa_tenant_id", tenant(context).toString(),
+                                        "nexa_workspace_id", workspace(context).toString(),
+                                        "nexa_buyer_membership_id", context.membershipId().value().toString(),
+                                        "nexa_client_account_id", clientAccountId.toString(),
+                                        "nexa_setup_attempt_id", attemptId.toString()));
+                    }, tenant(context), workspace(context), context.membershipId().value(), clientAccountId,
+                    providerSetupIntentId).stream().findFirst().orElseThrow(() ->
+                    new IllegalArgumentException("Buyer SetupIntent is not owned by this Buyer membership"));
+        });
+        if (preparation == null || preparation.providerCustomerId() == null) {
+            throw new IllegalArgumentException("Buyer SetupIntent is not bound to a verified Customer");
+        }
+        return preparation;
+    }
+
+    @Override
+    public void bindBuyerPaymentProviderCustomer(CurrentAccessContext context,
+            TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation, String providerCustomerId) {
+        requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_CREATE);
+        if (providerCustomerId == null || providerCustomerId.isBlank() || providerCustomerId.length() > 255) {
+            throw new IllegalArgumentException("Stripe Customer id is invalid");
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            setBuyerMembershipScope(context);
+            int profileUpdated = jdbc.update("update payments.buyer_payment_provider_profile "
+                            + "set provider_customer_id=?,updated_at=current_timestamp "
+                            + "where tenant_id=? and workspace_id=? and buyer_membership_id=? and client_account_id=? "
+                            + "and (provider_customer_id is null or provider_customer_id=?)",
+                    providerCustomerId, tenant(context), workspace(context), context.membershipId().value(),
+                    preparation.clientAccountId(), providerCustomerId);
+            int attemptUpdated = jdbc.update("update payments.buyer_payment_method_setup_attempt "
+                            + "set provider_customer_id=? where tenant_id=? and workspace_id=? and id=? "
+                            + "and buyer_membership_id=? and client_account_id=? "
+                            + "and (provider_customer_id is null or provider_customer_id=?)",
+                    providerCustomerId, tenant(context), workspace(context), preparation.setupAttemptId(),
+                    context.membershipId().value(), preparation.clientAccountId(), providerCustomerId);
+            if (profileUpdated != 1 || attemptUpdated != 1) {
+                throw new IllegalStateException("Stripe Customer could not be bound to the Buyer payment profile");
+            }
+        });
+    }
+
+    @Override
+    public void recordBuyerPaymentSetupIntent(CurrentAccessContext context,
+            TenantPaymentSession.BuyerPaymentMethodSetupPreparation preparation, String providerCustomerId,
+            String providerSetupIntentId) {
+        requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_CREATE);
+        if (providerSetupIntentId == null || providerSetupIntentId.isBlank() || providerSetupIntentId.length() > 255) {
+            throw new IllegalArgumentException("Stripe SetupIntent id is invalid");
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            setBuyerMembershipScope(context);
+            int updated = jdbc.update("update payments.buyer_payment_method_setup_attempt "
+                            + "set provider_setup_intent_id=?,status=case when status='CREATED' then 'PENDING' else status end "
+                            + "where tenant_id=? and workspace_id=? and id=? and buyer_membership_id=? "
+                            + "and client_account_id=? and provider_customer_id=? "
+                            + "and status in ('CREATED','PENDING','SUCCEEDED') "
+                            + "and (provider_setup_intent_id is null or provider_setup_intent_id=?)",
+                    providerSetupIntentId, tenant(context), workspace(context), preparation.setupAttemptId(),
+                    context.membershipId().value(), preparation.clientAccountId(), providerCustomerId,
+                    providerSetupIntentId);
+            if (updated != 1) throw new IllegalStateException("Stripe SetupIntent could not be bound to its Buyer attempt");
+        });
+    }
+
+    @Override
+    public TenantPaymentSession.BuyerPaymentMethodDetachPreparation prepareBuyerPaymentMethodDetach(
+            CurrentAccessContext context, UUID paymentMethodId) {
+        UUID clientAccountId = requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_CREATE);
+        return transactionTemplate.execute(status -> {
+            setBuyerMembershipScope(context);
+            String customerId = jdbc.query("select provider_customer_id from payments.buyer_payment_provider_profile "
+                            + "where tenant_id=? and workspace_id=? and buyer_membership_id=? and client_account_id=?",
+                    (rs, row) -> rs.getString("provider_customer_id"), tenant(context), workspace(context),
+                    context.membershipId().value(), clientAccountId).stream().findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Buyer payment method was not found"));
+            BuyerSavedPaymentMethodRow method = jdbc.query("select id,provider_payment_method_id from "
+                            + "payments.buyer_saved_payment_method where tenant_id=? and workspace_id=? "
+                            + "and buyer_membership_id=? and client_account_id=? and id=?",
+                    (rs, row) -> new BuyerSavedPaymentMethodRow(rs.getObject("id", UUID.class),
+                            rs.getString("provider_payment_method_id")),
+                    tenant(context), workspace(context), context.membershipId().value(), clientAccountId, paymentMethodId)
+                    .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Buyer payment method was not found"));
+            if (customerId == null) throw new IllegalStateException("Buyer Stripe Customer binding is unavailable");
+            return new TenantPaymentSession.BuyerPaymentMethodDetachPreparation(clientAccountId,
+                    context.membershipId().value(), method.id(), customerId, method.providerPaymentMethodId());
+        });
+    }
+
+    @Override
+    public void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId) {
+        UUID clientAccountId = requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_CREATE);
+        transactionTemplate.executeWithoutResult(status -> {
+            setBuyerMembershipScope(context);
+            lockBuyerPaymentProfile(context, clientAccountId);
+            Boolean wasDefault = jdbc.query("select is_default from payments.buyer_saved_payment_method "
+                            + "where tenant_id=? and workspace_id=? and buyer_membership_id=? "
+                            + "and client_account_id=? and id=? for update",
+                    (rs, row) -> rs.getBoolean(1), tenant(context), workspace(context), context.membershipId().value(),
+                    clientAccountId, paymentMethodId).stream().findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Buyer payment method was not found"));
+            int removed = jdbc.update("delete from payments.buyer_saved_payment_method where tenant_id=? "
+                            + "and workspace_id=? and buyer_membership_id=? and client_account_id=? and id=?",
+                    tenant(context), workspace(context), context.membershipId().value(), clientAccountId, paymentMethodId);
+            if (removed != 1) throw new IllegalArgumentException("Buyer payment method was not found");
+            if (wasDefault) {
+                UUID nextDefault = jdbc.query("select id from payments.buyer_saved_payment_method "
+                                + "where tenant_id=? and workspace_id=? and buyer_membership_id=? and client_account_id=? "
+                                + "order by created_at,id limit 1",
+                        (rs, row) -> rs.getObject("id", UUID.class), tenant(context), workspace(context),
+                        context.membershipId().value(), clientAccountId).stream().findFirst().orElse(null);
+                if (nextDefault != null) {
+                    jdbc.update("update payments.buyer_saved_payment_method set is_default=true "
+                                    + "where tenant_id=? and workspace_id=? and buyer_membership_id=? and id=?",
+                            tenant(context), workspace(context), context.membershipId().value(), nextDefault);
+                }
+            }
+        });
+    }
+
+    @Override
+    public PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext context,
+            UUID paymentMethodId) {
+        UUID clientAccountId = requireBuyerPaymentAccount(context, PermissionKey.PAYMENT_CREATE);
+        return transactionTemplate.execute(status -> {
+            setBuyerMembershipScope(context);
+            lockBuyerPaymentProfile(context, clientAccountId);
+            Integer found = jdbc.query("select 1 from payments.buyer_saved_payment_method "
+                            + "where tenant_id=? and workspace_id=? and buyer_membership_id=? "
+                            + "and client_account_id=? and id=? for update",
+                    (rs, row) -> rs.getInt(1), tenant(context), workspace(context), context.membershipId().value(),
+                    clientAccountId, paymentMethodId).stream().findFirst().orElse(null);
+            if (found == null) throw new IllegalArgumentException("Buyer payment method was not found");
+            jdbc.update("update payments.buyer_saved_payment_method set is_default=false where tenant_id=? "
+                            + "and workspace_id=? and buyer_membership_id=? and is_default",
+                    tenant(context), workspace(context), context.membershipId().value());
+            jdbc.update("update payments.buyer_saved_payment_method set is_default=true where tenant_id=? "
+                            + "and workspace_id=? and buyer_membership_id=? and id=?",
+                    tenant(context), workspace(context), context.membershipId().value(), paymentMethodId);
+            return findBuyerSavedMethod(context, clientAccountId, paymentMethodId);
+        });
+    }
+
+    @Override
+    public PaymentModels.WebhookReceipt applyBuyerPaymentMethodSetupWebhook(UUID tenantId, UUID workspaceId,
+            UUID buyerMembershipId, UUID clientAccountId, UUID setupAttemptId, String setupIntentId,
+            String providerCustomerId, String eventId, String eventType, String providerStatus,
+            String signatureSha256, PaymentProviderOperations.ProviderPaymentMethod method) {
+        if (tenantId == null || workspaceId == null || buyerMembershipId == null || clientAccountId == null
+                || setupAttemptId == null || blankOrTooLong(setupIntentId, 255) || blankOrTooLong(providerCustomerId, 255)
+                || blankOrTooLong(eventId, 160) || blankOrTooLong(eventType, 160)
+                || signatureSha256 == null || !signatureSha256.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("Verified Buyer SetupIntent event is incomplete");
+        }
+        RlsRequestScope.Scope scope = RlsRequestScope.current();
+        if (scope == null || !tenantId.equals(scope.tenantId()) || !workspaceId.equals(scope.workspaceId())
+                || RlsRequestScope.crossScopeWorkspaceScanEnabled()) {
+            throw new AccessPolicyViolation("Buyer SetupIntent callback requires its exact Tenant and Workspace scope");
+        }
+        SetupOutcome outcome = switch (eventType) {
+            case "setup_intent.succeeded" -> {
+                if (!"succeeded".equalsIgnoreCase(providerStatus)) {
+                    throw new IllegalArgumentException("Stripe SetupIntent is not succeeded");
+                }
+                validateSavedCard(method, providerCustomerId);
+                yield SetupOutcome.SUCCEEDED;
+            }
+            case "setup_intent.setup_failed" -> SetupOutcome.FAILED;
+            case "setup_intent.canceled" -> SetupOutcome.CANCELLED;
+            default -> null;
+        };
+        if (outcome == null) return new PaymentModels.WebhookReceipt(eventId, "IGNORED");
+
+        return transactionTemplate.execute(status -> {
+            String installed = jdbc.queryForObject("select current_setting('app.current_membership_id', true)",
+                    String.class);
+            if (!buyerMembershipId.toString().equals(installed)) {
+                throw new AccessPolicyViolation("Verified callback Buyer membership scope was not installed");
+            }
+            if (!customerAccounts.lockAndCheckActiveBuyerPaymentSetupRelationship(tenantId.toString(),
+                    workspaceId.toString(), buyerMembershipId.toString(), clientAccountId.toString())) {
+                throw new AccessPolicyViolation(
+                        "SetupIntent callback requires an active Buyer Client Account relationship");
+            }
+            BuyerPaymentSetupAttemptRow attempt = jdbc.query("select id,client_account_id,provider_customer_id,"
+                            + "provider_setup_intent_id,status from payments.buyer_payment_method_setup_attempt "
+                            + "where tenant_id=? and workspace_id=? and buyer_membership_id=? and client_account_id=? "
+                            + "and id=? and provider_setup_intent_id=? and provider_customer_id=? for update",
+                    (rs, row) -> new BuyerPaymentSetupAttemptRow(rs.getObject("id", UUID.class),
+                            rs.getObject("client_account_id", UUID.class), rs.getString("provider_customer_id"),
+                            rs.getString("provider_setup_intent_id"), rs.getString("status")),
+                    tenantId, workspaceId, buyerMembershipId, clientAccountId, setupAttemptId,
+                    setupIntentId, providerCustomerId).stream().findFirst().orElse(null);
+            if (attempt == null) return new PaymentModels.WebhookReceipt(eventId, "IGNORED");
+            lockBuyerPaymentProfile(tenantId, workspaceId, buyerMembershipId, clientAccountId);
+            int insertedEvent = jdbc.update("insert into payments.buyer_payment_method_setup_event "
+                            + "(tenant_id,workspace_id,buyer_membership_id,event_id,setup_attempt_id,event_type,"
+                            + "signature_sha256,outcome,received_at) values (?,?,?,?,?,?,?,?,?) on conflict "
+                            + "(tenant_id,workspace_id,event_id) do nothing",
+                    tenantId, workspaceId, buyerMembershipId, eventId, setupAttemptId, eventType,
+                    signatureSha256, outcome.name(), Timestamp.from(Instant.now()));
+            if (insertedEvent == 0) {
+                Boolean sameEvent = jdbc.query("select setup_attempt_id=? and buyer_membership_id=? and event_type=? "
+                                + "from payments.buyer_payment_method_setup_event where tenant_id=? and workspace_id=? "
+                                + "and event_id=?",
+                        (rs, row) -> rs.getBoolean(1), setupAttemptId, buyerMembershipId, eventType,
+                        tenantId, workspaceId, eventId).stream().findFirst().orElse(false);
+                if (!sameEvent) throw new IllegalArgumentException("Stripe SetupIntent event id is already bound elsewhere");
+                return new PaymentModels.WebhookReceipt(eventId, "DUPLICATE");
+            }
+
+            if (outcome == SetupOutcome.SUCCEEDED) {
+                boolean defaultMethod = !Boolean.TRUE.equals(jdbc.queryForObject(
+                        "select exists(select 1 from payments.buyer_saved_payment_method where tenant_id=? "
+                                + "and workspace_id=? and buyer_membership_id=? and is_default)", Boolean.class,
+                        tenantId, workspaceId, buyerMembershipId));
+                jdbc.update("insert into payments.buyer_saved_payment_method "
+                                + "(id,tenant_id,workspace_id,buyer_membership_id,client_account_id,"
+                                + "provider_payment_method_id,payment_type,brand,last4,expiry_month,expiry_year,is_default) "
+                                + "values (?,?,?,?,?,?,'CARD',?,?,?,?,?) on conflict "
+                                + "(tenant_id,workspace_id,provider_payment_method_id) do nothing",
+                        UUID.randomUUID(), tenantId, workspaceId, buyerMembershipId, clientAccountId,
+                        method.providerId(), method.brand().trim().toLowerCase(Locale.ROOT), method.last4(),
+                        Math.toIntExact(method.expiryMonth()), Math.toIntExact(method.expiryYear()), defaultMethod);
+                BuyerSavedPaymentMethodRow saved = jdbc.query("select id,provider_payment_method_id,buyer_membership_id,client_account_id "
+                                + "from payments.buyer_saved_payment_method where tenant_id=? and workspace_id=? "
+                                + "and provider_payment_method_id=? for update",
+                        (rs, row) -> new BuyerSavedPaymentMethodRow(rs.getObject("id", UUID.class),
+                                rs.getString("provider_payment_method_id"),
+                                rs.getObject("buyer_membership_id", UUID.class),
+                                rs.getObject("client_account_id", UUID.class)),
+                        tenantId, workspaceId, method.providerId()).stream().findFirst().orElse(null);
+                if (saved == null || !buyerMembershipId.equals(saved.membershipId())
+                        || !clientAccountId.equals(saved.clientAccountId())) {
+                    throw new IllegalArgumentException("Stripe PaymentMethod is already linked to another Buyer");
+                }
+                if (defaultMethod) {
+                    jdbc.update("update payments.buyer_saved_payment_method set is_default=true "
+                                    + "where tenant_id=? and workspace_id=? and buyer_membership_id=? "
+                                    + "and id=? and not is_default",
+                            tenantId, workspaceId, buyerMembershipId, saved.id());
+                }
+                jdbc.update("update payments.buyer_payment_method_setup_attempt set status='SUCCEEDED', "
+                                + "completed_at=coalesce(completed_at,current_timestamp) where tenant_id=? "
+                                + "and workspace_id=? and id=? and buyer_membership_id=? and client_account_id=? "
+                                + "and status in ('CREATED','PENDING','SUCCEEDED')",
+                        tenantId, workspaceId, setupAttemptId, buyerMembershipId, clientAccountId);
+            } else {
+                jdbc.update("update payments.buyer_payment_method_setup_attempt set status=?,completed_at=null "
+                                + "where tenant_id=? and workspace_id=? and id=? and buyer_membership_id=? "
+                                + "and status in ('CREATED','PENDING')",
+                        outcome.name(), tenantId, workspaceId, setupAttemptId, buyerMembershipId);
+            }
+            return new PaymentModels.WebhookReceipt(eventId, outcome.name());
+        });
+    }
+
+    @Override
     @Transactional
     public PaymentModels.WebhookReceipt receiveStripeWebhook(String payload, String signature) {
         return recordStripeWebhook(verifyStripeWebhook(payload, signature), signature);
@@ -1434,6 +1799,81 @@ public class PaymentService implements PaymentPersistencePort, TenantPaymentSess
             throw new IllegalArgumentException("Stripe webhook metadata " + key + " is invalid", exception);
         }
     }
+
+    private UUID requireBuyerPaymentAccount(CurrentAccessContext context, PermissionKey permission) {
+        Objects.requireNonNull(context, "Verified Buyer access context is required");
+        context.requirePermission(permission);
+        if (!context.hasRole(MembershipRole.BUYER)) {
+            throw new AccessPolicyViolation("Buyer membership is required to manage saved payment methods");
+        }
+        RlsRequestScope.Scope scope = RlsRequestScope.current();
+        if (scope == null || !tenant(context).equals(scope.tenantId())
+                || !workspace(context).equals(scope.workspaceId())
+                || RlsRequestScope.crossScopeWorkspaceScanEnabled()) {
+            throw new AccessPolicyViolation("Saved payment methods require the verified Tenant and Workspace scope");
+        }
+        if (customerAccounts == null) throw new AccessPolicyViolation("Buyer Client Account relationship is unavailable");
+        return customerAccounts.findActiveBuyerDetails(tenant(context).toString(), workspace(context).toString(),
+                        context.membershipId().value().toString())
+                .filter(com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountDetails::active)
+                .map(value -> {
+                    try { return UUID.fromString(value.id()); }
+                    catch (RuntimeException invalid) {
+                        throw new AccessPolicyViolation("Buyer Client Account relationship is invalid");
+                    }
+                })
+                .orElseThrow(() -> new AccessPolicyViolation("Active Buyer Client Account relationship is required"));
+    }
+
+    private void setBuyerMembershipScope(CurrentAccessContext context) {
+        String installed = jdbc.queryForObject("select set_config('app.current_membership_id', ?, true)",
+                String.class, context.membershipId().value().toString());
+        if (!context.membershipId().value().toString().equals(installed)) {
+            throw new AccessPolicyViolation("Verified Buyer membership scope could not be applied");
+        }
+    }
+
+    private void lockBuyerPaymentProfile(CurrentAccessContext context, UUID clientAccountId) {
+        lockBuyerPaymentProfile(tenant(context), workspace(context), context.membershipId().value(), clientAccountId);
+    }
+
+    private void lockBuyerPaymentProfile(UUID tenantId, UUID workspaceId, UUID buyerMembershipId,
+            UUID clientAccountId) {
+        boolean found = !jdbc.query("select lock_version from payments.buyer_payment_provider_profile where tenant_id=? "
+                        + "and workspace_id=? and buyer_membership_id=? and client_account_id=? for update",
+                (rs, row) -> rs.getLong(1), tenantId, workspaceId, buyerMembershipId, clientAccountId).isEmpty();
+        if (!found) throw new IllegalArgumentException("Buyer payment profile was not found");
+    }
+
+    private PaymentModels.BuyerSavedPaymentMethodView findBuyerSavedMethod(CurrentAccessContext context,
+            UUID clientAccountId, UUID paymentMethodId) {
+        return jdbc.query("select id,payment_type,brand,last4,expiry_month,expiry_year,is_default,created_at "
+                        + "from payments.buyer_saved_payment_method where tenant_id=? and workspace_id=? "
+                        + "and buyer_membership_id=? and client_account_id=? and id=?",
+                (rs, row) -> new PaymentModels.BuyerSavedPaymentMethodView(
+                        rs.getObject("id", UUID.class).toString(), rs.getString("payment_type"),
+                        rs.getString("brand"), rs.getString("last4"), rs.getInt("expiry_month"),
+                        rs.getInt("expiry_year"), rs.getBoolean("is_default"),
+                        rs.getTimestamp("created_at").toInstant()),
+                tenant(context), workspace(context), context.membershipId().value(), clientAccountId, paymentMethodId)
+                .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Buyer payment method was not found"));
+    }
+
+    private static void validateSavedCard(PaymentProviderOperations.ProviderPaymentMethod method,
+            String expectedCustomerId) {
+        if (method == null || blankOrTooLong(method.providerId(), 255)
+                || !expectedCustomerId.equals(method.customerId()) || !"card".equalsIgnoreCase(method.type())
+                || method.brand() == null || method.brand().isBlank() || method.brand().length() > 40
+                || method.last4() == null || !method.last4().matches("[0-9]{4}")
+                || method.expiryMonth() == null || method.expiryMonth() < 1 || method.expiryMonth() > 12
+                || method.expiryYear() == null || method.expiryYear() < 2000 || method.expiryYear() > 9999) {
+            throw new IllegalArgumentException("Verified Stripe PaymentMethod summary is invalid");
+        }
+    }
+
+    private static boolean blankOrTooLong(String value, int maxLength) {
+        return value == null || value.isBlank() || value.length() > maxLength;
+    }
     private static void requireWebhookIdentity(StripePaymentProvider.StripeWebhookEvent event) {
         if (event == null || event.eventId() == null || event.eventId().isBlank() || event.eventId().length() > 255
                 || event.eventType() == null || event.eventType().isBlank() || event.eventType().length() > 160) {
@@ -1620,6 +2060,16 @@ public class PaymentService implements PaymentPersistencePort, TenantPaymentSess
                                             String failureKind) { }
     private record RetryIdempotencyRow(String requestHash, String resultStatus, String resultJson, String failureKind) { }
     private record PaymentViewRow(PaymentRow payment, String method) { }
+    private record BuyerPaymentProfileRow(UUID clientAccountId, String providerCustomerId) { }
+    private record BuyerPaymentSetupAttemptRow(UUID id, UUID clientAccountId, String providerCustomerId,
+            String providerSetupIntentId, String status) { }
+    private record BuyerSavedPaymentMethodRow(UUID id, String providerPaymentMethodId, UUID membershipId,
+            UUID clientAccountId) {
+        private BuyerSavedPaymentMethodRow(UUID id, String providerPaymentMethodId) {
+            this(id, providerPaymentMethodId, null, null);
+        }
+    }
+    private enum SetupOutcome { SUCCEEDED, FAILED, CANCELLED }
     private record ReconciliationCaseRow(UUID id, UUID paymentId, UUID receivableId, String state, int attemptCount, Instant leaseUntil) { }
     private record AuthoritativeSubject(UUID clientAccountId, BigDecimal amount, String currency, String status, String paymentOption) { }
     private record PaymentRow(UUID id, UUID receivableId, String status, BigDecimal amount, String currency, String clientSecret, String providerId, Instant createdAt, Instant completedAt, UUID clientAccountId, UUID tenantId, UUID workspaceId) {

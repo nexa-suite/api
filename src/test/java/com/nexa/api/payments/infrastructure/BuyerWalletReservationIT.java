@@ -156,7 +156,7 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
         migrateTenant("8");
         seedPolicySnapshot();
         seedBuyerRelationship();
-        migrateTenant("16");
+        migrateTenant();
 
         TenantBusinessDatabaseCredentials credentials = new TenantBusinessDatabaseCredentials(
                 TENANT_DATABASE.getJdbcUrl(), RUNTIME, RUNTIME_PASSWORD);
@@ -874,9 +874,9 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
 
     private void provisionTenantRoles() throws SQLException {
         try (Connection connection = tenantAdminConnection(); Statement statement = connection.createStatement()) {
-            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN PASSWORD '" + MIGRATOR_PASSWORD
+            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN NOINHERIT PASSWORD '" + MIGRATOR_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
-            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN PASSWORD '" + RUNTIME_PASSWORD
+            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN NOINHERIT PASSWORD '" + RUNTIME_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("CREATE ROLE " + POLICY_WRITER + " LOGIN PASSWORD '" + POLICY_WRITER_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
@@ -887,6 +887,8 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
             statement.execute("CREATE ROLE nexa_payments_worker NOLOGIN NOSUPERUSER NOCREATEDB "
                     + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("CREATE ROLE nexa_business_traceability_worker NOLOGIN NOSUPERUSER NOCREATEDB "
+                    + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker NOLOGIN NOSUPERUSER NOCREATEDB "
                     + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + TENANT_DATABASE.getDatabaseName()
                     + "\" TO " + MIGRATOR);
@@ -900,6 +902,12 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
         Path location = Path.of("src/main/resources/db/tenant-migration").toAbsolutePath().normalize();
         Flyway.configure().dataSource(TENANT_DATABASE.getJdbcUrl(), MIGRATOR, MIGRATOR_PASSWORD)
                 .locations("filesystem:" + location).target(target).load().migrate();
+    }
+
+    private void migrateTenant() {
+        Path location = Path.of("src/main/resources/db/tenant-migration").toAbsolutePath().normalize();
+        Flyway.configure().dataSource(TENANT_DATABASE.getJdbcUrl(), MIGRATOR, MIGRATOR_PASSWORD)
+                .locations("filesystem:" + location).load().migrate();
     }
 
     private void seedTenantIdentityAndWorkspace() throws SQLException {
@@ -921,6 +929,8 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
 
     private void seedBuyerRelationship() {
         Timestamp now = Timestamp.from(Instant.now());
+        String taxIdentifier = "20" + String.format(java.util.Locale.ROOT, "%09d",
+                Math.floorMod(buyerAccountId.getLeastSignificantBits(), 1_000_000_000L));
         tenantAdminJdbc().update("insert into sales.client_account "
                         + "(id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,"
                         + "tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,"
@@ -928,7 +938,7 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
                         + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 buyerAccountId, tenantId, workspaceId, "WALLET-" + buyerAccountId.toString().substring(0, 8),
                 "Tenant wallet fixture", "Tenant wallet fixture", "PE", "RUC",
-                "20" + buyerAccountId.toString().replace("-", "").substring(0, 10), "B2B", "Fixture contact",
+                taxIdentifier, "B2B", "Fixture contact",
                 "wallet-fixture@example.test", "+51999999999", "Fixture delivery", "PREPAID", now, now);
         tenantAdminJdbc().update("insert into sales.client_account_membership "
                         + "(client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) "

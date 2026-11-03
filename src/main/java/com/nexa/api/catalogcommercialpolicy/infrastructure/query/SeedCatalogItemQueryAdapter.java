@@ -45,8 +45,10 @@ public final class SeedCatalogItemQueryAdapter implements CatalogItemQueryPort {
 		List<CatalogItem> filtered = items.stream()
 				.filter(item -> item.status().name().equals("ACTIVE"))
 				.filter(item -> containsAny(item, safeCriteria.query()))
-				.filter(item -> matches(item.brandName().value(), safeCriteria.brand()))
-				.filter(item -> matches(item.categoryName().value(), safeCriteria.category()))
+				.filter(item -> matchesExactly(item.brandName().value(), safeCriteria.brand()))
+				.filter(item -> matchesExactly(item.categoryName().value(), safeCriteria.category()))
+				// Seed entries have no stable taxonomy IDs; fail closed for ID filters instead of broadening results.
+				.filter(item -> safeCriteria.brandId() == null && safeCriteria.categoryId() == null)
 				.filter(item -> safeCriteria.coldChainRequirement() == null
 						|| item.coldChainRequirement() == safeCriteria.coldChainRequirement())
 				.sorted(comparator(safeCriteria.sortField(), safeCriteria.sortDirection()))
@@ -77,6 +79,10 @@ public final class SeedCatalogItemQueryAdapter implements CatalogItemQueryPort {
 
 	private static boolean matches(String value, String filter) {
 		return filter == null || filter.isBlank() || value.toLowerCase(Locale.ROOT).contains(filter.toLowerCase(Locale.ROOT));
+	}
+
+	private static boolean matchesExactly(String value, String filter) {
+		return filter == null || filter.isBlank() || value.equalsIgnoreCase(filter);
 	}
 
 	private static Comparator<CatalogItem> comparator(CatalogSortField field, SortDirection direction) {

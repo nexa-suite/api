@@ -132,9 +132,9 @@ class TenantBusinessDatabaseBaselineIT {
 
     private static void provisionTenantRoles(PostgreSQLContainer tenant) throws SQLException {
         try (Connection connection = adminConnection(tenant); Statement statement = connection.createStatement()) {
-            statement.execute("CREATE ROLE nexa_migrator LOGIN PASSWORD '" + MIGRATOR_PASSWORD
+            statement.execute("CREATE ROLE nexa_migrator LOGIN NOINHERIT PASSWORD '" + MIGRATOR_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
-            statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + RUNTIME_PASSWORD
+            statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT PASSWORD '" + RUNTIME_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + tenant.getDatabaseName() + "\" TO nexa_migrator");
             statement.execute("GRANT CONNECT ON DATABASE \"" + tenant.getDatabaseName() + "\" TO nexa_runtime");

@@ -6,6 +6,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantExternalConfigurationSource;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.CustomFieldDefinition;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OperationalSettings;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationLegalAddress;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.OrganizationProfile;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.ReferencePlanAssignment;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.configuration.RegionalSettings;
@@ -20,6 +21,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.LocalTime;
@@ -46,14 +49,42 @@ public class JdbcTenantConfigurationAdapter implements TenantConfigurationPort {
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public Optional<OrganizationProfile> findOrganizationProfile(String tenantId) {
 		ensureTenantDefaults(tenantId);
-		return jdbc.query("select legal_name,display_name,business_identifier,operation_category,version from tenant_management.organization_settings where tenant_id=?",
-				(rs, row) -> new OrganizationProfile(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getLong(5)), uuid(tenantId)).stream().findFirst();
+		return jdbc.query("select legal_name,display_name,business_identifier,operation_category,version,ruc,"
+				+ "legal_address_country_code,legal_address_line,legal_address_department_code,legal_address_province_code,"
+				+ "legal_address_district_code,legal_address_road_type,legal_address_street_name,legal_address_street_number,"
+				+ "legal_address_interior,legal_address_postal_code,legal_address_reference "
+				+ "from tenant_management.organization_settings where tenant_id=?",
+				(rs, row) -> new OrganizationProfile(rs.getString("legal_name"), rs.getString("display_name"),
+						rs.getString("business_identifier"), rs.getString("operation_category"), rs.getLong("version"),
+						rs.getString("ruc"), legalAddress(rs)), uuid(tenantId)).stream().findFirst();
 	}
 
 	@Override
 	public int updateOrganizationProfile(String tenantId, OrganizationProfile profile) {
-		return jdbc.update("update tenant_management.organization_settings set legal_name=?,display_name=?,business_identifier=?,operation_category=?,updated_at=current_timestamp,version=version+1 where tenant_id=? and version=?",
-				profile.legalName(), profile.displayName(), profile.businessIdentifier(), profile.operationCategory(), uuid(tenantId), profile.version());
+		OrganizationLegalAddress address = profile.legalAddress();
+		return jdbc.update("update tenant_management.organization_settings set legal_name=?,display_name=?,business_identifier=?,operation_category=?,ruc=?,"
+				+ "legal_address_country_code=?,legal_address_line=?,legal_address_department_code=?,legal_address_province_code=?,"
+				+ "legal_address_district_code=?,legal_address_road_type=?,legal_address_street_name=?,legal_address_street_number=?,"
+				+ "legal_address_interior=?,legal_address_postal_code=?,legal_address_reference=?,updated_at=current_timestamp,version=version+1 "
+				+ "where tenant_id=? and version=?",
+				profile.legalName(), profile.displayName(), profile.businessIdentifier(), profile.operationCategory(), profile.ruc(),
+				address == null ? null : address.countryCode(), address == null ? null : address.addressLine(),
+				address == null ? null : address.departmentCode(), address == null ? null : address.provinceCode(),
+				address == null ? null : address.districtCode(), address == null ? null : address.roadType(),
+				address == null ? null : address.streetName(), address == null ? null : address.streetNumber(),
+				address == null ? null : address.interior(), address == null ? null : address.postalCode(),
+				address == null ? null : address.reference(), uuid(tenantId), profile.version());
+	}
+
+	private static OrganizationLegalAddress legalAddress(ResultSet rs) throws SQLException {
+		String countryCode = rs.getString("legal_address_country_code");
+		if (countryCode == null) return null;
+		return new OrganizationLegalAddress(countryCode, rs.getString("legal_address_line"),
+				rs.getString("legal_address_department_code"), rs.getString("legal_address_province_code"),
+				rs.getString("legal_address_district_code"), rs.getString("legal_address_road_type"),
+				rs.getString("legal_address_street_name"), rs.getString("legal_address_street_number"),
+				rs.getString("legal_address_interior"), rs.getString("legal_address_postal_code"),
+				rs.getString("legal_address_reference"));
 	}
 
 	@Override

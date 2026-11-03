@@ -95,6 +95,10 @@ class ClientAccountAddressTests {
             @Override public Optional<CustomerAccountReference> findReference(String tenant, String workspace, String account) {
                 return Optional.of(new CustomerAccountReference(account, "ACTIVE"));
             }
+            @Override public Optional<CustomerAccountReference> findSalesOwnerReference(
+                    String tenant, String workspace, String account, String salesOwnerMembershipId) {
+                return Optional.of(new CustomerAccountReference(account, "ACTIVE"));
+            }
             @Override public Optional<CustomerAccountReference> findBuyerReference(String tenant, String workspace, String membership) {
                 return Optional.empty();
             }

@@ -2,7 +2,7 @@ package com.nexa.api.bootstrap.runtime.boundaries.payments;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcPaymentProviderRouteRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePaymentCallbackRouter;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.payments.application.publicapi.TenantPaymentProviderEventProcessor;
 import com.nexa.api.bootstrap.runtime.boundaries.TenantPaymentServiceBindingsFactory;
 import com.nexa.api.payments.application.publicapi.TenantPaymentSession;

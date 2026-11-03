@@ -64,6 +64,12 @@ class TenantBoundBuyerWalletReadIT {
     private static final String RUNTIME_PASSWORD = "tenant-wallet-read-runtime-test-only";
     private static final String POLICY_WRITER = "nexa_policy_snapshot_writer";
     private static final String POLICY_WRITER_PASSWORD = "tenant-wallet-read-policy-test-only";
+    private static final Set<String> WORKER_ROLES = Set.of(
+            "nexa_wallet_recharge_worker",
+            "nexa_business_documents_worker",
+            "nexa_payments_worker",
+            "nexa_business_traceability_worker",
+            "nexa_warehouse_reservation_expiry_worker");
 
     @Container
     private static final PostgreSQLContainer TENANT_A = tenant("wallet-read-a");
@@ -184,7 +190,7 @@ class TenantBoundBuyerWalletReadIT {
         provisionRoles(database);
         migrate(database, "2");
         seedScope(database, tenantId, workspaceId, databaseIdentity);
-        migrate(database, "5");
+        migrateCurrent(database);
         seedBuyerRelationship(database, tenantId, workspaceId, clientAccountId, membershipId);
         seedWallet(database, tenantId, workspaceId, buyerIdentityId, balance);
         return new TenantFixture(new TenantId(tenantId), new WorkspaceId(workspaceId), databaseIdentity,
@@ -203,12 +209,16 @@ class TenantBoundBuyerWalletReadIT {
 
     private static void provisionRoles(PostgreSQLContainer database) throws SQLException {
         try (Connection connection = adminConnection(database); Statement statement = connection.createStatement()) {
-            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN PASSWORD '" + MIGRATOR_PASSWORD
+            statement.execute("CREATE ROLE " + MIGRATOR + " LOGIN NOINHERIT PASSWORD '" + MIGRATOR_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
-            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN PASSWORD '" + RUNTIME_PASSWORD
+            statement.execute("CREATE ROLE " + RUNTIME + " LOGIN NOINHERIT PASSWORD '" + RUNTIME_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("CREATE ROLE " + POLICY_WRITER + " LOGIN PASSWORD '" + POLICY_WRITER_PASSWORD
                     + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            for (String role : WORKER_ROLES) {
+                statement.execute("CREATE ROLE " + role
+                        + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            }
             statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + database.getDatabaseName() + "\" TO " + MIGRATOR);
             statement.execute("GRANT CONNECT ON DATABASE \"" + database.getDatabaseName() + "\" TO " + RUNTIME
                     + ", " + POLICY_WRITER);
@@ -220,6 +230,12 @@ class TenantBoundBuyerWalletReadIT {
         Path location = Path.of("src/main/resources/db/tenant-migration").toAbsolutePath().normalize();
         Flyway.configure().dataSource(database.getJdbcUrl(), MIGRATOR, MIGRATOR_PASSWORD)
                 .locations("filesystem:" + location).target(target).load().migrate();
+    }
+
+    private static void migrateCurrent(PostgreSQLContainer database) {
+        Path location = Path.of("src/main/resources/db/tenant-migration").toAbsolutePath().normalize();
+        Flyway.configure().dataSource(database.getJdbcUrl(), MIGRATOR, MIGRATOR_PASSWORD)
+                .locations("filesystem:" + location).load().migrate();
     }
 
     private static void seedScope(PostgreSQLContainer database, UUID tenantId, UUID workspaceId,
@@ -243,11 +259,13 @@ class TenantBoundBuyerWalletReadIT {
         JdbcTemplate admin = new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
                 database.getJdbcUrl(), database.getUsername(), database.getPassword()));
         Timestamp now = Timestamp.from(Instant.now());
+        String taxIdentifier = "20" + String.format(java.util.Locale.ROOT, "%09d",
+                Math.floorMod(accountId.getLeastSignificantBits(), 1_000_000_000L));
         admin.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,"
                         + "tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,"
                         + "delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 accountId, tenantId, workspaceId, "WALLET-" + accountId.toString().substring(0, 8), "Fixture buyer",
-                "Fixture buyer", "PE", "RUC", "20" + accountId.toString().replace("-", "").substring(0, 10),
+                "Fixture buyer", "PE", "RUC", taxIdentifier,
                 "B2B", "Fixture contact", accountId + "@example.test", "+51999999999", "Fixture delivery",
                 "PREPAID", now, now);
         admin.update("insert into sales.client_account_membership "

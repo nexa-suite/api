@@ -1,5 +1,7 @@
 package com.nexa.api.bootstrap.runtime.database.tenant;
 
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
+
 import com.nexa.api.bootstrap.runtime.database.RlsScopedDataSource;
 import com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements;
 import com.nexa.api.shared.context.RlsRequestScope;

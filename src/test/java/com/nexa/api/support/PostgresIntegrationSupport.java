@@ -12,6 +12,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -53,6 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 		"nexa.tenant-business.buyer-wallet-recharge.enabled=true",
 		"nexa.tenant-business.purchase-request.enabled=true",
 		"nexa.tenant-business.catalog-detail-read.enabled=true",
+		"nexa.tenant-business.catalog-favorites.enabled=true",
 		"nexa.tenant-business.catalog-management.enabled=true",
 		"nexa.tenant-business.payments.enabled=true",
 		"nexa.tenant-business.fulfillment-delivery.enabled=true",
@@ -71,11 +73,14 @@ public abstract class PostgresIntegrationSupport {
 	protected static final String TEST_PASSWORD = "integration-test-password";
 	protected static final String MIGRATOR_USERNAME = "nexa";
 	protected static final String MIGRATOR_PASSWORD = "test-only-password";
+	protected static final String FLYWAY_MIGRATOR_USERNAME = CentralMigrationTestBootstrap.MIGRATOR_USERNAME;
+	protected static final String FLYWAY_MIGRATOR_PASSWORD = CentralMigrationTestBootstrap.MIGRATOR_PASSWORD;
 	protected static final String RUNTIME_USERNAME = "nexa_runtime";
 	protected static final String RUNTIME_PASSWORD = "test-only-runtime-password";
 	protected static final String TEST_DATABASE_USERNAME = "nexa_test";
 	protected static final String TEST_DATABASE_PASSWORD = "test-only-test-password";
 	protected static final String BUSINESS_DOCUMENT_SCOPE_READER_PASSWORD = "test-only-business-document-scope-reader-password";
+	protected static final String WORKSPACE_SCOPE_READER_PASSWORD = CentralMigrationTestBootstrap.WORKSPACE_SCOPE_READER_PASSWORD;
 	protected static final String WORKSPACE_SLUG = "icisa-test";
 	protected static final String ALLOWED_ORIGIN = "http://localhost:4200";
 	protected static final String OWNER_EMAIL = "owner@icisa-test.local";
@@ -87,7 +92,8 @@ public abstract class PostgresIntegrationSupport {
 	protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
 			.withDatabaseName("nexa")
 			.withUsername(MIGRATOR_USERNAME)
-			.withPassword(MIGRATOR_PASSWORD);
+			.withPassword(MIGRATOR_PASSWORD)
+			.withLabel("com.nexa.local-provisioning.disposable-test", "true");
 
 	static {
 		if (Boolean.getBoolean("nexa.integration.enabled")) {
@@ -95,6 +101,7 @@ public abstract class PostgresIntegrationSupport {
 			createRuntimeRole();
 			createTestRole();
 			createBusinessDocumentScopeReaderRole();
+			CentralMigrationTestBootstrap.migrateToCurrent(POSTGRES);
 		}
 	}
 
@@ -123,9 +130,12 @@ public abstract class PostgresIntegrationSupport {
 		registry.add("NEXA_DATABASE_PASSWORD", () -> TEST_DATABASE_PASSWORD);
 		registry.add("NEXA_DATABASE_RUNTIME_USERNAME", () -> TEST_DATABASE_USERNAME);
 		registry.add("NEXA_DATABASE_RUNTIME_PASSWORD", () -> TEST_DATABASE_PASSWORD);
-		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", POSTGRES::getUsername);
-		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", POSTGRES::getPassword);
+		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", () -> FLYWAY_MIGRATOR_USERNAME);
+		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", () -> FLYWAY_MIGRATOR_PASSWORD);
 		registry.add("NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD", () -> BUSINESS_DOCUMENT_SCOPE_READER_PASSWORD);
+		registry.add("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", () -> WORKSPACE_SCOPE_READER_PASSWORD);
+		registry.add("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD",
+				() -> CentralMigrationTestBootstrap.INTERNAL_OPERATOR_DATABASE_PASSWORD);
 		registry.add("nexa.tenant-business.local-credentials-directory", TenantBusinessIntegrationFixture::credentialDirectory);
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", () -> TEST_DATABASE_USERNAME);
@@ -191,6 +201,14 @@ public abstract class PostgresIntegrationSupport {
 	/** Direct test-only SQL handle for an explicitly provisioned Tenant database. */
 	protected JdbcTemplate tenantJdbcFor(UUID tenantId) {
 		return TenantBusinessIntegrationFixture.jdbcFor(tenantId);
+	}
+
+	/** Direct test-only SQL handle using the least-privileged Buyer payment callback worker role. */
+	protected JdbcTemplate tenantPaymentCallbackWorkerJdbc(UUID tenantId) {
+		String reference = "local-tenant-payment-callback-worker:" + tenantId;
+		var credentials = TenantBusinessIntegrationFixture.paymentCallbackWorkerCredentials(reference);
+		return new JdbcTemplate(new DriverManagerDataSource(credentials.jdbcUrl(), credentials.username(),
+				credentials.password()));
 	}
 
 	/** Provisions the physical Tenant database and central READY binding for an existing exact Workspace. */
@@ -264,7 +282,7 @@ public abstract class PostgresIntegrationSupport {
 	}
 
 	private boolean tenantBusinessRoutingEnabled() {
-		return java.util.Arrays.stream(new String[]{"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request", "catalog-detail-read",
+		return java.util.Arrays.stream(new String[]{"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request", "catalog-detail-read", "catalog-favorites",
 				"catalog-management", "payments", "fulfillment-delivery", "warehouse-operations", "local-fixtures",
 				"support-sales-order-read", "business-documents", "business-traceability", "notifications"})
 				.anyMatch(capability -> environment.getProperty(

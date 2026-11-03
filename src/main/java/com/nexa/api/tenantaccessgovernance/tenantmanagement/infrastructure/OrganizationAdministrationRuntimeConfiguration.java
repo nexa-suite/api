@@ -4,7 +4,9 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.OrganizationAdministrationPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.OrganizationAdministrationService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.BuyerMembershipDirectoryService;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.service.ActiveSalesMembershipDirectoryService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.ActiveSalesMembershipDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.RoleDefinitionPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.AuthorizationVersionPort;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +20,11 @@ public class OrganizationAdministrationRuntimeConfiguration {
 	@Bean
 	BuyerMembershipDirectory buyerMembershipDirectory(OrganizationAdministrationPort port) {
 		return new BuyerMembershipDirectoryService(port);
+	}
+
+	@Bean
+	ActiveSalesMembershipDirectory activeSalesMembershipDirectory(OrganizationAdministrationPort port) {
+		return new ActiveSalesMembershipDirectoryService(port);
 	}
 
 	@Bean

@@ -5,6 +5,7 @@ import org.springframework.modulith.NamedInterface;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** Transport-neutral operational views and command values for Logistics operations. */
 public final class LogisticsOperationsModels {
@@ -119,4 +120,21 @@ public final class LogisticsOperationsModels {
                                       String status, String receiverName, Instant completedAt, String notes,
                                       boolean photoEvidenceDeclared, boolean signatureEvidenceDeclared,
                                       Instant updatedAt) { }
+
+    @NamedInterface("fulfillment-public")
+    public record DispatchDeliveriesView(UUID dispatchOrderId,
+                                         List<DispatchDeliveryStatusView> deliveries) {
+        public DispatchDeliveriesView {
+            deliveries = List.copyOf(deliveries == null ? List.of() : deliveries);
+        }
+    }
+    @NamedInterface("fulfillment-public")
+    public record DispatchDeliveryStatusView(UUID deliveryId, UUID fulfillmentId,
+                                             String deliveryStatus, long deliveryVersion,
+                                             Instant deliveryUpdatedAt, DispatchDeliveryPodView pod) { }
+    @NamedInterface("fulfillment-public")
+    public record DispatchDeliveryPodView(UUID id, UUID deliveryId, String status,
+                                          String receiverName, Instant completedAt, Instant sealedAt,
+                                          boolean photoEvidenceDeclared,
+                                          boolean signatureEvidenceDeclared) { }
 }

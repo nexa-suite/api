@@ -37,7 +37,7 @@ public class DriverTrackingController {
  @GetMapping("/driver/location") @Operation(operationId="getOwnDriverLocation")
  public Coordinate own(@RequestAttribute(ACCESS)CurrentAccessContext c){return requests.execute(c,FulfillmentDeliveryRequestRunner.Requirements.driver(),composition->composition.driverTracking().ownLocation(c));}
  @GetMapping("/dispatch/drivers/{membershipId}/location") @Operation(operationId="getAuthorizedDispatchDriverLocation")
- public Coordinate dispatch(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID membershipId){return requests.execute(c,FulfillmentDeliveryRequestRunner.Requirements.assignable(Set.of(membershipId)),composition->composition.driverTracking().dispatchLocation(c,membershipId));}
+ public Coordinate dispatch(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID membershipId,@RequestParam(required=false) UUID deliveryId){return requests.execute(c,deliveryId==null?FulfillmentDeliveryRequestRunner.Requirements.assignable(Set.of(membershipId)):FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignable(Set.of(membershipId)),composition->deliveryId==null?composition.driverTracking().dispatchLocation(c,membershipId):composition.driverTracking().dispatchLocation(c,membershipId,deliveryId));}
  @GetMapping("/buyer/deliveries/{deliveryId}/live-location") @Operation(operationId="getBuyerOwnDeliveryLiveLocation")
  public DeliveryTracking buyer(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID deliveryId){return requests.execute(c,FulfillmentDeliveryRequestRunner.Requirements.none(),composition->composition.driverTracking().buyerLocation(c,deliveryId));}
  public record Availability(@NotNull Boolean locationAvailable) { }

@@ -1,7 +1,9 @@
 package com.nexa.api.salescommitment.application.salesorder.export.model;
 
 import java.util.Arrays;
+import org.springframework.modulith.NamedInterface;
 
+@NamedInterface("sales-public")
 public record SalesOrderSummaryExportResult(String filename, String contentType, byte[] content) {
 	public SalesOrderSummaryExportResult {
 		content = content == null ? new byte[0] : Arrays.copyOf(content, content.length);

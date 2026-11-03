@@ -11,15 +11,46 @@ unexpected_failure() {
 }
 trap 'unexpected_failure "$?" "${BASH_LINENO[0]:-$LINENO}"' ERR
 usage() {
-	printf '%s\n' 'Usage: ops/scripts/provision-local-tenant-database.sh <tenant-uuid> <workspace-uuid> <loopback-port> [--retry-failed] [--task-id <uuid> --claim-token <uuid>] [--workspace-anchor-only --workspace-task-id <uuid> --claim-token <uuid>] [--central-configfile <private-file> --local-state-dir <private-directory>]' >&2
+	printf '%s\n' \
+		'Usage: ops/scripts/provision-local-tenant-database.sh <tenant-uuid> <workspace-uuid> <loopback-port> [--retry-failed] [--task-id <uuid> --claim-token <uuid>] [--workspace-anchor-only --workspace-task-id <uuid> --claim-token <uuid>] [--verify-ready-only] [--provisioner-password-stdin] [--central-configfile <private-file> --local-state-dir <private-directory>]' >&2
 }
 private_mode() {
-	local path="$1" expected="$2" actual
+	local path="$1" expected="$2" actual platform
 	[[ ! -L "$path" ]] || return 1
-	actual="$(stat -c '%a' "$path" 2>/dev/null)" || actual="$(stat -f '%Lp' "$path" 2>/dev/null)" || return 1
+	platform="$(uname -s)" || return 1
+	case "$platform" in
+		Darwin) actual="$(trap - ERR; stat -f '%Lp' "$path" 2>/dev/null)" || return 1 ;;
+		*) actual="$(trap - ERR; stat -c '%a' "$path" 2>/dev/null)" || return 1 ;;
+	esac
 	[[ "$actual" =~ ^[0-7]{3,4}$ && "$actual" == "$expected" ]]
 }
 read_value() { awk -F= -v key="$2" '$1 == key { count++; value=substr($0, index($0, "=") + 1) } END { if (count != 1) exit 1; print value }' "$1"; }
+load_provisioner_password() {
+	local inherited_password="${NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD:-}"
+	if [[ "$PROVISIONER_PASSWORD_STDIN" == 1 ]]; then
+		IFS= read -r PROVISIONER_PASSWORD <&3 \
+			|| fail 'The local Tenant provisioner credential pipe is unavailable.'
+		local extra_line=''
+		if IFS= read -r extra_line <&3; then
+			fail 'The local Tenant provisioner credential pipe contains unexpected data.'
+		fi
+		exec 3<&-
+	elif [[ -n "$inherited_password" ]]; then
+		PROVISIONER_PASSWORD="$inherited_password"
+	else
+		[[ -f "$CENTRAL_ENV_FILE" && ! -L "$CENTRAL_ENV_FILE" ]] \
+			|| fail 'The private Modern local environment is unavailable for Tenant provisioning.'
+		private_mode "$CENTRAL_ENV_FILE" 600 || fail 'The central local environment file must be owner-only 0600.'
+		PROVISIONER_PASSWORD="$(read_value "$CENTRAL_ENV_FILE" NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD)" \
+			|| fail 'The local Tenant provisioner credential is missing or ambiguous.'
+	fi
+	local base64_pattern='^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}(==)?|[A-Za-z0-9+/]{3}=?|[A-Za-z0-9+/]{4})?$'
+	local base64url_pattern='^([A-Za-z0-9_-]{4})*([A-Za-z0-9_-]{2}(==)?|[A-Za-z0-9_-]{3}=?|[A-Za-z0-9_-]{4})?$'
+	[[ -n "$PROVISIONER_PASSWORD" \
+		&& ( "$PROVISIONER_PASSWORD" =~ $base64_pattern || "$PROVISIONER_PASSWORD" =~ $base64url_pattern ) ]] \
+		|| fail 'The local Tenant provisioner credential is invalid.'
+	unset NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD
+}
 new_uuid() {
 	local value="$(openssl rand -hex 16)"
 	printf '%s-%s-%s-%s-%s\n' "${value:0:8}" "${value:8:4}" "${value:12:4}" "${value:16:4}" "${value:20:12}"
@@ -36,6 +67,7 @@ ensure_api_jdbc_url() {
 		return
 	fi
 	[[ "$count" == 0 ]] || fail 'Local Tenant credential file contains duplicate API database URLs.'
+	[[ "$VERIFY_READY_ONLY" != 1 ]] || fail 'Local Tenant credential file is missing its UUID-bound API database URL.'
 	temporary="$properties_file.$$.tmp"
 	cat -- "$properties_file" > "$temporary"
 	printf 'api-jdbc-url=%s\n' "$expected_url" >> "$temporary"
@@ -73,6 +105,7 @@ SQL
 cleanup() {
 	local status=$?
 	trap - EXIT
+	if [[ "$VERIFY_READY_ONLY" == 1 ]]; then exit "$status"; fi
 	if [[ "$BINDING_ACTIVE" == 1 ]]; then
 		[[ "$status" -ne 0 ]] || status=1
 		binding_failed || true
@@ -80,14 +113,16 @@ cleanup() {
 		binding_failed || true
 	fi
 	if [[ -n "${STAGING_DIRECTORY:-}" && -d "$STAGING_DIRECTORY" ]]; then rm -rf -- "$STAGING_DIRECTORY"; fi
-	if [[ -n "${LOCK_DIRECTORY:-}" && -d "$LOCK_DIRECTORY" ]]; then rmdir -- "$LOCK_DIRECTORY" 2>/dev/null || true; fi
+	if [[ "${LOCK_ACQUIRED:-0}" == 1 && -n "${LOCK_DIRECTORY:-}" && -d "$LOCK_DIRECTORY" ]]; then
+		rmdir -- "$LOCK_DIRECTORY" 2>/dev/null || true
+	fi
 	exit "$status"
 }
 
 [[ $# -ge 3 ]] || { usage; exit 2; }
 TENANT_ID="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
 WORKSPACE_ID="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
-DATABASE_PORT="$3" RETRY_FAILED=0 WORKSPACE_ANCHOR_ONLY=0
+DATABASE_PORT="$3" RETRY_FAILED=0 WORKSPACE_ANCHOR_ONLY=0 VERIFY_READY_ONLY=0 PROVISIONER_PASSWORD_STDIN=0
 CENTRAL_CONFIG_FILE='' LOCAL_STATE_DIR_ARGUMENT='' PROVISIONING_TASK_ID='' PROVISIONING_CLAIM_TOKEN='' TASK_CLAIM_GUARD=0
 WORKSPACE_ANCHOR_TASK_ID='' WORKSPACE_ANCHOR_CLAIM_TOKEN=''
 shift 3
@@ -118,6 +153,16 @@ while [[ $# -gt 0 ]]; do
 			WORKSPACE_ANCHOR_ONLY=1
 			shift
 			;;
+		--verify-ready-only)
+			[[ "$VERIFY_READY_ONLY" == 0 ]] || { usage; exit 2; }
+			VERIFY_READY_ONLY=1
+			shift
+			;;
+		--provisioner-password-stdin)
+			[[ "$PROVISIONER_PASSWORD_STDIN" == 0 ]] || { usage; exit 2; }
+			PROVISIONER_PASSWORD_STDIN=1
+			shift
+			;;
 		--workspace-task-id)
 			[[ $# -ge 2 && -z "$WORKSPACE_ANCHOR_TASK_ID" ]] || { usage; exit 2; }
 			WORKSPACE_ANCHOR_TASK_ID="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
@@ -135,7 +180,12 @@ UUID_PATTERN='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 [[ "$TENANT_ID" =~ $UUID_PATTERN && "$WORKSPACE_ID" =~ $UUID_PATTERN ]] || fail 'Tenant and Workspace ids must be UUIDs.'
 TENANT_API_JDBC_URL="$(tenant_api_jdbc_url "$TENANT_ID")"
 [[ "$DATABASE_PORT" =~ ^[0-9]{1,5}$ ]] && (( DATABASE_PORT >= 1024 && DATABASE_PORT <= 65535 )) || fail 'The loopback port must be from 1024 through 65535.'
-if [[ "$WORKSPACE_ANCHOR_ONLY" == 1 ]]; then
+if [[ "$VERIFY_READY_ONLY" == 1 ]]; then
+	[[ "$RETRY_FAILED" == 0 && "$WORKSPACE_ANCHOR_ONLY" == 0 \
+		&& -z "$PROVISIONING_TASK_ID$PROVISIONING_CLAIM_TOKEN$WORKSPACE_ANCHOR_TASK_ID" \
+		&& -n "$CENTRAL_CONFIG_FILE" && -n "$LOCAL_STATE_DIR_ARGUMENT" ]] \
+		|| fail 'Read-only READY verification requires only an explicit central config and existing local state directory.'
+elif [[ "$WORKSPACE_ANCHOR_ONLY" == 1 ]]; then
 	[[ "$WORKSPACE_ANCHOR_TASK_ID" =~ $UUID_PATTERN && "$PROVISIONING_CLAIM_TOKEN" =~ $UUID_PATTERN \
 		&& -z "$PROVISIONING_TASK_ID" ]] || fail 'The Workspace anchor task claim is invalid.'
 	WORKSPACE_ANCHOR_CLAIM_TOKEN="$PROVISIONING_CLAIM_TOKEN"
@@ -167,22 +217,30 @@ SCOPE_SQL_FILE="$API_DIRECTORY/ops/database/seed-local-tenant-database-scope.sql
 PROJECT_NAME="nexa-tenant-db-$TENANT_ID"
 VOLUME_NAME="nexa-tenant-business-$TENANT_ID"
 API_CONTAINER_NAME="${NEXA_LOCAL_API_CONTAINER_NAME:-nexa-modern-api}"
+API_COMPOSE_PROJECT="${NEXA_LOCAL_API_COMPOSE_PROJECT:-nexa-modern}"
 CLI_MAIN='com.nexa.api.bootstrap.runtime.database.tenant.local.LocalTenantBusinessDatabaseProvisioningCli'
 BINDING_ACTIVE=0 BINDING_VERSION='' DATABASE_IDENTITY='' SECRET_REFERENCE='' STAGING_DIRECTORY=''
-LOCAL_ROOT='' TENANT_DIRECTORY='' VOLUME_MARKER='' LOCK_DIRECTORY=''
+LOCAL_ROOT='' TENANT_DIRECTORY='' VOLUME_MARKER='' LOCK_DIRECTORY='' LOCK_ACQUIRED=0
 CENTRAL_CONTAINER_ID='' SCHEMA_MANIFEST_DIGEST='' WALLET_RECHARGE_SECRET_REFERENCE=''
 BUSINESS_DOCUMENTS_WORKER_SECRET_REFERENCE='' PAYMENT_CALLBACK_SECRET_REFERENCE=''
 BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE=''
+RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE=''
 WORKER_CREDENTIALS_MISSING=0
 BUSINESS_DOCUMENTS_WORKER_CREDENTIALS_MISSING=0
 PAYMENT_WORKER_CREDENTIALS_MISSING=0
 BUSINESS_TRACEABILITY_WORKER_CREDENTIALS_MISSING=0
+RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
 [[ "$API_CONTAINER_NAME" =~ ^nexa-modern-api(-[A-Za-z0-9][A-Za-z0-9_.-]{0,100})?$ ]] \
 	|| fail 'The local API container name is invalid.'
+[[ "$API_COMPOSE_PROJECT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$ ]] \
+	|| fail 'The local API Compose project name is invalid.'
 trap cleanup EXIT
+load_provisioner_password
 
 command -v docker >/dev/null 2>&1 || fail 'Docker is required for local Tenant provisioning.'
-command -v openssl >/dev/null 2>&1 || fail 'OpenSSL is required to generate local credentials.'
+if [[ "$VERIFY_READY_ONLY" != 1 ]]; then
+	command -v openssl >/dev/null 2>&1 || fail 'OpenSSL is required to generate local credentials.'
+fi
 docker_context="$(docker context show 2>/dev/null)" || fail 'The local Docker context could not be identified.'
 docker_endpoint="$(docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" \
 	|| fail 'The local Docker endpoint could not be verified.'
@@ -225,6 +283,9 @@ if [[ -n "$CENTRAL_CONFIG_FILE" ]]; then
 		if [[ -e "$LOCAL_STATE_DIR_ARGUMENT" ]]; then
 			private_mode "$LOCAL_STATE_DIR_ARGUMENT" 700 || fail 'The explicit local state directory must be owner-only 0700.'
 		else
+			if [[ "$VERIFY_READY_ONLY" == 1 ]]; then
+				fail 'The read-only Tenant state directory is missing; refusing to recreate it.'
+			fi
 			mkdir -m 700 -- "$LOCAL_STATE_DIR_ARGUMENT" || fail 'The explicit local state directory could not be created.'
 		fi
 		LOCAL_ROOT="$(cd -- "$LOCAL_STATE_DIR_ARGUMENT" && pwd -P)"
@@ -247,12 +308,17 @@ fi
 TENANT_DIRECTORY="$LOCAL_ROOT/$TENANT_ID"
 VOLUME_MARKER="$TENANT_DIRECTORY/volume-creation-started"
 LOCK_DIRECTORY="$LOCAL_ROOT/.locks/$TENANT_ID"
-[[ ! -L "$LOCAL_ROOT/.locks" ]] || fail 'Local Tenant lock directory cannot be a symbolic link.'
-mkdir -p -- "$LOCAL_ROOT/.locks"
-chmod 700 "$LOCAL_ROOT" "$LOCAL_ROOT/.locks"
-private_mode "$LOCAL_ROOT" 700 && private_mode "$LOCAL_ROOT/.locks" 700 || fail 'The local Tenant credential root must be owner-only.'
-mkdir -- "$LOCK_DIRECTORY" 2>/dev/null || fail 'Another provisioner holds this Tenant lock, or a stale lock needs manual inspection.'
-chmod 700 "$LOCK_DIRECTORY"
+if [[ "$VERIFY_READY_ONLY" == 1 ]]; then
+	private_mode "$LOCAL_ROOT" 700 || fail 'The read-only Tenant state directory must be owner-only.'
+else
+	[[ ! -L "$LOCAL_ROOT/.locks" ]] || fail 'Local Tenant lock directory cannot be a symbolic link.'
+	mkdir -p -- "$LOCAL_ROOT/.locks"
+	chmod 700 "$LOCAL_ROOT" "$LOCAL_ROOT/.locks"
+	private_mode "$LOCAL_ROOT" 700 && private_mode "$LOCAL_ROOT/.locks" 700 || fail 'The local Tenant credential root must be owner-only.'
+	mkdir -- "$LOCK_DIRECTORY" 2>/dev/null || fail 'Another provisioner holds this Tenant lock, or a stale lock needs manual inspection.'
+	LOCK_ACQUIRED=1
+	chmod 700 "$LOCK_DIRECTORY"
+fi
 
 central_psql() {
 	local central_exec
@@ -264,7 +330,11 @@ central_psql() {
 		central_exec=(docker compose --env-file "$CENTRAL_ENV_FILE" -f "$CENTRAL_COMPOSE_FILE" exec -T)
 		central_target='modern-postgres'
 	fi
-	"${central_exec[@]}" \
+	{
+		printf '%s\n' "$PROVISIONER_PASSWORD"
+		printf "%s\n" "SELECT set_config('app.current_tenant_id', '$TENANT_ID', false) AS _tenant_scope, set_config('app.current_workspace_id', '$WORKSPACE_ID', false) AS _workspace_scope \\gset"
+		cat
+	} | "${central_exec[@]}" \
 		-e "NEXA_LOCAL_TENANT_ID=$TENANT_ID" -e "NEXA_LOCAL_WORKSPACE_ID=$WORKSPACE_ID" \
 		-e "NEXA_LOCAL_DATABASE_IDENTITY=$DATABASE_IDENTITY" -e "NEXA_LOCAL_SECRET_REFERENCE=$SECRET_REFERENCE" \
 		-e "NEXA_LOCAL_EXPECTED_VERSION=$BINDING_VERSION" \
@@ -277,7 +347,40 @@ central_psql() {
 		-e "NEXA_LOCAL_TASK_GUARD=$TASK_CLAIM_GUARD" \
 		-e "NEXA_LOCAL_WORKSPACE_TASK_ID=$WORKSPACE_ANCHOR_TASK_ID" \
 		-e "NEXA_LOCAL_WORKSPACE_TASK_CLAIM_TOKEN=$WORKSPACE_ANCHOR_CLAIM_TOKEN" "$central_target" sh -ec '
-			exec psql -X -qAt -v ON_ERROR_STOP=1 -v tenant_id="$NEXA_LOCAL_TENANT_ID" \
+			umask 077
+			passfile="$(mktemp)" || exit 70
+			cleanup() {
+				status=$?
+				trap - EXIT HUP INT TERM
+				rm -f -- "$passfile" || status=70
+				exit "$status"
+			}
+			trap cleanup EXIT
+			trap "exit 129" HUP
+			trap "exit 130" INT
+			trap "exit 143" TERM
+			chmod 600 "$passfile" || exit 70
+			IFS= read -r password || exit 70
+			case "$password" in ""|*[!A-Za-z0-9+/=_-]*) exit 70 ;; esac
+			case "$password" in
+				*[+/]*) case "$password" in *[_-]*) exit 70 ;; esac ;;
+			esac
+			case "$password" in
+				*==) padding=2; pass_body=${password%==} ;;
+				*=) padding=1; pass_body=${password%=} ;;
+				*) padding=0; pass_body=$password ;;
+			esac
+			case "$pass_body" in *"="*) exit 70 ;; esac
+			pass_length=${#pass_body}
+			case "$padding" in
+				0) case "$((pass_length % 4))" in 0|2|3) ;; *) exit 70 ;; esac ;;
+				1) [ "$((pass_length % 4))" -eq 3 ] || exit 70 ;;
+				2) [ "$((pass_length % 4))" -eq 2 ] || exit 70 ;;
+			esac
+			printf "localhost:*:*:nexa_tenant_database_provisioner:%s\\n" "$password" > "$passfile" || exit 70
+			unset password pass_body
+			unset PGPASSWORD
+			PGPASSFILE="$passfile" psql -X -qAt -w -v ON_ERROR_STOP=1 -v tenant_id="$NEXA_LOCAL_TENANT_ID" \
 			-v workspace_id="$NEXA_LOCAL_WORKSPACE_ID" -v database_identity="$NEXA_LOCAL_DATABASE_IDENTITY" \
 			-v secret_reference="$NEXA_LOCAL_SECRET_REFERENCE" -v expected_version="$NEXA_LOCAL_EXPECTED_VERSION" \
 			-v schema_manifest_digest="$NEXA_LOCAL_SCHEMA_MANIFEST_DIGEST" \
@@ -288,7 +391,7 @@ central_psql() {
 			-v expected_database_port="$NEXA_LOCAL_DATABASE_PORT" \
 			-v workspace_task_id="${NEXA_LOCAL_WORKSPACE_TASK_ID:-00000000-0000-4000-8000-000000000000}" \
 			-v workspace_task_claim_token="${NEXA_LOCAL_WORKSPACE_TASK_CLAIM_TOKEN:-00000000-0000-4000-8000-000000000000}" \
-			-U "$POSTGRES_USER" -d "$POSTGRES_DB"
+			-U nexa_tenant_database_provisioner -d "$POSTGRES_DB"
 		'
 }
 tenant_compose() {
@@ -300,7 +403,7 @@ ensure_api_tenant_network() {
 	local api_identity network_identity attached_network_id
 	api_identity="$(docker inspect --format '{{.Id}}|{{.State.Status}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project"}}' "$API_CONTAINER_NAME" 2>/dev/null)" \
 		|| fail 'The local Modern API container could not be identified for Tenant network attachment.'
-	[[ "$api_identity" =~ ^([0-9a-f]{64})\|running\|modern-api\|nexa-modern$ ]] \
+	[[ "$api_identity" =~ ^([0-9a-f]{64})\|running\|modern-api\|$API_COMPOSE_PROJECT$ ]] \
 		|| fail 'Tenant provisioning requires the matching running local Modern API container.'
 	network_identity="$(docker network inspect --format '{{.Id}}|{{.Driver}}|{{index .Labels "com.docker.compose.project"}}' \
 		"$TENANT_NETWORK_NAME" 2>/dev/null)" \
@@ -358,11 +461,8 @@ read_schema_manifest_digest() {
 verify_central_scope() {
 	local verified
 	verified="$(central_psql <<'SQL'
-SELECT 'verified' WHERE EXISTS (
-  SELECT 1 FROM tenant_management.tenant tenant
-  JOIN tenant_management.workspace workspace ON workspace.tenant_id=tenant.id
-  WHERE tenant.id=:'tenant_id'::UUID AND workspace.id=:'workspace_id'::UUID
-);
+SELECT 'verified'
+ WHERE tenant_management.provisioner_scope_exists(:'tenant_id'::UUID, :'workspace_id'::UUID);
 SQL
 	)"
 	[[ "$verified" == verified ]] || fail 'The central Tenant and Workspace relationship could not be verified.'
@@ -420,11 +520,11 @@ verify_workspace_anchor_claim() {
 	local verified
 	verified="$(central_psql <<'SQL'
 SET app.current_tenant_id = :'tenant_id';
-SET app.cross_scope_workspace_scan = 'true';
+SET app.current_workspace_id = :'workspace_id';
 SELECT 'verified'
  WHERE EXISTS (
-       SELECT 1 FROM tenant_management.workspace workspace
-        WHERE workspace.tenant_id=:'tenant_id'::UUID AND workspace.id=:'workspace_id'::UUID
+       SELECT 1
+        WHERE tenant_management.provisioner_scope_exists(:'tenant_id'::UUID, :'workspace_id'::UUID)
    )
    AND EXISTS (
        SELECT 1 FROM tenant_management.tenant_business_database_binding binding
@@ -520,6 +620,7 @@ load_existing_state() {
 	BUSINESS_DOCUMENTS_WORKER_SECRET_REFERENCE="local-tenant-business-documents-worker:$TENANT_ID"
 	PAYMENT_CALLBACK_SECRET_REFERENCE="local-tenant-payment-callback-worker:$TENANT_ID"
 	BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE="local-tenant-business-traceability-worker:$TENANT_ID"
+	RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE="local-tenant-inventory-reservation-expiry-worker:$TENANT_ID"
 	if [[ -e "$TENANT_DIRECTORY/wallet-recharge-worker.properties" || -e "$TENANT_DIRECTORY/wallet-recharge-worker-password" ]]; then
 		[[ -f "$TENANT_DIRECTORY/wallet-recharge-worker.properties" && -f "$TENANT_DIRECTORY/wallet-recharge-worker-password" ]] \
 			&& private_mode "$TENANT_DIRECTORY/wallet-recharge-worker.properties" 600 \
@@ -593,22 +694,70 @@ load_existing_state() {
 		fi
 		BUSINESS_TRACEABILITY_WORKER_CREDENTIALS_MISSING=1
 	fi
+	if [[ -e "$TENANT_DIRECTORY/reservation-expiry-worker.properties" || -e "$TENANT_DIRECTORY/reservation-expiry-worker-password" ]]; then
+		[[ -f "$TENANT_DIRECTORY/reservation-expiry-worker.properties" && -f "$TENANT_DIRECTORY/reservation-expiry-worker-password" ]] \
+			&& private_mode "$TENANT_DIRECTORY/reservation-expiry-worker.properties" 600 \
+			&& private_mode "$TENANT_DIRECTORY/reservation-expiry-worker-password" 600 \
+			|| fail 'Local Tenant reservation-expiry worker state is incomplete or not owner-only; refusing to regenerate credentials.'
+		[[ "$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" credential-secret-reference)" == "$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE" ]] \
+			|| fail 'Local Tenant reservation-expiry worker reference does not match the Tenant.'
+		[[ "$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" username)" == nexa_warehouse_reservation_expiry_worker ]] \
+			|| fail 'Local Tenant reservation-expiry credentials require the dedicated worker role.'
+		[[ "$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" jdbc-url)" == "jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business" ]] \
+			|| fail 'Local Tenant reservation-expiry worker credentials target an unexpected database.'
+		ensure_api_jdbc_url "$TENANT_DIRECTORY/reservation-expiry-worker.properties" "$TENANT_API_JDBC_URL"
+		RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
+	else
+		if grep -q '^reservation-expiry-worker-credential-reference=' "$TENANT_DIRECTORY/state.properties"; then
+			fail 'Local Tenant state references reservation-expiry worker credentials that are missing; refusing to regenerate them.'
+		fi
+		RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=1
+	fi
+}
+validate_ready_binding_state() {
+	local binding_snapshot="$1" bound_identity bound_reference binding_state binding_version
+	local registered_worker_reference registered_payment_worker_reference
+	[[ -n "$binding_snapshot" ]] || fail 'The Tenant has no central database binding; refusing READY-state verification.'
+	load_existing_state
+	IFS='|' read -r bound_identity bound_reference binding_state binding_version <<<"$binding_snapshot"
+	[[ "$bound_identity" == "$DATABASE_IDENTITY" && "$bound_reference" == "$SECRET_REFERENCE" \
+		&& "$binding_state" == READY && "$binding_version" =~ ^[0-9]+$ ]] \
+		|| fail 'The Tenant binding is not the matching READY database identity.'
+	WALLET_RECHARGE_SECRET_REFERENCE="local-tenant-wallet-recharge-worker:$TENANT_ID"
+	registered_worker_reference="$(read_wallet_recharge_callback_reference)"
+	[[ "$registered_worker_reference" == "$WALLET_RECHARGE_SECRET_REFERENCE" ]] \
+		|| fail 'The Tenant binding does not match the owner-private wallet worker identity.'
+	PAYMENT_CALLBACK_SECRET_REFERENCE="local-tenant-payment-callback-worker:$TENANT_ID"
+	registered_payment_worker_reference="$(read_payment_callback_credential_reference)"
+	[[ "$registered_payment_worker_reference" == "$PAYMENT_CALLBACK_SECRET_REFERENCE" ]] \
+		|| fail 'The Tenant binding does not match the owner-private Payments worker identity.'
+}
+validate_ready_local_volume() {
+	[[ -f "$VOLUME_MARKER" && ! -L "$VOLUME_MARKER" ]] && private_mode "$VOLUME_MARKER" 600 \
+		|| fail 'The READY Tenant database has no valid local volume history; refusing to recreate it.'
+	local volume_identity
+	volume_identity="$(docker volume inspect --format '{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$VOLUME_NAME" 2>/dev/null)" \
+		|| fail 'The READY Tenant database volume is missing; restore it before continuing.'
+	[[ "$volume_identity" == "$VOLUME_NAME|$PROJECT_NAME|tenant-business-data" ]] \
+		|| fail 'The READY Tenant database volume does not belong to this Tenant Compose project.'
 }
 create_local_state() {
 	local bootstrap_password migrator_password runtime_password policy_snapshot_writer_password
 	local wallet_recharge_worker_password business_documents_worker_password payment_callback_worker_password
-	local business_traceability_worker_password
+	local business_traceability_worker_password reservation_expiry_worker_password
 	bootstrap_password="$(openssl rand -hex 32)" migrator_password="$(openssl rand -hex 32)" \
 		runtime_password="$(openssl rand -hex 32)" policy_snapshot_writer_password="$(openssl rand -hex 32)" \
 		wallet_recharge_worker_password="$(openssl rand -hex 32)" \
 		business_documents_worker_password="$(openssl rand -hex 32)" \
 		payment_callback_worker_password="$(openssl rand -hex 32)" \
-		business_traceability_worker_password="$(openssl rand -hex 32)"
+		business_traceability_worker_password="$(openssl rand -hex 32)" \
+		reservation_expiry_worker_password="$(openssl rand -hex 32)"
 	DATABASE_IDENTITY="$(new_uuid)" SECRET_REFERENCE="local-tenant-db:$(new_uuid)"
 	WALLET_RECHARGE_SECRET_REFERENCE="local-tenant-wallet-recharge-worker:$TENANT_ID"
 	BUSINESS_DOCUMENTS_WORKER_SECRET_REFERENCE="local-tenant-business-documents-worker:$TENANT_ID"
 	PAYMENT_CALLBACK_SECRET_REFERENCE="local-tenant-payment-callback-worker:$TENANT_ID"
 	BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE="local-tenant-business-traceability-worker:$TENANT_ID"
+	RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE="local-tenant-inventory-reservation-expiry-worker:$TENANT_ID"
 	STAGING_DIRECTORY="$(mktemp -d "$LOCAL_ROOT/.${TENANT_ID}.setup.XXXXXX")"
 	chmod 700 "$STAGING_DIRECTORY"
 	write_private "$STAGING_DIRECTORY/bootstrap-admin-password" <<<"$bootstrap_password"
@@ -619,6 +768,7 @@ create_local_state() {
 	write_private "$STAGING_DIRECTORY/business-documents-worker-password" <<<"$business_documents_worker_password"
 	write_private "$STAGING_DIRECTORY/payment-callback-worker-password" <<<"$payment_callback_worker_password"
 	write_private "$STAGING_DIRECTORY/business-traceability-worker-password" <<<"$business_traceability_worker_password"
+	write_private "$STAGING_DIRECTORY/reservation-expiry-worker-password" <<<"$reservation_expiry_worker_password"
 	write_private "$STAGING_DIRECTORY/migrator.properties" <<EOF
 jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
 username=nexa_migrator
@@ -658,6 +808,13 @@ api-jdbc-url=$TENANT_API_JDBC_URL
 username=nexa_business_traceability_worker
 password=$business_traceability_worker_password
 EOF
+	write_private "$STAGING_DIRECTORY/reservation-expiry-worker.properties" <<EOF
+credential-secret-reference=$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE
+jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
+api-jdbc-url=$TENANT_API_JDBC_URL
+username=nexa_warehouse_reservation_expiry_worker
+password=$reservation_expiry_worker_password
+EOF
 	write_private "$STAGING_DIRECTORY/credentials.properties" <<EOF
 credential-secret-reference=$SECRET_REFERENCE
 jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
@@ -675,6 +832,7 @@ wallet-recharge-callback-credential-reference=$WALLET_RECHARGE_SECRET_REFERENCE
 business-documents-worker-credential-reference=$BUSINESS_DOCUMENTS_WORKER_SECRET_REFERENCE
 payment-callback-worker-credential-reference=$PAYMENT_CALLBACK_SECRET_REFERENCE
 business-traceability-worker-credential-reference=$BUSINESS_TRACEABILITY_WORKER_SECRET_REFERENCE
+reservation-expiry-worker-credential-reference=$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE
 EOF
 	write_private "$STAGING_DIRECTORY/compose.env" <<EOF
 NEXA_TENANT_DATABASE_PORT=$DATABASE_PORT
@@ -683,7 +841,7 @@ NEXA_TENANT_DATABASE_SECRET_DIR=$TENANT_DIRECTORY
 EOF
 	unset bootstrap_password migrator_password runtime_password policy_snapshot_writer_password \
 		wallet_recharge_worker_password business_documents_worker_password payment_callback_worker_password \
-		business_traceability_worker_password
+		business_traceability_worker_password reservation_expiry_worker_password
 	[[ ! -e "$TENANT_DIRECTORY" && ! -L "$TENANT_DIRECTORY" ]] || fail 'Local Tenant state appeared concurrently; inspect it before retrying.'
 	mv -- "$STAGING_DIRECTORY" "$TENANT_DIRECTORY"
 	STAGING_DIRECTORY=''
@@ -691,6 +849,7 @@ EOF
 	BUSINESS_DOCUMENTS_WORKER_CREDENTIALS_MISSING=0
 	PAYMENT_WORKER_CREDENTIALS_MISSING=0
 	BUSINESS_TRACEABILITY_WORKER_CREDENTIALS_MISSING=0
+	RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
 }
 
 ensure_wallet_recharge_worker_credentials() {
@@ -837,32 +996,59 @@ EOF
 	fi
 }
 
+ensure_reservation_expiry_worker_credentials() {
+	local role_exists
+	RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE="local-tenant-inventory-reservation-expiry-worker:$TENANT_ID"
+	if [[ "$RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING" == 1 ]]; then
+		role_exists="$(tenant_compose exec -T tenant-database psql -X -qAt -v ON_ERROR_STOP=1 \
+			-U nexa_tenant_bootstrap_admin -d nexa_tenant_business \
+			-c "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='nexa_warehouse_reservation_expiry_worker')")" \
+			|| fail 'The local Tenant reservation-expiry worker role could not be inspected.'
+		[[ "$role_exists" == f ]] || fail 'The Tenant reservation-expiry worker role exists without its owner-private credential; refusing to rotate it.'
+		local reservation_expiry_worker_password
+		reservation_expiry_worker_password="$(openssl rand -hex 32)"
+		write_private "$TENANT_DIRECTORY/reservation-expiry-worker-password" <<<"$reservation_expiry_worker_password"
+		write_private "$TENANT_DIRECTORY/reservation-expiry-worker.properties" <<EOF
+credential-secret-reference=$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE
+jdbc-url=jdbc:postgresql://127.0.0.1:$DATABASE_PORT/nexa_tenant_business
+api-jdbc-url=$TENANT_API_JDBC_URL
+username=nexa_warehouse_reservation_expiry_worker
+password=$reservation_expiry_worker_password
+EOF
+		unset reservation_expiry_worker_password
+		RESERVATION_EXPIRY_WORKER_CREDENTIALS_MISSING=0
+	fi
+	if ! grep -q '^reservation-expiry-worker-credential-reference=' "$TENANT_DIRECTORY/state.properties"; then
+		role_exists="$(tenant_compose exec -T tenant-database psql -X -qAt -v ON_ERROR_STOP=1 \
+			-U nexa_tenant_bootstrap_admin -d nexa_tenant_business \
+			-c "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='nexa_warehouse_reservation_expiry_worker')")" \
+			|| fail 'The local Tenant reservation-expiry worker role could not be inspected.'
+		[[ "$role_exists" == f ]] || fail 'The Tenant reservation-expiry role exists without complete owner-private state; refusing to rotate it.'
+		local replacement="$TENANT_DIRECTORY/.state.properties.$$.tmp"
+		cat "$TENANT_DIRECTORY/state.properties" > "$replacement"
+		printf 'reservation-expiry-worker-credential-reference=%s\n' "$RESERVATION_EXPIRY_WORKER_SECRET_REFERENCE" >> "$replacement"
+		chmod 600 "$replacement"
+		mv -- "$replacement" "$TENANT_DIRECTORY/state.properties"
+	fi
+}
+
 verify_central_scope
 binding_snapshot="$(read_binding)"
 IDEMPOTENT_READY=0
+if [[ "$VERIFY_READY_ONLY" == 1 ]]; then
+	validate_ready_binding_state "$binding_snapshot"
+	validate_ready_local_volume
+	printf '%s\n' 'READY Tenant state and database volume match the central binding.'
+	exit 0
+fi
 if [[ "$WORKSPACE_ANCHOR_ONLY" == 1 ]]; then
-	[[ -n "$binding_snapshot" ]] || fail 'The Tenant has no central database binding; refusing to provision a database from a Workspace anchor task.'
-	load_existing_state
-	IFS='|' read -r bound_identity bound_reference binding_state binding_version <<<"$binding_snapshot"
-	[[ "$bound_identity" == "$DATABASE_IDENTITY" && "$bound_reference" == "$SECRET_REFERENCE" \
-		&& "$binding_state" == READY ]] || fail 'The Tenant binding is not the matching READY database identity.'
-	WALLET_RECHARGE_SECRET_REFERENCE="local-tenant-wallet-recharge-worker:$TENANT_ID"
-	registered_worker_reference="$(read_wallet_recharge_callback_reference)"
-	[[ "$registered_worker_reference" == "$WALLET_RECHARGE_SECRET_REFERENCE" ]] \
-		|| fail 'The Tenant binding does not match the owner-private wallet worker identity.'
-	PAYMENT_CALLBACK_SECRET_REFERENCE="local-tenant-payment-callback-worker:$TENANT_ID"
-	registered_payment_worker_reference="$(read_payment_callback_credential_reference)"
-	[[ "$registered_payment_worker_reference" == "$PAYMENT_CALLBACK_SECRET_REFERENCE" ]] \
-		|| fail 'The Tenant binding does not match the owner-private Payments worker identity.'
+	validate_ready_binding_state "$binding_snapshot"
 	SCHEMA_MANIFEST_DIGEST="$(read_schema_manifest_digest)"
 	if deferred_task="$(defer_workspace_anchor_for_schema_upgrade)" && [[ "$deferred_task" == "$WORKSPACE_ANCHOR_TASK_ID" ]]; then
 		printf '%s\n' 'Tenant schema manifest changed; queued the existing Tenant database task for migration before Workspace projection.'
 		exit 75
 	fi
-	[[ -e "$VOLUME_MARKER" && -f "$VOLUME_MARKER" ]] \
-		|| fail 'The Tenant database has no local volume history; refusing workspace-only provisioning.'
-	docker volume inspect "$VOLUME_NAME" >/dev/null 2>&1 \
-		|| fail 'The READY Tenant database volume is missing; restore it before projecting a Workspace anchor.'
+	validate_ready_local_volume
 	verify_workspace_anchor_claim
 	tenant_compose config --quiet >/dev/null
 	tenant_compose up -d tenant-database
@@ -997,6 +1183,7 @@ ensure_wallet_recharge_worker_credentials
 ensure_business_documents_worker_credentials
 ensure_payment_callback_worker_credentials
 ensure_business_traceability_worker_credentials
+ensure_reservation_expiry_worker_credentials
 
 host_ready=0
 for _ in $(seq 1 30); do
@@ -1049,11 +1236,13 @@ SQL
 business_documents_worker_password="$(read_value "$TENANT_DIRECTORY/business-documents-worker.properties" password)"
 	payment_callback_worker_password="$(read_value "$TENANT_DIRECTORY/payment-callback-worker.properties" password)"
 business_traceability_worker_password="$(read_value "$TENANT_DIRECTORY/business-traceability-worker.properties" password)"
+reservation_expiry_worker_password="$(read_value "$TENANT_DIRECTORY/reservation-expiry-worker.properties" password)"
 {
 	printf '\\set wallet_recharge_worker_password %s\n' "$wallet_recharge_worker_password"
 	printf '\\set business_documents_worker_password %s\n' "$business_documents_worker_password"
 	printf '\\set payments_worker_password %s\n' "$payment_callback_worker_password"
 	printf '\\set business_traceability_worker_password %s\n' "$business_traceability_worker_password"
+	printf '\\set reservation_expiry_worker_password %s\n' "$reservation_expiry_worker_password"
 	cat "$ROLE_SQL_FILE"
 } | tenant_compose exec -T tenant-database sh -ec '
 	export NEXA_LOCAL_MIGRATOR_PASSWORD="$(cat /run/secrets/migrator_password)"
@@ -1065,6 +1254,7 @@ unset wallet_recharge_worker_password
 unset business_documents_worker_password
 unset payment_callback_worker_password
 unset business_traceability_worker_password
+unset reservation_expiry_worker_password
 
 run_cli migrate
 tenant_compose exec -T tenant-database psql -X -q -v ON_ERROR_STOP=1 \
