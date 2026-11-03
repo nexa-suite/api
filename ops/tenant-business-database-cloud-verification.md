@@ -83,7 +83,7 @@ replacement; do not broaden them. The CLI does not perform these operations or
 claim their completion.
 
 After those gates, follow [bounded cloud read configuration](tenant-business-database-cloud.md).
-Enable catalog list/detail/filter and Buyer own-account reads. The independent notification flag may enable the existing HTTP inbox, unread count, read-state and personal preferences. Workspace notification-settings writes remain unavailable; push delivery, projections and callbacks remain outside this delivery. Preserve
+Enable catalog list/detail/filter, Buyer own-account reads and existing authorized Platform customer list/detail reads. Verify Sales account ownership and deny Buyer management access; do not infer customer-specific pricing or offers. The independent notification flag may enable the existing HTTP inbox, unread count, read-state and personal preferences. Workspace notification-settings writes remain unavailable; push delivery, projections and callbacks remain outside this delivery. Preserve
 central authentication, fail-closed routing and all disabled unsupported
 capabilities. Verify authenticated positive and wrong-scope negative requests
 against the exact deployed API and mobile builds. Disable flags and restore

@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 
-/** Selects only the existing authorized Buyer self-account read for the explicit cloud delivery. */
+/** Selects existing authorized Tenant account reads for the explicit cloud delivery. */
 @Configuration(proxyBeanMethods = false)
 @Profile("tenant-cloud")
 @ConditionalOnProperty(prefix = "nexa.tenant-business", name = {

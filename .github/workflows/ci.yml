@@ -31,6 +31,51 @@ jobs:
         run: git fetch --no-tags --depth=1 origin refs/tags/v0.21.0:refs/tags/v0.21.0
       - name: Fetch previous published v0.20.0 consumer baseline
         run: git fetch --no-tags --depth=1 origin refs/tags/v0.20.0:refs/tags/v0.20.0
+      - name: Fetch immutable migration baseline 689be612
+        if: ${{ github.event_name == 'pull_request' }}
+        run: git fetch --no-tags --depth=1 origin 689be612d96079feb02a155fbe76d829a10bdeb1
+      - name: Fetch immutable migration baseline acbb76f5
+        if: ${{ github.event_name == 'pull_request' }}
+        run: git fetch --no-tags --depth=1 origin acbb76f56deba09fcb0ee31ea6854238dcb7486b
+      - name: Verify OpenAPI compatibility against base snapshot
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$OPENAPI_BASE_REF"
+          python3 .github/scripts/test_check_openapi_compatibility.py
+          python3 .github/scripts/test_check_openapi_migration.py
+          python3 .github/scripts/check-openapi-migration.py
+      - name: Verify OpenAPI compatibility against published v2.0.0
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v2.0.0
+        run: python3 .github/scripts/check-openapi-migration.py
+      - name: Verify OpenAPI compatibility against historical v0.21.0 release
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v0.21.0
+        run: python3 .github/scripts/check-openapi-migration.py
+      - name: Verify OpenAPI compatibility against previous published release
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v0.20.0
+        run: python3 .github/scripts/check-openapi-migration.py
+      - name: Verify OpenAPI compatibility against previous consumer release
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v0.19.0
+        run: python3 .github/scripts/check-openapi-migration.py
+      - name: Verify OpenAPI compatibility against earlier consumer release
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v0.18.0
+        run: python3 .github/scripts/check-openapi-migration.py
+      - name: Verify OpenAPI compatibility against historical upgrade baseline
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAPI_BASE_REF: v0.17.1
+        run: python3 .github/scripts/check-openapi-migration.py
       - name: Start external integration adapters
         run: |
           docker run -d --name nexa-ci-clamav -p 3310:3310 clamav/clamav-debian:1.4.3
@@ -89,45 +134,6 @@ jobs:
           path: docs/openapi/openapi.json
           if-no-files-found: error
           retention-days: 3
-      - name: Verify OpenAPI compatibility against base snapshot
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          OPENAPI_BASE_REF: ${{ github.event.pull_request.base.sha }}
-        run: |
-          git fetch --no-tags --depth=1 origin "$OPENAPI_BASE_REF"
-          python3 .github/scripts/test_check_openapi_compatibility.py
-          python3 .github/scripts/test_check_openapi_migration.py
-          python3 .github/scripts/check-openapi-migration.py
-      - name: Verify OpenAPI compatibility against published v2.0.0
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          OPENAPI_BASE_REF: v2.0.0
-        run: python3 .github/scripts/check-openapi-migration.py
-      - name: Verify OpenAPI compatibility against historical v0.21.0 release
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          OPENAPI_BASE_REF: v0.21.0
-        run: python3 .github/scripts/check-openapi-migration.py
-      - name: Verify OpenAPI compatibility against previous published release
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          OPENAPI_BASE_REF: v0.20.0
-        run: python3 .github/scripts/check-openapi-migration.py
-      - name: Verify OpenAPI compatibility against previous consumer release
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          OPENAPI_BASE_REF: v0.19.0
-        run: python3 .github/scripts/check-openapi-migration.py
-      - name: Verify OpenAPI compatibility against earlier consumer release
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          OPENAPI_BASE_REF: v0.18.0
-        run: python3 .github/scripts/check-openapi-migration.py
-      - name: Verify OpenAPI compatibility against historical upgrade baseline
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          OPENAPI_BASE_REF: v0.17.1
-        run: python3 .github/scripts/check-openapi-migration.py
       - name: Stop external integration adapters
         if: ${{ always() }}
         run: docker rm -f nexa-ci-clamav nexa-ci-stripe-mock || true

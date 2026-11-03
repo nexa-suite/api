@@ -19,10 +19,7 @@ explicit read composition requires all three switches:
 
 Partial read activation fails startup. The composition uses the existing
 Tenant-routed catalog list, detail and filter queries and the existing
-authorized Buyer self-account read (`GET /api/v1/client-accounts/me`). It does
-not enable Client Account administration, management reads, addresses or
-mutations: the cloud self-account wrapper rejects every other
-`ClientAccountUseCase` method. Native authentication, context selection and
+authorized Buyer self-account read (`GET /api/v1/client-accounts/me`) plus existing authorized Platform customer list/detail reads (`GET /api/v1/client-accounts` and `GET /api/v1/client-accounts/{id}`). The existing server policy still denies Buyer management reads and limits Sales to its assigned accounts. This enables customer selection without new business rules. It does not enable Client Account administration, membership reads, addresses or mutations: the cloud wrapper rejects every other `ClientAccountUseCase` method. Customer-specific offers and pricing are not established by generic catalog reads. Native authentication, context selection and
 personal-profile access continue through their existing central authority.
 An independent `NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED=true` opt-in enables the existing Tenant-routed HTTP inbox, unread count, read-state and personal-preference operations. Workspace notification-settings writes remain unavailable in cloud because their central security audit is outside the Tenant transaction. Push delivery, background projections and callbacks are not enabled or verified by this composition.
 

@@ -15,7 +15,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 import java.util.List;
 import java.util.Objects;
 
-/** Exposes one routed read; neither management reads nor mutations can reach the delegate. */
+/** Exposes existing Tenant account reads; authorization and ownership remain with the delegate. */
 final class CloudBuyerSelfAccountReadUseCase implements ClientAccountUseCase {
     private final ClientAccountUseCase tenantDelegate;
 
@@ -29,8 +29,12 @@ final class CloudBuyerSelfAccountReadUseCase implements ClientAccountUseCase {
     }
 
     @Override public CustomerAccountPage<ClientAccountView> list(CurrentAccessContext context,
-            String search, String status, int page, int size) { throw unavailable(); }
-    @Override public ClientAccountView detail(CurrentAccessContext context, String id) { throw unavailable(); }
+            String search, String status, int page, int size) {
+        return tenantDelegate.list(context, search, status, page, size);
+    }
+    @Override public ClientAccountView detail(CurrentAccessContext context, String id) {
+        return tenantDelegate.detail(context, id);
+    }
     @Override public ClientAccountRegistrationResult registerOwnBusiness(CurrentAccessContext context,
             BuyerClientAccountRegistrationCommand command) { throw unavailable(); }
     @Override public List<BuyerMembershipCandidate> buyerMembershipCandidates(CurrentAccessContext context) { throw unavailable(); }
@@ -51,6 +55,6 @@ final class CloudBuyerSelfAccountReadUseCase implements ClientAccountUseCase {
             String id, String salesMembershipId, long version) { throw unavailable(); }
 
     private static TenantBusinessDatabaseUnavailableException unavailable() {
-        return new TenantBusinessDatabaseUnavailableException("Cloud delivery enables only the Buyer self-account read");
+        return new TenantBusinessDatabaseUnavailableException("Cloud delivery enables only authorized Tenant account reads");
     }
 }

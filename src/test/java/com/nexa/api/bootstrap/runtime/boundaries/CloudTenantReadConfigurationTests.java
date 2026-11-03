@@ -4,6 +4,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRout
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogDetailQueryFactory;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogHttpReadPort;
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.model.ClientAccountView;
+import com.nexa.api.customerbuyerrelationships.application.clientaccount.model.CustomerAccountPage;
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.port.ClientAccountUseCase;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.application.fieldvisit.port.FieldVisitUseCase;
@@ -11,9 +12,14 @@ import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAcco
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerRelationshipsCompositionFactory;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantCatalogAvailabilityAdapterFactory;
 import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.ActiveSalesMembershipDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -21,6 +27,9 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -78,7 +87,7 @@ class CloudTenantReadConfigurationTests {
     }
 
     @Test
-    void selfReadDelegatesOnlyToTheVerifiedTenantUseCaseAndEveryOtherMethodFailsClosed() throws Exception {
+    void accountReadsDelegateOnlyToTheVerifiedTenantUseCaseAndEveryOtherMethodFailsClosed() throws Exception {
         ClientAccountUseCase tenant = mock(ClientAccountUseCase.class);
         var read = new CloudBuyerSelfAccountReadUseCase(tenant);
         CurrentAccessContext context = mock(CurrentAccessContext.class);
@@ -86,8 +95,15 @@ class CloudTenantReadConfigurationTests {
         when(tenant.buyerDetail(context)).thenReturn(result);
         assertThat(read.buyerDetail(context)).isSameAs(result);
         verify(tenant).buyerDetail(context);
+        var page = new CustomerAccountPage<ClientAccountView>(List.of(result), 0, 20, 1);
+        when(tenant.list(context, "customer", "ACTIVE", 0, 20)).thenReturn(page);
+        when(tenant.detail(context, "account-id")).thenReturn(result);
+        assertThat(read.list(context, "customer", "ACTIVE", 0, 20)).isSameAs(page);
+        assertThat(read.detail(context, "account-id")).isSameAs(result);
+        verify(tenant).list(context, "customer", "ACTIVE", 0, 20);
+        verify(tenant).detail(context, "account-id");
         for (Method method : ClientAccountUseCase.class.getMethods()) {
-            if (method.getName().equals("buyerDetail")) continue;
+            if (Set.of("buyerDetail", "list", "detail").contains(method.getName())) continue;
             Object[] arguments = new Object[method.getParameterCount()];
             for (int index = 0; index < arguments.length; index++) {
                 Class<?> type = method.getParameterTypes()[index];
@@ -112,6 +128,50 @@ class CloudTenantReadConfigurationTests {
             verifyNoInteractions(context.getBean(TenantBusinessDatabaseRouter.class),
                     context.getBean(TenantCustomerRelationshipsCompositionFactory.class));
         });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "BUYER", "TENANT_ADMIN" })
+    void administrativeAccountReadsRejectUnqualifiedRolesBeforeRouting(String role) {
+        var router = mock(TenantBusinessDatabaseRouter.class);
+        var compositions = mock(TenantCustomerRelationshipsCompositionFactory.class);
+        var tenant = new TenantBoundCustomerRelationshipsUseCase(router, compositions,
+                mock(BuyerMembershipDirectory.class), mock(ActiveSalesMembershipDirectory.class),
+                mock(TenantBusinessTraceabilityBindingsFactory.class));
+        var read = new CloudBuyerSelfAccountReadUseCase(tenant);
+        var context = mock(CurrentAccessContext.class);
+        when(context.hasRole(MembershipRole.valueOf(role))).thenReturn(true);
+        assertThatThrownBy(() -> read.list(context, null, null, 0, 20))
+                .isInstanceOf(AccessPolicyViolation.class);
+        assertThatThrownBy(() -> read.detail(context, "account-id"))
+                .isInstanceOf(AccessPolicyViolation.class);
+        verifyNoInteractions(router, compositions);
+    }
+
+    @Test
+    void administrativeAccountReadsRequireMatchingRequestScopeBeforeRouting() {
+        var router = mock(TenantBusinessDatabaseRouter.class);
+        var compositions = mock(TenantCustomerRelationshipsCompositionFactory.class);
+        var tenant = new TenantBoundCustomerRelationshipsUseCase(router, compositions,
+                mock(BuyerMembershipDirectory.class), mock(ActiveSalesMembershipDirectory.class),
+                mock(TenantBusinessTraceabilityBindingsFactory.class));
+        var read = new CloudBuyerSelfAccountReadUseCase(tenant);
+        var context = mock(CurrentAccessContext.class);
+        var tenantId = UUID.randomUUID();
+        var workspaceId = UUID.randomUUID();
+        when(context.tenantId()).thenReturn(new TenantId(tenantId));
+        when(context.workspaceId()).thenReturn(new WorkspaceId(workspaceId));
+        RlsRequestScope.clear();
+        try {
+            assertThatThrownBy(() -> read.list(context, null, null, 0, 20))
+                    .isInstanceOf(AccessPolicyViolation.class);
+            RlsRequestScope.set(tenantId, UUID.randomUUID());
+            assertThatThrownBy(() -> read.detail(context, "account-id"))
+                    .isInstanceOf(AccessPolicyViolation.class);
+            verifyNoInteractions(router, compositions);
+        } finally {
+            RlsRequestScope.clear();
+        }
     }
 
     private ApplicationContextRunner enabled() {
