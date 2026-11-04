@@ -118,14 +118,21 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                                     rs.getTimestamp(3)) : null, tenant, workspace, accountId);
                     if (currentOwner != null && (currentOwner.membershipId() == null
                             || currentOwner.membershipId().equals(salesMembership))) {
-                        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=?,version=? "
+                        int restored = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=?,version=? "
                                         + "where tenant_id=? and workspace_id=? and id=? and version=? "
                                         + "and sales_owner_membership_id is not distinct from ?",
                                 originalOwner.membershipId(), originalOwner.updatedAt(), originalOwner.version(), tenant,
                                 workspace, accountId, currentOwner.version(), currentOwner.membershipId());
+                        assertThat(restored).as("Restore the original Sales owner with the captured version").isEqualTo(1);
                     }
                 }
             } finally {
+                UUID ownerAfterCleanup = tenantJdbc().queryForObject(
+                        "select sales_owner_membership_id from sales.client_account "
+                                + "where tenant_id=? and workspace_id=? and id=?",
+                        UUID.class, tenant, workspace, accountId);
+                assertThat(ownerAfterCleanup).as("Do not retire a still-assigned synthetic Sales owner")
+                        .isNotEqualTo(salesMembership);
                 retireSyntheticWorkspaceIdentity(salesIdentity);
             }
         }
