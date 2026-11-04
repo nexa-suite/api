@@ -68,11 +68,18 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 	@ParameterizedTest
 	@ValueSource(strings = { "buyer-wallet-read", "buyer-wallet-recharge", "purchase-request",
 			"catalog-favorites", "catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
-			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability", "notifications" })
+			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability" })
 	void refusesBusinessCapabilitiesUntilCloudCompositionIsImplemented(String capability) throws IOException {
 		context().withPropertyValues("nexa.tenant-business." + capability + ".enabled=true")
 				.run(context -> assertThat(context).hasFailed().getFailure()
 						.hasRootCauseMessage("Cloud Tenant business capabilities require cloud composition before activation"));
+	}
+
+	@Test
+	void allowsExistingTenantNotificationCompositionAlongsideExplicitCloudRouter() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.cloud-router.enabled=true",
+				"nexa.tenant-business.notifications.enabled=true")
+				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
 	}
 
 	@Test

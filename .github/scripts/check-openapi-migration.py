@@ -23,7 +23,7 @@ SPEC = importlib.util.spec_from_file_location("openapi_compatibility", SCRIPT)
 CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
 CHECKER_SHA256 = hashlib.sha256(SCRIPT.read_bytes()).hexdigest()
-DEFAULT_MANIFEST = "docs/openapi/migrations/v2.0.0.json"
+DEFAULT_MANIFEST = "docs/openapi/migrations/v2.0.1.json"
 SNAPSHOT = "docs/openapi/openapi.json"
 
 

@@ -1,5 +1,7 @@
 package com.nexa.api.catalogcommercialpolicy.infrastructure.query;
 
+import com.nexa.api.catalogcommercialpolicy.application.service.SkuIdentifierResolutionService;
+import com.nexa.api.catalogcommercialpolicy.application.port.in.SkuIdentifierResolutionUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPage;
@@ -13,7 +15,6 @@ import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogDetailQu
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-
 import java.time.Clock;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,6 +30,14 @@ public final class JdbcTenantCatalogDetailQueryFactory implements TenantCatalogD
 	public JdbcTenantCatalogDetailQueryFactory(Clock clock) {
 		this.clock = Objects.requireNonNull(clock, "Catalog clock is required");
 	}
+
+    @Override
+    public SkuIdentifierResolutionUseCase bindSkuIdentifiers(
+            JdbcTemplate tenantJdbc) {
+        return new SkuIdentifierResolutionService(
+                new JdbcSkuIdentifierResolutionQuery(Objects.requireNonNull(tenantJdbc,
+                        "Tenant JDBC session is required")), authorization);
+    }
 
 	@Override
 	public void requireCatalogRead() {

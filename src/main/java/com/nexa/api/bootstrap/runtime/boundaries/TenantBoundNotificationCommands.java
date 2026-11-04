@@ -13,6 +13,7 @@ import com.nexa.api.notifications.application.publicapi.PushSubscriptionView;
 import com.nexa.api.notifications.application.publicapi.TenantNotificationSettingsCommands;
 import com.nexa.api.notifications.tenantdatabase.TenantNotificationBusinessBindingsFactory;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
+import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.SecurityAuditPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.exception.ConcurrencyConflictException;
@@ -21,6 +22,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Per
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 
 import java.time.Clock;
 import java.util.List;
@@ -30,7 +33,7 @@ import java.util.function.Function;
 
 /** Tenant-enabled HTTP boundary. Every operation uses only the verified request's Tenant route. */
 @Component
-@Profile("local")
+@Profile({"local", "tenant-cloud"})
 @ConditionalOnProperty(prefix = "nexa.tenant-business.notifications", name = "enabled", havingValue = "true")
 public final class TenantBoundNotificationCommands implements NotificationUseCase, PushSubscriptionUseCase,
         TenantNotificationSettingsCommands {
@@ -40,18 +43,20 @@ public final class TenantBoundNotificationCommands implements NotificationUseCas
     private final TenantBusinessTraceabilityBindingsFactory traceabilityBindings;
     private final SecurityAuditPort audit;
     private final Clock clock;
+    private final Environment environment;
 
     public TenantBoundNotificationCommands(TenantBusinessDatabaseRouter router,
             TenantNotificationBusinessBindingsFactory bindings,
             TenantCustomerAccountQueryFactory customerAccounts,
             TenantBusinessTraceabilityBindingsFactory traceabilityBindings,
-            SecurityAuditPort audit, Clock clock) {
+            SecurityAuditPort audit, Clock clock, Environment environment) {
         this.router = router;
         this.bindings = bindings;
         this.customerAccounts = customerAccounts;
         this.traceabilityBindings = traceabilityBindings;
         this.audit = audit;
         this.clock = clock;
+        this.environment = environment;
     }
 
     @Override
@@ -103,6 +108,10 @@ public final class TenantBoundNotificationCommands implements NotificationUseCas
             long expectedVersion, String correlationId) {
         context.requirePermission(PermissionKey.NOTIFICATION_MANAGE_PREFERENCES);
         requireWorkspace(context, workspaceId);
+        if (environment.acceptsProfiles(Profiles.of("tenant-cloud"))) {
+            throw new TechnicalFailureException(TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE,
+                    "Cloud notification settings require atomic Tenant preferences and security audit persistence");
+        }
         NotificationPreferencesView updated = withPreferences(context, workspaceId,
                 preferences -> {
                     preferences.ensureNotificationDefaults(workspaceId);

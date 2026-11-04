@@ -14,6 +14,7 @@ JSON SHA256 is
 | Comparison ref | Resolved baseline commit | Findings |
 |---|---|---:|
 | `689be612d96079feb02a155fbe76d829a10bdeb1` (PR main base) | `689be612d96079feb02a155fbe76d829a10bdeb1` | 429 |
+| `acbb76f56deba09fcb0ee31ea6854238dcb7486b` (develop back-merge base) | `acbb76f56deba09fcb0ee31ea6854238dcb7486b` | 429 |
 | `v0.17.1` | `be03488df7b3442ad0016af822667817c3fcddab` | 314 |
 | `v0.18.0` | `05cb9ed3100e44d7ab0c6593cf6fbda86a4aa383` | 328 |
 | `v0.19.0` | `89ff511c30976cbb1734ab16ecd3fadac0651ed4` | 328 |
@@ -25,6 +26,23 @@ sorted findings list, including repeated findings. Counts are comparison-local;
 they must not be added together as distinct consumer changes. The PR main base
 uses its immutable commit rather than a moving local `origin/main` ref. The
 manifest binds the checker source SHA256 as well as the two contract snapshots.
+
+## Additional back-merge baseline
+
+The Owner approved adding the exact develop baseline
+`acbb76f56deba09fcb0ee31ea6854238dcb7486b`; the decision was recorded at
+2026-11-03T12:49:15+00:00 in [PR #139](https://github.com/nexa-suite/api/pull/139).
+The manifest timestamp records this additional decision, not a GitHub review
+event or an inferred earlier decision time. The original six-baseline approval
+remains recorded in PR #133.
+
+The added baseline raw OpenAPI SHA256 is
+`2adc09eaed575b1f77b0d035625308dab45ec7c82611067b49aabba82adb393f`.
+Compared with the existing immutable main baseline, its document differs only
+in `info.version` (`1.2.0` instead of `2.0.0`) and produces the same exact 429
+findings against the unchanged candidate snapshot. This additional record does
+not change the checker, candidate bytes, existing baseline records, or published
+v2.0.0 tag. It grants no exemption to another ref, hash or finding list.
 
 ## Gate behavior
 
@@ -107,3 +125,13 @@ allowance. Consumers generated from historical snapshots must regenerate models,
 send the already-required version/idempotency headers, and handle actual success
 and Problem Details responses. This evidence does not claim complete runtime
 compatibility or connected-client acceptance.
+
+## Compatible patch v2.0.1
+
+The Product Owner approved the exact candidate SHA256
+`de215cb0a335b717951fc3fb424bdf2e08d926643ecbbdfc7a085bb955bb13a3`
+in the execution conversation; [PR #139](https://github.com/nexa-suite/api/pull/139) records that decision separately from GitHub review.
+The document differs from published v2.0.0 only in `info.version`; their strict comparison has zero findings.
+The [v2.0.1 manifest](v2.0.1.json) explicitly records all seven historical baselines.
+Its findings also enumerate the four private Buyer self-account fields already removed in v2.0.0, because the historical checker exception is tied to version 2.0.0.
+The strict compatibility checker and its digest remain unchanged. Any extra finding or different candidate hash fails.

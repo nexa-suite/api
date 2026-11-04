@@ -42,15 +42,17 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                 rs -> rs.next() ? new SalesOwnerState(rs.getObject(1, UUID.class), rs.getLong(2),
                         rs.getTimestamp(3)) : null, tenant, workspace, accountId);
         assertThat(originalOwner).isNotNull();
-        int cleared = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=null, "
-                        + "updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? "
-                        + "and id=? and version=? and sales_owner_membership_id is not distinct from ?",
-                tenant, workspace, accountId, originalOwner.version(), originalOwner.membershipId());
-        assertThat(cleared).isEqualTo(1);
-        long clearedVersion = originalOwner.version() + 1;
-        UUID salesMembership = UUID.fromString(membershipId(SALES_EMAIL));
+        var salesIdentity = createSyntheticWorkspaceIdentity(SALES_EMAIL, "sales", "Dispatch Sales");
+        UUID salesMembership = salesIdentity.membershipId();
+        boolean ownerCleared = false;
         try {
-            String sales = accessToken(SALES_EMAIL, "PLATFORM");
+            int cleared = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=null, "
+                            + "updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? "
+                            + "and id=? and version=? and sales_owner_membership_id is not distinct from ?",
+                    tenant, workspace, accountId, originalOwner.version(), originalOwner.membershipId());
+            assertThat(cleared).isEqualTo(1);
+            ownerCleared = true;
+            String sales = accessToken(salesIdentity.email(), "PLATFORM");
             MvcResult unassignedList = mockMvc.perform(get("/api/v1/dispatch-orders")
                             .header("Authorization", "Bearer " + sales))
                     .andExpect(status().isOk()).andReturn();
@@ -71,7 +73,11 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                             .content("{\"membershipId\":\"" + salesMembership + "\"}"))
                     .andExpect(status().isOk());
 
-            String assignedSales = accessToken(SALES_EMAIL, "PLATFORM");
+            String assignedSales = accessToken(salesIdentity.email(), "PLATFORM");
+            assertThat(jdbc.queryForObject("select count(*) from tenant_management.warehouse_access_grant "
+                            + "where tenant_id=? and workspace_id=? and membership_id=? and status='ACTIVE'",
+                    Integer.class, tenant, workspace, salesMembership))
+                    .as("The assigned Sales actor must not already have a Warehouse grant").isZero();
             MvcResult assignedWithoutWarehouseGrant = mockMvc.perform(get("/api/v1/dispatch-orders")
                             .header("Authorization", "Bearer " + assignedSales))
                     .andExpect(status().isOk()).andReturn();
@@ -90,7 +96,7 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                 grantWarehouseAccess(warehouseId.toString(), salesMembership.toString());
             }
 
-            String grantedSales = accessToken(SALES_EMAIL, "PLATFORM");
+            String grantedSales = accessToken(salesIdentity.email(), "PLATFORM");
             MvcResult assignedList = mockMvc.perform(get("/api/v1/dispatch-orders")
                             .header("Authorization", "Bearer " + grantedSales))
                     .andExpect(status().isOk()).andReturn();
@@ -103,18 +109,31 @@ class DispatchLifecycleIT extends NexaWorkflowIntegrationSupport {
                             .header("Authorization", "Bearer " + grantedSales))
                     .andExpect(status().isOk());
         } finally {
-            SalesOwnerState currentOwner = tenantJdbc().query(
-                    "select sales_owner_membership_id,version,updated_at from sales.client_account "
-                            + "where tenant_id=? and workspace_id=? and id=?",
-                    rs -> rs.next() ? new SalesOwnerState(rs.getObject(1, UUID.class), rs.getLong(2),
-                            rs.getTimestamp(3)) : null, tenant, workspace, accountId);
-            if (currentOwner != null && (currentOwner.membershipId() == null
-                    || currentOwner.membershipId().equals(salesMembership))) {
-                tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=?,version=? "
-                                + "where tenant_id=? and workspace_id=? and id=? and version=? "
-                                + "and sales_owner_membership_id is not distinct from ?",
-                        originalOwner.membershipId(), originalOwner.updatedAt(), originalOwner.version(), tenant,
-                        workspace, accountId, currentOwner.version(), currentOwner.membershipId());
+            try {
+                if (ownerCleared) {
+                    SalesOwnerState currentOwner = tenantJdbc().query(
+                            "select sales_owner_membership_id,version,updated_at from sales.client_account "
+                                    + "where tenant_id=? and workspace_id=? and id=?",
+                            rs -> rs.next() ? new SalesOwnerState(rs.getObject(1, UUID.class), rs.getLong(2),
+                                    rs.getTimestamp(3)) : null, tenant, workspace, accountId);
+                    if (currentOwner != null && (currentOwner.membershipId() == null
+                            || currentOwner.membershipId().equals(salesMembership))) {
+                        int restored = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?,updated_at=?,version=? "
+                                        + "where tenant_id=? and workspace_id=? and id=? and version=? "
+                                        + "and sales_owner_membership_id is not distinct from ?",
+                                originalOwner.membershipId(), originalOwner.updatedAt(), originalOwner.version(), tenant,
+                                workspace, accountId, currentOwner.version(), currentOwner.membershipId());
+                        assertThat(restored).as("Restore the original Sales owner with the captured version").isEqualTo(1);
+                    }
+                }
+            } finally {
+                UUID ownerAfterCleanup = tenantJdbc().queryForObject(
+                        "select sales_owner_membership_id from sales.client_account "
+                                + "where tenant_id=? and workspace_id=? and id=?",
+                        UUID.class, tenant, workspace, accountId);
+                assertThat(ownerAfterCleanup).as("Do not retire a still-assigned synthetic Sales owner")
+                        .isNotEqualTo(salesMembership);
+                retireSyntheticWorkspaceIdentity(salesIdentity);
             }
         }
     }

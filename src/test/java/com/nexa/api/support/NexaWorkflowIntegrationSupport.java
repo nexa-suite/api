@@ -251,11 +251,21 @@ public abstract class NexaWorkflowIntegrationSupport extends PostgresIntegration
 
     protected void grantWarehouseAccess(String warehouseId, String targetMembershipId) throws Exception {
         String owner = accessToken(OWNER_EMAIL, "PLATFORM");
-        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
-                        .header("Authorization", "Bearer " + owner)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"membershipId\":\"" + targetMembershipId + "\"}"))
-                .andExpect(status().isOk());
+        var grants = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                .header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn());
+        tools.jackson.databind.JsonNode prior = null;
+        for (var grant : grants) {
+            if (targetMembershipId.equals(grant.path("membershipId").asText())) {
+                if ("ACTIVE".equals(grant.path("status").asText())) return;
+                prior = grant;
+            }
+        }
+        var request = post("/api/v1/warehouses/" + warehouseId + "/access-grants")
+                .header("Authorization", "Bearer " + owner)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"membershipId\":\"" + targetMembershipId + "\"}");
+        if (prior != null) request.header("If-Match", "\"" + prior.get("version").asLong() + "\"");
+        mockMvc.perform(request).andExpect(status().isOk());
     }
 
     protected tools.jackson.databind.JsonNode json(MvcResult result) throws Exception {

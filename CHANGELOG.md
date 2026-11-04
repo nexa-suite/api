@@ -2,14 +2,25 @@
 
 ## Unreleased
 
-## [2.0.0] — Release candidate
+## [2.0.1] — Release candidate
+
+- Add verify-only Neon Tenant database readiness checks without provisioning or changing database grants.
+- Enable existing Tenant-routed notification HTTP adapters behind the independent cloud capability flag; keep workspace-settings writes unavailable across databases.
+- Connect existing authorized Platform customer list/detail reads for Operations customer selection; retain assigned Sales ownership and deny Buyer management access.
+- Restore existing SKU-code/GTIN reads for Operations scanning through the bounded Tenant catalog reader without enabling catalog commands.
+- Retain bounded catalog and Buyer own-account composition, fail-closed routing and disabled unsupported business capabilities.
+- Check the unchanged functional OpenAPI contract against published v2.0.0 and retain exact Owner-reviewed historical migration findings.
+
+Publication and deployment gates remain pending. See [release notes](docs/releases/v2.0.1.md).
+
+## [2.0.0] — 2026-11-03
 
 - Enforce the global five-business-day delivery minimum in the America/Lima timezone. Earlier dates accepted by the previous release are rejected; consumers must consult the Buyer delivery policy before submission.
 - Preserve draft creation without a delivery date and require a valid date on submission.
 - Add authenticated Buyer and Operations delivery-policy endpoints backed by one fixed global policy; Workspace settings do not configure commercial lead time.
 - Route native Buyer password-reset requests to the Platform recovery page with Origin-bound, expiring, single-use token consumption and generic rate-limited request responses.
 
-This candidate is not published; release and acceptance gates remain open.
+Published [source release v2.0.0](https://github.com/nexa-suite/api/releases/tag/v2.0.0) from `62c70c8ccca69ba0c2901df3d0fc3acf4214eaa2`. Product/System Acceptance and Production Readiness are separate gates.
 
 ## [1.2.0] - 2026-10-28
 
