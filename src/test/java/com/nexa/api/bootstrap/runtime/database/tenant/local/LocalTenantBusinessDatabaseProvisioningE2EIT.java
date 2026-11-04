@@ -8,12 +8,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.io.IOException;
 import java.io.File;
+import java.net.BindException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +32,7 @@ import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -36,6 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** End-to-end local provisioner checks against disposable central and Tenant PostgreSQL databases. */
 @Testcontainers(disabledWithoutDocker = true)
+@Execution(ExecutionMode.SAME_THREAD)
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static final Path REPOSITORY_ROOT = Path.of("").toAbsolutePath().normalize();
@@ -52,6 +58,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static String apiContainerName;
 	private static String apiComposeProject;
 	private static boolean apiContainerStarted;
+	private static int nextFixturePort = 20_000;
 	private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS = Set.of(
 			PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
 	private static final Set<PosixFilePermission> PRIVATE_FILE_PERMISSIONS = Set.of(
@@ -284,7 +291,8 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		UUID selectedAnchorTaskId = UUID.randomUUID();
 		seedTenantAndWorkspace(selectedTenantId, selectedWorkspaceId);
 		OffsetDateTime selectedCreatedAt = OffsetDateTime.now().withNano(0);
-		insertProvisioningTask(selectedTaskId, selectedTenantId, selectedWorkspaceId, selectedCreatedAt);
+		int selectedPort = availableLoopbackPort();
+		insertProvisioningTask(selectedTaskId, selectedTenantId, selectedWorkspaceId, selectedCreatedAt, selectedPort);
 		insertWorkspaceAnchorTask(selectedAnchorTaskId, selectedTenantId, selectedWorkspaceId, selectedCreatedAt);
 		String selectedVolume = volumeName(selectedTenantId);
 		assertThat(volumeExists(selectedVolume)).isFalse();
@@ -297,7 +305,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			ProvisioningTask selected = readProvisioningTask(selectedTaskId);
 			assertThat(selected.status()).isEqualTo("READY");
 			assertThat(selected.attemptCount()).isEqualTo(1);
-			assertThat(selected.databasePort()).isNotNull();
+			assertThat(selected.databasePort()).isEqualTo(selectedPort);
 			assertThat(selected.claimToken()).isNull();
 			assertThat(readBinding(selectedTenantId).lifecycleState()).isEqualTo("READY");
 
@@ -409,17 +417,23 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 
 	private static void insertProvisioningTask(UUID taskId, UUID tenantId, UUID workspaceId, OffsetDateTime createdAt)
 			throws Exception {
+		insertProvisioningTask(taskId, tenantId, workspaceId, createdAt, null);
+	}
+
+	private static void insertProvisioningTask(UUID taskId, UUID tenantId, UUID workspaceId, OffsetDateTime createdAt,
+			Integer databasePort) throws Exception {
 		try (Connection connection = centralConnection();
 				 PreparedStatement statement = connection.prepareStatement("""
 					 INSERT INTO tenant_management.tenant_business_database_provisioning_task
-					     (task_id,tenant_id,workspace_id,created_at,updated_at)
-					 VALUES (?,?,?,?,?)
+					     (task_id,tenant_id,workspace_id,created_at,updated_at,database_port)
+					 VALUES (?,?,?,?,?,?)
 					 """)) {
 			statement.setObject(1, taskId);
 			statement.setObject(2, tenantId);
 			statement.setObject(3, workspaceId);
 			statement.setObject(4, createdAt);
 			statement.setObject(5, createdAt);
+			statement.setObject(6, databasePort, java.sql.Types.INTEGER);
 			statement.executeUpdate();
 		}
 	}
@@ -780,12 +794,34 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		return sanitized;
 	}
 
-	private static int availableLoopbackPort() throws IOException {
-		try (ServerSocket socket = new ServerSocket()) {
-			socket.setReuseAddress(false);
-			socket.bind(new java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0));
-			return socket.getLocalPort();
+	private static synchronized int availableLoopbackPort() throws IOException {
+		// Explicit Compose ports must not compete with automatic ephemeral allocations.
+		int upperExclusive = 30_000;
+		Path ephemeralRange = Path.of("/proc/sys/net/ipv4/ip_local_port_range");
+		if (Files.isRegularFile(ephemeralRange)) {
+			upperExclusive = Math.min(upperExclusive,
+					Integer.parseInt(Files.readString(ephemeralRange).trim().split("\\s+")[0]));
 		}
+		Set<Integer> publishedPorts = new HashSet<>();
+		for (var container : DockerClientFactory.instance().client().listContainersCmd().exec()) {
+			if (container.getPorts() == null) continue;
+			for (var port : container.getPorts()) {
+				if (port.getPublicPort() != null) publishedPorts.add(port.getPublicPort());
+			}
+		}
+		while (nextFixturePort < upperExclusive) {
+			int port = nextFixturePort++;
+			if (publishedPorts.contains(port)) continue;
+			try (ServerSocket socket = new ServerSocket()) {
+				socket.setReuseAddress(false);
+				socket.bind(new java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), port));
+				// Probe only: Docker performs the final bind after this socket closes.
+				return port;
+			} catch (BindException occupied) {
+				// Check the next explicit fixture port; do not retry a provisioning task.
+			}
+		}
+		throw new IOException("No checked explicit fixture port is available below the host ephemeral range");
 	}
 
 	private static String jdbcUrl(int port) {
