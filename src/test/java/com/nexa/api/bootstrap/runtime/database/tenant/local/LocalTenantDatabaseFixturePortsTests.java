@@ -1,8 +1,11 @@
 package com.nexa.api.bootstrap.runtime.database.tenant.local;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Set;
 
@@ -10,6 +13,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LocalTenantDatabaseFixturePortsTests {
+    @Test
+    void readsCompleteTabSeparatedKernelBounds(@TempDir Path directory) throws Exception {
+        Path file = directory.resolve("range");
+        Files.writeString(file, "32768\t60999\n");
+        assertThat(LocalTenantDatabaseFixturePorts.readEphemeralRange(file)).containsExactly(32768, 60999);
+    }
+
+    @Test
+    void incompleteKernelBoundsFailWithExplicitDiagnostic(@TempDir Path directory) throws Exception {
+        Path file = directory.resolve("range");
+        Files.writeString(file, "3\n");
+        assertThatThrownBy(() -> LocalTenantDatabaseFixturePorts.readEphemeralRange(file))
+                .isInstanceOf(IOException.class).hasMessage("Expected two host ephemeral port bounds");
+    }
+
     @Test
     void prefersCheckedPortOutsideHostEphemeralRange() throws Exception {
         int port = new LocalTenantDatabaseFixturePorts().choose(15000, 60999, Set.of(), candidate -> true);

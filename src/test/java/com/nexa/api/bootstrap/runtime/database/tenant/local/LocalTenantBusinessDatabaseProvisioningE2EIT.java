@@ -800,9 +800,9 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		int ephemeralLast = 65535;
 		Path ephemeralRange = Path.of("/proc/sys/net/ipv4/ip_local_port_range");
 		if (Files.isRegularFile(ephemeralRange)) {
-			String[] bounds = Files.readString(ephemeralRange).trim().split("\\s+");
-			ephemeralFirst = Integer.parseInt(bounds[0]);
-			ephemeralLast = Integer.parseInt(bounds[1]);
+			int[] bounds = LocalTenantDatabaseFixturePorts.readEphemeralRange(ephemeralRange);
+			ephemeralFirst = bounds[0];
+			ephemeralLast = bounds[1];
 		}
 		Set<Integer> publishedPorts = new HashSet<>();
 		for (var container : DockerClientFactory.instance().client().listContainersCmd().exec()) {

@@ -1,6 +1,8 @@
 package com.nexa.api.bootstrap.runtime.database.tenant.local;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -11,6 +13,25 @@ final class LocalTenantDatabaseFixturePorts {
     private static final int COUNT = MAX - MIN + 1;
     private final Set<Integer> used = new HashSet<>();
     private int next = 20000;
+
+    static int[] readEphemeralRange(Path file) throws IOException {
+        // Read a complete line from the virtual kernel file before validating its bounds.
+        try (var reader = Files.newBufferedReader(file)) {
+            String line = reader.readLine();
+            String[] bounds = line == null ? new String[0] : line.trim().split("\\s+");
+            if (bounds.length != 2) throw new IOException("Expected two host ephemeral port bounds");
+            try {
+                int first = Integer.parseInt(bounds[0]);
+                int last = Integer.parseInt(bounds[1]);
+                if (first < 1 || last > MAX || first > last) {
+                    throw new IOException("Invalid host ephemeral port bounds");
+                }
+                return new int[]{first, last};
+            } catch (NumberFormatException invalid) {
+                throw new IOException("Invalid host ephemeral port bounds", invalid);
+            }
+        }
+    }
 
     synchronized int choose(int ephemeralFirst, int ephemeralLast, Set<Integer> published, PortProbe probe)
             throws IOException {
