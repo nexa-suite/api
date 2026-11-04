@@ -76,6 +76,12 @@ jobs:
         env:
           OPENAPI_BASE_REF: v0.17.1
         run: python3 .github/scripts/check-openapi-migration.py
+      - name: Verify disposable provisioning fixtures before the full suite
+        run: |
+          echo 'Runner ephemeral port range:'
+          cat /proc/sys/net/ipv4/ip_local_port_range
+          ./mvnw -B -ntp -Dtest=LocalTenantBusinessDatabaseProvisioningE2EIT \
+            -Dnexa.integration.enabled=true test
       - name: Start external integration adapters
         run: |
           docker run -d --name nexa-ci-clamav -p 3310:3310 clamav/clamav-debian:1.4.3

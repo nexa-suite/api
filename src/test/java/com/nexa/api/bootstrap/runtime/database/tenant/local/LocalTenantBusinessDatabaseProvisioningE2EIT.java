@@ -58,7 +58,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static String apiContainerName;
 	private static String apiComposeProject;
 	private static boolean apiContainerStarted;
-	private static int nextFixturePort = 20_000;
+	private static final LocalTenantDatabaseFixturePorts FIXTURE_PORTS = new LocalTenantDatabaseFixturePorts();
 	private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS = Set.of(
 			PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
 	private static final Set<PosixFilePermission> PRIVATE_FILE_PERMISSIONS = Set.of(
@@ -795,12 +795,14 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	}
 
 	private static synchronized int availableLoopbackPort() throws IOException {
-		// Explicit Compose ports must not compete with automatic ephemeral allocations.
-		int upperExclusive = 30_000;
+		// Unknown ranges are treated conservatively as covering all valid explicit ports.
+		int ephemeralFirst = 1024;
+		int ephemeralLast = 65535;
 		Path ephemeralRange = Path.of("/proc/sys/net/ipv4/ip_local_port_range");
 		if (Files.isRegularFile(ephemeralRange)) {
-			upperExclusive = Math.min(upperExclusive,
-					Integer.parseInt(Files.readString(ephemeralRange).trim().split("\\s+")[0]));
+			String[] bounds = Files.readString(ephemeralRange).trim().split("\\s+");
+			ephemeralFirst = Integer.parseInt(bounds[0]);
+			ephemeralLast = Integer.parseInt(bounds[1]);
 		}
 		Set<Integer> publishedPorts = new HashSet<>();
 		for (var container : DockerClientFactory.instance().client().listContainersCmd().exec()) {
@@ -809,19 +811,16 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 				if (port.getPublicPort() != null) publishedPorts.add(port.getPublicPort());
 			}
 		}
-		while (nextFixturePort < upperExclusive) {
-			int port = nextFixturePort++;
-			if (publishedPorts.contains(port)) continue;
+		return FIXTURE_PORTS.choose(ephemeralFirst, ephemeralLast, publishedPorts, port -> {
 			try (ServerSocket socket = new ServerSocket()) {
 				socket.setReuseAddress(false);
 				socket.bind(new java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), port));
 				// Probe only: Docker performs the final bind after this socket closes.
-				return port;
+				return true;
 			} catch (BindException occupied) {
-				// Check the next explicit fixture port; do not retry a provisioning task.
+				return false;
 			}
-		}
-		throw new IOException("No checked explicit fixture port is available below the host ephemeral range");
+		});
 	}
 
 	private static String jdbcUrl(int port) {
