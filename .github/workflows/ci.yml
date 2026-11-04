@@ -106,6 +106,18 @@ jobs:
           fi
           docker logs nexa-ci-clamav
           docker logs nexa-ci-stripe-mock
+      - name: Verify dispatch Sales authorization fixture before the full suite
+        env:
+          NEXA_DATABASE_POOL_MAX: "4"
+          NEXA_CLAMAV_MODE: network
+          NEXA_CLAMAV_HOST: 127.0.0.1
+          NEXA_CLAMAV_PORT: "3310"
+        run: >-
+          ./mvnw -B -ntp -Dtest='DispatchLifecycleIT#salesDispatchReadsFollowActiveAccountAssignment'
+          -Dnexa.integration.enabled=true
+          -Dnexa.scheduling.enabled=false
+          -Dspring.modulith.moments.enabled=false
+          -Dspring.datasource.hikari.maximum-pool-size=4 test
       - name: Verify API with real PostgreSQL integrations
         id: verify
         env:
