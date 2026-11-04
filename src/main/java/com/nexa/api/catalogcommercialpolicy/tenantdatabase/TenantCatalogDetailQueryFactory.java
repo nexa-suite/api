@@ -1,5 +1,6 @@
 package com.nexa.api.catalogcommercialpolicy.tenantdatabase;
 
+import com.nexa.api.catalogcommercialpolicy.application.port.in.SkuIdentifierResolutionUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPage;
@@ -8,7 +9,6 @@ import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogAvailab
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.CatalogClientAccountPort;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
 import org.springframework.jdbc.core.JdbcTemplate;
-
 import java.util.UUID;
 import java.util.Optional;
 import java.util.List;
@@ -19,6 +19,13 @@ import java.util.List;
  * adapter binding and a Buyer profile already resolved by Customer & Buyer Relationships.
  */
 public interface TenantCatalogDetailQueryFactory {
+    default SkuIdentifierResolutionUseCase bindSkuIdentifiers(
+            JdbcTemplate tenantJdbc) {
+        throw new com.nexa.api.shared.application.error.TechnicalFailureException(
+                com.nexa.api.shared.application.error.TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE,
+                "Tenant SKU identifier resolution is unavailable");
+    }
+
 	/** Checks the Catalog owner permission before runtime queries an upstream Buyer profile. */
 	void requireCatalogRead();
 

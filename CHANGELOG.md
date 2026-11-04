@@ -7,6 +7,7 @@
 - Add verify-only Neon Tenant database readiness checks without provisioning or changing database grants.
 - Enable existing Tenant-routed notification HTTP adapters behind the independent cloud capability flag; keep workspace-settings writes unavailable across databases.
 - Connect existing authorized Platform customer list/detail reads for Operations customer selection; retain assigned Sales ownership and deny Buyer management access.
+- Restore existing SKU-code/GTIN reads for Operations scanning through the bounded Tenant catalog reader without enabling catalog commands.
 - Retain bounded catalog and Buyer own-account composition, fail-closed routing and disabled unsupported business capabilities.
 - Check the unchanged functional OpenAPI contract against published v2.0.0 and retain exact Owner-reviewed historical migration findings.
 
