@@ -125,7 +125,6 @@ class FulfillmentDispatchPlanIntegrationTests extends NexaWorkflowIntegrationSup
                                 + "\"lines\":[{\"catalogItemId\":\"CAT-0002\",\"quantity\":1,\"unit\":\"UNIT\"}]}") )
                 .andExpect(status().isCreated()).andReturn();
         String orderId = json(order).get("id").asText();
-        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
         var backingWarehouses = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id "
@@ -135,7 +134,7 @@ class FulfillmentDispatchPlanIntegrationTests extends NexaWorkflowIntegrationSup
                         + "where b.tenant_id=? and b.workspace_id=? and c.sales_order_id=? and b.status='BACKED'",
                 (rs, row) -> rs.getObject(1, UUID.class), UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), UUID.fromString(orderId));
-        for (UUID warehouseId : backingWarehouses) ensureWarehouseGrant(owner, warehouseId, membershipId(WAREHOUSE_EMAIL));
+        for (UUID warehouseId : backingWarehouses) grantWarehouseAccess(warehouseId.toString(), membershipId(WAREHOUSE_EMAIL));
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult created = mockMvc.perform(post("/api/v1/sales-orders/" + orderId + "/fulfillments")
                         .header("Authorization", "Bearer " + warehouse)
@@ -147,7 +146,7 @@ class FulfillmentDispatchPlanIntegrationTests extends NexaWorkflowIntegrationSup
                         + "/physical-allocation").header("Authorization", "Bearer " + warehouse))
                 .andExpect(status().isOk()).andReturn());
         var line = allocation.get("lines").get(0);
-        ensureWarehouseGrant(owner, UUID.fromString(line.get("warehouseId").asText()), membershipId(LOGISTICS_EMAIL));
+        grantWarehouseAccess(line.get("warehouseId").asText(), membershipId(LOGISTICS_EMAIL));
         String coordinator = accessToken(LOGISTICS_EMAIL, "PLATFORM");
         warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         Fixture fixture = new Fixture(UUID.fromString(fulfillment.get("id").asText()),
@@ -183,19 +182,6 @@ class FulfillmentDispatchPlanIntegrationTests extends NexaWorkflowIntegrationSup
             etag = step.getResponse().getHeader("ETag");
         }
         return fixture;
-    }
-
-    private void ensureWarehouseGrant(String owner, UUID warehouseId, String targetMembershipId) throws Exception {
-        var grants = json(mockMvc.perform(get("/api/v1/warehouses/" + warehouseId + "/access-grants")
-                .header("Authorization", "Bearer " + owner)).andExpect(status().isOk()).andReturn());
-        for (var grant : grants) {
-            if (targetMembershipId.equals(grant.path("membershipId").asText())
-                    && "ACTIVE".equals(grant.path("status").asText())) return;
-        }
-        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
-                        .header("Authorization", "Bearer " + owner).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"membershipId\":\"" + targetMembershipId + "\"}"))
-                .andExpect(status().isOk());
     }
 
     private static String planBody(UUID assignmentId, long version, Fixture fixture,

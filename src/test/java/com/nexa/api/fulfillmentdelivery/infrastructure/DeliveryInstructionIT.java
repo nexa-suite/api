@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -51,6 +52,39 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
             tenantJdbc().update("update catalog_management.sellable_sku set temperature_min=?,temperature_max=? where id=?",
                     originalTemperatureMinimum, originalTemperatureMaximum, temperatureFixtureSku);
         }
+    }
+
+    @Test
+    void workflowFixtureReactivatesRevokedWarehouseGrantUsingCurrentVersion() throws Exception {
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String owner = accessToken(OWNER_EMAIL, "PLATFORM");
+        MvcResult created = mockMvc.perform(post("/api/v1/warehouses")
+                        .header("Authorization", bearer(warehouse)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"WH-GRANT-" + UUID.randomUUID().toString().substring(0, 8)
+                                + "\",\"name\":\"Grant fixture regression\",\"address\":\"Lima\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        String warehouseId = json(created).get("id").asText();
+        String target = membershipId(WAREHOUSE_EMAIL);
+        String path = "/api/v1/warehouses/" + warehouseId + "/access-grants";
+        grantWarehouseAccess(warehouseId, target);
+        MvcResult active = mockMvc.perform(post(path).header("Authorization", bearer(owner))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"membershipId\":\"" + target + "\"}"))
+                .andExpect(status().isOk()).andReturn();
+        MvcResult revoked = mockMvc.perform(delete(path + "/" + target)
+                        .header("Authorization", bearer(owner)).header("If-Match", active.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andReturn();
+        long expectedVersion = json(revoked).get("version").asLong() + 1;
+        mockMvc.perform(post(path).header("Authorization", bearer(owner))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"membershipId\":\"" + target + "\"}"))
+                .andExpect(status().is(428)).andExpect(jsonPath("$.code").value("PRECONDITION_REQUIRED"));
+        grantWarehouseAccess(warehouseId, target);
+        grantWarehouseAccess(warehouseId, target);
+        var grants = json(mockMvc.perform(get(path).header("Authorization", bearer(owner)))
+                .andExpect(status().isOk()).andReturn());
+        var restored = java.util.stream.StreamSupport.stream(grants.spliterator(), false)
+                .filter(grant -> target.equals(grant.path("membershipId").asText())).findFirst().orElseThrow();
+        assertThat(restored.path("status").asText()).isEqualTo("ACTIVE");
+        assertThat(restored.path("version").asLong()).isEqualTo(expectedVersion);
     }
 
     @Test
@@ -356,7 +390,6 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                     .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1))
                     .andExpect(jsonPath("$.instructions.length()").value(1));
         }
-        String ownerToken = accessToken(OWNER_EMAIL, "PLATFORM");
         List<UUID> backedWarehouseIds = tenantJdbc().query("select distinct p.warehouse_id from warehouse.inventory_backing b "
                         + "join sales.commercial_commitment c on c.id=b.commercial_commitment_id "
                         + "join warehouse.inventory_backing_line l on l.tenant_id=b.tenant_id and l.workspace_id=b.workspace_id and l.backing_id=b.id "
@@ -365,10 +398,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
                 (rs, row) -> rs.getObject(1, UUID.class), UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), orderId);
         for (UUID backedWarehouseId : backedWarehouseIds) {
-            mockMvc.perform(post("/api/v1/warehouses/" + backedWarehouseId + "/access-grants")
-                            .header("Authorization", bearer(ownerToken)).contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"membershipId\":\"" + membershipId(WAREHOUSE_EMAIL) + "\"}"))
-                    .andExpect(status().isOk());
+            grantWarehouseAccess(backedWarehouseId.toString(), membershipId(WAREHOUSE_EMAIL));
         }
         String warehouseToken = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
         MvcResult fulfillmentResult = mockMvc.perform(post("/api/v1/sales-orders/" + json(order).get("id").asText()
@@ -392,10 +422,7 @@ class DeliveryInstructionIT extends NexaWorkflowIntegrationSupport {
         UUID skuId = UUID.fromString(physicalLine.get("skuId").asText());
         long allocationVersion = allocation.get("version").asLong();
         UUID logisticsMembership = UUID.fromString(membershipId(LOGISTICS_EMAIL));
-        mockMvc.perform(post("/api/v1/warehouses/" + warehouseId + "/access-grants")
-                        .header("Authorization", bearer(ownerToken)).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"membershipId\":\"" + logisticsMembership + "\"}"))
-                .andExpect(status().isOk());
+        grantWarehouseAccess(warehouseId.toString(), logisticsMembership.toString());
 
         String startKey = "delivery-instructions-picking-start-" + UUID.randomUUID();
         MvcResult pickingStarted = mockMvc.perform(post("/api/v1/fulfillments/" + fulfillmentId + "/picking-starts")
