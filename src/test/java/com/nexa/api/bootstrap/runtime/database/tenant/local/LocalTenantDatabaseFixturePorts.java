@@ -1,18 +1,53 @@
 package com.nexa.api.bootstrap.runtime.database.tenant.local;
 
+import org.testcontainers.DockerClientFactory;
+
 import java.io.IOException;
+import java.net.BindException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 
 /** Checked explicit ports for disposable local-database fixtures; not an atomic reservation. */
-final class LocalTenantDatabaseFixturePorts {
+public final class LocalTenantDatabaseFixturePorts {
+    private static final LocalTenantDatabaseFixturePorts FIXTURE_PORTS = new LocalTenantDatabaseFixturePorts();
     private static final int MIN = 1024;
     private static final int MAX = 65535;
     private static final int COUNT = MAX - MIN + 1;
     private final Set<Integer> used = new HashSet<>();
     private int next = 20000;
+
+    public static synchronized int availableLoopbackPort() throws IOException {
+        // Unknown ranges are treated conservatively as covering all valid explicit ports.
+        int ephemeralFirst = 1024;
+        int ephemeralLast = 65535;
+        Path ephemeralRange = Path.of("/proc/sys/net/ipv4/ip_local_port_range");
+        if (Files.isRegularFile(ephemeralRange)) {
+            int[] bounds = LocalTenantDatabaseFixturePorts.readEphemeralRange(ephemeralRange);
+            ephemeralFirst = bounds[0];
+            ephemeralLast = bounds[1];
+        }
+        Set<Integer> publishedPorts = new HashSet<>();
+        for (var container : DockerClientFactory.instance().client().listContainersCmd().exec()) {
+            if (container.getPorts() == null) continue;
+            for (var port : container.getPorts()) {
+                if (port.getPublicPort() != null) publishedPorts.add(port.getPublicPort());
+            }
+        }
+        return FIXTURE_PORTS.choose(ephemeralFirst, ephemeralLast, publishedPorts, port -> {
+            try (ServerSocket socket = new ServerSocket()) {
+                socket.setReuseAddress(false);
+                socket.bind(new java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), port));
+                // Probe only: Docker performs the final bind after this socket closes.
+                return true;
+            } catch (BindException occupied) {
+                return false;
+            }
+        });
+    }
 
     static int[] readEphemeralRange(Path file) throws IOException {
         // Read a complete line from the virtual kernel file before validating its bounds.

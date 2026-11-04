@@ -1,12 +1,15 @@
 package com.nexa.api.support;
 
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.notification.JdbcSecurityNotificationOutboxAdapter;
+import com.nexa.api.bootstrap.runtime.database.tenant.local.LocalTenantDatabaseFixturePorts;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
@@ -35,6 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Connects real activation, one-shot provisioning, tenant routing and persisted business data. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Execution(ExecutionMode.SAME_THREAD)
 class OrganizationActivationProvisioningRoutingE2EIT extends PostgresIntegrationSupport {
 	private static final Path REPOSITORY_ROOT = Path.of("").toAbsolutePath().normalize();
 	private static final Path WORKER = REPOSITORY_ROOT.resolve("ops/scripts/tenant-business-database-provisioning-worker.sh");
@@ -124,6 +128,13 @@ class OrganizationActivationProvisioningRoutingE2EIT extends PostgresIntegration
 		Path parkedStateRoot = temporaryDirectory.resolve("parked-tenant-state");
 		Path parkedTenantStateDirectory = parkedStateRoot.resolve(tenantId.toString());
 		try {
+			int fixturePort = LocalTenantDatabaseFixturePorts.availableLoopbackPort();
+			assertThat(jdbc.update("""
+					UPDATE tenant_management.tenant_business_database_provisioning_task
+					   SET database_port=?
+					 WHERE task_id=? AND tenant_id=? AND workspace_id=?
+					   AND status='PENDING' AND database_port IS NULL
+					""", fixturePort, provisioningTaskId, tenantId, workspaceId)).isEqualTo(1);
 			UUID competingAnchorClaim = UUID.randomUUID();
 			assertThat(jdbc.update("""
 					UPDATE tenant_management.tenant_business_database_workspace_anchor_task
@@ -145,6 +156,7 @@ class OrganizationActivationProvisioningRoutingE2EIT extends PostgresIntegration
 					Integer.class, provisioningTaskId);
 			Integer provisioningPort = jdbc.queryForObject("select database_port from tenant_management.tenant_business_database_provisioning_task where task_id=?",
 					Integer.class, provisioningTaskId);
+			assertThat(provisioningPort).isEqualTo(fixturePort);
 			assertThat(jdbc.update("""
 					UPDATE tenant_management.tenant_business_database_workspace_anchor_task
 					   SET lease_until=current_timestamp - interval '1 second', updated_at=current_timestamp

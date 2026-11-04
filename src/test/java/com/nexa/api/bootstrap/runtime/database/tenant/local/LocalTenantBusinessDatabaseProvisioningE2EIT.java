@@ -10,16 +10,12 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
-import org.testcontainers.DockerClientFactory;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.io.IOException;
 import java.io.File;
-import java.net.BindException;
-import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,7 +28,6 @@ import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -58,7 +53,6 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static String apiContainerName;
 	private static String apiComposeProject;
 	private static boolean apiContainerStarted;
-	private static final LocalTenantDatabaseFixturePorts FIXTURE_PORTS = new LocalTenantDatabaseFixturePorts();
 	private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS = Set.of(
 			PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
 	private static final Set<PosixFilePermission> PRIVATE_FILE_PERMISSIONS = Set.of(
@@ -123,7 +117,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		UUID readyWorkspaceId = UUID.randomUUID();
 		seedTenantAndWorkspace(readyTenantId, readyWorkspaceId);
 		Path readyStateDirectory = temporaryDirectory.resolve("ready-state");
-		int readyPort = availableLoopbackPort();
+		int readyPort = LocalTenantDatabaseFixturePorts.availableLoopbackPort();
 		String readyVolume = volumeName(readyTenantId);
 		assertThat(volumeExists(readyVolume)).isFalse();
 		try {
@@ -167,7 +161,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		Path retryStateDirectory = temporaryDirectory.resolve("retry-state");
 		Files.createDirectory(retryStateDirectory);
 		Files.setPosixFilePermissions(retryStateDirectory, PRIVATE_DIRECTORY_PERMISSIONS);
-		int retryPort = availableLoopbackPort();
+		int retryPort = LocalTenantDatabaseFixturePorts.availableLoopbackPort();
 		Path retryTenantDirectory = createPreProvisionedState(retryStateDirectory, retryTenantId,
 				retryWorkspaceId, retryDatabaseIdentity, retryCredentialReference, retryPort);
 		String retryVolume = volumeName(retryTenantId);
@@ -291,7 +285,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		UUID selectedAnchorTaskId = UUID.randomUUID();
 		seedTenantAndWorkspace(selectedTenantId, selectedWorkspaceId);
 		OffsetDateTime selectedCreatedAt = OffsetDateTime.now().withNano(0);
-		int selectedPort = availableLoopbackPort();
+		int selectedPort = LocalTenantDatabaseFixturePorts.availableLoopbackPort();
 		insertProvisioningTask(selectedTaskId, selectedTenantId, selectedWorkspaceId, selectedCreatedAt, selectedPort);
 		insertWorkspaceAnchorTask(selectedAnchorTaskId, selectedTenantId, selectedWorkspaceId, selectedCreatedAt);
 		String selectedVolume = volumeName(selectedTenantId);
@@ -794,34 +788,6 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		return sanitized;
 	}
 
-	private static synchronized int availableLoopbackPort() throws IOException {
-		// Unknown ranges are treated conservatively as covering all valid explicit ports.
-		int ephemeralFirst = 1024;
-		int ephemeralLast = 65535;
-		Path ephemeralRange = Path.of("/proc/sys/net/ipv4/ip_local_port_range");
-		if (Files.isRegularFile(ephemeralRange)) {
-			int[] bounds = LocalTenantDatabaseFixturePorts.readEphemeralRange(ephemeralRange);
-			ephemeralFirst = bounds[0];
-			ephemeralLast = bounds[1];
-		}
-		Set<Integer> publishedPorts = new HashSet<>();
-		for (var container : DockerClientFactory.instance().client().listContainersCmd().exec()) {
-			if (container.getPorts() == null) continue;
-			for (var port : container.getPorts()) {
-				if (port.getPublicPort() != null) publishedPorts.add(port.getPublicPort());
-			}
-		}
-		return FIXTURE_PORTS.choose(ephemeralFirst, ephemeralLast, publishedPorts, port -> {
-			try (ServerSocket socket = new ServerSocket()) {
-				socket.setReuseAddress(false);
-				socket.bind(new java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), port));
-				// Probe only: Docker performs the final bind after this socket closes.
-				return true;
-			} catch (BindException occupied) {
-				return false;
-			}
-		});
-	}
 
 	private static String jdbcUrl(int port) {
 		return "jdbc:postgresql://127.0.0.1:" + port + "/nexa_tenant_business";
