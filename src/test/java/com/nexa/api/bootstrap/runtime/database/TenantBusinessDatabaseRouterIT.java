@@ -1,12 +1,13 @@
 package com.nexa.api.bootstrap.runtime.database;
 
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseAuthority;
 import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDatabaseBindingRegistry;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
-import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogFamilySkuMappingLoader;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceSeedItemRecord;
 import com.nexa.api.catalogcommercialpolicy.infrastructure.seed.CatalogPersistenceSeedLoader;
@@ -43,13 +44,18 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
 import javax.sql.DataSource;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.Savepoint;
 import java.sql.SQLNonTransientConnectionException;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Timestamp;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -67,7 +73,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 /** Exercises opt-in routing against one central and two physically separate PostgreSQL databases. */
 @Testcontainers(disabledWithoutDocker = true)
 class TenantBusinessDatabaseRouterIT {
-	private static final String CENTRAL_RUNTIME_PASSWORD = "central-runtime-only-test-password";
+	private static final String CENTRAL_RUNTIME_PASSWORD = CentralMigrationTestBootstrap.RUNTIME_PASSWORD;
 	private static final String TENANT_A_RUNTIME_PASSWORD = "tenant-a-runtime-only-test-password";
 	private static final String TENANT_B_RUNTIME_PASSWORD = "tenant-b-runtime-only-test-password";
 	private static final String TENANT_POLICY_SNAPSHOT_WRITER_PASSWORD = "tenant-policy-snapshot-writer-test-password";
@@ -99,8 +105,7 @@ class TenantBusinessDatabaseRouterIT {
 		configureWorkerRoles(TENANT_A);
 		configureWorkerRoles(TENANT_B);
 
-		Flyway.configure().dataSource(CENTRAL.getJdbcUrl(), CENTRAL.getUsername(), CENTRAL.getPassword())
-				.locations("classpath:db/migration").load().migrate();
+		CentralMigrationTestBootstrap.migrateToCurrent(CENTRAL);
 		Flyway.configure().dataSource(TENANT_A.getJdbcUrl(), TENANT_A.getUsername(), TENANT_A.getPassword())
 				.locations("classpath:db/tenant-migration").load().migrate();
 		Flyway.configure().dataSource(TENANT_B.getJdbcUrl(), TENANT_B.getUsername(), TENANT_B.getPassword())
@@ -139,6 +144,61 @@ class TenantBusinessDatabaseRouterIT {
 	}
 
 	@Test
+	void tenantRuntimeCannotMutateChangeFeedBySettingMaintenanceGuc() throws Exception {
+		try (Connection runtime = DriverManager.getConnection(TENANT_A.getJdbcUrl(), RUNTIME_USERNAME,
+				TENANT_A_RUNTIME_PASSWORD);
+			 Statement statement = runtime.createStatement()) {
+			statement.execute("SELECT set_config('nexa.change_feed.maintenance', 'on', false)");
+			UUID eventId = UUID.randomUUID();
+			TenantRecord tenant = fixture.tenantA();
+			assertThat(changeEventCount(statement, eventId)).as("Tenant feed must fail closed without scope").isZero();
+			setDatabaseSessionScope(runtime, UUID.randomUUID(), UUID.randomUUID());
+			assertThatThrownBy(() -> insertChangeEvent(runtime, eventId, tenant))
+					.as("Tenant runtime cannot append another Tenant's event")
+					.isInstanceOf(SQLException.class)
+					.hasMessageContaining("row-level security");
+			setDatabaseSessionScope(runtime, tenant.tenantId().value(), tenant.workspaceId().value());
+			insertChangeEvent(runtime, eventId, tenant);
+			assertThat(changeEventCount(statement, eventId)).as("matching Tenant scope can read its event").isEqualTo(1);
+			setDatabaseSessionScope(runtime, UUID.randomUUID(), UUID.randomUUID());
+			assertThat(changeEventCount(statement, eventId)).as("foreign scope cannot read Tenant events").isZero();
+			setDatabaseSessionScope(runtime, tenant.tenantId().value(), tenant.workspaceId().value());
+
+			assertThatThrownBy(() -> statement.executeUpdate(
+					"UPDATE integration.change_event SET event_type = event_type WHERE false"))
+					.as("Tenant runtime must not update append-only change events")
+					.isInstanceOf(SQLException.class)
+					.hasMessageContaining("permission denied");
+			assertThatThrownBy(() -> statement.executeUpdate(
+					"DELETE FROM integration.change_event WHERE false"))
+					.as("Tenant runtime must use the bounded retention function")
+					.isInstanceOf(SQLException.class)
+					.hasMessageContaining("permission denied");
+			assertThatThrownBy(() -> statement.execute("TRUNCATE integration.change_event"))
+					.as("Tenant runtime must not bypass append-only triggers through TRUNCATE")
+					.isInstanceOf(SQLException.class)
+					.hasMessageContaining("permission denied");
+
+			try (var result = statement.executeQuery("""
+					SELECT has_table_privilege(current_user, 'integration.change_event', 'SELECT'),
+					       has_table_privilege(current_user, 'integration.change_event', 'INSERT'),
+					       has_function_privilege(current_user,
+					           'integration.purge_expired_change_events(integer)', 'EXECUTE')
+					""")) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getBoolean(1)).isTrue();
+				assertThat(result.getBoolean(2)).isTrue();
+				assertThat(result.getBoolean(3)).isTrue();
+			}
+			try (var retention = statement.executeQuery("SELECT integration.purge_expired_change_events(1000)")) {
+				assertThat(retention.next()).isTrue();
+				assertThat(retention.getLong(1)).as("bounded owner retention still removes expired feed rows")
+						.isGreaterThanOrEqualTo(1);
+			}
+		}
+	}
+
+	@Test
 	void verifiedCentralBindingRoutesToTwoPhysicalDatabasesAndReusesTenantPools() {
 		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
 		CurrentAccessContext tenantB = resolveContext(fixture.tenantB());
@@ -169,6 +229,109 @@ class TenantBusinessDatabaseRouterIT {
 				CENTRAL_RUNTIME_PASSWORD)).isInstanceOf(SQLException.class);
 		assertThatThrownBy(() -> DriverManager.getConnection(CENTRAL.getJdbcUrl(), RUNTIME_USERNAME,
 				TENANT_A_RUNTIME_PASSWORD)).isInstanceOf(SQLException.class);
+	}
+
+	@Test
+	void physicalTenantBusinessChildrenUseForcedParentScopeRls() throws SQLException {
+		Map<String, String> protectedChildren = Map.of(
+				"sales.purchase_request_line", "purchase_request_line_parent_scope",
+				"sales.sales_order_line", "sales_order_line_parent_scope",
+				"warehouse.inventory_reservation_line", "inventory_reservation_line_parent_scope",
+				"warehouse.inventory_reservation_allocation", "inventory_reservation_allocation_parent_scope",
+				"warehouse.reservation_shortage", "reservation_shortage_parent_scope",
+				"tenant_management.notification_preference", "notification_preference_parent_scope");
+		assertForcedParentRls(tenantAAdmin, protectedChildren);
+		assertForcedParentRls(tenantBAdmin, protectedChildren);
+
+		TenantRecord tenantA = fixture.tenantA();
+		TenantRecord tenantB = fixture.tenantB();
+		try (Connection connection = DriverManager.getConnection(tenantA.container().getJdbcUrl(),
+				tenantA.container().getUsername(), tenantA.container().getPassword())) {
+			connection.setAutoCommit(false);
+			try {
+				ParentScopedChildren children = seedParentScopedChildren(connection, tenantA);
+				insertFixtureRow(connection, """
+						INSERT INTO tenant_management.notification_preference
+						    (workspace_id,event_category,channel,enabled,updated_at)
+						VALUES (?,'ORDER_STATUS','IN_APP',true,current_timestamp)
+						""", tenantA.workspaceId().value());
+
+				// These BEFORE triggers query the parent rows as the runtime caller. With a mismatched
+				// workspace they raise a domain exception before PostgreSQL evaluates RLS WITH CHECK.
+				// Disable only those two validations in this rollback-only fixture transaction so each
+				// rejected INSERT demonstrates the V26 policy itself. RLS/FORCE remains enabled.
+				try (Statement statement = connection.createStatement()) {
+					statement.execute("ALTER TABLE warehouse.inventory_reservation_line DISABLE TRIGGER reservation_line_sku_scope");
+					statement.execute("ALTER TABLE warehouse.inventory_reservation_allocation DISABLE TRIGGER reservation_allocation_scope");
+					statement.execute("SET LOCAL ROLE nexa_runtime");
+				}
+				assertThat(currentDatabaseRole(connection)).isEqualTo(RUNTIME_USERNAME);
+				for (String table : protectedChildren.keySet()) {
+					assertRuntimeCanSelectAndInsert(connection, table);
+				}
+
+				setDatabaseScope(connection, tenantA);
+				assertChildCount(connection, "sales.purchase_request_line", children.purchaseRequestLineId(), 1);
+				assertChildCount(connection, "sales.sales_order_line", children.salesOrderLineId(), 1);
+				assertChildCount(connection, "warehouse.inventory_reservation_line", children.reservationLineId(), 1);
+				assertChildCount(connection, "warehouse.inventory_reservation_allocation", children.allocationId(), 1);
+				assertChildCount(connection, "warehouse.reservation_shortage", children.shortageId(), 1);
+				assertNotificationPreferenceCount(connection, tenantA.workspaceId().value(), 1);
+
+				setDatabaseScope(connection, tenantA.tenantId().value(), tenantB.workspaceId().value());
+				assertChildCount(connection, "sales.purchase_request_line", children.purchaseRequestLineId(), 0);
+				assertChildCount(connection, "sales.sales_order_line", children.salesOrderLineId(), 0);
+				assertChildCount(connection, "warehouse.inventory_reservation_line", children.reservationLineId(), 0);
+				assertChildCount(connection, "warehouse.inventory_reservation_allocation", children.allocationId(), 0);
+				assertChildCount(connection, "warehouse.reservation_shortage", children.shortageId(), 0);
+				assertNotificationPreferenceCount(connection, tenantA.workspaceId().value(), 0);
+
+				assertRlsRejectedInsert(connection, "sales.purchase_request_line", """
+					INSERT INTO sales.purchase_request_line
+					    (id,purchase_request_id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,
+					     unit_price_amount,unit_price_currency,created_at,updated_at,sku_id,product_family_id,
+					     product_family_code_snapshot,sku_code_snapshot)
+					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+					""", UUID.randomUUID(), children.purchaseRequestId(), children.deniedPurchaseRequestCatalogItemId(),
+					"Unauthorized item", "Unit", new BigDecimal("1"), "UNIT", new BigDecimal("1"), "PEN",
+					children.createdAt(), children.createdAt(), children.skuId(), children.productFamilyId(),
+					children.productFamilyCode(), children.skuCode());
+				assertRlsRejectedInsert(connection, "sales.sales_order_line", """
+					INSERT INTO sales.sales_order_line
+					    (id,sales_order_id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,
+					     unit_price_amount,unit_price_currency,line_subtotal,created_at,sku_id,product_family_id,
+					     product_family_code_snapshot,sku_code_snapshot)
+					VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+					""", UUID.randomUUID(), children.salesOrderId(), children.deniedSalesOrderCatalogItemId(),
+					"Unauthorized item", "Unit", new BigDecimal("1"), "UNIT", new BigDecimal("1"), "PEN",
+					new BigDecimal("1"), children.createdAt(), children.skuId(), children.productFamilyId(),
+					children.productFamilyCode(), children.skuCode());
+				assertRlsRejectedInsert(connection, "warehouse.inventory_reservation_line", """
+					INSERT INTO warehouse.inventory_reservation_line
+					    (id,reservation_id,catalog_item_id,requested_quantity,unit,shortage_quantity,sku_id)
+					VALUES (?,?,?,?,?,?,?)
+					""", UUID.randomUUID(), children.reservationId(), children.deniedReservationCatalogItemId(),
+					new BigDecimal("1"), "UNIT", BigDecimal.ZERO, children.alternateSkuId());
+				assertRlsRejectedInsert(connection, "warehouse.inventory_reservation_allocation", """
+					INSERT INTO warehouse.inventory_reservation_allocation
+					    (id,reservation_line_id,lot_id,quantity,unit,expiration_date)
+					VALUES (?,?,?,?,?,?)
+					""", UUID.randomUUID(), children.reservationLineId(), children.alternateLotId(),
+					new BigDecimal("1"), "UNIT", children.expirationDate());
+				assertRlsRejectedInsert(connection, "warehouse.reservation_shortage", """
+					INSERT INTO warehouse.reservation_shortage (id,reservation_line_id,quantity,reason)
+					VALUES (?,?,?,?)
+					""", UUID.randomUUID(), children.reservationLineId(), new BigDecimal("1"), "RLS scope test");
+				assertRlsRejectedInsert(connection, "tenant_management.notification_preference", """
+					INSERT INTO tenant_management.notification_preference
+					    (workspace_id,event_category,channel,enabled,updated_at)
+					VALUES (?,'INVITATION','EMAIL',true,current_timestamp)
+					""", tenantA.workspaceId().value());
+			} finally {
+				// This also removes append-only child rows; rollback restores the validation triggers.
+				connection.rollback();
+			}
+		}
 	}
 
 	@Test
@@ -667,6 +830,313 @@ class TenantBusinessDatabaseRouterIT {
 		return admin.queryForObject("SELECT count(*) FROM nexa_platform.route_probe WHERE id=?", Integer.class, id);
 	}
 
+	private static void assertForcedParentRls(JdbcTemplate admin, Map<String, String> tablesAndPolicies) {
+		tablesAndPolicies.forEach((table, policy) -> {
+			String[] relation = table.split("\\.", 2);
+			Integer matches = admin.queryForObject("""
+					SELECT count(*)
+					FROM pg_class c
+					JOIN pg_namespace n ON n.oid=c.relnamespace
+					JOIN pg_policies p ON p.schemaname=n.nspname AND p.tablename=c.relname
+					WHERE n.nspname=? AND c.relname=? AND p.policyname=?
+					  AND c.relrowsecurity AND c.relforcerowsecurity
+					""", Integer.class, relation[0], relation[1], policy);
+			assertThat(matches).as("forced RLS policy %s on %s", policy, table).isEqualTo(1);
+		});
+	}
+
+	private static ParentScopedChildren seedParentScopedChildren(Connection connection, TenantRecord tenant)
+			throws SQLException {
+		String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+		String ruc = "20" + String.format(java.util.Locale.ROOT, "%09d",
+				Math.floorMod(UUID.randomUUID().getMostSignificantBits(), 1_000_000_000L));
+		UUID accountId = UUID.randomUUID();
+		UUID purchaseRequestId = UUID.randomUUID();
+		UUID purchaseRequestLineId = UUID.randomUUID();
+		UUID salesOrderId = UUID.randomUUID();
+		UUID salesOrderLineId = UUID.randomUUID();
+		UUID categoryId = UUID.randomUUID();
+		UUID brandId = UUID.randomUUID();
+		UUID productFamilyId = UUID.randomUUID();
+		UUID skuId = UUID.randomUUID();
+		UUID alternateSkuId = UUID.randomUUID();
+		UUID warehouseId = UUID.randomUUID();
+		UUID zoneId = UUID.randomUUID();
+		UUID lotId = UUID.randomUUID();
+		UUID alternateLotId = UUID.randomUUID();
+		UUID reservationId = UUID.randomUUID();
+		UUID reservationLineId = UUID.randomUUID();
+		UUID allocationId = UUID.randomUUID();
+		UUID shortageId = UUID.randomUUID();
+		String productFamilyCode = "rls-family-" + suffix;
+		String skuCode = "RLS-SKU-" + suffix;
+		String alternateSkuCode = "RLS-ALT-" + suffix;
+		String purchaseRequestCatalogItemId = "pr-item-" + suffix;
+		String salesOrderCatalogItemId = "so-item-" + suffix;
+		String reservationCatalogItemId = "reservation-item-" + suffix;
+		String orderNumber = "RLS" + suffix;
+		Timestamp createdAt = Timestamp.from(Instant.now());
+		Timestamp expiresAt = Timestamp.from(createdAt.toInstant().plusSeconds(86_400));
+		LocalDate expirationDate = LocalDate.now().plusDays(365);
+
+		insertFixtureRow(connection, """
+				INSERT INTO catalog_management.category
+				    (id,tenant_id,workspace_id,slug,name,status,created_at,updated_at)
+				VALUES (?,?,?,?,?,'ACTIVE',?,?)
+				""", categoryId, tenant.tenantId().value(), tenant.workspaceId().value(),
+				"rls-category-" + suffix, "RLS category", createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO catalog_management.brand
+				    (id,tenant_id,workspace_id,slug,name,status,created_at,updated_at)
+				VALUES (?,?,?,?,?,'ACTIVE',?,?)
+				""", brandId, tenant.tenantId().value(), tenant.workspaceId().value(),
+				"rls-brand-" + suffix, "RLS brand", createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO catalog_management.product_family
+				    (id,tenant_id,workspace_id,family_code,name,description,category_id,brand_id,storage_family,status,
+				     created_at,updated_at)
+				VALUES (?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)
+				""", productFamilyId, tenant.tenantId().value(), tenant.workspaceId().value(), productFamilyCode,
+				"RLS family", "Parent-scoped RLS integration fixture", categoryId, brandId, "AMBIENT", createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO catalog_management.sellable_sku
+				    (id,tenant_id,workspace_id,family_id,sku_code,presentation,packaging_type,unit_of_measure,created_at,updated_at)
+				VALUES (?,?,?,?,?,?,?,?,?,?)
+				""", skuId, tenant.tenantId().value(), tenant.workspaceId().value(), productFamilyId, skuCode,
+				"RLS unit", "UNIT", "UNIT", createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO catalog_management.sellable_sku
+				    (id,tenant_id,workspace_id,family_id,sku_code,presentation,packaging_type,unit_of_measure,created_at,updated_at)
+				VALUES (?,?,?,?,?,?,?,?,?,?)
+				""", alternateSkuId, tenant.tenantId().value(), tenant.workspaceId().value(), productFamilyId,
+				alternateSkuCode, "RLS alternate unit", "UNIT", "UNIT", createdAt, createdAt);
+
+		insertFixtureRow(connection, """
+				INSERT INTO sales.client_account
+				    (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,
+				     tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,
+				     status,created_at,updated_at)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				""", accountId, tenant.tenantId().value(), tenant.workspaceId().value(), "RLS-" + suffix,
+				"RLS fixture account", "RLS fixture account", "PE", "RUC", ruc,
+				"RETAIL", "RLS fixture", "rls-" + suffix + "@example.test", "+51000000000", "STANDARD",
+				"IMMEDIATE", "ACTIVE", createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO sales.purchase_request
+				    (id,tenant_id,workspace_id,client_account_id,buyer_membership_id,code,status,priority,created_at,updated_at)
+				VALUES (?,?,?,?,?,?,'DRAFT','NORMAL',?,?)
+				""", purchaseRequestId, tenant.tenantId().value(), tenant.workspaceId().value(), accountId,
+				tenant.membershipId().value(), "RLS-PR-" + suffix, createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO sales.purchase_request_line
+				    (id,purchase_request_id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,
+				     unit_price_amount,unit_price_currency,created_at,updated_at,sku_id,product_family_id,
+				     product_family_code_snapshot,sku_code_snapshot)
+				VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?)
+				""", purchaseRequestLineId, purchaseRequestId, purchaseRequestCatalogItemId, "RLS item", "RLS unit",
+				new BigDecimal("2"), "UNIT", new BigDecimal("1"), "PEN", createdAt, createdAt, skuId,
+				productFamilyId, productFamilyCode, skuCode);
+		insertFixtureRow(connection, """
+				INSERT INTO sales.sales_order
+				    (id,tenant_id,workspace_id,number,client_account_id,created_by_membership_id,priority,currency,
+				     total_amount,status,created_at,updated_at,order_source,origin_type)
+				VALUES (?,?,?,?,?,?,'NORMAL','PEN',?,'CONFIRMED',?,?,'MANUAL','MANUAL')
+				""", salesOrderId, tenant.tenantId().value(), tenant.workspaceId().value(), orderNumber,
+				accountId, tenant.membershipId().value(), new BigDecimal("2"), createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO sales.sales_order_line
+				    (id,sales_order_id,catalog_item_id,item_name_snapshot,presentation_snapshot,quantity,unit,
+				     unit_price_amount,unit_price_currency,line_subtotal,created_at,sku_id,product_family_id,
+				     product_family_code_snapshot,sku_code_snapshot)
+				VALUES (?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?)
+				""", salesOrderLineId, salesOrderId, salesOrderCatalogItemId, "RLS item", "RLS unit",
+				new BigDecimal("2"), "UNIT", new BigDecimal("1"), "PEN", new BigDecimal("2"), createdAt,
+				skuId, productFamilyId, productFamilyCode, skuCode);
+
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.warehouse
+				    (id,tenant_id,workspace_id,code,name,status,created_at,updated_at)
+				VALUES (?,?,?,?,?,'ACTIVE',?,?)
+				""", warehouseId, tenant.tenantId().value(), tenant.workspaceId().value(), "RLS-" + suffix,
+				"RLS warehouse", createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.storage_zone
+				    (id,tenant_id,workspace_id,warehouse_id,code,name,zone_type,status,created_at,updated_at)
+				VALUES (?,?,?,?,?,?,'AMBIENT','ACTIVE',?,?)
+				""", zoneId, tenant.tenantId().value(), tenant.workspaceId().value(), warehouseId,
+				"RLS-" + suffix, "RLS zone", createdAt, createdAt);
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.inventory_lot
+				    (id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,batch_number,expiration_date,
+				     received_at,stock_quantity,unit,sku_id)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+				""", lotId, tenant.tenantId().value(), tenant.workspaceId().value(), warehouseId, zoneId,
+				reservationCatalogItemId, "BATCH-" + suffix, expirationDate, createdAt, new BigDecimal("10"),
+				"UNIT", skuId);
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.inventory_lot
+				    (id,tenant_id,workspace_id,warehouse_id,zone_id,catalog_item_id,batch_number,expiration_date,
+				     received_at,stock_quantity,unit,sku_id)
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+				""", alternateLotId, tenant.tenantId().value(), tenant.workspaceId().value(), warehouseId, zoneId,
+				reservationCatalogItemId, "ALT-BATCH-" + suffix, expirationDate, createdAt, new BigDecimal("10"),
+				"UNIT", skuId);
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.inventory_reservation
+				    (id,tenant_id,workspace_id,sales_order_id,order_number,client_account_id,status,created_at,updated_at,expires_at)
+				VALUES (?,?,?,?,?,?,'SHORTAGE',?,?,?)
+				""", reservationId, tenant.tenantId().value(), tenant.workspaceId().value(), salesOrderId,
+				orderNumber, accountId, createdAt, createdAt, expiresAt);
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.inventory_reservation_line
+				    (id,reservation_id,catalog_item_id,requested_quantity,unit,shortage_quantity,sku_id)
+				VALUES (?,?,?,?,?,?,?)
+				""", reservationLineId, reservationId, reservationCatalogItemId, new BigDecimal("2"), "UNIT",
+				new BigDecimal("1"), skuId);
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.inventory_reservation_allocation
+				    (id,reservation_line_id,lot_id,quantity,unit,expiration_date)
+				VALUES (?,?,?,?,?,?)
+				""", allocationId, reservationLineId, lotId, new BigDecimal("1"), "UNIT", expirationDate);
+		insertFixtureRow(connection, """
+				INSERT INTO warehouse.reservation_shortage (id,reservation_line_id,quantity,reason)
+				VALUES (?,?,?,?)
+				""", shortageId, reservationLineId, new BigDecimal("1"), "RLS fixture shortage");
+
+		return new ParentScopedChildren(purchaseRequestId, purchaseRequestLineId, salesOrderId, salesOrderLineId,
+				productFamilyId, productFamilyCode, skuId, skuCode, alternateSkuId, reservationId,
+				reservationLineId, allocationId, shortageId, alternateLotId, expirationDate, createdAt, suffix);
+	}
+
+	private static void insertFixtureRow(Connection connection, String sql, Object... values) throws SQLException {
+		try (PreparedStatement statement = connection.prepareStatement(sql)) {
+			for (int index = 0; index < values.length; index++) {
+				statement.setObject(index + 1, values[index]);
+			}
+			statement.executeUpdate();
+		}
+	}
+
+	private static String currentDatabaseRole(Connection connection) throws SQLException {
+		try (Statement statement = connection.createStatement(); var result = statement.executeQuery("SELECT current_user")) {
+			assertThat(result.next()).isTrue();
+			return result.getString(1);
+		}
+	}
+
+	private static void assertRuntimeCanSelectAndInsert(Connection connection, String table) throws SQLException {
+		try (PreparedStatement statement = connection.prepareStatement("""
+				SELECT has_table_privilege('nexa_runtime', ?, 'SELECT'),
+			       has_table_privilege('nexa_runtime', ?, 'INSERT')
+				""")) {
+			statement.setString(1, table);
+			statement.setString(2, table);
+			try (var result = statement.executeQuery()) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getBoolean(1)).as("nexa_runtime SELECT on %s", table).isTrue();
+				assertThat(result.getBoolean(2)).as("nexa_runtime INSERT on %s", table).isTrue();
+			}
+		}
+	}
+
+	private static void setDatabaseScope(Connection connection, TenantRecord tenant) throws SQLException {
+		setDatabaseScope(connection, tenant.tenantId().value(), tenant.workspaceId().value());
+	}
+
+	private static void setDatabaseScope(Connection connection, UUID tenantId, UUID workspaceId) throws SQLException {
+		try (PreparedStatement statement = connection.prepareStatement("""
+				SELECT set_config('app.current_tenant_id', ?, true),
+			       set_config('app.current_workspace_id', ?, true)
+				""")) {
+			statement.setString(1, tenantId.toString());
+			statement.setString(2, workspaceId.toString());
+			statement.execute();
+		}
+	}
+
+	private static void setDatabaseSessionScope(Connection connection, UUID tenantId, UUID workspaceId)
+			throws SQLException {
+		try (PreparedStatement statement = connection.prepareStatement("""
+				SELECT set_config('app.current_tenant_id', ?, false),
+				       set_config('app.current_workspace_id', ?, false)
+				""")) {
+			statement.setString(1, tenantId.toString());
+			statement.setString(2, workspaceId.toString());
+			statement.execute();
+		}
+	}
+
+	private static long changeEventCount(Statement statement, UUID eventId) throws SQLException {
+		try (var result = statement.executeQuery("SELECT count(*) FROM integration.change_event WHERE event_id='"
+				+ eventId + "'")) {
+			assertThat(result.next()).isTrue();
+			return result.getLong(1);
+		}
+	}
+
+	private static void insertChangeEvent(Connection connection, UUID eventId, TenantRecord tenant) throws SQLException {
+		Instant now = Instant.now();
+		try (PreparedStatement statement = connection.prepareStatement("""
+				INSERT INTO integration.change_event
+					(event_id,tenant_id,workspace_id,aggregate_type,aggregate_id,event_type,audiences,occurred_at,expires_at)
+				VALUES (?,?,?,'scope-test',?,'scope-test.event',ARRAY['OWNER'],?,?)
+				""")) {
+			statement.setObject(1, eventId);
+			statement.setObject(2, tenant.tenantId().value());
+			statement.setObject(3, tenant.workspaceId().value());
+			statement.setObject(4, UUID.randomUUID());
+			statement.setTimestamp(5, Timestamp.from(now));
+			statement.setTimestamp(6, Timestamp.from(now.minusSeconds(1)));
+			statement.executeUpdate();
+		}
+	}
+
+	private static void assertChildCount(Connection connection, String table, UUID childId, long expectedCount)
+			throws SQLException {
+		try (PreparedStatement statement = connection.prepareStatement("SELECT count(*) FROM " + table + " WHERE id=?")) {
+			statement.setObject(1, childId);
+			try (var result = statement.executeQuery()) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).as("visible rows in %s for child %s", table, childId).isEqualTo(expectedCount);
+			}
+		}
+	}
+
+	private static void assertNotificationPreferenceCount(Connection connection, UUID workspaceId, long expectedCount)
+			throws SQLException {
+		try (PreparedStatement statement = connection.prepareStatement("""
+				SELECT count(*) FROM tenant_management.notification_preference
+				WHERE workspace_id=? AND event_category='ORDER_STATUS' AND channel='IN_APP'
+				""")) {
+			statement.setObject(1, workspaceId);
+			try (var result = statement.executeQuery()) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getLong(1)).isEqualTo(expectedCount);
+			}
+		}
+	}
+
+	private static void assertRlsRejectedInsert(Connection connection, String table, String sql, Object... values)
+			throws SQLException {
+		Savepoint savepoint = connection.setSavepoint();
+		SQLException failure = null;
+		try (PreparedStatement statement = connection.prepareStatement(sql)) {
+			for (int index = 0; index < values.length; index++) {
+				statement.setObject(index + 1, values[index]);
+			}
+			statement.executeUpdate();
+		} catch (SQLException exception) {
+			failure = exception;
+		} finally {
+			connection.rollback(savepoint);
+			connection.releaseSavepoint(savepoint);
+		}
+		assertThat(failure == null).as("wrong-workspace INSERT into %s is rejected by RLS", table).isFalse();
+		assertThat(failure.getSQLState()).as("RLS SQLSTATE for INSERT into %s", table).isEqualTo("42501");
+		assertThat(failure.getMessage()).as("INSERT into %s fails the row-level security policy", table)
+				.contains("row-level security policy");
+	}
+
 	private static Map<String, TenantBusinessDatabaseCredentials> credentialsFor(TestFixture fixture,
 			boolean routeTenantAToTenantB) {
 		TenantRecord credentialsForA = routeTenantAToTenantB ? fixture.tenantB() : fixture.tenantA();
@@ -701,8 +1171,8 @@ class TenantBusinessDatabaseRouterIT {
 				tenantId.value(), tenantName, tenantSlug + "-" + tenantId, "ACTIVE", now, now);
 		central.update("INSERT INTO tenant_management.workspace (id,tenant_id,name,slug,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
 				workspaceId.value(), tenantId.value(), tenantName + " Workspace", "primary", "ACTIVE", now, now);
-		central.update("INSERT INTO tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-				membershipId.value(), workspaceId.value(), userId.value(), "INTERNAL", "ACTIVE", now, now);
+		central.update("INSERT INTO tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+				membershipId.value(), tenantId.value(), workspaceId.value(), userId.value(), "INTERNAL", "ACTIVE", now, now);
 		central.update("""
 				INSERT INTO tenant_management.membership_role_definition
 				    (membership_id,tenant_id,workspace_id,role_id,assigned_at)
@@ -835,7 +1305,7 @@ class TenantBusinessDatabaseRouterIT {
 	private static void configureRuntimeRole(PostgreSQLContainer container, String runtimePassword) {
 		try (Connection connection = DriverManager.getConnection(container.getJdbcUrl(), container.getUsername(), container.getPassword());
 				var statement = connection.createStatement()) {
-			statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + runtimePassword + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT PASSWORD '" + runtimePassword + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 		} catch (Exception exception) {
 			throw new IllegalStateException("Could not create the restricted runtime role for routing integration tests", exception);
 		}
@@ -864,6 +1334,8 @@ class TenantBusinessDatabaseRouterIT {
 			statement.execute("CREATE ROLE nexa_business_traceability_worker LOGIN PASSWORD '"
 					+ TRACEABILITY_WORKER_PASSWORD
 					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker NOLOGIN NOINHERIT "
+					+ "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + container.getDatabaseName()
 					+ "\" TO nexa_business_documents_worker, nexa_payments_worker, nexa_business_traceability_worker");
 		} catch (Exception exception) {
@@ -901,6 +1373,15 @@ class TenantBusinessDatabaseRouterIT {
 	}
 
 	private record TestFixture(TenantRecord tenantA, TenantRecord tenantB) { }
+
+	private record ParentScopedChildren(UUID purchaseRequestId, UUID purchaseRequestLineId, UUID salesOrderId,
+			UUID salesOrderLineId, UUID productFamilyId, String productFamilyCode, UUID skuId, String skuCode,
+			UUID alternateSkuId, UUID reservationId, UUID reservationLineId, UUID allocationId, UUID shortageId,
+			UUID alternateLotId, LocalDate expirationDate, Timestamp createdAt, String suffix) {
+		private String deniedPurchaseRequestCatalogItemId() { return "denied-pr-item-" + suffix; }
+		private String deniedSalesOrderCatalogItemId() { return "denied-so-item-" + suffix; }
+		private String deniedReservationCatalogItemId() { return "denied-reservation-item-" + suffix; }
+	}
 
 	private record TenantRecord(TenantId tenantId, WorkspaceId workspaceId, MembershipId membershipId,
 			UserId userId, UUID databaseIdentity, String credentialSecretReference,

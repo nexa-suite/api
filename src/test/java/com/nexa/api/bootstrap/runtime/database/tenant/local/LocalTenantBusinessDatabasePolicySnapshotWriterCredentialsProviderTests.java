@@ -57,7 +57,8 @@ class LocalTenantBusinessDatabasePolicySnapshotWriterCredentialsProviderTests {
 				+ "wallet-recharge-callback-credential-reference=local-tenant-wallet-recharge-worker:" + tenantId + "\n"
 				+ "business-documents-worker-credential-reference=local-tenant-business-documents-worker:" + tenantId + "\n"
 				+ "payment-callback-worker-credential-reference=local-tenant-payment-callback-worker:" + tenantId + "\n"
-				+ "business-traceability-worker-credential-reference=local-tenant-business-traceability-worker:" + tenantId + "\n");
+				+ "business-traceability-worker-credential-reference=local-tenant-business-traceability-worker:" + tenantId + "\n"
+				+ "reservation-expiry-worker-credential-reference=local-tenant-inventory-reservation-expiry-worker:" + tenantId + "\n");
 		writeWriterCredentials(tenantDirectory.resolve("policy-snapshot-writer.properties"), tenantId,
 				"jdbc:postgresql://127.0.0.1:5547/nexa_tenant_business", "nexa_policy_snapshot_writer",
 				"tenant-policy-snapshot-writer-test-secret");

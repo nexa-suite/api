@@ -37,10 +37,20 @@ public final class DispatchReadinessModels {
                             boolean ready,
                             List<String> reasons,
                             List<LineReadiness> lines,
-                            Instant asOf) {
+                            Instant asOf,
+                            @Schema(nullable = true) String orderNumber,
+                            @Schema(nullable = true) String customerName,
+                            @Schema(nullable = true) String priority) {
         public Readiness {
             reasons = List.copyOf(reasons == null ? List.of() : reasons);
             lines = List.copyOf(lines == null ? List.of() : lines);
+        }
+        public Readiness withOrderHeader(String number, String customer, String orderPriority) {
+            return new Readiness(subjectKind, fulfillmentId, fulfillmentVersion, fulfillmentStatus,
+                    physicalAllocationId, physicalAllocationStatus, physicalAllocationVersion,
+                    deliveryId, deliveryStatus, deliveryVersion, windowStart, windowEnd, windowSource,
+                    allocationComplete, pickingComplete, pickingEvidenceComplete, ready, reasons, lines, asOf,
+                    number, customer, orderPriority);
         }
     }
 

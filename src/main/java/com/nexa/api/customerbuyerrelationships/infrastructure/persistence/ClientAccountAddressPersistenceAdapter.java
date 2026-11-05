@@ -56,7 +56,7 @@ public class ClientAccountAddressPersistenceAdapter
     public Optional<ClientAccountAddress> findForBuyer(String tenantId, String workspaceId, String membershipId, String addressId) {
         return jdbc.query(SELECT + " join sales.client_account_membership m on m.client_account_id=a.client_account_id "
                         + "and m.tenant_id=a.tenant_id and m.workspace_id=a.workspace_id "
-                        + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? and a.id=? and a.status='ACTIVE'",
+                        + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? and m.status='ACTIVE' and a.id=? and a.status='ACTIVE'",
                 rs -> rs.next() ? Optional.of(address(rs)) : Optional.empty(),
                 uuid(tenantId), uuid(workspaceId), uuid(membershipId), uuid(addressId));
     }
@@ -64,7 +64,7 @@ public class ClientAccountAddressPersistenceAdapter
     public Optional<ClientAccountAddress> findDefaultForBuyer(String tenantId, String workspaceId, String membershipId) {
         return jdbc.query(SELECT + " join sales.client_account_membership m on m.client_account_id=a.client_account_id "
                         + "and m.tenant_id=a.tenant_id and m.workspace_id=a.workspace_id "
-                        + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? "
+                        + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? and m.status='ACTIVE' "
                         + "and a.default_address and a.status='ACTIVE'",
                 rs -> rs.next() ? Optional.of(address(rs)) : Optional.empty(),
                 uuid(tenantId), uuid(workspaceId), uuid(membershipId));
@@ -187,7 +187,7 @@ public class ClientAccountAddressPersistenceAdapter
                         + "join sales.client_account_membership m on m.client_account_id=a.client_account_id "
                         + "and m.tenant_id=a.tenant_id and m.workspace_id=a.workspace_id "
                         + "where a.tenant_id=? and a.workspace_id=? and m.workspace_membership_id=? "
-                        + "and a.status='ACTIVE' and ca.status='ACTIVE' and " + predicate,
+                        + "and m.status='ACTIVE' and a.status='ACTIVE' and ca.status='ACTIVE' and " + predicate,
                 rs -> rs.next() ? Optional.of(reference(address(rs))) : Optional.empty(), parameters.toArray());
     }
 

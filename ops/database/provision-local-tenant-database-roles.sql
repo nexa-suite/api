@@ -10,6 +10,7 @@ SELECT set_config('nexa.local.wallet_recharge_worker_password', :'wallet_recharg
 SELECT set_config('nexa.local.business_documents_worker_password', :'business_documents_worker_password', false) AS _business_documents_worker_password \gset
 SELECT set_config('nexa.local.payments_worker_password', :'payments_worker_password', false) AS _payments_worker_password \gset
 SELECT set_config('nexa.local.business_traceability_worker_password', :'business_traceability_worker_password', false) AS _business_traceability_worker_password \gset
+SELECT set_config('nexa.local.reservation_expiry_worker_password', :'reservation_expiry_worker_password', false) AS _reservation_expiry_worker_password \gset
 
 DO $provision$
 DECLARE
@@ -21,6 +22,7 @@ DECLARE
     business_documents_worker_role pg_roles%ROWTYPE;
     payments_worker_role pg_roles%ROWTYPE;
     business_traceability_worker_role pg_roles%ROWTYPE;
+    reservation_expiry_worker_role pg_roles%ROWTYPE;
 BEGIN
     IF current_user <> 'nexa_tenant_bootstrap_admin' THEN
         RAISE EXCEPTION 'Tenant roles must be provisioned by the isolated bootstrap administrator';
@@ -43,11 +45,11 @@ BEGIN
 		              WHERE member = migration_role.oid OR roleid = migration_role.oid) THEN
             RAISE EXCEPTION 'Existing Tenant migrator role has unsafe privileges or memberships';
         END IF;
-        EXECUTE format('ALTER ROLE nexa_migrator PASSWORD %L',
+        EXECUTE format('ALTER ROLE nexa_migrator NOINHERIT PASSWORD %L',
                        current_setting('nexa.local.migrator_password'));
     ELSE
         EXECUTE format(
-            'CREATE ROLE nexa_migrator LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+            'CREATE ROLE nexa_migrator LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
             current_setting('nexa.local.migrator_password'));
     END IF;
 
@@ -65,11 +67,11 @@ BEGIN
 		              WHERE has_schema_privilege(runtime_role.oid, oid, 'CREATE')) THEN
             RAISE EXCEPTION 'Existing Tenant runtime role has unsafe privileges or memberships';
         END IF;
-        EXECUTE format('ALTER ROLE nexa_runtime PASSWORD %L',
+        EXECUTE format('ALTER ROLE nexa_runtime NOINHERIT PASSWORD %L',
                        current_setting('nexa.local.runtime_password'));
     ELSE
         EXECUTE format(
-            'CREATE ROLE nexa_runtime LOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+            'CREATE ROLE nexa_runtime LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
             current_setting('nexa.local.runtime_password'));
     END IF;
 
@@ -188,13 +190,38 @@ BEGIN
             current_setting('nexa.local.business_traceability_worker_password'));
     END IF;
 
+    SELECT * INTO reservation_expiry_worker_role FROM pg_roles WHERE rolname = 'nexa_warehouse_reservation_expiry_worker';
+    IF FOUND THEN
+        IF NOT reservation_expiry_worker_role.rolcanlogin OR reservation_expiry_worker_role.rolinherit
+           OR reservation_expiry_worker_role.rolsuper OR reservation_expiry_worker_role.rolcreatedb
+           OR reservation_expiry_worker_role.rolcreaterole OR reservation_expiry_worker_role.rolreplication
+           OR reservation_expiry_worker_role.rolbypassrls
+           OR EXISTS (SELECT 1 FROM pg_auth_members
+                      WHERE member = reservation_expiry_worker_role.oid OR roleid = reservation_expiry_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_database WHERE datdba = reservation_expiry_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = reservation_expiry_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_class WHERE relowner = reservation_expiry_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_proc WHERE proowner = reservation_expiry_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_namespace
+                      WHERE has_schema_privilege(reservation_expiry_worker_role.oid, oid, 'CREATE')) THEN
+            RAISE EXCEPTION 'Existing Tenant reservation-expiry worker role has unsafe privileges or memberships';
+        END IF;
+        EXECUTE format('ALTER ROLE nexa_warehouse_reservation_expiry_worker PASSWORD %L',
+                       current_setting('nexa.local.reservation_expiry_worker_password'));
+    ELSE
+        EXECUTE format(
+            'CREATE ROLE nexa_warehouse_reservation_expiry_worker LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L',
+            current_setting('nexa.local.reservation_expiry_worker_password'));
+    END IF;
+
 END
 $provision$;
 
 REVOKE CONNECT, TEMPORARY ON DATABASE nexa_tenant_business FROM PUBLIC;
 GRANT CONNECT ON DATABASE nexa_tenant_business TO nexa_migrator, nexa_runtime,
     nexa_policy_snapshot_writer, nexa_wallet_recharge_worker, nexa_business_documents_worker,
-    nexa_payments_worker, nexa_business_traceability_worker;
+    nexa_payments_worker, nexa_business_traceability_worker,
+    nexa_warehouse_reservation_expiry_worker;
 GRANT CREATE ON DATABASE nexa_tenant_business TO nexa_migrator;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA public TO nexa_migrator;

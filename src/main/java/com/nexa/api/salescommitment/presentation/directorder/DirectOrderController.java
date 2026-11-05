@@ -31,6 +31,14 @@ public final class DirectOrderController {
         this.mapper = mapper;
     }
 
+    @GetMapping("/delivery-policy")
+    @Operation(operationId = "getDirectOrderDeliveryPolicy", summary = "Read Direct Order delivery policy",
+            description = "Requires SALES_ORDER_CREATE_MANUAL. Returns the fixed global five-business-day policy, calculated from America/Lima and shared with Direct Order validation.")
+    public DirectOrderUseCase.DirectOrderDeliveryPolicy deliveryPolicy(
+            @RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context) {
+        return directOrders.deliveryPolicy(context);
+    }
+
     @PostMapping
     @Operation(operationId = "createDirectOrder", summary = "Create and confirm a Direct Order atomically")
     @ApiResponses({
@@ -40,7 +48,10 @@ public final class DirectOrderController {
     })
     public ResponseEntity<SalesOrderResponse> create(
             @RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
-            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @io.swagger.v3.oas.annotations.Parameter(name = "Idempotency-Key",
+                    in = io.swagger.v3.oas.annotations.enums.ParameterIn.HEADER, required = true,
+                    description = "Stable retry key for this request")
+            @RequestHeader(name = "Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CreatePurchaseRequestRequest request) {
         var value = directOrders.create(context, request.clientAccountId(), request.priority(), request.requestedDeliveryDate(),
                 request.deliveryProfileSnapshot(), request.paymentOption(), request.comment(),

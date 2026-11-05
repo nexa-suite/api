@@ -1,5 +1,6 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.jpa;
 
+import com.nexa.api.support.CentralMigrationTestBootstrap;
 import com.nexa.api.tenantaccessgovernance.iam.application.exception.RefreshTokenReuseDetectedException;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.RefreshSessionCommand;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.SignInCommand;
@@ -7,6 +8,7 @@ import com.nexa.api.tenantaccessgovernance.iam.application.port.in.RefreshSessio
 import com.nexa.api.tenantaccessgovernance.iam.application.port.in.SignInUseCase;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -14,6 +16,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.annotation.DirtiesContext;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -29,17 +32,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 		"spring.autoconfigure.exclude=",
 		"nexa.security.reset.throttle-key=integration-reset-throttle-key-012345678901234567890123456789",
 		"nexa.security.notification-outbox-key=integration-notification-outbox-key-012345678901234567890123456789",
-		"nexa.security.system-operator-token=integration-system-operator-token-0123456789-abcdefghijklmnopqrstuvwxyz"
+		"nexa.security.system-operator-token=integration-system-operator-token-0123456789-abcdefghijklmnopqrstuvwxyz",
+		"nexa.scheduling.enabled=false"
 })
 @Testcontainers(disabledWithoutDocker = true)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class RefreshSessionPostgresIntegrationTests {
 	private static final String PASSWORD = "refresh-test-password";
+	private static final String RUNTIME_PASSWORD = "test-only-runtime-password";
 
 	@Container
 	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
 			.withDatabaseName("nexa")
 			.withUsername("nexa")
 			.withPassword("test-only-password");
+
+	@BeforeAll
+	static void migrateWithRestrictedLogin() {
+		CentralMigrationTestBootstrap.migrateToCurrent(POSTGRES);
+	}
 
 	@Autowired
 	private SignInUseCase signIn;
@@ -55,6 +66,13 @@ class RefreshSessionPostgresIntegrationTests {
 		registry.add("NEXA_DATABASE_URL", POSTGRES::getJdbcUrl);
 		registry.add("NEXA_DATABASE_USERNAME", POSTGRES::getUsername);
 		registry.add("NEXA_DATABASE_PASSWORD", POSTGRES::getPassword);
+		registry.add("NEXA_DATABASE_RUNTIME_USERNAME", () -> "nexa_runtime");
+		registry.add("NEXA_DATABASE_RUNTIME_PASSWORD", () -> RUNTIME_PASSWORD);
+		registry.add("NEXA_DATABASE_MIGRATOR_USERNAME", () -> CentralMigrationTestBootstrap.MIGRATOR_USERNAME);
+		registry.add("NEXA_DATABASE_MIGRATOR_PASSWORD", () -> CentralMigrationTestBootstrap.MIGRATOR_PASSWORD);
+		registry.add("NEXA_WORKSPACE_SCOPE_READER_PASSWORD", () -> CentralMigrationTestBootstrap.WORKSPACE_SCOPE_READER_PASSWORD);
+		registry.add("NEXA_INTERNAL_OPERATOR_DATABASE_PASSWORD",
+				() -> CentralMigrationTestBootstrap.INTERNAL_OPERATOR_DATABASE_PASSWORD);
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);

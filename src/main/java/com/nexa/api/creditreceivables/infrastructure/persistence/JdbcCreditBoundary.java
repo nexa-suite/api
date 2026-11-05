@@ -2,7 +2,7 @@ package com.nexa.api.creditreceivables.infrastructure.persistence;
 
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditReservationCommands;
-import com.nexa.api.customerbuyerrelationships.application.publicapi.LegacyCustomerCreditInitializationQuery;
+import com.nexa.api.creditreceivables.application.publicapi.CreditEligibilitySource;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -18,11 +18,11 @@ import java.util.UUID;
 @Profile("!test")
 public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservationCommands {
     private final JdbcTemplate jdbc;
-    private final LegacyCustomerCreditInitializationQuery customers;
+    private final CreditEligibilitySource creditEligibility;
 
-    public JdbcCreditBoundary(JdbcTemplate jdbc, LegacyCustomerCreditInitializationQuery customers) {
+    public JdbcCreditBoundary(JdbcTemplate jdbc, CreditEligibilitySource creditEligibility) {
         this.jdbc = jdbc;
-        this.customers = customers;
+        this.creditEligibility = java.util.Objects.requireNonNull(creditEligibility);
     }
 
     @Override
@@ -61,14 +61,11 @@ public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservatio
         if (commercialCommitmentId == null && purchaseRequestId == null) {
             throw new IllegalStateException("Credit commitment reference is required");
         }
+        if (!creditEligibility.lockAndCheckCreditAllowed(tenantId.toString(), workspaceId.toString(),
+                customerAccountId.toString())) {
+            throw new IllegalStateException("Credit commitment is not allowed by customer terms");
+        }
         CreditReservationRow existing = reservation(tenantId, workspaceId, commercialCommitmentId, purchaseRequestId);
-        customers.find(tenantId, workspaceId, customerAccountId, currency).ifPresent(customer ->
-                jdbc.update("insert into payments.credit_account "
-                                + "(id,tenant_id,workspace_id,client_account_id,currency,credit_limit,created_at,updated_at) "
-                                + "values (md5(? || ':' || ?)::uuid,?,?,?,?,?,?,?) "
-                                + "on conflict (tenant_id,workspace_id,client_account_id,currency) do nothing",
-                        customer.customerAccountId().toString(), customer.currency(), tenantId, workspaceId,
-                        customer.customerAccountId(), customer.currency(), customer.initialLimit(), timestamp(now), timestamp(now)));
         CreditAccountRow account = jdbc.query(
                 "select id,credit_limit,credit_exposure,reserved_exposure from payments.credit_account where tenant_id=? and workspace_id=? "
                         + "and client_account_id=? and currency=? and status='ACTIVE' for update",
@@ -123,7 +120,7 @@ public class JdbcCreditBoundary implements CreditExposureQuery, CreditReservatio
                                      UUID purchaseRequestId) {
         CreditReservationRow reservation = reservation(tenantId, workspaceId, commercialCommitmentId, purchaseRequestId);
         if (reservation == null || !"RESERVED".equals(reservation.status())) return;
-        UUID accountId = jdbc.query("select id from payments.credit_account where tenant_id=? and workspace_id=? and id=? and status='ACTIVE' for update",
+        UUID accountId = jdbc.query("select id from payments.credit_account where tenant_id=? and workspace_id=? and id=? for update",
                 (org.springframework.jdbc.core.ResultSetExtractor<UUID>) rs -> rs.next() ? rs.getObject(1, UUID.class) : null,
                 tenantId, workspaceId, reservation.creditAccountId());
         if (accountId == null) throw new IllegalStateException("Credit account is not configured");

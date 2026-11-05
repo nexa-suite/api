@@ -2,30 +2,39 @@ package com.nexa.api.fulfillmentdelivery.application;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.port.MobileDeliveryContractPort;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.MobileDeliveryContractOperations;
 import com.nexa.api.fulfillmentdelivery.application.service.MobileDeliveryContractService;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentCommands;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.UserId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
 import java.util.HexFormat;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -149,6 +158,59 @@ class MobileDeliveryContractServiceTests {
                 .isInstanceOf(FulfillmentOperationException.class)
                 .hasMessage("BUYER_RECEIPT_DECISION_INVALID");
         verify(persistence, never()).recordReceipt(any());
+    }
+
+    @Test
+    void acceptsOpaqueBuyerHandoffAndPublishesCanonicalCompletionOnlyForNewAcceptance() {
+        MobileDeliveryContractPort persistence = mock(MobileDeliveryContractPort.class);
+        CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+        BusinessTraceabilityCommands traceability = mock(BusinessTraceabilityCommands.class);
+        SalesOrderFulfillmentCommands salesOrderCommands = mock(SalesOrderFulfillmentCommands.class);
+        SalesOrderFulfillmentQuery salesOrders = mock(SalesOrderFulfillmentQuery.class);
+        CurrentAccessContext context = context();
+        UUID customerAccountId = UUID.randomUUID();
+        UUID receiptId = UUID.randomUUID();
+        UUID deliveryId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        UUID podId = UUID.randomUUID();
+        UUID salesOrderId = UUID.randomUUID();
+        when(context.hasRole(MembershipRole.BUYER)).thenReturn(true);
+        when(accounts.findBuyerReference(TENANT.toString(), WORKSPACE.toString(), MEMBERSHIP.toString()))
+                .thenReturn(Optional.of(new CustomerAccountReference(customerAccountId.toString(), "ACTIVE")));
+        when(persistence.recordAcceptance(any())).thenReturn(new MobileDeliveryContractPort.BuyerReceiptAcceptance(
+                receiptId, deliveryId, attemptId, podId, salesOrderId, BigDecimal.ONE, NOW, "DELIVERED", "SEALED",
+                1L, true, true, false));
+        when(salesOrders.getForUpdate(TENANT, WORKSPACE, salesOrderId)).thenReturn(
+                new SalesOrderFulfillmentQuery.Snapshot(salesOrderId, "SO-001", customerAccountId,
+                        "IN_FULFILLMENT", "PREPAID", null, null, "PEN", BigDecimal.ONE, 0L, List.of()));
+        when(salesOrders.get(TENANT, WORKSPACE, salesOrderId)).thenReturn(
+                new SalesOrderFulfillmentQuery.Snapshot(salesOrderId, "SO-001", customerAccountId,
+                        "COMPLETED", "PREPAID", null, null, "PEN", BigDecimal.ONE, 1L, List.of()));
+
+        var accepted = new MobileDeliveryContractService(persistence, accounts, traceability,
+                salesOrderCommands, salesOrders, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10))
+                .acceptReceipt(context, "opaque-qr-credential", "buyer-acceptance-1");
+
+        assertThat(accepted.receiptId()).isEqualTo(receiptId);
+        assertThat(accepted.deliveryId()).isEqualTo(deliveryId);
+        assertThat(accepted.attemptId()).isEqualTo(attemptId);
+        assertThat(accepted.podId()).isEqualTo(podId);
+        assertThat(accepted.acceptedQuantity()).isEqualTo(BigDecimal.ONE);
+        assertThat(accepted.deliveryStatus()).isEqualTo("DELIVERED");
+        assertThat(accepted.podStatus()).isEqualTo("SEALED");
+        assertThat(accepted.salesOrderStatus()).isEqualTo("COMPLETED");
+        assertThat(accepted.orderCompleted()).isTrue();
+        var request = org.mockito.ArgumentCaptor.forClass(MobileDeliveryContractPort.AcceptanceRequest.class);
+        verify(persistence).recordAcceptance(request.capture());
+        assertThat(request.getValue().tenantId()).isEqualTo(TENANT);
+        assertThat(request.getValue().workspaceId()).isEqualTo(WORKSPACE);
+        assertThat(request.getValue().buyerMembershipId()).isEqualTo(MEMBERSHIP);
+        assertThat(request.getValue().customerAccountId()).isEqualTo(customerAccountId);
+        assertThat(request.getValue().tokenHash()).isEqualTo(sha256("opaque-qr-credential"));
+        verify(context).requireSurface(Surface.PORTAL);
+        verify(salesOrderCommands).markCompleted(TENANT, WORKSPACE, salesOrderId, MEMBERSHIP, NOW,
+                "Buyer accepted the full ordered quantity", BigDecimal.ZERO);
+        verify(traceability, org.mockito.Mockito.times(2)).record(any(BusinessTraceabilityCommands.TraceRequest.class));
     }
 
     private static MobileDeliveryContractService service(MobileDeliveryContractPort persistence,

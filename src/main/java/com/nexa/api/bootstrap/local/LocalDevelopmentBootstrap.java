@@ -1,7 +1,5 @@
 package com.nexa.api.bootstrap.local;
 
-import com.nexa.api.bootstrap.local.seed.ClientAccountSeedLoader;
-import com.nexa.api.bootstrap.local.seed.ClientAccountSeedRecord;
 import com.nexa.api.shared.context.RlsRequestScope;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
@@ -42,19 +40,17 @@ public class LocalDevelopmentBootstrap {
 	private final BCryptPasswordEncoder encoder;
 	private final org.springframework.core.env.Environment environment;
 	private final Clock clock;
-	private final ClientAccountSeedLoader clientAccountSeedLoader;
 	private final TransactionTemplate transactionTemplate;
 	private final ResolveCurrentAccessContextUseCase accessContexts;
 	private final WarehouseObjectAccess warehouseObjectAccess;
 
-	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock, ClientAccountSeedLoader clientAccountSeedLoader,
+	public LocalDevelopmentBootstrap(JdbcTemplate jdbc, org.springframework.core.env.Environment environment, Clock clock,
 			PlatformTransactionManager transactionManager, ResolveCurrentAccessContextUseCase accessContexts,
 			WarehouseObjectAccess warehouseObjectAccess) {
 		this.jdbc = jdbc;
 		this.environment = environment;
 		this.encoder = new BCryptPasswordEncoder(environment.getProperty("nexa.security.bcrypt-strength", Integer.class, 12));
 		this.clock = clock;
-		this.clientAccountSeedLoader = clientAccountSeedLoader;
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
 		this.accessContexts = accessContexts;
 		this.warehouseObjectAccess = warehouseObjectAccess;
@@ -76,20 +72,17 @@ public class LocalDevelopmentBootstrap {
 					new UserSeed("NEXA_DEV_BUYER_EMAIL", "NEXA_DEV_BUYER_PASSWORD", Set.of("BUYER"))));
 			addOptionalUser(users, "NEXA_DEV_TENANT_ADMIN_EMAIL", "NEXA_DEV_TENANT_ADMIN_PASSWORD", Set.of("TENANT_ADMIN"));
 			addOptionalUser(users, "NEXA_DEV_BOM_EMAIL", "NEXA_DEV_BOM_PASSWORD", Set.of("BUSINESS_OPERATIONS_MANAGER"));
-			UUID buyerUserId = null;
 			for (UserSeed user : users) {
 				UUID userId = user(user, now);
-				if (user.roles().contains("BUYER")) buyerUserId = userId;
 				jdbc.update("insert into tenant_management.workspace_membership "
-						+ "(id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
+						+ "(id, tenant_id, workspace_id, user_id, membership_type, status, created_at, updated_at, version) values (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, 0) "
 						+ "on conflict (workspace_id, user_id) do update set membership_type = excluded.membership_type, status = 'ACTIVE', updated_at = excluded.updated_at",
-						LocalIdentityIds.forMembership(workspaceId, userId), workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
+						LocalIdentityIds.forMembership(workspaceId, userId), tenantId, workspaceId, userId, user.roles().contains("BUYER") ? "BUYER" : "INTERNAL", timestamp(now), timestamp(now));
 				UUID membershipId = jdbc.queryForObject("select id from tenant_management.workspace_membership where workspace_id=? and user_id=?", UUID.class, workspaceId, userId);
 				jdbc.update("delete from tenant_management.membership_role_definition a using tenant_management.role_definition r where a.role_id=r.id and a.membership_id=? and r.tenant_id is null", membershipId);
 				for (String role : user.roles()) jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) select ?,?,?,r.id,? from tenant_management.role_definition r where r.tenant_id is null and r.code=lower(?) on conflict do nothing", membershipId, tenantId, workspaceId, timestamp(now), role);
 				jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?,?,?,?,?) on conflict (membership_id) do update set authorization_version=tenant_management.membership_authorization_state.authorization_version+1,updated_at=excluded.updated_at", membershipId, tenantId, workspaceId, 0, timestamp(now));
 			}
-			seedClientAccounts(tenantId, workspaceId, buyerUserId, now);
 		} finally {
 			RlsRequestScope.clear();
 		}
@@ -186,44 +179,6 @@ public class LocalDevelopmentBootstrap {
 		}
 	}
 
-	private void seedClientAccounts(UUID tenantId, UUID workspaceId, UUID buyerUserId, Instant now) {
-		if (buyerUserId == null) return;
-		List<UUID> memberships = jdbc.query("select id from tenant_management.workspace_membership where workspace_id=? and user_id=? and membership_type='BUYER' and status='ACTIVE'", (rs, row) -> rs.getObject(1, UUID.class), workspaceId, buyerUserId);
-		if (memberships.isEmpty()) return;
-		UUID membershipId = memberships.get(0);
-		for (var seed : clientAccountSeedLoader.load()) {
-			BigDecimal creditLimit = seed.monthlyCreditLimit() == null ? BigDecimal.ZERO : seed.monthlyCreditLimit();
-			BigDecimal creditUsed = seed.monthlyCreditUsed() == null ? BigDecimal.ZERO : seed.monthlyCreditUsed();
-			BigDecimal availableCredit = creditLimit.subtract(creditUsed).max(BigDecimal.ZERO);
-			jdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,credit_limit,current_commercial_exposure,available_credit,default_payment_preference,status,created_at,updated_at,version) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) on conflict (tenant_id,code) do update set business_name=excluded.business_name,commercial_name=excluded.commercial_name,payment_condition=excluded.payment_condition,credit_limit=excluded.credit_limit,current_commercial_exposure=excluded.current_commercial_exposure,available_credit=excluded.available_credit,default_payment_preference=excluded.default_payment_preference,status=excluded.status,updated_at=excluded.updated_at",
-					LocalIdentityIds.forClientAccount(tenantId, seed.code()), tenantId, workspaceId, seed.code(), seed.businessName(), seed.commercialName(), "PE", "RUC", seed.ruc(), seed.segment(), seed.contact(), seed.contactEmail(), seed.phone(), seed.deliveryPreference(), seed.paymentCondition(), creditLimit, creditUsed, availableCredit, seed.paymentCondition(), "active".equalsIgnoreCase(seed.status()) ? "ACTIVE" : "SUSPENDED", timestamp(now), timestamp(now));
-				List<UUID> accounts = jdbc.query("select id from sales.client_account where tenant_id=? and workspace_id=? and code=?", (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, seed.code());
-				if (accounts.isEmpty() || !seed.portalAccess()) continue;
-				jdbc.update("insert into sales.client_account_membership (client_account_id,workspace_membership_id,tenant_id,workspace_id,created_at) values (?,?,?,?,?) on conflict (workspace_membership_id) do nothing", accounts.get(0), membershipId, tenantId, workspaceId, timestamp(now));
-				if ("CLI-001".equals(seed.code())) seedBuyerAddress(tenantId, workspaceId, accounts.get(0), seed, now);
-			}
-		}
-
-	private void seedBuyerAddress(UUID tenantId, UUID workspaceId, UUID clientAccountId,
-			ClientAccountSeedRecord seed, Instant now) {
-		UUID addressId = LocalIdentityIds.forClientAccountAddress(clientAccountId, "buyer-demo-pueblo-libre");
-		jdbc.update("update sales.client_account_address set default_address=false,updated_at=? where tenant_id=? and workspace_id=? and client_account_id=? and id<>? and default_address",
-				timestamp(now), tenantId, workspaceId, clientAccountId, addressId);
-		jdbc.update("insert into sales.client_account_address "
-				+ "(id,tenant_id,workspace_id,client_account_id,label,recipient_name,recipient_phone,road_type,street_name,street_number,"
-				+ "address_line,reference,receiving_instructions,receiving_hours,latitude,longitude,source,department_code,province_code,"
-				+ "district_code,default_address,status,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,true,'ACTIVE',0,?,?) "
-				+ "on conflict (id) do update set label=excluded.label,recipient_name=excluded.recipient_name,recipient_phone=excluded.recipient_phone,"
-				+ "road_type=excluded.road_type,street_name=excluded.street_name,street_number=excluded.street_number,address_line=excluded.address_line,"
-				+ "reference=excluded.reference,receiving_instructions=excluded.receiving_instructions,receiving_hours=excluded.receiving_hours,"
-				+ "latitude=excluded.latitude,longitude=excluded.longitude,source=excluded.source,department_code=excluded.department_code,"
-				+ "province_code=excluded.province_code,district_code=excluded.district_code,default_address=true,status='ACTIVE',updated_at=excluded.updated_at",
-				addressId, tenantId, workspaceId, clientAccountId, "Buyer delivery · Pueblo Libre", seed.contact(), seed.phone(),
-				"AVENUE", "Av. Sucre", "1992", "Av. Sucre 1992", "Ingreso de proveedores por recepción principal",
-				"Validar ventana de cadena de frío con el comprador", "08:00-17:00", new BigDecimal("-12.0725"),
-				new BigDecimal("-77.0685"), "MAP_PIN", "15", "1501", "150121", timestamp(now), timestamp(now));
-	}
-
 	private UUID tenant(Instant now) {
 		String slug = defaulted("NEXA_DEV_TENANT_SLUG", "icisa").toLowerCase(java.util.Locale.ROOT);
 		String name = defaulted("NEXA_DEV_TENANT_NAME", "ICISA");
@@ -266,9 +221,9 @@ public class LocalDevelopmentBootstrap {
 		UUID membershipId = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid",
 				UUID.class, workspaceId);
 		int inserted = jdbc.update("insert into tenant_management.workspace_membership "
-				+ "(id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
-				+ "values (?,?,?,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) "
-				+ "on conflict (workspace_id,user_id) do nothing", membershipId, workspaceId,
+				+ "(id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) "
+				+ "values (?,?,?,?,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) "
+				+ "on conflict (workspace_id,user_id) do nothing", membershipId, tenantId, workspaceId,
 				UUID.fromString(SYSTEM_WORKFLOW_ACTOR));
 		if (inserted == 1) {
 			jdbc.update("insert into tenant_management.membership_role_definition "

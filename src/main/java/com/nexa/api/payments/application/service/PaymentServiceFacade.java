@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 @Service
 @Profile("!test")
@@ -33,6 +34,10 @@ public class PaymentServiceFacade {
     public PaymentModels.PaymentView createCreditLinePayment(CurrentAccessContext c, UUID id, String key) { return port.createCreditLinePayment(c, id, key); }
     public PaymentModels.PaymentView createBankTransfer(CurrentAccessContext c, UUID id, String key, String reference, UUID proofEvidenceId) { return port.createBankTransfer(c, id, key, reference, proofEvidenceId); }
     public PaymentModels.PaymentView reviewBankTransfer(CurrentAccessContext c, UUID id, String action, String reason, String key) { return port.reviewBankTransfer(c, id, action, reason, key); }
+    public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext c) { return port.listBuyerSavedPaymentMethods(c); }
+    public PaymentModels.BuyerPaymentMethodSetupView createBuyerPaymentMethodSetup(CurrentAccessContext c, String key) { return port.createBuyerPaymentMethodSetup(c, key); }
+    public PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext c, UUID id) { return port.setBuyerSavedPaymentMethodDefault(c, id); }
+    public void removeBuyerSavedPaymentMethod(CurrentAccessContext c, UUID id) { port.removeBuyerSavedPaymentMethod(c, id); }
     public PaymentModels.WebhookReceipt receiveStripeWebhook(String payload, String signature) {
         return webhookIntake.receiveStripeWebhook(payload, signature);
     }

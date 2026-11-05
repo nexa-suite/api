@@ -1,5 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
+import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
+import com.nexa.api.catalogcommercialpolicy.application.port.in.SkuIdentifierResolutionUseCase;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
@@ -16,13 +18,11 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
-
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Explicit Tenant-bound composition for catalog reads. It is deliberately not
- * used by the existing HTTP controller; callers must opt in to this use case.
+ * Explicit opt-in Tenant-bound composition for catalog HTTP reads.
  */
 public final class TenantBoundCatalogDetailReader implements TenantCatalogHttpReadPort {
 	private final TenantBusinessDatabaseRouter router;
@@ -42,11 +42,27 @@ public final class TenantBoundCatalogDetailReader implements TenantCatalogHttpRe
 	}
 
     @Override
+    public SkuIdentifierResolutionUseCase.Resolution resolveSkuIdentifier(
+            CurrentAccessContext context, String identifier) {
+        Objects.requireNonNull(context, "Verified access context is required");
+        catalogDetails.requireCatalogRead();
+        return router.inTransaction(context, jdbc -> catalogDetails.bindSkuIdentifiers(jdbc)
+                .resolve(new CatalogScope(
+                        context.tenantId().value(), context.workspaceId().value(), false), identifier));
+    }
+
+    @Override
     public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(CurrentAccessContext context, String kind, String search, int page, int size) {
+        return filterOptions(context, kind, search, page, size, null);
+    }
+
+    @Override
+    public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+            CurrentAccessContext context, String kind, String search, int page, int size, UUID familyId) {
         Objects.requireNonNull(context, "Verified access context is required");
         catalogDetails.requireCatalogRead();
         return router.inTransaction(context, jdbc -> catalogReadQuery(context, jdbc)
-                .filterOptions(context.tenantId().value(), context.workspaceId().value(), kind, search, page, size));
+                .filterOptions(context.tenantId().value(), context.workspaceId().value(), kind, search, page, size, familyId));
     }
 
 	@Override

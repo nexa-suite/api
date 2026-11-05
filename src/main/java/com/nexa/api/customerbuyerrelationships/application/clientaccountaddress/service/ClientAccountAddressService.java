@@ -6,6 +6,7 @@ import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressPersistencePort;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.application.exception.CustomerRelationshipConflictException;
+import com.nexa.api.customerbuyerrelationships.application.clientaccount.service.ClientAccountAccessPolicy;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
@@ -99,9 +100,14 @@ public class ClientAccountAddressService implements ClientAccountAddressUseCase 
                     .filter(id -> requestedAccountId == null || id.equals(requestedAccountId.trim()))
                     .orElseThrow(() -> new ApiResourceNotFoundException("client-account"));
         }
-        if (write) context.requirePermission(PermissionKey.CLIENT_ADDRESS_MANAGE);
-        else context.requirePermission(PermissionKey.CLIENT_READ);
+        ClientAccountAccessPolicy.requireAddressAccess(context, write);
         if (requestedAccountId == null || requestedAccountId.isBlank()) throw new ApiResourceNotFoundException("client-account");
+        if (ClientAccountAccessPolicy.isSalesOwnerScoped(context)) {
+            return accounts.findSalesOwnerReference(scope(context), workspace(context), requestedAccountId.trim(),
+                            context.membershipId().toString())
+                    .map(CustomerAccountReference::id)
+                    .orElseThrow(() -> new ApiResourceNotFoundException("client-account"));
+        }
         return accounts.findReference(scope(context), workspace(context), requestedAccountId.trim())
                 .map(CustomerAccountReference::id)
                 .orElseThrow(() -> new ApiResourceNotFoundException("client-account"));

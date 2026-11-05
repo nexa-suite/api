@@ -100,6 +100,9 @@ public class WarehouseOperationsApplicationService implements WarehouseOperation
     public Page<LotSummary> lots(CurrentAccessContext context, String catalogItemId, String warehouseId, String zoneId, String status, int page, int size, String sort) { return inventory.lots(context, catalogItemId, warehouseId, zoneId, status, page, size, sort); }
     public Page<MovementSummary> movements(CurrentAccessContext context, String lotId, int page, int size, String sort) { return inventory.movements(context, lotId, page, size, sort); }
     public LotSummary lot(CurrentAccessContext context, String id) { return inventory.lot(context, id); }
+    public TemperatureReadingsSummary temperatureReadings(CurrentAccessContext context, String lotId, int page, int size) {
+        return inventory.temperatureReadings(context, lotId, page, size);
+    }
     public LotSummary receive(CurrentAccessContext context, Receipt receipt, String key, String correlation) { return receiveInventory.execute(context, receipt, key, correlation); }
     public LotSummary adjust(CurrentAccessContext context, String lotId, BigDecimal quantity, boolean inbound, String reason, long expected, String key, String correlation) { return adjustInventory.execute(context, lotId, quantity, inbound, reason, expected, key, correlation); }
     public LotSummary waste(CurrentAccessContext context, String lotId, BigDecimal quantity, String reason, long expected, String key, String correlation) { return registerWaste.execute(context, lotId, quantity, reason, expected, key, correlation); }

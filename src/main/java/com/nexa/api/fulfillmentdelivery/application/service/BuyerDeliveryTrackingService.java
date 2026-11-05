@@ -81,7 +81,7 @@ public class BuyerDeliveryTrackingService implements com.nexa.api.fulfillmentdel
         if (order == null || !scope.clientAccountId().equals(order.clientAccountId())) {
             throw error("RESOURCE_NOT_FOUND", true);
         }
-        return new DeliveryRecord(record.id(), record.salesOrderId(), order.number(), record.status(),
+        return new DeliveryRecord(record.id(), record.salesOrderId(), order.number(), order.status(), record.status(),
                 record.destination(), record.scheduledAt(), record.dispatchedAt(), record.deliveredAt(),
                 record.proofOfDeliveryStatus(), record.version(), record.createdAt(), record.updatedAt());
     }
@@ -103,7 +103,8 @@ public class BuyerDeliveryTrackingService implements com.nexa.api.fulfillmentdel
     }
 
     private static DeliveryView buyerSafe(DeliveryRecord value) {
-        return new DeliveryView(value.id().toString(), value.salesOrderNumber(), value.status(), value.destination(),
+        return new DeliveryView(value.id().toString(), value.salesOrderNumber(), value.salesOrderStatus(),
+                value.status(), value.destination(),
                 value.scheduledAt(), value.dispatchedAt(), value.deliveredAt(), value.proofOfDeliveryStatus(),
                 value.version(), value.createdAt(), value.updatedAt());
     }

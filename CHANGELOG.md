@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [2.0.1] — Release candidate
+
+- Add verify-only Neon Tenant database readiness checks without provisioning or changing database grants.
+- Enable existing Tenant-routed notification HTTP adapters behind the independent cloud capability flag; keep workspace-settings writes unavailable across databases.
+- Connect existing authorized Platform customer list/detail reads for Operations customer selection; retain assigned Sales ownership and deny Buyer management access.
+- Restore existing SKU-code/GTIN reads for Operations scanning through the bounded Tenant catalog reader without enabling catalog commands.
+- Retain bounded catalog and Buyer own-account composition, fail-closed routing and disabled unsupported business capabilities.
+- Check the unchanged functional OpenAPI contract against published v2.0.0 and retain exact Owner-reviewed historical migration findings.
+
+Publication and deployment gates remain pending. See [release notes](docs/releases/v2.0.1.md).
+
+## [2.0.0] — 2026-11-03
+
+- Enforce the global five-business-day delivery minimum in the America/Lima timezone. Earlier dates accepted by the previous release are rejected; consumers must consult the Buyer delivery policy before submission.
+- Preserve draft creation without a delivery date and require a valid date on submission.
+- Add authenticated Buyer and Operations delivery-policy endpoints backed by one fixed global policy; Workspace settings do not configure commercial lead time.
+- Route native Buyer password-reset requests to the Platform recovery page with Origin-bound, expiring, single-use token consumption and generic rate-limited request responses.
+
+Published [source release v2.0.0](https://github.com/nexa-suite/api/releases/tag/v2.0.0) from `62c70c8ccca69ba0c2901df3d0fc3acf4214eaa2`. Product/System Acceptance and Production Readiness are separate gates.
+
 ## [1.2.0] - 2026-10-28
 
 NEXA Academic Stable Checkpoint for controlled academic demonstration. Published from the verified signed `v1.2.0` tag with the corresponding [GitHub Release](https://github.com/nexa-suite/api/releases/tag/v1.2.0). See the [release notes](docs/releases/v1.2.0.md). This source release does not establish Product or System Acceptance or commercial production readiness.
@@ -15,6 +35,29 @@ NEXA Academic Stable Checkpoint for controlled academic demonstration. Published
 - Return a Buyer-specific self-account response that omits unverified contact details.
 - Add central Flyway migrations V163–V168 and Tenant migrations V24–V25; published migrations remain unchanged.
 - Align Maven, Render and generated OpenAPI version metadata with `1.2.0`.
+
+- Add Buyer-owned catalog favorites, personal delivery addresses, company
+  registration and provider-backed saved payment methods, scoped to the
+  authenticated Buyer membership.
+- Add configurable Workspace minimum delivery lead time, enforced by the server
+  for Buyer and Sales order changes, and expose receipt-time lot temperature
+  readings for Warehouse/BOM review.
+- Restrict Dispatch visibility to the user's Buyer, Sales-account and Warehouse
+  grants, including the warehouses backing each Dispatch.
+- Add optional per-Tenant physical business-database provisioning and routing
+  for locally enabled capabilities; central identity and governance remain
+  shared, and full production cutover is not claimed.
+- Accept standard and URL-safe Base64 provisioner credentials in local Tenant
+  database provisioning while keeping generated `.pgpass` entries restricted
+  to safe credential characters.
+- Add password-reset delivery/rate limiting and further Tenant/Workspace RLS
+  and database-role isolation checks.
+- `GET /api/v1/client-accounts/me` no longer returns `contactPerson`,
+  `contactEmail`, `phone` or `buyerMembershipId`. This intentional response
+  contract break reduces exposure of personal Buyer data and internal
+  membership identifiers and is approved for v1.3.0. The registration POST
+  keeps its dedicated response schema; contact fields are nullable when the
+  account has multiple historical Buyer memberships.
 
 ## [1.1.0-alpha.1] - 2026-10-10
 

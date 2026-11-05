@@ -3,6 +3,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerRelationshipsCompositionFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.ActiveSalesMembershipDirectory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,7 +21,10 @@ public class TenantBoundCustomerRelationshipsConfiguration {
     TenantBoundCustomerRelationshipsUseCase tenantCustomerRelationshipsUseCase(
             TenantBusinessDatabaseRouter router,
             TenantCustomerRelationshipsCompositionFactory compositions,
-            BuyerMembershipDirectory buyerMemberships) {
-        return new TenantBoundCustomerRelationshipsUseCase(router, compositions, buyerMemberships);
+            BuyerMembershipDirectory buyerMemberships,
+            ActiveSalesMembershipDirectory salesMemberships,
+            TenantBusinessTraceabilityBindingsFactory traceabilityBindings) {
+        return new TenantBoundCustomerRelationshipsUseCase(router, compositions, buyerMemberships,
+                salesMemberships, traceabilityBindings);
     }
 }

@@ -189,7 +189,8 @@ public class FulfillmentLifecycleService implements com.nexa.api.fulfillmentdeli
                         line.id(), line.skuId(), line.catalogItemId(), line.warehouseId(), line.zoneId(), line.lotId(),
                         line.quantity(), line.releasedQuantity(), line.consumedQuantity(),
                         line.quantity().subtract(line.releasedQuantity()).subtract(line.consumedQuantity()),
-                        line.unit(), line.expirationDate()))
+                        line.unit(), line.expirationDate(), line.productName(), line.skuCode(), line.imageFileName(),
+                        line.presentation(), line.brandName(), line.warehouseName(), line.zoneName(), line.batchNumber()))
                 .toList();
         return new PhysicalAllocationModels.PhysicalAllocationView(
                 allocation.allocationId(), allocation.status(), allocation.version(), now(), lines);
@@ -571,10 +572,10 @@ public class FulfillmentLifecycleService implements com.nexa.api.fulfillmentdeli
                     hash("final-adjustment-v1|" + result.attemptId() + "|" + result.finalAdjustmentAmount() + "|" + result.adjustmentCurrency()),
                     "CUSTOMER_CREDIT", null, now()));
         }
-        if (result.allCommercialQuantityResolved()) {
+        if (result.allCommercialQuantityResolved() && !driverCanonical) {
             salesOrderCommands.markCompleted(tenant(context), workspace(context), result.salesOrderId(), actor(context), now(),
                     "Delivery quantities commercially resolved", BigDecimal.ZERO);
-        } else if (result.partial() && command.outcome() != DeliveryAttemptOutcome.FAILED) {
+        } else if (!driverCanonical && result.partial() && command.outcome() != DeliveryAttemptOutcome.FAILED) {
             salesOrderCommands.markPartiallyDelivered(tenant(context), workspace(context), result.salesOrderId(), actor(context), now(),
                     "Partial delivery recorded");
         }

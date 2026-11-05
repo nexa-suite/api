@@ -20,7 +20,7 @@ public class JdbcCustomerMembershipQuery implements CustomerMembershipQuery {
     @Override
     public List<UUID> findMembershipIds(UUID tenantId, UUID workspaceId, UUID clientAccountId) {
         return jdbc.query("select workspace_membership_id from sales.client_account_membership "
-                        + "where tenant_id=? and workspace_id=? and client_account_id=?",
+                        + "where tenant_id=? and workspace_id=? and client_account_id=? and status='ACTIVE'",
                 (rs, row) -> rs.getObject(1, UUID.class), tenantId, workspaceId, clientAccountId);
     }
 }

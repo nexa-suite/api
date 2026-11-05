@@ -1,5 +1,7 @@
 package com.nexa.api.catalogcommercialpolicy.infrastructure.query;
 
+import com.nexa.api.catalogcommercialpolicy.application.service.SkuIdentifierResolutionService;
+import com.nexa.api.catalogcommercialpolicy.application.port.in.SkuIdentifierResolutionUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPage;
@@ -13,7 +15,6 @@ import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogDetailQu
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-
 import java.time.Clock;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,6 +30,14 @@ public final class JdbcTenantCatalogDetailQueryFactory implements TenantCatalogD
 	public JdbcTenantCatalogDetailQueryFactory(Clock clock) {
 		this.clock = Objects.requireNonNull(clock, "Catalog clock is required");
 	}
+
+    @Override
+    public SkuIdentifierResolutionUseCase bindSkuIdentifiers(
+            JdbcTemplate tenantJdbc) {
+        return new SkuIdentifierResolutionService(
+                new JdbcSkuIdentifierResolutionQuery(Objects.requireNonNull(tenantJdbc,
+                        "Tenant JDBC session is required")), authorization);
+    }
 
 	@Override
 	public void requireCatalogRead() {
@@ -56,9 +65,26 @@ public final class JdbcTenantCatalogDetailQueryFactory implements TenantCatalogD
                 return catalog.filterOptions(scope(tenantId, workspaceId), kind, search, page, size);
             }
 
+            @Override
+            public com.nexa.api.catalogcommercialpolicy.application.model.CatalogFilterOptions filterOptions(
+                    UUID tenantId, UUID workspaceId, String kind, String search, int page, int size, UUID familyId) {
+                return catalog.filterOptions(scope(tenantId, workspaceId), kind, search, page, size, familyId);
+            }
+
 			@Override
 			public CatalogItemDetail getByCatalogItemId(UUID tenantId, UUID workspaceId, String catalogItemId) {
 				return catalog.getByCatalogItemId(scope(tenantId, workspaceId), catalogItemId);
+			}
+
+			@Override
+			public Optional<CatalogItemDetail> findBySellableSkuId(UUID tenantId, UUID workspaceId, UUID sellableSkuId) {
+				return catalog.findBySellableSkuId(scope(tenantId, workspaceId), sellableSkuId);
+			}
+
+			@Override
+			public java.util.List<CatalogItemDetail> findBySellableSkuIds(UUID tenantId, UUID workspaceId,
+					java.util.List<UUID> sellableSkuIds) {
+				return catalog.findBySellableSkuIds(scope(tenantId, workspaceId), sellableSkuIds);
 			}
 
 			@Override

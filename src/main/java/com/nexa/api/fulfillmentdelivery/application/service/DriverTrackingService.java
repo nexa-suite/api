@@ -5,6 +5,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverTrackingModels.*
 import com.nexa.api.fulfillmentdelivery.application.port.DriverTrackingPort;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.DispatchReadinessQueries;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
@@ -28,10 +29,13 @@ public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.a
     private final WorkforceDirectory workforce;
     private final CustomerAccountQuery accounts;
     private final SalesOrderFulfillmentQuery orders;
+    private final DispatchReadinessQueries readiness;
     private final Clock clock;
     public DriverTrackingService(DriverTrackingPort tracking, WorkforceDirectory workforce,
-                                 CustomerAccountQuery accounts, SalesOrderFulfillmentQuery orders, Clock clock) {
-        this.tracking=tracking; this.workforce=workforce; this.accounts=accounts; this.orders=orders; this.clock=clock;
+                                 CustomerAccountQuery accounts, SalesOrderFulfillmentQuery orders,
+                                 DispatchReadinessQueries readiness, Clock clock) {
+        this.tracking=tracking; this.workforce=workforce; this.accounts=accounts; this.orders=orders;
+        this.readiness=readiness; this.clock=clock;
     }
     @Transactional(readOnly=true)
     public Workday current(CurrentAccessContext c) { driver(c); return tracking.current(t(c),w(c),a(c)); }
@@ -63,12 +67,27 @@ public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.a
     public Coordinate ownLocation(CurrentAccessContext c) { driver(c); return tracking.latest(t(c),w(c),a(c),clock.instant()); }
     @Transactional(readOnly=true)
     public Coordinate dispatchLocation(CurrentAccessContext c,UUID driver) {
+        authorizeDispatchLocation(c, driver);
+        return tracking.latest(t(c),w(c),driver,clock.instant());
+    }
+    @Transactional(readOnly=true, isolation=org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public Coordinate dispatchLocation(CurrentAccessContext c, UUID driver, UUID delivery) {
+        authorizeDispatchLocation(c, driver);
+        DeliveryScope scope = tracking.deliveryScope(t(c),w(c),delivery);
+        if (scope == null || scope.fulfillmentId() == null || !driver.equals(scope.driverMembershipId())
+                || !Set.of("DISPATCHED","IN_TRANSIT").contains(scope.status()))
+            throw error("DRIVER_LOCATION_NOT_FOUND",true);
+        var current = readiness.readiness(c, scope.fulfillmentId());
+        if (!delivery.equals(current.deliveryId()) || !Set.of("DISPATCHED","IN_TRANSIT").contains(current.deliveryStatus()))
+            throw error("DRIVER_LOCATION_NOT_FOUND",true);
+        return tracking.latestForDelivery(t(c),w(c),driver,delivery,clock.instant());
+    }
+    private void authorizeDispatchLocation(CurrentAccessContext c, UUID driver) {
         c.requirePermission(PermissionKey.DISPATCH_READ);
         if (!(c.hasRole(MembershipRole.COMPANY_OWNER) || c.hasRole(MembershipRole.LOGISTICS)))
             throw error("DRIVER_LOCATION_NOT_FOUND",true);
         c.requirePermission(PermissionKey.DISPATCH_ASSIGN);
         if (workforce.findAssignableLogisticsName(t(c),w(c),driver).isEmpty()) throw error("DRIVER_LOCATION_NOT_FOUND",true);
-        return tracking.latest(t(c),w(c),driver,clock.instant());
     }
     @Transactional(readOnly=true)
     public DeliveryTracking buyerLocation(CurrentAccessContext c,UUID delivery) {
@@ -80,7 +99,7 @@ public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.a
         var account=orders.get(t(c),w(c),scope.salesOrderId()).clientAccountId();
         if(account==null || !accounts.hasBuyerRelationship(t(c).toString(),w(c).toString(),a(c).toString(),account.toString()))
             throw error("DELIVERY_NOT_FOUND",true);
-        Coordinate location=tracking.latest(t(c),w(c),scope.driverMembershipId(),clock.instant());
+        Coordinate location=tracking.latestForDelivery(t(c),w(c),scope.driverMembershipId(),delivery,clock.instant());
         if(location!=null && (scope.trackingStartedAt()==null || location.capturedAt().isBefore(scope.trackingStartedAt()))) location=null;
         return new DeliveryTracking(delivery,location);
     }

@@ -1,6 +1,8 @@
 package com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc;
 
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.out.InvitationPersistencePort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceDirectory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkspaceScopeReader;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.WorkspaceId;
@@ -26,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -39,17 +42,25 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 	private static final AtomicInteger NEXT_EXPIRY_SCOPE = new AtomicInteger();
 	private final JdbcTemplate jdbc;
 	private final TransactionTemplate workspaceScanTransaction;
+	private final WorkspaceScopeReader workspaceScopeReader;
 
 	public JdbcInvitationPersistenceAdapter(JdbcTemplate jdbc) {
-		this.jdbc = jdbc;
-		this.workspaceScanTransaction = null;
+		this(jdbc, null, null);
+	}
+
+	public JdbcInvitationPersistenceAdapter(JdbcTemplate jdbc, PlatformTransactionManager transactionManager) {
+		this(jdbc, transactionManager, null);
 	}
 
 	@Autowired
-	public JdbcInvitationPersistenceAdapter(JdbcTemplate jdbc, PlatformTransactionManager transactionManager) {
+	public JdbcInvitationPersistenceAdapter(JdbcTemplate jdbc, PlatformTransactionManager transactionManager,
+			WorkspaceScopeReader workspaceScopeReader) {
 		this.jdbc = jdbc;
-		this.workspaceScanTransaction = new TransactionTemplate(transactionManager);
-		this.workspaceScanTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+		this.workspaceScanTransaction = transactionManager == null ? null : new TransactionTemplate(transactionManager);
+		if (this.workspaceScanTransaction != null) {
+			this.workspaceScanTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+		}
+		this.workspaceScopeReader = workspaceScopeReader;
 	}
 
 	@Override
@@ -114,20 +125,13 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 		if (workspaceScanTransaction == null) {
 			throw new IllegalStateException("Workspace enumeration requires a transaction manager");
 		}
+		if (workspaceScopeReader == null) {
+			throw new IllegalStateException("Dedicated Workspace scope-reader credentials are required for invitation expiry");
+		}
 		RlsRequestScope.Scope previous = RlsRequestScope.current();
 		try {
 			RlsRequestScope.clear();
-			List<WorkspaceScope> scopes;
-			RlsRequestScope.enableCrossScopeWorkspaceScan();
-			try {
-				scopes = workspaceScanTransaction.execute(status -> {
-					jdbc.queryForObject("select set_config('app.cross_scope_workspace_scan', 'true', true)", String.class);
-					return jdbc.query("select tenant_id,id from tenant_management.workspace order by tenant_id,id",
-							(rs, row) -> new WorkspaceScope(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class)));
-				});
-			} finally {
-				RlsRequestScope.clearCrossScopeWorkspaceScan();
-			}
+			List<WorkspaceScope> scopes = scanAllWorkspaceScopes();
 			if (scopes == null || scopes.isEmpty()) return 0;
 			int start = Math.floorMod(NEXT_EXPIRY_SCOPE.getAndIncrement(), scopes.size());
 			int changed = 0;
@@ -148,6 +152,28 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 		} finally {
 			if (previous == null) RlsRequestScope.clear();
 			else RlsRequestScope.set(previous.tenantId(), previous.workspaceId());
+		}
+	}
+
+	private List<WorkspaceScope> scanAllWorkspaceScopes() {
+		List<WorkspaceScope> scopes = new ArrayList<>();
+		UUID afterTenant = null;
+		UUID afterWorkspace = null;
+		while (true) {
+			List<WorkspaceDirectory.Scope> page;
+			RlsRequestScope.enableCrossScopeWorkspaceScan();
+			try {
+				page = workspaceScopeReader.scanAfter(afterTenant, afterWorkspace, 100);
+			} finally {
+				RlsRequestScope.clearCrossScopeWorkspaceScan();
+			}
+			for (WorkspaceDirectory.Scope scope : page) {
+				scopes.add(new WorkspaceScope(scope.tenantId(), scope.workspaceId()));
+			}
+			if (page.size() < 100) return scopes;
+			WorkspaceDirectory.Scope last = page.getLast();
+			afterTenant = last.tenantId();
+			afterWorkspace = last.workspaceId();
 		}
 	}
 
@@ -229,7 +255,7 @@ public class JdbcInvitationPersistenceAdapter implements InvitationPersistencePo
 	public UUID createMembership(String tenantId, String workspaceId, UUID userId, Instant now) {
 		UUID membership = UUID.randomUUID();
 		try {
-			jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)", membership, uuid(workspaceId), userId, Timestamp.from(now), Timestamp.from(now));
+			jdbc.update("insert into tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'INTERNAL','ACTIVE',?,?,0)", membership, uuid(tenantId), uuid(workspaceId), userId, Timestamp.from(now), Timestamp.from(now));
 		} catch (DuplicateKeyException exception) {
 			throw new InvitationPersistencePort.DuplicateMembershipException();
 		}

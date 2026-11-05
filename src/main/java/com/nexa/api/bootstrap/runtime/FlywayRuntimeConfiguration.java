@@ -20,9 +20,11 @@ public class FlywayRuntimeConfiguration {
 				environment.getProperty("NEXA_DATABASE_USERNAME", environment.getProperty("spring.datasource.username")));
 		String password = environment.getProperty("NEXA_DATABASE_MIGRATOR_PASSWORD",
 				environment.getProperty("NEXA_DATABASE_PASSWORD", environment.getProperty("spring.datasource.password", "")));
-		return Flyway.configure().dataSource(url, username, password)
-				.locations(environment.getProperty("spring.flyway.locations", "classpath:db/migration"))
-				.load();
+		String target = environment.getProperty("NEXA_FLYWAY_TARGET");
+		var configuration = Flyway.configure().dataSource(url, username, password)
+				.locations(environment.getProperty("spring.flyway.locations", "classpath:db/migration"));
+		if (target != null && !target.isBlank()) configuration.target(target);
+		return configuration.load();
 	}
 
 	@Bean(name = "flywayMigrationRunner")

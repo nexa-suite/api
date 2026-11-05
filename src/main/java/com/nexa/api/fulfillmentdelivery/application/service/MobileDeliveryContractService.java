@@ -5,10 +5,14 @@ import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAcc
 import com.nexa.api.fulfillmentdelivery.application.port.MobileDeliveryContractPort;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.MobileDeliveryContractOperations;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentCommands;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Permission;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -34,24 +38,38 @@ public class MobileDeliveryContractService implements MobileDeliveryContractOper
     private final MobileDeliveryContractPort persistence;
     private final CustomerAccountQuery accounts;
     private final BusinessTraceabilityCommands traceability;
+    private final SalesOrderFulfillmentCommands salesOrderCommands;
+    private final SalesOrderFulfillmentQuery salesOrders;
     private final Clock clock;
     private final SecureRandom random;
     private final Duration handoffTtl;
 
+    @Autowired
     public MobileDeliveryContractService(MobileDeliveryContractPort persistence,
                                          CustomerAccountQuery accounts,
                                          BusinessTraceabilityCommands traceability,
+                                         SalesOrderFulfillmentCommands salesOrderCommands,
+                                         SalesOrderFulfillmentQuery salesOrders,
                                          Clock clock,
                                          @Value("${nexa.mobile.delivery-handoff-ttl:PT10M}") Duration handoffTtl) {
         this.persistence = Objects.requireNonNull(persistence, "Mobile delivery persistence is required");
         this.accounts = Objects.requireNonNull(accounts, "Customer accounts are required");
         this.traceability = Objects.requireNonNull(traceability, "Traceability is required");
+        this.salesOrderCommands = salesOrderCommands;
+        this.salesOrders = salesOrders;
         this.clock = Objects.requireNonNull(clock, "Clock is required");
         this.random = new SecureRandom();
         if (handoffTtl == null || handoffTtl.isNegative() || handoffTtl.isZero() || handoffTtl.compareTo(Duration.ofHours(24)) > 0) {
             throw new IllegalArgumentException("Delivery handoff TTL must be between one second and 24 hours");
         }
         this.handoffTtl = handoffTtl;
+    }
+
+    public MobileDeliveryContractService(MobileDeliveryContractPort persistence,
+                                         CustomerAccountQuery accounts,
+                                         BusinessTraceabilityCommands traceability,
+                                         Clock clock, Duration handoffTtl) {
+        this(persistence, accounts, traceability, null, null, clock, handoffTtl);
     }
 
     @Transactional
@@ -140,14 +158,23 @@ public class MobileDeliveryContractService implements MobileDeliveryContractOper
                                                                         String idempotencyKey) {
         requireBuyer(context, PermissionKey.BUYER_ORDER_READ);
         requireKey(idempotencyKey);
-        if (deliveryId == null) throw invalid("DELIVERY_HANDOFF_REQUEST_INVALID");
         String normalizedDecision = decision == null ? "" : decision.trim().toUpperCase(Locale.ROOT);
         if (!normalizedDecision.equals("ACCEPTED") && !normalizedDecision.equals("DISPUTED")) {
             throw invalid("BUYER_RECEIPT_DECISION_INVALID");
         }
+        if (normalizedDecision.equals("ACCEPTED")) {
+            MobileDeliveryContractOperations.BuyerReceiptAcceptance accepted = recordAcceptance(
+                    context, rawToken, deliveryId, acceptedQuantity, idempotencyKey);
+            return new MobileDeliveryContractOperations.BuyerReceipt(accepted.receiptId(), accepted.deliveryId(),
+                    accepted.attemptId(), "ACCEPTED", accepted.acceptedQuantity(), accepted.acceptedQuantity(),
+                    null, accepted.occurredAt(), accepted.deliveryStatus(), accepted.podStatus(),
+                    accepted.salesOrderStatus(), accepted.deliveryVersion(), accepted.orderCompleted(),
+                    accepted.replayed());
+        }
+        if (deliveryId == null) throw invalid("DELIVERY_HANDOFF_REQUEST_INVALID");
         if (acceptedQuantity == null || acceptedQuantity.signum() < 0) throw invalid("BUYER_RECEIPT_QUANTITY_INVALID");
         String boundedReason = bounded(reason);
-        if (normalizedDecision.equals("DISPUTED") && (boundedReason == null || boundedReason.isBlank())) {
+        if (boundedReason == null || boundedReason.isBlank()) {
             throw invalid("BUYER_RECEIPT_REASON_REQUIRED");
         }
         String token = requireToken(rawToken);
@@ -175,6 +202,80 @@ public class MobileDeliveryContractService implements MobileDeliveryContractOper
                 receipt.acceptedQuantity(), receipt.reason(), receipt.occurredAt(), receipt.replayed());
     }
 
+    @Transactional
+    @Override
+    public MobileDeliveryContractOperations.BuyerReceiptAcceptance acceptReceipt(
+            CurrentAccessContext context, String rawToken, UUID expectedDeliveryId, String idempotencyKey) {
+        requireBuyer(context, PermissionKey.BUYER_ORDER_READ);
+        requireKey(idempotencyKey);
+        return recordAcceptance(context, rawToken, expectedDeliveryId, null, idempotencyKey);
+    }
+
+    private MobileDeliveryContractOperations.BuyerReceiptAcceptance recordAcceptance(
+            CurrentAccessContext context, String rawToken, UUID expectedDeliveryId,
+            BigDecimal expectedAcceptedQuantity, String idempotencyKey) {
+        String token = requireToken(rawToken);
+        UUID customerAccountId = buyerAccount(context);
+        String tokenHash = hash(token);
+        MobileDeliveryContractPort.BuyerReceiptAcceptance accepted = persistence.recordAcceptance(
+                new MobileDeliveryContractPort.AcceptanceRequest(context.tenantId().value(),
+                        context.workspaceId().value(), context.membershipId().value(), customerAccountId,
+                        tokenHash, expectedDeliveryId, expectedAcceptedQuantity, idempotencyKey.trim(),
+                        hash("buyer-receipt-accepted-v1|" + tokenHash), clock.instant()));
+        if (salesOrders == null) {
+            throw new IllegalStateException("Sales Order query is required for Buyer receipt acceptance");
+        }
+        SalesOrderFulfillmentQuery.Snapshot salesOrder = salesOrders.getForUpdate(context.tenantId().value(),
+                context.workspaceId().value(), accepted.salesOrderId());
+        if (salesOrder.clientAccountId() == null || !customerAccountId.equals(salesOrder.clientAccountId())) {
+            throw invalid("BUYER_RELATIONSHIP_NOT_FOUND");
+        }
+        if (!accepted.replayed()) {
+            if ("CANCELLED".equals(salesOrder.status()) || "REJECTED".equals(salesOrder.status())) {
+                throw invalid("SALES_ORDER_TRANSITION_INVALID");
+            }
+            if (accepted.allOrderQuantityReceived()) {
+                if (salesOrderCommands == null) {
+                    throw new IllegalStateException("Sales Order commands are required for Buyer receipt acceptance");
+                }
+                if (!"COMPLETED".equals(salesOrder.status())) {
+                    salesOrderCommands.markCompleted(context.tenantId().value(), context.workspaceId().value(),
+                            accepted.salesOrderId(), context.membershipId().value(), accepted.occurredAt(),
+                            "Buyer accepted the full ordered quantity", BigDecimal.ZERO);
+                }
+            } else if (accepted.acceptedQuantity().signum() > 0 && salesOrderCommands != null
+                    && !"COMPLETED".equals(salesOrder.status())) {
+                salesOrderCommands.markPartiallyDelivered(context.tenantId().value(), context.workspaceId().value(),
+                        accepted.salesOrderId(), context.membershipId().value(), accepted.occurredAt(),
+                        "Buyer accepted a partial delivered quantity");
+            }
+        }
+        String salesOrderStatus = salesOrders.get(context.tenantId().value(), context.workspaceId().value(),
+                accepted.salesOrderId()).status();
+        boolean orderCompleted = accepted.allOrderQuantityReceived()
+                && "COMPLETED".equals(salesOrderStatus);
+        if (!accepted.replayed()) {
+            java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+            metadata.put("buyerMembershipId", context.membershipId().value());
+            metadata.put("customerAccountId", customerAccountId);
+            metadata.put("deliveryId", accepted.deliveryId());
+            metadata.put("attemptId", accepted.attemptId());
+            metadata.put("decision", "ACCEPTED");
+            metadata.put("acceptedQuantity", accepted.acceptedQuantity());
+            metadata.put("podId", accepted.podId());
+            trace(context, "BUYER_RECEIPT_RECORDED", "BuyerReceiptFact", accepted.receiptId(),
+                    idempotencyKey, metadata);
+            if (accepted.podSealedNow()) {
+                trace(context, "POD_SEALED", "ProofOfDelivery", accepted.podId(),
+                        accepted.podId().toString(), metadata);
+            }
+        }
+        return new MobileDeliveryContractOperations.BuyerReceiptAcceptance(accepted.receiptId(),
+                accepted.deliveryId(), accepted.attemptId(), accepted.podId(), accepted.acceptedQuantity(),
+                accepted.occurredAt(), accepted.deliveryStatus(), accepted.podStatus(), salesOrderStatus,
+                accepted.deliveryVersion(), orderCompleted, accepted.replayed());
+    }
+
     private UUID buyerAccount(CurrentAccessContext context) {
         return accounts.findBuyerReference(context.tenantId().toString(), context.workspaceId().toString(),
                         context.membershipId().toString())
@@ -184,6 +285,7 @@ public class MobileDeliveryContractService implements MobileDeliveryContractOper
 
     private static void requireBuyer(CurrentAccessContext context, PermissionKey permission) {
         if (!context.hasRole(MembershipRole.BUYER)) throw invalid("BUYER_ONLY_OPERATION");
+        context.requireSurface(Surface.PORTAL);
         context.requirePermission(permission);
     }
 

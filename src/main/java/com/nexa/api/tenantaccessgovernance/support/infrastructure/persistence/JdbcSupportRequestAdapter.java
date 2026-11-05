@@ -4,9 +4,11 @@ import com.nexa.api.tenantaccessgovernance.support.application.model.SupportRequ
 import com.nexa.api.tenantaccessgovernance.support.application.port.out.SupportRequestPersistencePort;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrant;
 import com.nexa.api.tenantaccessgovernance.support.application.publicapi.SupportOrderReadGrantValidationPort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.infrastructure.persistence.jdbc.InternalOperatorJdbcOperations;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,17 +25,20 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 	private static final String COLUMNS = "id,tenant_id,workspace_id,resource_type,resource_id,"
 		+ "requested_by_operator_id,approved_by_operator_id,status,expires_at,created_at,version";
 	private final JdbcTemplate jdbc;
+	private final InternalOperatorJdbcOperations operatorDatabase;
 
-	public JdbcSupportRequestAdapter(JdbcTemplate jdbc) {
+	public JdbcSupportRequestAdapter(JdbcTemplate jdbc,
+			@Qualifier("internalOperatorJdbcOperations") InternalOperatorJdbcOperations operatorDatabase) {
 		this.jdbc = jdbc;
+		this.operatorDatabase = operatorDatabase;
 	}
 
 	@Override
-	@Transactional
 	public SupportRequestView create(UUID id, UUID tenantId, UUID workspaceId, UUID salesOrderId,
 			UUID requesterOperatorId, Instant expiresAt, Instant now) {
-		bindOperator(requesterOperatorId);
-		List<SupportRequestView> inserted = jdbc.query("""
+		return operatorDatabase.readWrite(operatorJdbc -> {
+		bindOperator(operatorJdbc, requesterOperatorId);
+		List<SupportRequestView> inserted = operatorJdbc.query("""
 			INSERT INTO iam.internal_support_request
 				(id,tenant_id,workspace_id,resource_type,resource_id,requested_by_operator_id,status,expires_at,created_at,updated_at,version)
 			VALUES (?,?,?,'SALES_ORDER',?,?,'AWAITING_OWNER_CONSENT',?,?,?,0)
@@ -41,22 +46,24 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 			""".formatted(COLUMNS), rowMapper(now), id, tenantId, workspaceId, salesOrderId,
 			requesterOperatorId, expiresAt, now, now);
 		SupportRequestView created = only(inserted);
-		appendAudit(created, "REQUESTED", "INTERNAL_OPERATOR", requesterOperatorId, null, now);
+		appendAudit(operatorJdbc, created, "REQUESTED", "INTERNAL_OPERATOR", requesterOperatorId, null, now);
 		return created;
+		});
 	}
 
 	@Override
-	@Transactional(readOnly = true)
 	public List<SupportRequestView> listInternal(UUID operatorId, Instant now, int limit) {
-		bindOperator(operatorId);
-		return jdbc.query("SELECT " + COLUMNS + " FROM iam.internal_support_request ORDER BY created_at DESC,id LIMIT ?",
-			rowMapper(now), limit);
+		return operatorDatabase.readOnly(operatorJdbc -> {
+			bindOperator(operatorJdbc, operatorId);
+			return operatorJdbc.query("SELECT " + COLUMNS + " FROM iam.internal_support_request ORDER BY created_at DESC,id LIMIT ?",
+				rowMapper(now), limit);
+		});
 	}
 
 	@Override
 	@Transactional(readOnly = true)
 	public List<SupportRequestView> listOwner(UUID tenantId, UUID workspaceId, Instant now, int limit) {
-		bindOwnerScope(tenantId, workspaceId);
+		bindOwnerScope(jdbc, tenantId, workspaceId);
 		return jdbc.query("SELECT " + COLUMNS + " FROM iam.internal_support_request "
 			+ "WHERE tenant_id=? AND workspace_id=? AND status IN "
 			+ "('AWAITING_OWNER_CONSENT','AWAITING_INDEPENDENT_APPROVAL','APPROVED') "
@@ -64,18 +71,19 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 	}
 
 	@Override
-	@Transactional(readOnly = true)
 	public Optional<SupportRequestView> findForOperator(UUID requestId, UUID operatorId, Instant now) {
-		bindOperator(operatorId);
-		return jdbc.query("SELECT " + COLUMNS + " FROM iam.internal_support_request "
-			+ "WHERE id=? AND requested_by_operator_id=?", rowMapper(now), requestId, operatorId).stream().findFirst();
+		return operatorDatabase.readOnly(operatorJdbc -> {
+			bindOperator(operatorJdbc, operatorId);
+			return operatorJdbc.query("SELECT " + COLUMNS + " FROM iam.internal_support_request "
+				+ "WHERE id=? AND requested_by_operator_id=?", rowMapper(now), requestId, operatorId).stream().findFirst();
+		});
 	}
 
 	@Override
 	@Transactional
 	public Optional<SupportRequestView> consent(UUID requestId, UUID tenantId, UUID workspaceId,
 			UUID ownerUserId, UUID ownerMembershipId, Instant now) {
-		bindOwnerScope(tenantId, workspaceId);
+		bindOwnerScope(jdbc, tenantId, workspaceId);
 		List<SupportRequestView> updated = jdbc.query("""
 			UPDATE iam.internal_support_request
 			SET status='AWAITING_INDEPENDENT_APPROVAL', owner_consent_user_id=?, owner_consent_membership_id=?,
@@ -86,15 +94,15 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 			requestId, tenantId, workspaceId, now);
 		if (updated.isEmpty()) return Optional.empty();
 		SupportRequestView request = updated.getFirst();
-		appendAudit(request, "OWNER_CONSENTED", "COMPANY_OWNER", ownerUserId, ownerMembershipId, now);
+		appendAudit(jdbc, request, "OWNER_CONSENTED", "COMPANY_OWNER", ownerUserId, ownerMembershipId, now);
 		return Optional.of(request);
 	}
 
 	@Override
-	@Transactional
 	public Optional<SupportRequestView> approve(UUID requestId, UUID approverOperatorId, Instant now) {
-		bindOperator(approverOperatorId);
-		List<SupportRequestView> updated = jdbc.query("""
+		return operatorDatabase.readWrite(operatorJdbc -> {
+		bindOperator(operatorJdbc, approverOperatorId);
+		List<SupportRequestView> updated = operatorJdbc.query("""
 			UPDATE iam.internal_support_request
 			SET status='APPROVED', approved_by_operator_id=?, updated_at=?, version=version+1
 			WHERE id=? AND status='AWAITING_INDEPENDENT_APPROVAL' AND owner_consented_at IS NOT NULL
@@ -103,15 +111,16 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 			""".formatted(COLUMNS), rowMapper(now), approverOperatorId, now, requestId, now, approverOperatorId);
 		if (updated.isEmpty()) return Optional.empty();
 		SupportRequestView request = updated.getFirst();
-		appendAudit(request, "APPROVED", "INTERNAL_OPERATOR", approverOperatorId, null, now);
+		appendAudit(operatorJdbc, request, "APPROVED", "INTERNAL_OPERATOR", approverOperatorId, null, now);
 		return Optional.of(request);
+		});
 	}
 
 	@Override
-	@Transactional
 	public Optional<SupportRequestView> revokeByOperator(UUID requestId, UUID operatorId, Instant now) {
-		bindOperator(operatorId);
-		List<SupportRequestView> updated = jdbc.query("""
+		return operatorDatabase.readWrite(operatorJdbc -> {
+		bindOperator(operatorJdbc, operatorId);
+		List<SupportRequestView> updated = operatorJdbc.query("""
 			UPDATE iam.internal_support_request
 			SET status='REVOKED', revoked_at=?, revoked_by_operator_id=?, updated_at=?, version=version+1
 			WHERE id=? AND status IN ('AWAITING_OWNER_CONSENT','AWAITING_INDEPENDENT_APPROVAL','APPROVED')
@@ -120,15 +129,16 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 			""".formatted(COLUMNS), rowMapper(now), now, operatorId, now, requestId, now, operatorId, operatorId);
 		if (updated.isEmpty()) return Optional.empty();
 		SupportRequestView request = updated.getFirst();
-		appendAudit(request, "REVOKED", "INTERNAL_OPERATOR", operatorId, null, now);
+		appendAudit(operatorJdbc, request, "REVOKED", "INTERNAL_OPERATOR", operatorId, null, now);
 		return Optional.of(request);
+		});
 	}
 
 	@Override
 	@Transactional
 	public Optional<SupportRequestView> revokeByOwner(UUID requestId, UUID tenantId, UUID workspaceId,
 			UUID ownerUserId, UUID ownerMembershipId, Instant now) {
-		bindOwnerScope(tenantId, workspaceId);
+		bindOwnerScope(jdbc, tenantId, workspaceId);
 		List<SupportRequestView> updated = jdbc.query("""
 			UPDATE iam.internal_support_request
 			SET status='REVOKED', revoked_at=?, revoked_by_owner_user_id=?, revoked_by_owner_membership_id=?,
@@ -140,22 +150,24 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 			requestId, tenantId, workspaceId, now);
 		if (updated.isEmpty()) return Optional.empty();
 		SupportRequestView request = updated.getFirst();
-		appendAudit(request, "REVOKED", "COMPANY_OWNER", ownerUserId, ownerMembershipId, now);
+		appendAudit(jdbc, request, "REVOKED", "COMPANY_OWNER", ownerUserId, ownerMembershipId, now);
 		return Optional.of(request);
 	}
 
 	@Override
-	@Transactional
 	public void appendOrderRead(SupportRequestView request, UUID requesterOperatorId, Instant now) {
-		bindOperator(requesterOperatorId);
-		appendAudit(request, "ORDER_READ", "INTERNAL_OPERATOR", requesterOperatorId, null, now);
+		operatorDatabase.readWrite(operatorJdbc -> {
+			bindOperator(operatorJdbc, requesterOperatorId);
+			appendAudit(operatorJdbc, request, "ORDER_READ", "INTERNAL_OPERATOR", requesterOperatorId, null, now);
+			return Boolean.TRUE;
+		});
 	}
 
 	@Override
-	@Transactional(readOnly = true)
 	public boolean isActive(SupportOrderReadGrant grant, Instant now) {
-		bindOperator(grant.requesterOperatorId());
-		Boolean active = jdbc.queryForObject("""
+		return operatorDatabase.readOnly(operatorJdbc -> {
+		bindOperator(operatorJdbc, grant.requesterOperatorId());
+		Boolean active = operatorJdbc.queryForObject("""
 			SELECT EXISTS (
 				SELECT 1 FROM iam.internal_support_request
 				WHERE id=? AND requested_by_operator_id=? AND tenant_id=? AND workspace_id=?
@@ -167,15 +179,15 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 			""", Boolean.class, grant.grantId(), grant.requesterOperatorId(), grant.tenantId(), grant.workspaceId(),
 			grant.salesOrderId(), grant.expiresAt(), now);
 		return Boolean.TRUE.equals(active);
+		});
 	}
 
 	@Override
-	@Transactional(readOnly = true)
 	public boolean isActive(SupportOrderReadGrant grant) {
 		return isActive(grant, Instant.now());
 	}
 
-	private void appendAudit(SupportRequestView request, String action, String actorType, UUID actorId,
+	private void appendAudit(JdbcTemplate jdbc, SupportRequestView request, String action, String actorType, UUID actorId,
 			UUID actorMembershipId, Instant now) {
 		jdbc.update("""
 			INSERT INTO iam.internal_support_audit_event
@@ -185,11 +197,11 @@ public class JdbcSupportRequestAdapter implements SupportRequestPersistencePort,
 			request.tenantId(), request.workspaceId(), request.resourceType(), request.resourceId(), request.expiresAt(), now);
 	}
 
-	private void bindOperator(UUID operatorId) {
+	private void bindOperator(JdbcTemplate jdbc, UUID operatorId) {
 		jdbc.queryForObject("SELECT set_config('app.current_internal_operator_id', ?, true)", String.class, operatorId.toString());
 	}
 
-	private void bindOwnerScope(UUID tenantId, UUID workspaceId) {
+	private void bindOwnerScope(JdbcTemplate jdbc, UUID tenantId, UUID workspaceId) {
 		jdbc.queryForObject("SELECT set_config('app.current_tenant_id', ?, true) || "
 				+ "set_config('app.current_workspace_id', ?, true)", String.class,
 			tenantId.toString(), workspaceId.toString());

@@ -106,7 +106,8 @@ abstract class PaymentIntegrationSupport extends NexaWorkflowIntegrationSupport 
         var foreignTenantJdbc = tenantJdbcFor(foreignTenant);
         foreignTenantJdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 foreignClient, foreignTenant, foreignWorkspace, "F-" + foreignClient.toString().substring(0, 8), "Foreign Client", "Foreign Client",
-                "PE", "RUC", "20" + foreignClient.toString().replace("-", "").substring(0, 11), "B2B", "Foreign Contact",
+                "PE", "RUC", "20" + String.format(java.util.Locale.ROOT, "%09d",
+                        Math.floorMod(foreignClient.getMostSignificantBits(), 1_000_000_000L)), "B2B", "Foreign Contact",
                 "foreign@example.test", "+51000000000", "Lima", "NET_30", Timestamp.from(now), Timestamp.from(now));
         foreignTenantJdbc.update("insert into payments.receivable (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,receivable_number,currency,amount,due_at,status,created_at,updated_at) values (?,?,?,?,? ,?, ?, 'PEN', 10.00, ?, 'OPEN', ?, ?)",
                 foreignReceivable, foreignTenant, foreignWorkspace, foreignClient, "SALES_ORDER", UUID.randomUUID(),

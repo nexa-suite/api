@@ -2,10 +2,12 @@ package com.nexa.api.catalogcommercialpolicy.application.service;
 
 import com.nexa.api.catalogcommercialpolicy.application.CatalogPermissions;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSkuModels;
+import com.nexa.api.catalogcommercialpolicy.application.model.CatalogVariantModels;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.CatalogSkuUseCase;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogAuthorizationPort;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogSkuPort;
+import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogVariantPort;
 import com.nexa.api.catalogcommercialpolicy.domain.model.catalogitem.Money;
 import com.nexa.api.catalogcommercialpolicy.domain.model.pricing.PricePeriod;
 import com.nexa.api.catalogcommercialpolicy.domain.model.productfamily.ProductFamily;
@@ -24,11 +26,14 @@ import java.util.UUID;
 /** Application orchestration for the canonical Product Family/Sellable SKU boundary. */
 public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
     private final CatalogSkuPort port;
+    private final CatalogVariantPort variants;
     private final CatalogAuthorizationPort authorization;
     private final Clock clock;
 
-    public CatalogSkuServiceFacade(CatalogSkuPort port, CatalogAuthorizationPort authorization, Clock clock) {
+    public CatalogSkuServiceFacade(CatalogSkuPort port, CatalogVariantPort variants,
+            CatalogAuthorizationPort authorization, Clock clock) {
         this.port = Objects.requireNonNull(port, "Catalog SKU port is required");
+        this.variants = Objects.requireNonNull(variants, "Catalog variant port is required");
         this.authorization = Objects.requireNonNull(authorization, "Catalog authorization port is required");
         this.clock = Objects.requireNonNull(clock, "Catalog SKU clock is required");
     }
@@ -87,19 +92,39 @@ public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
     }
 
     @Override
+    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(
+            CatalogScope scope, int page, int size, String search, UUID familyId, UUID variantId) {
+        authorization.require(CatalogPermissions.READ);
+        if (familyId != null && variantId != null) {
+            CatalogVariantModels.VariantView variant = variants.variant(scope, variantId);
+            if (!familyId.toString().equals(variant.familyId())) {
+                throw new IllegalArgumentException("Product variant must belong to the specified product family");
+            }
+        }
+        return port.skus(scope, page, size, search, familyId, variantId);
+    }
+
+    @Override
     public CatalogSkuModels.SkuView sku(CatalogScope scope, UUID id) {
         authorization.require(CatalogPermissions.READ);
         return port.sku(scope, id);
     }
 
     @Override
-    public CatalogSkuModels.SkuView createSku(CatalogScope scope, UUID familyId, String skuCode, String gtin,
+    public CatalogSkuModels.SkuView createSku(CatalogScope scope, UUID familyId, UUID variantId,
+            String skuCode, String gtin,
             String presentation, String packaging, String unit, BigDecimal netWeight, BigDecimal grossWeight,
             BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax, int shelfLifeDays,
             int minimumRemainingShelfLifeDays, boolean lotTracking, boolean expiryTracking, String taxCategory) {
         authorization.require(CatalogPermissions.PRODUCT_MANAGE);
         port.family(scope, familyId);
-        SellableSku sku = SellableSku.create(scope.tenantId(), scope.workspaceId(), familyId, skuCode, gtin,
+        if (variantId != null) {
+            CatalogVariantModels.VariantView variant = variants.variant(scope, variantId);
+            if (!familyId.toString().equals(variant.familyId())) {
+                throw new IllegalArgumentException("Product variant must belong to the specified product family");
+            }
+        }
+        SellableSku sku = SellableSku.create(scope.tenantId(), scope.workspaceId(), familyId, variantId, skuCode, gtin,
                 presentation, packaging, unit, netWeight, grossWeight,
                 packQuantity == null ? BigDecimal.ONE : packQuantity, temperatureMin, temperatureMax, shelfLifeDays,
                 minimumRemainingShelfLifeDays, lotTracking, expiryTracking,
@@ -112,7 +137,8 @@ public final class CatalogSkuServiceFacade implements CatalogSkuUseCase {
         authorization.require(CatalogPermissions.PRODUCT_MANAGE);
         CatalogSkuModels.SkuView current = port.sku(scope, id);
         SellableSku sku = SellableSku.restore(UUID.fromString(current.id()), scope.tenantId(), scope.workspaceId(),
-                UUID.fromString(current.familyId()), current.skuCode(), current.gtin(), current.presentation(),
+                UUID.fromString(current.familyId()), current.variantId() == null ? null : UUID.fromString(current.variantId()),
+                current.skuCode(), current.gtin(), current.presentation(),
                 current.packagingType(), current.unitOfMeasure(), current.netWeight(), current.grossWeight(),
                 current.packQuantity(), current.temperatureMin(), current.temperatureMax(), current.shelfLifeDays(),
                 current.minimumRemainingShelfLifeDays(), current.lotTrackingRequired(), current.expiryTrackingRequired(),

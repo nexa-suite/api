@@ -1,5 +1,6 @@
 package com.nexa.api.catalogcommercialpolicy.presentation.rest;
 
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogHttpReadPort;
 import com.nexa.api.catalogcommercialpolicy.application.port.in.SkuIdentifierResolutionUseCase;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -24,14 +25,22 @@ import org.springframework.web.bind.annotation.RestController;
 public final class SkuIdentifierResolutionController {
     private final SkuIdentifierResolutionUseCase service;
     private final ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests;
+    private final ObjectProvider<TenantCatalogHttpReadPort> tenantReads;
 
     public SkuIdentifierResolutionController(SkuIdentifierResolutionUseCase service) {
         this(service, null);
     }
 
-    @Autowired
     public SkuIdentifierResolutionController(SkuIdentifierResolutionUseCase service,
             ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests) {
+        this(service, tenantRequests, null);
+    }
+
+    @Autowired
+    public SkuIdentifierResolutionController(SkuIdentifierResolutionUseCase service,
+            ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests,
+            ObjectProvider<TenantCatalogHttpReadPort> tenantReads) {
+        this.tenantReads = tenantReads;
         this.service = service;
         this.tenantRequests = tenantRequests;
     }
@@ -41,6 +50,8 @@ public final class SkuIdentifierResolutionController {
     public SkuIdentifierResolutionUseCase.Resolution resolve(
             @RequestAttribute(CatalogHttpSupport.ACCESS_CONTEXT) CurrentAccessContext context,
             @RequestParam String identifier) {
+        var reads = tenantReads == null ? null : tenantReads.getIfAvailable();
+        if (reads != null) return reads.resolveSkuIdentifier(context, identifier);
         return CatalogHttpSupport.tenantRequest(context, tenantRequests,
                 () -> service.resolve(CatalogHttpSupport.scope(context), identifier),
                 request -> request.skuIdentifiers().resolve(request.scope(), identifier));

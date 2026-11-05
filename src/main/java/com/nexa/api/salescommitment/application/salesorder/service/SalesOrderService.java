@@ -8,6 +8,7 @@ import com.nexa.api.salescommitment.application.model.SalesPage;
 import com.nexa.api.salescommitment.application.salesorder.model.FulfillmentCandidateView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderEventView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
+import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderSalesOwnerScope;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderWalletRefundView;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderWalletRefundCandidateView;
@@ -126,11 +127,18 @@ public class SalesOrderService implements SalesOrderUseCase, SalesOrderApprovedW
 
 	@Override
 	public SalesPage<SalesOrderView> list(CurrentAccessContext context, SalesOrderFilter filter) {
+		if (salesOwnerScoped(context)) {
+			return persistence.listForSalesOwner(scope(context), workspace(context), salesOwnerScope(context), filter);
+		}
 		return persistence.list(scope(context), workspace(context), buyerAccount(context), filter);
 	}
 
 	@Override
 	public SalesOrderView detail(CurrentAccessContext context, String id) {
+		if (salesOwnerScoped(context)) {
+			return persistence.findForSalesOwner(scope(context), workspace(context), salesOwnerScope(context), id)
+					.orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("sales-order"));
+		}
 		return persistence.find(scope(context), workspace(context), buyerAccount(context), id)
 				.orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("sales-order"));
 	}
@@ -237,6 +245,9 @@ public class SalesOrderService implements SalesOrderUseCase, SalesOrderApprovedW
 
 	@Override
 	public List<SalesOrderEventView> events(CurrentAccessContext context, String id) {
+		if (salesOwnerScoped(context)) {
+			return persistence.eventsForSalesOwner(scope(context), workspace(context), salesOwnerScope(context), id);
+		}
 		return persistence.events(scope(context), workspace(context), buyerAccount(context), id);
 	}
 
@@ -254,6 +265,19 @@ public class SalesOrderService implements SalesOrderUseCase, SalesOrderApprovedW
 		context.requirePermission(PermissionKey.BUYER_ORDER_READ);
 		return accounts.findBuyerReference(scope(context), workspace(context), context.membershipId().toString())
 				.map(CustomerAccountReference::id).orElseThrow(() -> new com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException("client-account"));
+	}
+
+	private boolean salesOwnerScoped(CurrentAccessContext context) {
+		return context.allows(PermissionKey.SALES_ORDER_READ)
+				&& !context.hasRole(MembershipRole.COMPANY_OWNER);
+	}
+
+	private SalesOrderSalesOwnerScope salesOwnerScope(CurrentAccessContext context) {
+		context.requirePermission(PermissionKey.SALES_ORDER_READ);
+		java.util.Set<UUID> accountIds = accounts.lockActiveSalesOwnerAccountIds(scope(context), workspace(context),
+				context.membershipId().toString()).stream().map(UUID::fromString)
+				.collect(java.util.stream.Collectors.toUnmodifiableSet());
+		return new SalesOrderSalesOwnerScope(accountIds);
 	}
 
 	private static void commercialWrite(CurrentAccessContext context) {

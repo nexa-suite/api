@@ -50,9 +50,13 @@ class BusinessDocumentWorkerSecurityTests {
         assertThat(adapter).contains("where tenant_id=? and workspace_id=? and status='RESERVED'", "transactionTemplate.executeWithoutResult");
         assertThat(adapter).doesNotContain("limit 100 for update skip locked");
         assertThat(support).contains("PROPAGATION_REQUIRES_NEW");
-        assertThat(Files.readString(Path.of("src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceDirectory.java")))
-                .contains("select tenant_id,id from tenant_management.workspace", "(tenant_id,id) > (?,?)",
-                        "order by tenant_id,id limit ?", "Propagation.MANDATORY", "crossScopeWorkspaceScanEnabled()");
+        String workspaceDirectory = Files.readString(Path.of(
+                "src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceDirectory.java"));
+        assertThat(workspaceDirectory).contains("scopeReader().scanAfter", "crossScopeWorkspaceScanEnabled()");
+        String scopeReader = Files.readString(Path.of(
+                "src/main/java/com/nexa/api/tenantaccessgovernance/tenantmanagement/infrastructure/persistence/JdbcWorkspaceScopeReader.java"));
+        assertThat(scopeReader).contains("tenant_management.workspace", "(w.tenant_id,w.id) > (?,?)",
+                "ORDER BY w.tenant_id,w.id LIMIT ?", "PROPAGATION_REQUIRES_NEW", "crossScopeWorkspaceScanEnabled()");
         assertThat(entrypoint).doesNotContain("@Transactional");
     }
 }

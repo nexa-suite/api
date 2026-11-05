@@ -278,6 +278,8 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 	private static void seedClientAccount(JdbcTemplate tenantAdmin, TenantRecord tenant, String code) {
 		Timestamp now = Timestamp.from(Instant.parse("2026-10-01T00:00:00Z"));
 		UUID accountId = UUID.nameUUIDFromBytes((tenant.tenantId() + ":account").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		String taxDigits = String.format(java.util.Locale.ROOT, "%09d",
+				Math.floorMod(accountId.getLeastSignificantBits(), 1_000_000_000L));
 		tenantAdmin.update("""
 				INSERT INTO sales.client_account
 				    (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,
@@ -285,7 +287,7 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 				     status,created_at,updated_at)
 				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 				""", accountId, tenant.tenantId(), tenant.workspaceId(), code, "Expiry Account", "Expiry Account",
-				"PE", "RUC", code, "WHOLESALE", "Test Contact", "expiry@example.test", "000000000",
+				"PE", "RUC", "20" + taxDigits, "WHOLESALE", "Test Contact", "expiry@example.test", "000000000",
 				"STANDARD", "CREDIT_30", "ACTIVE", now, now);
 	}
 
@@ -312,7 +314,7 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 	private static void createTenantRoles(PostgreSQLContainer container) {
 		try (Connection connection = DriverManager.getConnection(container.getJdbcUrl(), container.getUsername(), container.getPassword());
 				var statement = connection.createStatement()) {
-			statement.execute("CREATE ROLE nexa_runtime LOGIN PASSWORD '" + RUNTIME_PASSWORD + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_runtime LOGIN NOINHERIT PASSWORD '" + RUNTIME_PASSWORD + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("CREATE ROLE nexa_policy_snapshot_writer LOGIN PASSWORD '" + WRITER_PASSWORD + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("CREATE ROLE nexa_business_documents_worker LOGIN PASSWORD '"
 					+ DOCUMENTS_WORKER_PASSWORD
@@ -322,6 +324,8 @@ class TenantBusinessDatabasePurchaseRequestExpiryPolicyIT {
 			statement.execute("CREATE ROLE nexa_business_traceability_worker LOGIN PASSWORD '"
 					+ TRACEABILITY_WORKER_PASSWORD
 					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker NOLOGIN NOINHERIT "
+					+ "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + container.getDatabaseName()
 					+ "\" TO nexa_runtime, nexa_policy_snapshot_writer, nexa_business_documents_worker, "
 					+ "nexa_payments_worker, nexa_business_traceability_worker");

@@ -11,6 +11,7 @@ public final class SellableSku {
     private final UUID tenantId;
     private final UUID workspaceId;
     private final UUID familyId;
+    private final UUID variantId;
     private final String skuCode;
     private final String gtin;
     private final String presentation;
@@ -30,7 +31,8 @@ public final class SellableSku {
     private boolean visible;
     private long version;
 
-    private SellableSku(UUID id, UUID tenantId, UUID workspaceId, UUID familyId, String skuCode, String gtin,
+    private SellableSku(UUID id, UUID tenantId, UUID workspaceId, UUID familyId, UUID variantId,
+            String skuCode, String gtin,
             String presentation, String packagingType, String unitOfMeasure, BigDecimal netWeight,
             BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax,
             int shelfLifeDays, int minimumRemainingShelfLifeDays, boolean lotTrackingRequired,
@@ -39,6 +41,7 @@ public final class SellableSku {
         this.tenantId = Objects.requireNonNull(tenantId);
         this.workspaceId = Objects.requireNonNull(workspaceId);
         this.familyId = Objects.requireNonNull(familyId);
+        this.variantId = variantId;
         this.skuCode = required(skuCode, "SKU code", 80);
         this.gtin = optionalDigits(gtin);
         this.presentation = required(presentation, "Presentation", 160);
@@ -69,8 +72,18 @@ public final class SellableSku {
             BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax,
             int shelfLifeDays, int minimumRemainingShelfLifeDays, boolean lotTrackingRequired,
             boolean expiryTrackingRequired, String taxCategory, Instant now) {
+        return create(tenantId, workspaceId, familyId, null, skuCode, gtin, presentation, packagingType,
+                unitOfMeasure, netWeight, grossWeight, packQuantity, temperatureMin, temperatureMax, shelfLifeDays,
+                minimumRemainingShelfLifeDays, lotTrackingRequired, expiryTrackingRequired, taxCategory, now);
+    }
+
+    public static SellableSku create(UUID tenantId, UUID workspaceId, UUID familyId, UUID variantId,
+            String skuCode, String gtin, String presentation, String packagingType, String unitOfMeasure,
+            BigDecimal netWeight, BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin,
+            BigDecimal temperatureMax, int shelfLifeDays, int minimumRemainingShelfLifeDays,
+            boolean lotTrackingRequired, boolean expiryTrackingRequired, String taxCategory, Instant now) {
         Objects.requireNonNull(now, "Creation time is required");
-        return new SellableSku(UUID.randomUUID(), tenantId, workspaceId, familyId, skuCode, gtin, presentation,
+        return new SellableSku(UUID.randomUUID(), tenantId, workspaceId, familyId, variantId, skuCode, gtin, presentation,
                 packagingType, unitOfMeasure, netWeight, grossWeight, packQuantity, temperatureMin, temperatureMax,
                 shelfLifeDays, minimumRemainingShelfLifeDays, lotTrackingRequired, expiryTrackingRequired, taxCategory,
                 SellableSkuStatus.DRAFT, true, 0);
@@ -81,7 +94,19 @@ public final class SellableSku {
             BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax,
             int shelfLifeDays, int minimumRemainingShelfLifeDays, boolean lotTrackingRequired,
             boolean expiryTrackingRequired, String taxCategory, SellableSkuStatus status, boolean visible, long version) {
-        return new SellableSku(id, tenantId, workspaceId, familyId, skuCode, gtin, presentation, packagingType,
+        return restore(id, tenantId, workspaceId, familyId, null, skuCode, gtin, presentation, packagingType,
+                unitOfMeasure, netWeight, grossWeight, packQuantity, temperatureMin, temperatureMax, shelfLifeDays,
+                minimumRemainingShelfLifeDays, lotTrackingRequired, expiryTrackingRequired, taxCategory, status,
+                visible, version);
+    }
+
+    public static SellableSku restore(UUID id, UUID tenantId, UUID workspaceId, UUID familyId, UUID variantId,
+            String skuCode, String gtin, String presentation, String packagingType, String unitOfMeasure,
+            BigDecimal netWeight, BigDecimal grossWeight, BigDecimal packQuantity, BigDecimal temperatureMin,
+            BigDecimal temperatureMax, int shelfLifeDays, int minimumRemainingShelfLifeDays,
+            boolean lotTrackingRequired, boolean expiryTrackingRequired, String taxCategory,
+            SellableSkuStatus status, boolean visible, long version) {
+        return new SellableSku(id, tenantId, workspaceId, familyId, variantId, skuCode, gtin, presentation, packagingType,
                 unitOfMeasure, netWeight, grossWeight, packQuantity, temperatureMin, temperatureMax, shelfLifeDays,
                 minimumRemainingShelfLifeDays, lotTrackingRequired, expiryTrackingRequired, taxCategory, status, visible, version);
     }
@@ -122,6 +147,7 @@ public final class SellableSku {
     public UUID tenantId() { return tenantId; }
     public UUID workspaceId() { return workspaceId; }
     public UUID familyId() { return familyId; }
+    public UUID variantId() { return variantId; }
     public String skuCode() { return skuCode; }
     public String gtin() { return gtin; }
     public String presentation() { return presentation; }

@@ -5,6 +5,7 @@ import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemDetail;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogItemSummary;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogPage;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSearchCriteria;
+import com.nexa.api.catalogcommercialpolicy.application.model.CatalogScope;
 import com.nexa.api.catalogcommercialpolicy.application.model.CatalogSortField;
 import com.nexa.api.catalogcommercialpolicy.application.model.SortDirection;
 import com.nexa.api.catalogcommercialpolicy.application.port.out.CatalogItemQueryPort;
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import java.math.BigDecimal;
 
@@ -66,5 +69,53 @@ class CatalogQueryServiceTests {
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new CatalogSearchCriteria("x".repeat(121), null, null, null, 0, 20, null, null))
 				.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
+	void resolvesMultipleSellableSkusThroughOneAuthorizedBatchQuery() {
+		UUID tenantId = UUID.randomUUID();
+		UUID workspaceId = UUID.randomUUID();
+		UUID firstSkuId = UUID.randomUUID();
+		UUID secondSkuId = UUID.randomUUID();
+		CatalogItemDetail first = new CatalogItemDetail("CAT-0001", "PROD-0001", "First", "Brand", "Dairy",
+				"Description", "BOX 1", new BigDecimal("17.30"), "PEN", "REFRIGERATED", "/image.png", "image.png");
+		CatalogItemDetail second = new CatalogItemDetail("CAT-0002", "PROD-0002", "Second", "Brand", "Dairy",
+				"Description", "BOX 1", new BigDecimal("12.30"), "PEN", "REFRIGERATED", "/image.png", "image.png");
+		AtomicInteger batchQueries = new AtomicInteger();
+		AtomicInteger scalarQueries = new AtomicInteger();
+		AtomicInteger authorizationChecks = new AtomicInteger();
+		CatalogItemQueryPort port = new CatalogItemQueryPort() {
+			@Override
+			public CatalogPage<CatalogItemSummary> search(CatalogSearchCriteria criteria) {
+				return new CatalogPage<>(List.of(), 0, 20, 0, CatalogSortField.ITEM_NAME, SortDirection.ASC);
+			}
+
+			@Override
+			public Optional<CatalogItemDetail> findByCatalogItemId(CatalogItemId id) {
+				return Optional.empty();
+			}
+
+			@Override
+			public Optional<CatalogItemDetail> findBySellableSkuId(CatalogScope scope, UUID sellableSkuId) {
+				scalarQueries.incrementAndGet();
+				return Optional.empty();
+			}
+
+			@Override
+			public List<CatalogItemDetail> findBySellableSkuIds(CatalogScope scope, List<UUID> sellableSkuIds) {
+				batchQueries.incrementAndGet();
+				assertThat(scope.tenantId()).isEqualTo(tenantId);
+				assertThat(scope.workspaceId()).isEqualTo(workspaceId);
+				assertThat(sellableSkuIds).containsExactly(firstSkuId, secondSkuId);
+				return List.of(first, second);
+			}
+		};
+		CatalogQueryService service = new CatalogQueryService(port, authorizationChecks::incrementAndGet);
+
+		assertThat(service.findBySellableSkuIds(new CatalogScope(tenantId, workspaceId),
+				List.of(firstSkuId, secondSkuId))).containsExactly(first, second);
+		assertThat(batchQueries).hasValue(1);
+		assertThat(scalarQueries).hasValue(0);
+		assertThat(authorizationChecks).hasValue(1);
 	}
 }

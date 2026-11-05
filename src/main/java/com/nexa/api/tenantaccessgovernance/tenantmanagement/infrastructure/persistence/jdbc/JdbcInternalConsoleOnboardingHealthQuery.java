@@ -5,11 +5,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.TenantBusinessDatabaseProvisioningStatusQuery;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.security.access.AccessDeniedException;
 
 import java.sql.ResultSet;
@@ -29,16 +26,12 @@ import java.util.UUID;
 @Component
 @ConditionalOnProperty(prefix = "nexa.jdbc", name = "adapters-enabled", havingValue = "true", matchIfMissing = true)
 public final class JdbcInternalConsoleOnboardingHealthQuery implements InternalConsoleOnboardingHealthQuery {
-	private final JdbcTemplate jdbc;
-	private final TransactionTemplate transactions;
+	private final InternalOperatorJdbcOperations operatorDatabase;
 	private final TenantBusinessDatabaseProvisioningStatusQuery provisioning;
 
-	public JdbcInternalConsoleOnboardingHealthQuery(JdbcTemplate jdbc,
-			PlatformTransactionManager transactionManager,
+	public JdbcInternalConsoleOnboardingHealthQuery(InternalOperatorJdbcOperations operatorDatabase,
 			TenantBusinessDatabaseProvisioningStatusQuery provisioning) {
-		this.jdbc = Objects.requireNonNull(jdbc);
-		this.transactions = new TransactionTemplate(Objects.requireNonNull(transactionManager));
-		this.transactions.setReadOnly(true);
+		this.operatorDatabase = Objects.requireNonNull(operatorDatabase);
 		this.provisioning = Objects.requireNonNull(provisioning);
 	}
 
@@ -48,13 +41,13 @@ public final class JdbcInternalConsoleOnboardingHealthQuery implements InternalC
 			throw new AccessDeniedException("An authenticated internal operator is required.");
 		}
 		int boundedLimit = Math.max(1, Math.min(100, limit));
-		List<RegistrationStatus> registrations = Objects.requireNonNull(transactions.execute(status -> {
+		List<RegistrationStatus> registrations = operatorDatabase.readOnly(jdbc -> {
 			jdbc.queryForObject("select set_config('app.current_internal_operator_id', ?, true)",
 					String.class, internalOperatorId.toString());
 			return jdbc.query("select id,status,tenant_id,workspace_id,updated_at "
 					+ "from tenant_management.organization_registration "
 					+ "order by updated_at desc,id limit ?", registrationMapper(), boundedLimit);
-		}));
+		});
 
 		List<TenantBusinessDatabaseProvisioningStatus> taskStatuses = provisioning.listRecent(internalOperatorId, boundedLimit);
 		Map<WorkspaceKey, TenantBusinessDatabaseProvisioningStatus> byWorkspace = new HashMap<>();

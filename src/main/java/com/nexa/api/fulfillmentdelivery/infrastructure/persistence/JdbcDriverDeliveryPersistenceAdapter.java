@@ -8,6 +8,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.A
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.ArrivalView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.AttemptView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.DeliveryView;
+import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.LastAttemptView;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels.OutcomeLineView;
 import com.nexa.api.fulfillmentdelivery.application.port.DriverDeliveryPersistencePort;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,27 +46,31 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
 
     @Override
     public List<DeliveryView> listAssigned(UUID tenantId, UUID workspaceId, UUID membershipId) {
-        return jdbc.query("select " + DELIVERY_COLUMNS + ACTIVE_COLUMNS + " from logistics.delivery d "
+        return jdbc.query("select " + DELIVERY_COLUMNS + ACTIVE_COLUMNS + LAST_ATTEMPT_COLUMNS + " from logistics.delivery d "
                         + "left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id "
                         + "left join logistics.dispatch_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.dispatch_order_id "
                         + "join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id "
                         + "left join logistics.delivery_active_attempt active on active.tenant_id=d.tenant_id and active.workspace_id=d.workspace_id and active.delivery_id=d.id "
+                        + LAST_ATTEMPT_JOIN
                         + "where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? "
-                        + "and d.status in ('PLANNED','ASSIGNED','DISPATCHED','IN_TRANSIT','PARTIAL') order by d.scheduled_at nulls last,d.created_at,d.id",
-                JdbcDriverDeliveryPersistenceAdapter::mapDelivery, tenantId, workspaceId, membershipId)
-                .stream().map(delivery -> withOutcomeLines(delivery, tenantId, workspaceId)).toList();
+                        + "and (d.status in ('PLANNED','ASSIGNED','DISPATCHED','IN_TRANSIT','PARTIAL') "
+                        + "or (d.status='DELIVERED' and " + TERMINAL_HANDOFF_ELIGIBILITY + ")) "
+                        + "order by d.scheduled_at nulls last,d.created_at,d.id",
+                JdbcDriverDeliveryPersistenceAdapter::mapDelivery, tenantId, workspaceId, membershipId, membershipId)
+                .stream().map(delivery -> withOutcomeLines(delivery, tenantId, workspaceId, membershipId)).toList();
     }
 
     @Override
     public DeliveryView findAssigned(UUID tenantId, UUID workspaceId, UUID membershipId, UUID deliveryId) {
-        return jdbc.query("select " + DELIVERY_COLUMNS + ACTIVE_COLUMNS + " from logistics.delivery d "
+        return jdbc.query("select " + DELIVERY_COLUMNS + ACTIVE_COLUMNS + LAST_ATTEMPT_COLUMNS + " from logistics.delivery d "
                         + "left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id "
                         + "left join logistics.dispatch_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.dispatch_order_id "
                         + "join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id "
                         + "left join logistics.delivery_active_attempt active on active.tenant_id=d.tenant_id and active.workspace_id=d.workspace_id and active.delivery_id=d.id "
+                        + LAST_ATTEMPT_JOIN
                         + "where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? and d.id=?",
                 JdbcDriverDeliveryPersistenceAdapter::mapDelivery, tenantId, workspaceId, membershipId, deliveryId)
-                .stream().findFirst().map(delivery -> withOutcomeLines(delivery, tenantId, workspaceId))
+                .stream().findFirst().map(delivery -> withOutcomeLines(delivery, tenantId, workspaceId, membershipId))
                 .orElseThrow(() -> error("DELIVERY_NOT_FOUND"));
     }
 
@@ -236,9 +241,9 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
         return findAssigned(request.tenantId(), request.workspaceId(), request.actorMembershipId(), request.deliveryId());
     }
 
-    private DeliveryView withOutcomeLines(DeliveryView delivery, UUID tenantId, UUID workspaceId) {
-        if (delivery.fulfillmentId() == null) return delivery;
-        List<OutcomeLineView> lines = jdbc.query(
+    private DeliveryView withOutcomeLines(DeliveryView delivery, UUID tenantId, UUID workspaceId,
+                                          UUID membershipId) {
+        List<OutcomeLineView> lines = delivery.fulfillmentId() == null ? List.of() : jdbc.query(
                 "select id,sku_id,catalog_item_id,dispatched_quantity,delivered_quantity,rejected_quantity,"
                         + "cancelled_quantity,greatest(dispatched_quantity-delivered_quantity-rejected_quantity-cancelled_quantity,0) remaining_quantity,unit "
                         + "from logistics.fulfillment_line where tenant_id=? and workspace_id=? and fulfillment_id=? order by id",
@@ -249,9 +254,22 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
                 tenantId, workspaceId, delivery.fulfillmentId());
         ArrivalFact arrival = delivery.activeAttempt() == null ? null : findArrivalFact(
                 tenantId, workspaceId, delivery.id(), delivery.activeAttempt().id());
+        boolean handoffRenewalEligible = handoffRenewalEligible(
+                tenantId, workspaceId, delivery.id(), membershipId);
         return new DeliveryView(delivery.id(), delivery.fulfillmentId(), delivery.salesOrderId(), delivery.status(),
                 delivery.destinationSnapshot(), delivery.scheduledAt(), delivery.dispatchedAt(), delivery.deliveredAt(),
-                delivery.updatedAt(), delivery.version(), delivery.activeAttempt(), lines, arrival);
+                delivery.updatedAt(), delivery.version(), delivery.activeAttempt(), lines, arrival,
+                delivery.lastAttempt(), handoffRenewalEligible);
+    }
+
+    private boolean handoffRenewalEligible(UUID tenantId, UUID workspaceId, UUID deliveryId,
+                                           UUID membershipId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "select exists(select 1 from logistics.delivery d join logistics.delivery_assignment a "
+                        + "on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id "
+                        + "where d.tenant_id=? and d.workspace_id=? and d.id=? and a.responsible_membership_id=? "
+                        + "and " + TERMINAL_HANDOFF_ELIGIBILITY + ")",
+                Boolean.class, tenantId, workspaceId, deliveryId, membershipId, membershipId));
     }
 
     private ArrivalFact findArrivalFact(UUID tenantId, UUID workspaceId, UUID deliveryId, UUID attemptId) {
@@ -396,10 +414,14 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
         UUID activeId = rs.getObject("active_id", UUID.class);
         AttemptView active = activeId == null ? null : new AttemptView(activeId, rs.getInt("active_attempt_number"),
                 "ACTIVE", rs.getObject("active_started_by", UUID.class), instant(rs, "active_started_at"));
+        UUID lastAttemptId = rs.getObject("last_attempt_id", UUID.class);
+        LastAttemptView lastAttempt = lastAttemptId == null ? null : new LastAttemptView(lastAttemptId,
+                rs.getInt("last_attempt_number"), rs.getString("last_attempt_status"),
+                rs.getString("last_attempt_outcome"), rs.getObject("last_attempt_started_by", UUID.class));
         return new DeliveryView(rs.getObject("id", UUID.class), rs.getObject("fulfillment_id", UUID.class),
                 rs.getObject("sales_order_id", UUID.class), rs.getString("status"), rs.getString("destination_snapshot"),
                 instant(rs, "scheduled_at"), instant(rs, "dispatched_at"), instant(rs, "delivered_at"),
-                instant(rs, "updated_at"), rs.getLong("version"), active, List.of(), null);
+                instant(rs, "updated_at"), rs.getLong("version"), active, List.of(), null, lastAttempt, false);
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
@@ -445,5 +467,30 @@ public class JdbcDriverDeliveryPersistenceAdapter implements DriverDeliveryPersi
     private record IdempotencyRow(String requestHash, UUID resourceId) { }
 
     private static final String DELIVERY_COLUMNS = "d.id,d.fulfillment_id,coalesce(f.sales_order_id,o.sales_order_id) sales_order_id,d.status,d.destination_snapshot,d.scheduled_at,d.dispatched_at,d.delivered_at,d.updated_at,d.version,";
-    private static final String ACTIVE_COLUMNS = "active.id active_id,active.attempt_number active_attempt_number,active.started_by_membership_id active_started_by,active.started_at active_started_at ";
+    private static final String ACTIVE_COLUMNS = "active.id active_id,active.attempt_number active_attempt_number,active.started_by_membership_id active_started_by,active.started_at active_started_at,";
+    private static final String LAST_ATTEMPT_COLUMNS = "last_attempt.id last_attempt_id,last_attempt.attempt_number last_attempt_number,"
+            + "last_attempt.status last_attempt_status,last_attempt.outcome last_attempt_outcome,"
+            + "last_attempt_command.actor_membership_id last_attempt_started_by ";
+    private static final String LAST_ATTEMPT_JOIN = "left join lateral (select attempt.id,attempt.attempt_number,attempt.status,attempt.outcome "
+            + "from logistics.delivery_attempt attempt where attempt.tenant_id=d.tenant_id and attempt.workspace_id=d.workspace_id "
+            + "and attempt.delivery_id=d.id order by attempt.attempt_number desc limit 1) last_attempt on true "
+            + "left join lateral (select command.actor_membership_id from logistics.delivery_command_idempotency command "
+            + "where command.tenant_id=d.tenant_id and command.workspace_id=d.workspace_id and command.operation='ATTEMPT' "
+            + "and command.resource_id=last_attempt.id order by command.created_at desc limit 1) last_attempt_command on true ";
+    private static final String TERMINAL_HANDOFF_ELIGIBILITY = "exists(select 1 from logistics.delivery_attempt latest "
+            + "join logistics.delivery_command_idempotency command on command.tenant_id=latest.tenant_id "
+            + "and command.workspace_id=latest.workspace_id and command.resource_id=latest.id and command.operation='ATTEMPT' "
+            + "where latest.tenant_id=d.tenant_id and latest.workspace_id=d.workspace_id and latest.delivery_id=d.id "
+            + "and latest.attempt_number=(select max(previous.attempt_number) from logistics.delivery_attempt previous "
+            + "where previous.tenant_id=d.tenant_id and previous.workspace_id=d.workspace_id and previous.delivery_id=d.id) "
+            + "and command.actor_membership_id=? "
+            + "and ((d.status='DELIVERED' and latest.status='FINAL' and latest.outcome='DELIVERED') "
+            + "or (d.status in ('PARTIAL','DELIVERED') and latest.status='PARTIAL' and latest.outcome='PARTIAL')) "
+            + "and not exists(select 1 from logistics.delivery_active_attempt active_attempt where active_attempt.tenant_id=d.tenant_id "
+            + "and active_attempt.workspace_id=d.workspace_id and active_attempt.delivery_id=d.id) "
+            + "and not exists(select 1 from logistics.buyer_receipt_fact receipt where receipt.tenant_id=d.tenant_id "
+            + "and receipt.workspace_id=d.workspace_id and receipt.delivery_id=d.id) "
+            + "and not exists(select 1 from logistics.proof_of_delivery pod where pod.tenant_id=d.tenant_id "
+            + "and pod.workspace_id=d.workspace_id and (pod.delivery_id=d.id or pod.dispatch_order_id=d.dispatch_order_id) "
+            + "and (pod.status in ('SEALED','COMPLETED') or pod.sealed_at is not null)))";
 }

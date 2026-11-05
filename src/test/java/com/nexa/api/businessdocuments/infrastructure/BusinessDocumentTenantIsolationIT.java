@@ -40,6 +40,8 @@ class BusinessDocumentTenantIsolationIT extends NexaWorkflowIntegrationSupport {
         UUID document = UUID.randomUUID();
         Instant now = Instant.now();
         String suffix = tenant.toString().replace("-", "").substring(0, 12);
+        String taxIdentifier = "20" + String.format(java.util.Locale.ROOT, "%09d",
+                Math.floorMod(tenant.getLeastSignificantBits(), 1_000_000_000L));
         String objectKey = "documents/" + tenant + "/" + UUID.randomUUID() + ".pdf";
         byte[] content = "%PDF-1.7\nforeign document".getBytes(StandardCharsets.US_ASCII);
 
@@ -51,7 +53,7 @@ class BusinessDocumentTenantIsolationIT extends NexaWorkflowIntegrationSupport {
         var foreignTenantJdbc = tenantJdbcFor(tenant);
         foreignTenantJdbc.update("insert into sales.client_account (id,tenant_id,workspace_id,code,business_name,commercial_name,tax_country_code,tax_identifier_type,tax_identifier_value,segment,contact_person,contact_email,phone,delivery_profile,payment_condition,status,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?)",
                 client, tenant, workspace, "FD-" + suffix, "Foreign Document Client", "Foreign Document Client", "PE", "RUC",
-                "20" + suffix + "000000", "B2B", "Foreign Contact", "foreign-document@example.test", "+51000000000", "Lima", "NET_30", Timestamp.from(now), Timestamp.from(now));
+                taxIdentifier, "B2B", "Foreign Contact", "foreign-document@example.test", "+51000000000", "Lima", "NET_30", Timestamp.from(now), Timestamp.from(now));
 
         ObjectStoragePort.StoredObject stored = storage.put(objectKey, new ByteArrayInputStream(content), content.length, "application/pdf");
         foreignTenantJdbc.update("insert into business_documents.object_storage_object (object_key,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at) values (?,?,?,?,?,?,?)",

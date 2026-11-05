@@ -17,8 +17,13 @@ public interface CatalogSkuUseCase {
             UUID categoryId, UUID brandId, String country, String manufacturer, String supplier, String storageFamily);
     CatalogSkuModels.FamilyView changeFamilyStatus(CatalogScope scope, UUID id, String status, long version);
     CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(CatalogScope scope, int page, int size, String search, UUID familyId);
+    default CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(
+            CatalogScope scope, int page, int size, String search, UUID familyId, UUID variantId) {
+        if (variantId != null) throw new UnsupportedOperationException("Combined family and variant SKU filtering is unavailable");
+        return skus(scope, page, size, search, familyId);
+    }
     CatalogSkuModels.SkuView sku(CatalogScope scope, UUID id);
-    CatalogSkuModels.SkuView createSku(CatalogScope scope, UUID familyId, String skuCode, String gtin,
+    CatalogSkuModels.SkuView createSku(CatalogScope scope, UUID familyId, UUID variantId, String skuCode, String gtin,
             String presentation, String packaging, String unit, BigDecimal netWeight, BigDecimal grossWeight,
             BigDecimal packQuantity, BigDecimal temperatureMin, BigDecimal temperatureMax, int shelfLifeDays,
             int minimumRemainingShelfLifeDays, boolean lotTracking, boolean expiryTracking, String taxCategory);

@@ -15,9 +15,11 @@ import jakarta.validation.constraints.NotNull;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -30,6 +32,38 @@ public final class PaymentController {
     private final PaymentServiceFacade service;
 
     public PaymentController(PaymentServiceFacade service) { this.service = service; }
+
+    @GetMapping("/buyer/payment-methods")
+    @Operation(operationId = "listBuyerSavedPaymentMethods")
+    public ResponseEntity<List<PaymentModels.BuyerSavedPaymentMethodView>> listBuyerSavedPaymentMethods(
+            @RequestAttribute(ACCESS) CurrentAccessContext context) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.listBuyerSavedPaymentMethods(context));
+    }
+
+    @PostMapping("/buyer/payment-methods/setup-intents")
+    @Operation(operationId = "createBuyerPaymentMethodSetupIntent")
+    public ResponseEntity<PaymentModels.BuyerPaymentMethodSetupView> createBuyerPaymentMethodSetupIntent(
+            @RequestAttribute(ACCESS) CurrentAccessContext context,
+            @Parameter(required = true, description = "Stable retry key") @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return ResponseEntity.accepted().cacheControl(CacheControl.noStore())
+                .body(service.createBuyerPaymentMethodSetup(context, idempotencyKey));
+    }
+
+    @PatchMapping("/buyer/payment-methods/{paymentMethodId}/default")
+    @Operation(operationId = "setBuyerSavedPaymentMethodDefault")
+    public ResponseEntity<PaymentModels.BuyerSavedPaymentMethodView> setBuyerSavedPaymentMethodDefault(
+            @RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID paymentMethodId) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(service.setBuyerSavedPaymentMethodDefault(context, paymentMethodId));
+    }
+
+    @DeleteMapping("/buyer/payment-methods/{paymentMethodId}")
+    @Operation(operationId = "removeBuyerSavedPaymentMethod")
+    public ResponseEntity<Void> removeBuyerSavedPaymentMethod(@RequestAttribute(ACCESS) CurrentAccessContext context,
+            @PathVariable UUID paymentMethodId) {
+        service.removeBuyerSavedPaymentMethod(context, paymentMethodId);
+        return ResponseEntity.noContent().build();
+    }
 
     @GetMapping("/receivables")
     @Operation(operationId = "listReceivables")

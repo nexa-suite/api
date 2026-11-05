@@ -3,6 +3,7 @@ package com.nexa.api.creditreceivables.infrastructure.persistence;
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
 import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigurationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigurationQuery;
+import com.nexa.api.creditreceivables.application.publicapi.CreditEligibilitySource;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditPaymentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.CreditReservationCommands;
@@ -22,7 +23,6 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
 /** Binds every BC-07 owner adapter to the Tenant router's current transaction session. */
@@ -55,12 +55,15 @@ public final class JdbcTenantCreditAccountAdapterFactory implements TenantCredit
 
     @Override
     public Bindings bindTo(JdbcTemplate tenantJdbc, CustomerAccountQuery tenantCustomerAccounts,
+            CreditEligibilitySource tenantCreditEligibility,
             ReceivablePaymentAccess tenantReceivablePaymentAccess,
             BusinessTraceabilityCommands tenantTraceability, CanonicalOutboxPort tenantCanonicalOutbox,
             FinancialAdjustmentSource tenantFinancialAdjustmentSource) {
         JdbcTemplate jdbc = requireTenantJdbc(tenantJdbc);
         CustomerAccountQuery accounts = Objects.requireNonNull(tenantCustomerAccounts,
                 "Tenant Customer Account query is required");
+        CreditEligibilitySource eligibility = Objects.requireNonNull(tenantCreditEligibility,
+                "Tenant credit eligibility source is required");
         ReceivablePaymentAccess receivables = Objects.requireNonNull(tenantReceivablePaymentAccess,
                 "Tenant Receivable access is required");
         BusinessTraceabilityCommands traceability = Objects.requireNonNull(tenantTraceability,
@@ -70,19 +73,16 @@ public final class JdbcTenantCreditAccountAdapterFactory implements TenantCredit
         FinancialAdjustmentSource adjustmentSource = Objects.requireNonNull(tenantFinancialAdjustmentSource,
                 "Tenant financial adjustment source is required");
 
-        // A Tenant commitment must never lazily copy credit settings from a central ClientAccount.
-        // ConfigureCredit creates the local account explicitly; a missing local row therefore fails closed.
-        LegacyCustomerCreditInitializationQuery noLegacyFallback =
-                (tenant, workspace, account, currency) -> Optional.empty();
-        JdbcCreditBoundary creditBoundary = new JdbcCreditBoundary(jdbc, noLegacyFallback);
+        // Credit commitments require a modern, explicitly configured account in this Tenant database.
+        JdbcCreditBoundary creditBoundary = new JdbcCreditBoundary(jdbc, eligibility);
         ConfigurationBindings configuration = bindConfigurationTo(jdbc, traceability);
         ReceivableCommands receivableCommands = new JdbcReceivableCommands(jdbc, outbox);
         ReceivableApplicationCommands receivableApplications = new JdbcReceivableApplicationAdapter(
                 jdbc, traceability, outbox);
-        CreditPaymentCommands creditPayments = new JdbcCreditPaymentAdapter(jdbc, traceability);
+        CreditPaymentCommands creditPayments = new JdbcCreditPaymentAdapter(jdbc, traceability, eligibility);
         FinancialAdjustmentCommands financialAdjustments = new JdbcFinancialAdjustmentAdapter(
                 jdbc, traceability, adjustmentSource);
-        return new Bindings(accounts, creditBoundary, creditBoundary, receivableCommands, receivables,
+        return new Bindings(accounts, eligibility, creditBoundary, creditBoundary, receivableCommands, receivables,
                 receivableApplications, creditPayments, financialAdjustments, configuration.query(),
                 configuration.commands());
     }

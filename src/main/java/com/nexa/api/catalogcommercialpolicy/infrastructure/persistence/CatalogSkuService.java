@@ -49,9 +49,9 @@ public class CatalogSkuService implements CatalogSkuPort {
         int safeSize = boundedSize(size);
         String term = like(search);
         String where = "f.tenant_id=? and f.workspace_id=? and (cast(? as text) is null or lower(f.name) like lower(?) or lower(f.family_code) like lower(?))"
-                + " and (cast(? as text) is null or exists(select 1 from catalog_management.brand b0 where b0.tenant_id=f.tenant_id and b0.workspace_id=f.workspace_id and b0.id=f.brand_id and lower(b0.name) like lower(?)))"
-                + " and (cast(? as text) is null or exists(select 1 from catalog_management.category c0 where c0.tenant_id=f.tenant_id and c0.workspace_id=f.workspace_id and c0.id=f.category_id and lower(c0.name) like lower(?)))" + familyVisibility(scope);
-        Object[] arguments = { scope.tenantId(), scope.workspaceId(), term, term, term, like(brand), like(brand), like(category), like(category) };
+                + " and (cast(? as text) is null or exists(select 1 from catalog_management.brand b0 where b0.tenant_id=f.tenant_id and b0.workspace_id=f.workspace_id and b0.id=f.brand_id and lower(b0.name)=lower(?)))"
+                + " and (cast(? as text) is null or exists(select 1 from catalog_management.category c0 where c0.tenant_id=f.tenant_id and c0.workspace_id=f.workspace_id and c0.id=f.category_id and lower(c0.name)=lower(?)))" + familyVisibility(scope);
+        Object[] arguments = { scope.tenantId(), scope.workspaceId(), term, term, term, exact(brand), exact(brand), exact(category), exact(category) };
         long total = jdbc.queryForObject("select count(*) from catalog_management.product_family f where " + where,
                 Long.class, arguments);
         List<CatalogSkuModels.FamilyView> rows = jdbc.query(familySql(where) + " order by f.name,f.id limit ? offset ?",
@@ -100,7 +100,10 @@ public class CatalogSkuService implements CatalogSkuPort {
         return skus(scope, page, size, search, null, variantId);
     }
 
-    private CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(CatalogScope scope, int page, int size, String search, UUID familyId, UUID variantId) {
+    @Override
+    @Transactional(readOnly = true)
+    public CatalogSkuModels.Page<CatalogSkuModels.SkuView> skus(
+            CatalogScope scope, int page, int size, String search, UUID familyId, UUID variantId) {
         int safePage = boundedPage(page);
         int safeSize = boundedSize(size);
         String term = like(search);
@@ -128,8 +131,8 @@ public class CatalogSkuService implements CatalogSkuPort {
     @Transactional
     public CatalogSkuModels.SkuView insertSku(CatalogScope scope, SellableSku sku) {
         Instant now = Instant.now();
-        jdbc.update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,sku_code,gtin,presentation,packaging_type,unit_of_measure,net_weight,gross_weight,pack_quantity,temperature_min,temperature_max,shelf_life_days,minimum_remaining_shelf_life_days,lot_tracking_required,expiry_tracking_required,tax_category,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DRAFT',true,0,?,?)",
-                sku.id(), scope.tenantId(), scope.workspaceId(), sku.familyId(), sku.skuCode(), sku.gtin(), sku.presentation(),
+        jdbc.update("insert into catalog_management.sellable_sku (id,tenant_id,workspace_id,family_id,variant_id,sku_code,gtin,presentation,packaging_type,unit_of_measure,net_weight,gross_weight,pack_quantity,temperature_min,temperature_max,shelf_life_days,minimum_remaining_shelf_life_days,lot_tracking_required,expiry_tracking_required,tax_category,status,visible,version,created_at,updated_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DRAFT',true,0,?,?)",
+                sku.id(), scope.tenantId(), scope.workspaceId(), sku.familyId(), sku.variantId(), sku.skuCode(), sku.gtin(), sku.presentation(),
                 sku.packagingType(), sku.unitOfMeasure(), sku.netWeight(), sku.grossWeight(), sku.packQuantity(),
                 sku.temperatureMin(), sku.temperatureMax(), sku.shelfLifeDays(), sku.minimumRemainingShelfLifeDays(),
                 sku.lotTrackingRequired(), sku.expiryTrackingRequired(), sku.taxCategory(), Timestamp.from(now), Timestamp.from(now));
@@ -321,6 +324,7 @@ public class CatalogSkuService implements CatalogSkuPort {
         if (normalized.length() > max) throw new IllegalArgumentException("Catalog value is invalid");
         return normalized;
     }
+    private static String exact(String value) { return value == null || value.isBlank() ? null : value.strip(); }
     private static int boundedPage(int value) { return Math.max(0, value); }
     private static int boundedSize(int value) { return Math.max(1, Math.min(100, value)); }
     private static String like(String value) { return value == null || value.isBlank() ? null : "%" + value.trim().replace("%", "\\%").replace("_", "\\_") + "%"; }

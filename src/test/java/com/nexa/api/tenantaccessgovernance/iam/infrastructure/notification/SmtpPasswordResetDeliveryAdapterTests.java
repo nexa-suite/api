@@ -22,6 +22,7 @@ class SmtpPasswordResetDeliveryAdapterTests {
         when(sender.createMimeMessage()).thenReturn(message);
         var adapter = new SmtpPasswordResetDeliveryAdapter(sender, "smtp.example", "no-reply@example.test",
                 "http://localhost:4200/reset-password", "http://localhost:4200/reset-password",
+                "", "",
                 Duration.ofSeconds(5), true);
 
         adapter.sendReset("buyer@example.test", "PORTAL", "sample-token", Instant.parse("2026-10-29T20:00:00Z"));
@@ -39,6 +40,7 @@ class SmtpPasswordResetDeliveryAdapterTests {
         when(sender.createMimeMessage()).thenReturn(message);
         var adapter = new SmtpPasswordResetDeliveryAdapter(sender, "smtp.example", "no-reply@example.test",
                 "https://platform.example.test/reset-password", "https://portal.example.test/reset-password",
+                "", "",
                 Duration.ofSeconds(5), true);
 
         adapter.sendReset("member@example.test", "PLATFORM", "sample-token", Instant.parse("2026-10-29T20:00:00Z"));

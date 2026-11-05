@@ -21,10 +21,31 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
         UUID accountId = UUID.fromString(buyerClientAccountId());
         UUID tenantId = UUID.fromString(tenantId());
         UUID workspaceId = UUID.fromString(workspaceId());
+        UUID salesMembershipId = UUID.fromString(membershipId(SALES_EMAIL));
         CreditAccountState original = creditAccount(accountId, tenantId, workspaceId, "PEN");
-        ensureCreditAccount(accountId, tenantId, workspaceId, "PEN");
-
+        SalesOwnerState originalSalesOwner = salesOwner(accountId, tenantId, workspaceId);
+        boolean salesOwnerAssignedByTest = false;
         try {
+            ensureCreditAccount(accountId, tenantId, workspaceId, "PEN");
+            UUID existingSalesOwner = originalSalesOwner.membershipId();
+            if (existingSalesOwner != null && !salesMembershipId.equals(existingSalesOwner)) {
+                throw new IllegalStateException("CLI-001 is assigned to a different Sales membership in the integration fixture");
+            }
+            if (existingSalesOwner == null) {
+                int ownerUpdated = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?, "
+                                + "updated_at=current_timestamp,version=version+1 where tenant_id=? and workspace_id=? "
+                                + "and id=? and code='CLI-001' and sales_owner_membership_id is null",
+                        salesMembershipId, tenantId, workspaceId, accountId);
+                if (ownerUpdated != 1) {
+                    throw new IllegalStateException("CLI-001 Sales owner changed while preparing the integration fixture");
+                }
+                salesOwnerAssignedByTest = true;
+            }
+            UUID verifiedSalesOwner = tenantJdbc().queryForObject("select sales_owner_membership_id from sales.client_account "
+                            + "where tenant_id=? and workspace_id=? and id=? and code='CLI-001'",
+                    (rs, row) -> rs.getObject("sales_owner_membership_id", UUID.class), tenantId, workspaceId, accountId);
+            assertThat(verifiedSalesOwner).isEqualTo(salesMembershipId);
+
             tenantJdbc().update("update payments.credit_account set credit_limit=1000.00,credit_exposure=125.00,reserved_exposure=75.00,status='ACTIVE',version=version+1,updated_at=current_timestamp where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN'",
                     tenantId, workspaceId, accountId);
             BigDecimal receivables = tenantJdbc().queryForObject("select coalesce(sum(amount+coalesce(adjustment_total,0)-amount_paid),0) from payments.receivable where tenant_id=? and workspace_id=? and client_account_id=? and currency='PEN' and status in ('OPEN','PARTIALLY_PAID','OVERDUE')",
@@ -35,6 +56,7 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
                             .param("currency", "pen")
                             .header("Authorization", "Bearer " + sales))
                     .andExpect(status().isOk()).andReturn();
+            assertThat(result.getResponse().getHeader("Cache-Control")).contains("no-store");
 
             var body = json(result);
             assertThat(body.get("clientAccountId").asText()).isEqualTo(accountId.toString());
@@ -50,11 +72,29 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
             assertThat(Instant.parse(body.get("asOf").asText())).isBeforeOrEqualTo(Instant.now());
 
             String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+            MvcResult buyerResult = mockMvc.perform(get("/api/v1/client-accounts/me/credit-exposure")
+                            .param("currency", "PEN")
+                            .header("Authorization", "Bearer " + buyer))
+                    .andExpect(status().isOk()).andReturn();
+            assertThat(buyerResult.getResponse().getHeader("Cache-Control")).contains("no-store");
             mockMvc.perform(get("/api/v1/client-accounts/" + accountId + "/credit-exposure")
                             .header("Authorization", "Bearer " + buyer))
                     .andExpect(status().isForbidden());
         } finally {
-            restoreCreditAccount(accountId, tenantId, workspaceId, original);
+            try {
+                restoreCreditAccount(accountId, tenantId, workspaceId, original);
+            } finally {
+                if (salesOwnerAssignedByTest) {
+                    int ownerRestored = tenantJdbc().update("update sales.client_account set sales_owner_membership_id=?, "
+                                    + "version=?,updated_at=? where tenant_id=? and workspace_id=? and id=? "
+                                    + "and code='CLI-001' and sales_owner_membership_id=? and version=?",
+                            originalSalesOwner.membershipId(), originalSalesOwner.version(), originalSalesOwner.updatedAt(),
+                            tenantId, workspaceId, accountId, salesMembershipId, originalSalesOwner.version() + 1);
+                    if (ownerRestored != 1) {
+                        throw new IllegalStateException("CLI-001 Sales owner changed before the integration fixture was restored");
+                    }
+                }
+            }
         }
     }
 
@@ -93,6 +133,16 @@ class CreditExposureQueryIT extends NexaWorkflowIntegrationSupport {
                 original.limit(), original.exposure(), original.reserved(), original.status(), original.version(), original.createdAt(), original.updatedAt(),
                 tenantId, workspaceId, clientAccountId);
     }
+
+    private SalesOwnerState salesOwner(UUID clientAccountId, UUID tenantId, UUID workspaceId) {
+        return tenantJdbc().queryForObject("select sales_owner_membership_id,version,updated_at from sales.client_account "
+                        + "where tenant_id=? and workspace_id=? and id=? and code='CLI-001'",
+                (rs, row) -> new SalesOwnerState(rs.getObject("sales_owner_membership_id", UUID.class),
+                        rs.getLong("version"), rs.getTimestamp("updated_at")),
+                tenantId, workspaceId, clientAccountId);
+    }
+
+    private record SalesOwnerState(UUID membershipId, long version, Timestamp updatedAt) { }
 
     private record CreditAccountState(UUID id, BigDecimal limit, BigDecimal exposure, BigDecimal reserved,
                                       String status, long version, Timestamp createdAt, Timestamp updatedAt) { }

@@ -1,0 +1,20 @@
+nexa:
+  tenant-business:
+    cloud-read:
+      enabled: ${NEXA_TENANT_BUSINESS_CLOUD_READ_ENABLED:false}
+    catalog-detail-read:
+      enabled: ${NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED:false}
+    cloud-router:
+      enabled: ${NEXA_TENANT_BUSINESS_CLOUD_ROUTER_ENABLED:false}
+      credentials-source: ${NEXA_TENANT_BUSINESS_CLOUD_CREDENTIALS_SOURCE:files}
+      runtime-credentials-directory: ${NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_CREDENTIALS_DIRECTORY:}
+      policy-writer-credentials-directory: ${NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_CREDENTIALS_DIRECTORY:}
+      environment:
+        credential-secret-reference: ${NEXA_TENANT_BUSINESS_CLOUD_CREDENTIAL_REFERENCE:}
+        tenant-id: ${NEXA_TENANT_BUSINESS_CLOUD_TENANT_ID:}
+        database-identity: ${NEXA_TENANT_BUSINESS_CLOUD_DATABASE_IDENTITY:}
+        jdbc-url: ${NEXA_TENANT_BUSINESS_CLOUD_JDBC_URL:}
+        runtime-username: ${NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_USERNAME:}
+        runtime-password: ${NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_PASSWORD:}
+        policy-writer-username: ${NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_USERNAME:}
+        policy-writer-password: ${NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_PASSWORD:}

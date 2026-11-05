@@ -7,6 +7,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingM
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.context.annotation.Profile;
@@ -79,7 +80,7 @@ public final class BuyerDeliveryTrackingController {
     private static DeliveryResponse response(DeliveryView value) {
         return new DeliveryResponse(value.id(), value.salesOrderNumber(), value.status(), value.destination(),
                 value.scheduledAt(), value.dispatchedAt(), value.deliveredAt(), value.proofOfDeliveryStatus(),
-                value.version(), value.createdAt(), value.updatedAt());
+                value.version(), value.createdAt(), value.updatedAt(), value.salesOrderStatus());
     }
 
     private static ReceiptResponse receiptResponse(ReceiptView value) {
@@ -93,11 +94,15 @@ public final class BuyerDeliveryTrackingController {
     public record PageResponse<T>(List<T> items, int page, int size, long total) { }
     public record DeliveryResponse(String id, String salesOrderNumber, String status, String destination,
                                    Instant scheduledAt, Instant dispatchedAt, Instant deliveredAt,
-                                   String proofOfDeliveryStatus, long version, Instant createdAt,
-                                   Instant updatedAt) { }
+                                   @Schema(nullable = true) String proofOfDeliveryStatus,
+                                   long version, Instant createdAt,
+                                   Instant updatedAt, String salesOrderStatus) { }
     public record EventResponse(String type, Instant occurredAt) { }
-    public record ReceiptResponse(String id, String deliveryId, String attemptId, String decision,
+    @Schema(name = "BuyerDeliveryReceiptResponse")
+    public record ReceiptResponse(String id, String deliveryId, String attemptId,
+                                  @Schema(allowableValues = {"ACCEPTED", "DISPUTED"}) String decision,
                                   java.math.BigDecimal driverDeliveredQuantity,
-                                  java.math.BigDecimal acceptedQuantity, String reason, Instant occurredAt,
+                                  java.math.BigDecimal acceptedQuantity,
+                                  @Schema(nullable = true) String reason, Instant occurredAt,
                                   String recordedByMembershipId) { }
 }

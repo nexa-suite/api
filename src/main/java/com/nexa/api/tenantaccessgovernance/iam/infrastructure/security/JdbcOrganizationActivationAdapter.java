@@ -1,6 +1,5 @@
 package com.nexa.api.tenantaccessgovernance.iam.infrastructure.security;
 
-import com.nexa.api.tenantaccessgovernance.iam.application.exception.IamSecurityException;
 import com.nexa.api.tenantaccessgovernance.iam.application.port.out.OrganizationActivationPersistencePort;
 import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.registration.OrganizationRegistration;
@@ -44,11 +43,6 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
         String founderEmail = registration.founder().email();
         UUID existingUser = jdbc.query("select id from iam.user_account where normalized_email=? for update",
                 (rs, row) -> rs.getObject(1, UUID.class), founderEmail).stream().findFirst().orElse(null);
-        if (existingUser != null && Boolean.TRUE.equals(jdbc.queryForObject(
-                "select exists(select 1 from tenant_management.workspace_membership where user_id=? and membership_type='BUYER' and status='ACTIVE')",
-                Boolean.class, existingUser))) {
-            throw new IamSecurityException("FOUNDER_EMAIL_INCOMPATIBLE");
-        }
 
         UUID tenantId = UUID.randomUUID();
         UUID workspaceId = UUID.randomUUID();
@@ -74,8 +68,8 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
         }
 
         UUID membershipId = UUID.randomUUID();
-        jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,'INTERNAL','ACTIVE',?,?,0)",
-                membershipId, workspaceId, userId, timestamp(now), timestamp(now));
+		jdbc.update("insert into tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?,?,?,?,'INTERNAL','ACTIVE',?,?,0)",
+				membershipId, tenantId, workspaceId, userId, timestamp(now), timestamp(now));
         ensureSystemWorkflowActor(tenantId, workspaceId);
         return new ActivatedOrganization(tenantId, workspaceId, userId, membershipId, founderEmail);
     }
@@ -88,7 +82,7 @@ public final class JdbcOrganizationActivationAdapter implements OrganizationActi
 
     private void ensureSystemWorkflowActor(UUID tenantId, UUID workspaceId) {
         String membership = jdbc.queryForObject("select md5('nexa-system-workflow:' || ?::text)::uuid", String.class, workspaceId);
-        int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, workspaceId);
+		int inserted = jdbc.update("insert into tenant_management.workspace_membership (id,tenant_id,workspace_id,user_id,membership_type,status,created_at,updated_at,version) values (?::uuid,?::uuid,?::uuid,'11111111-1111-4111-8111-111111111111'::uuid,'SYSTEM_WORKFLOW','ACTIVE',current_timestamp,current_timestamp,0) on conflict (workspace_id,user_id) do nothing", membership, tenantId, workspaceId);
         if (inserted == 1) {
             jdbc.update("insert into tenant_management.membership_role_definition (membership_id,tenant_id,workspace_id,role_id,assigned_at) values (?::uuid,?::uuid,?::uuid,'22222222-2222-4222-8222-222222222222'::uuid,current_timestamp) on conflict do nothing", membership, tenantId, workspaceId);
             jdbc.update("insert into tenant_management.membership_authorization_state (membership_id,tenant_id,workspace_id,authorization_version,updated_at) values (?::uuid,?::uuid,?::uuid,0,current_timestamp) on conflict (membership_id) do nothing", membership, tenantId, workspaceId);

@@ -12,7 +12,6 @@ import java.util.Objects;
 public final class TenantBoundManualSalesOrderUseCase implements ManualSalesOrderUseCase {
     private final TenantBusinessDatabaseRouter router;
     private final TenantSalesCommitmentCompositionProvider compositions;
-
     public TenantBoundManualSalesOrderUseCase(TenantBusinessDatabaseRouter router,
             TenantSalesCommitmentCompositionProvider compositions) {
         this.router = Objects.requireNonNull(router, "Tenant business database router is required");
