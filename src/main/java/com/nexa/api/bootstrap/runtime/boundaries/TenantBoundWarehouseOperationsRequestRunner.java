@@ -2,7 +2,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
-import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseWork;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessEvidenceQuery;
 import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessEvidenceQueryFactory;
 import com.nexa.api.catalogcommercialpolicy.application.publicapi.SellableSkuQuery;
@@ -12,14 +12,15 @@ import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAcco
 import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentInventoryQuery;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
-import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
+import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryCommercialSource;
 import com.nexa.api.inventoryavailability.application.publicapi.InventoryFulfillmentSource;
 import com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationsStoreUnavailableException;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
 import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
@@ -74,6 +75,27 @@ public final class TenantBoundWarehouseOperationsRequestRunner implements Wareho
 
     @Override
     public <T> T execute(CurrentAccessContext context, Function<WarehouseOperationsService, T> operation) {
+        return execute(context, operation, false);
+    }
+
+    public WarehouseOperationsService.Page<WarehouseOperationsService.LotSummary> listLots(
+            CurrentAccessContext context, String catalogItemId, String warehouseId, String zoneId,
+            String status, int page, int size, String sort) {
+        return execute(context, service -> service.lots(context, catalogItemId, warehouseId, zoneId,
+                status, page, size, sort), true);
+    }
+
+    public WarehouseOperationsService.LotSummary lot(CurrentAccessContext context, String id) {
+        return execute(context, service -> service.lot(context, id), true);
+    }
+
+    public java.util.List<WarehouseOperationsService.Availability> warehouseAvailability(
+            CurrentAccessContext context, String warehouseId, java.util.List<String> ids) {
+        return execute(context, service -> service.warehouseAvailability(context, warehouseId, ids), true);
+    }
+
+    private <T> T execute(CurrentAccessContext context, Function<WarehouseOperationsService, T> operation,
+                          boolean readOnly) {
         CurrentAccessContext verified = Objects.requireNonNull(context, "Verified access context is required");
         Function<WarehouseOperationsService, T> request = Objects.requireNonNull(operation,
                 "Warehouse request operation is required");
@@ -85,8 +107,9 @@ public final class TenantBoundWarehouseOperationsRequestRunner implements Wareho
         WarehouseObjectAccess verifiedWarehouseAccess = TenantWarehouseRequestBindings.warehouseAccessSnapshot(
                 verified, allowedWarehouses);
         try {
-            return router.inTransaction(verified, tenantJdbc -> executeWithinTenant(verified, tenantJdbc,
-                    verifiedWarehouseAccess, settings, request));
+            TenantBusinessDatabaseWork<T> work = tenantJdbc ->
+                    executeWithinTenant(verified, tenantJdbc, verifiedWarehouseAccess, settings, request);
+            return readOnly ? router.inReadOnlyTransaction(verified, work) : router.inTransaction(verified, work);
         } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                  | CannotGetJdbcConnectionException | CannotCreateTransactionException unavailable) {
             throw new WarehouseOperationsStoreUnavailableException(unavailable);

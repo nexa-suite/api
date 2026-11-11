@@ -1,15 +1,23 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseWork;
 import com.nexa.api.fulfillmentdelivery.application.FulfillmentDeliveryComposition;
-import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentModels;
+import com.nexa.api.fulfillmentdelivery.application.model.FulfillmentWorkListModels;
+import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationModels;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseAccessGrantView;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.CannotCreateTransactionException;
 
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +49,39 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
     @Override
     public <T> T execute(CurrentAccessContext context, Requirements requirements,
                          Function<FulfillmentDeliveryComposition, T> work) {
+        return execute(context, requirements, work, false);
+    }
+
+    public FulfillmentWorkListModels.Page listPickingWork(
+            CurrentAccessContext context, int page, int size) {
+        return read(context, composition -> composition.workList().list(context, page, size));
+    }
+
+    public FulfillmentModels.FulfillmentView readFulfillment(
+            CurrentAccessContext context, UUID id) {
+        return read(context, composition -> {
+            composition.fulfillment().getPhysicalAllocation(context, id);
+            return composition.fulfillment().get(context, id);
+        });
+    }
+
+    public PhysicalAllocationModels.PhysicalAllocationView readAllocation(
+            CurrentAccessContext context, UUID id) {
+        return read(context, composition -> composition.fulfillment().getPhysicalAllocation(context, id));
+    }
+
+    private <T> T read(CurrentAccessContext context, Function<FulfillmentDeliveryComposition, T> work) {
+        try {
+            return execute(context, Requirements.warehouse(), work, true);
+        } catch (TenantBusinessDatabaseSchemaManifestMismatchException
+                 | CannotGetJdbcConnectionException | CannotCreateTransactionException unavailable) {
+            throw new TenantBusinessDatabaseUnavailableException(
+                    "Tenant fulfillment data is temporarily unavailable", unavailable);
+        }
+    }
+
+    private <T> T execute(CurrentAccessContext context, Requirements requirements,
+                          Function<FulfillmentDeliveryComposition, T> work, boolean readOnly) {
         CurrentAccessContext verified = Objects.requireNonNull(context, "Verified access context is required");
         Requirements needed = Objects.requireNonNull(requirements, "Preflight requirements are required");
         Function<FulfillmentDeliveryComposition, T> action = Objects.requireNonNull(work,
@@ -75,8 +116,9 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
         WarehouseObjectAccess warehouseSnapshot = new WarehouseAccessSnapshot(verified, warehouses);
         WorkforceDirectory workforceSnapshot = new WorkforceSnapshot(verified, assignable, assignees,
                 needed.logisticsAssignees(), exceptionAssignees, needed.exceptionAssignees());
-        return router.inTransaction(verified, tenantJdbc -> action.apply(
-                compositions.bindTo(tenantJdbc, warehouseSnapshot, workforceSnapshot)));
+        TenantBusinessDatabaseWork<T> routedWork = tenantJdbc ->
+                action.apply(compositions.bindTo(tenantJdbc, warehouseSnapshot, workforceSnapshot));
+        return readOnly ? router.inReadOnlyTransaction(verified, routedWork) : router.inTransaction(verified, routedWork);
     }
 
     private static final class WarehouseAccessSnapshot implements WarehouseObjectAccess {

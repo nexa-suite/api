@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [2.0.3] — Release preparation
+
+- Restore the complete Swagger definition with visible operation groups by default; retain the optional smaller presentation view and same-origin HTTPS requests.
+- Add explicitly enabled Tenant-routed stock-lot, Warehouse availability and picking list/detail/allocation reads for the cloud composition, preserving existing response contracts, permissions and Warehouse grants.
+- Enforce PostgreSQL read-only repeatable-read transactions for these cloud reads. General inventory/fulfillment commands and scheduled work remain disabled.
+- Add HTTP, routing and authorization regression checks for cloud reads and fail-closed command behavior; no database migration or new client dependency.
+
 ## [2.0.2] — Release preparation
 
 - Default Swagger UI to a smaller presentation group for authentication, catalog taxonomy and warehouses; retain the complete consumer contract and compatibility routes.

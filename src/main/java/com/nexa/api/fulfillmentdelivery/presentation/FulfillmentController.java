@@ -51,9 +51,12 @@ public final class FulfillmentController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
 
     private final FulfillmentDeliveryRequestRunner requests;
+    private final com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead pickingWorkRead;
 
-    public FulfillmentController(FulfillmentDeliveryRequestRunner requests) {
+    public FulfillmentController(FulfillmentDeliveryRequestRunner requests,
+            com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead pickingWorkRead) {
         this.requests = requests;
+        this.pickingWorkRead = pickingWorkRead;
     }
 
     @GetMapping("/fulfillments")
@@ -62,9 +65,7 @@ public final class FulfillmentController {
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size) {
-        FulfillmentWorkListModels.Page value = requests.execute(context,
-                FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
-                composition -> composition.workList().list(context, page, size));
+        FulfillmentWorkListModels.Page value = pickingWorkRead.list(context, page, size);
         return ResponseEntity.ok(value);
     }
 
@@ -73,9 +74,7 @@ public final class FulfillmentController {
     public ResponseEntity<FulfillmentModels.FulfillmentView> getFulfillment(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
-        FulfillmentModels.FulfillmentView value = requests.execute(context,
-                FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
-                composition -> composition.fulfillment().get(context, fulfillmentId));
+        FulfillmentModels.FulfillmentView value = pickingWorkRead.fulfillment(context, fulfillmentId);
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
@@ -84,9 +83,7 @@ public final class FulfillmentController {
     public ResponseEntity<PhysicalAllocationModels.PhysicalAllocationView> getPhysicalAllocation(
             @RequestAttribute(ACCESS) CurrentAccessContext context,
             @PathVariable UUID fulfillmentId) {
-        PhysicalAllocationModels.PhysicalAllocationView value = requests.execute(context,
-                FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
-                composition -> composition.fulfillment().getPhysicalAllocation(context, fulfillmentId));
+        PhysicalAllocationModels.PhysicalAllocationView value = pickingWorkRead.allocation(context, fulfillmentId);
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 
