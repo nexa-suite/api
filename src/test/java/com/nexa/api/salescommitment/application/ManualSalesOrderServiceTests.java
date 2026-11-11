@@ -49,7 +49,8 @@ class ManualSalesOrderServiceTests {
     @Test
     void manualOrderUsesIdempotencyBeforeAllocatingASecondIdentity() {
         CapturingPersistence persistence = new CapturingPersistence();
-        Clock initialClock = Clock.fixed(Instant.parse("2026-10-29T17:00:00Z"), ZoneOffset.UTC);
+        Clock initialClock = Clock.fixed(LocalDate.now(ZoneOffset.UTC).plusDays(7)
+                .atTime(17, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
         LocalDate requestedDate = new BuyerDeliveryLeadBusinessPolicy().minimumAllowedDeliveryDate(initialClock);
         CreateManualSalesOrderCommand command = new CreateManualSalesOrderCommand(SalesTestFixtures.ACCOUNT,
                 SalesTestFixtures.ADDRESS.toString(), null, requestedDate, "Dock 2",
@@ -59,7 +60,7 @@ class ManualSalesOrderServiceTests {
 
         ManualSalesOrderService service = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence, initialClock);
         ManualSalesOrderView first = service.create(SalesTestFixtures.salesContext(), command, "manual-key-1");
-        Clock laterClock = Clock.fixed(Instant.parse("2026-10-31T17:00:00Z"), ZoneOffset.UTC);
+        Clock laterClock = Clock.offset(initialClock, java.time.Duration.ofDays(7));
         assertThat(new BuyerDeliveryLeadBusinessPolicy().minimumAllowedDeliveryDate(laterClock))
                 .isAfter(requestedDate);
         ManualSalesOrderService replayService = new ManualSalesOrderService(SalesTestFixtures.assembler(), persistence, laterClock);

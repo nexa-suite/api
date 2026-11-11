@@ -19,6 +19,8 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
+      - name: Fetch published v2.0.1 reviewed contract
+        run: git fetch --no-tags --depth=1 origin refs/tags/v2.0.1:refs/tags/v2.0.1
       - name: Fetch published v2.0.0 consumer baseline
         run: git fetch --no-tags --depth=1 origin refs/tags/v2.0.0:refs/tags/v2.0.0
       - name: Fetch published v0.17.1 migration baseline

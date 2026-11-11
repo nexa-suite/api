@@ -1,6 +1,6 @@
 # OpenAPI contract
 
-OpenAPI y Swagger UI se habilitan únicamente con el perfil `local`.
+OpenAPI y Swagger UI se habilitan con el perfil `local` o mediante la opción explícita `NEXA_SWAGGER_ENABLED=true`. Fuera de esas opciones siguen deshabilitados.
 
 ```bash
 SPRING_PROFILES_ACTIVE=local ./mvnw spring-boot:run
@@ -53,3 +53,81 @@ The route is enabled in the `local` profile by
 
 The read-only BC-05 lot temperature route and its Warehouse/BOM authorization
 scope are described in [`inventory-lot-temperature-readings.md`](./inventory-lot-temperature-readings.md).
+
+
+## Swagger para presentación
+
+Swagger abre el grupo `presentation`: autenticación, marcas, categorías y
+almacenes. El selector permite abrir `complete` para consultar toda la API.
+`/v3/api-docs` conserva el contrato completo usado por consumidores y por el
+snapshot. `/v3/api-docs/presentation` excluye operaciones deprecated; los aliases
+siguen disponibles en runtime y en `complete` por compatibilidad. No se elimina
+un endpoint publicado por aparecer tachado: su retirada requiere análisis de
+consumidores y migración.
+
+La interfaz inicia con tags cerrados, sin renderizar el panel global de schemas,
+con filtro y sin resaltado de sintaxis. Los cuerpos y respuestas siguen
+consultables al abrir cada operación. `Try it out` sigue siendo explícito; no se
+almacena el token entre recargas. Estas opciones están en `swagger-ui.yml`.
+Referencia: [configuración oficial de springdoc](https://springdoc.org/properties.html).
+
+### Ensayo CRUD con datos de prueba
+
+Usar una instancia local con Tenant provisionado, fixtures y capacidades de
+catálogo/almacenes habilitadas; consultar [operaciones locales](../../ops/README.md).
+La vista Swagger no habilita capacidades desactivadas del despliegue. No usar
+registros reales para ensayar. Un `503` por capacidad no disponible se resuelve
+preparando el entorno, no quitando controles de autorización.
+
+1. Obtener `accessToken` fuera del navegador. En Postman o un cliente HTTP de
+   terminal, ejecutar `POST /api/v1/authentication/sign-in` con
+   `Content-Type: application/json` y `X-Nexa-Client: NATIVE`, sin `Origin`.
+   Usar cuenta de prueba autorizada y este cuerpo, con sus datos:
+
+   ```json
+   {"identifier":"USUARIO_DE_PRUEBA","password":"CONTRASEÑA_DE_PRUEBA","workspaceSlug":"WORKSPACE_DE_PRUEBA","surface":"PLATFORM"}
+   ```
+
+2. Abrir `/swagger-ui/index.html`, grupo `presentation`. En **Authorize / bearerAuth**,
+   pegar `accessToken` sin prefijo `Bearer`. No pegar refresh token. Swagger ejecuta
+   las operaciones contra el mismo origen de la página, incluido HTTPS en Render.
+   El navegador envía `Origin` en el login; `X-Nexa-Client: NATIVE` no elude esa
+   restricción. El login browser requiere origen permitido y CSRF existentes.
+3. Crear marca con `POST /api/v1/catalog/brands`, `Idempotency-Key` nuevo y cuerpo:
+
+   ```json
+   {"slug":"presentacion-marca-01","name":"Marca presentación","description":"Datos de prueba"}
+   ```
+
+4. Copiar `id` y cabecera `ETag` de creación completa, incluidas comillas.
+   Leer `GET /api/v1/catalog/brands/{id}` para comprobar datos. Este GET devuelve
+   `version` en el cuerpo, no cabecera `ETag`.
+5. Modificar con `PATCH /api/v1/catalog/brands/{id}`, mismo cuerpo con nombre
+   cambiado y `If-Match` igual al último `ETag`.
+6. Desactivar con `POST /api/v1/catalog/brands/{id}/deactivations`, usando el
+   nuevo `ETag`. La baja es lógica (`INACTIVE`); no existe DELETE físico de marca.
+7. Repetir con categorías: `/api/v1/catalog/categories`, cuerpo con `slug`,
+   `name`, `description` y `parentId: null`. Usar los ETags nuevos en cada cambio.
+
+Sin token debe retornar `401`; usuario sin permiso debe recibir `403`; omitir
+`If-Match` en actualización debe retornar `428`. No reutilizar un ETag viejo.
+Un mismo `Idempotency-Key` identifica el mismo intento de creación, no otra marca.
+
+### Comprobación técnica
+
+```bash
+./mvnw -Dnexa.integration.enabled=true -Dtest=SwaggerSecurityConfigurationTests,OpenApiContractIT,SwaggerPresentationIT,CatalogManagementIT#ownerCreatesAndReplaysCategoryThenMustUseIfMatchForUpdate+warehouseCanReadCatalogButCannotManageTaxonomy clean package
+```
+
+Requiere Docker para PostgreSQL efímero de integración. Verifica paridad del
+contrato completo, selección inicial, reducción de payload, aliases fuera de la
+vista de presentación, CRUD de marca y permisos/precondiciones de categorías.
+Medir carga de navegador e inicio del servidor por separado: reducir contrato
+no elimina una eventual espera de arranque del alojamiento.
+
+
+La aprobación histórica en `migrations/v2.0.1.json` permanece inmutable. El gate
+puede reutilizarla para un patch posterior del mismo major/minor únicamente si
+el snapshot revisado conserva su SHA256 y el documento nuevo cambia solo
+`info.version`. Los schemas, seguridad, findings y baselines deben conservarse
+exactamente; cualquier cambio adicional requiere evaluación independiente.

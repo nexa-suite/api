@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## [2.0.2] — Release preparation
+
+- Default Swagger UI to a smaller presentation group for authentication, catalog taxonomy and warehouses; retain the complete consumer contract and compatibility routes.
+- Collapse tags and the global schema panel, enable filtering and request durations, and disable syntax highlighting and persisted authorization.
+- Document and test native sign-in followed by tenant-backed brand creation, reads, updates and deactivation; retain category permission and precondition coverage.
+- Preserve reviewed historical contract evidence for patch releases that change only OpenAPI version metadata; reject schema changes, missing approval and altered evidence.
+- Refresh the manual-order idempotency test clock so its delivery fixture remains in the future.
+- Clarify integration documentation and optional Swagger environment settings without adding runtime dependencies or database migrations.
+
 ## [2.0.1] — Release candidate
 
 - Add verify-only Neon Tenant database readiness checks without provisioning or changing database grants.
