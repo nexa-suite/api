@@ -17,11 +17,13 @@ import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.oas.models.servers.Server;
 import io.swagger.v3.core.converter.AnnotatedType;
 import io.swagger.v3.core.converter.ModelConverter;
 import io.swagger.v3.core.converter.ModelConverterContext;
 import io.swagger.v3.core.util.Json;
 import org.springdoc.core.customizers.GlobalOpenApiCustomizer;
+import org.springdoc.core.models.GroupedOpenApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
@@ -262,6 +264,34 @@ public class OpenApiConfiguration {
 					|| Boolean.parseBoolean(env.getProperty("springdoc.api-docs.enabled", "false"));
 		}
 	}
+	@Bean
+	GroupedOpenApi presentationOpenApi() {
+		return GroupedOpenApi.builder().group("presentation")
+				.pathsToMatch("/api/v1/authentication/**", "/api/v1/auth/workspace-previews",
+						"/api/v1/session", "/api/v1/me/access-contexts", "/api/v1/me/access-context-selections",
+						"/api/v1/catalog/brands", "/api/v1/catalog/brands/**",
+						"/api/v1/catalog/categories", "/api/v1/catalog/categories/**",
+						"/api/v1/warehouses", "/api/v1/warehouses/**")
+				.addOpenApiCustomizer(openApi -> {
+					useSameOrigin(openApi);
+					openApi.getPaths().values().forEach(path -> path.readOperationsMap().entrySet().stream()
+							.filter(entry -> Boolean.TRUE.equals(entry.getValue().getDeprecated()))
+							.map(Map.Entry::getKey).toList().forEach(method -> path.operation(method, null)));
+					openApi.getPaths().entrySet().removeIf(entry -> entry.getValue().readOperations().isEmpty());
+				})
+				.build();
+	}
+
+	@Bean
+	GroupedOpenApi completeOpenApi() {
+		return GroupedOpenApi.builder().group("complete").pathsToMatch("/api/**")
+				.addOpenApiCustomizer(OpenApiConfiguration::useSameOrigin).build();
+	}
+
+	private static void useSameOrigin(OpenAPI openApi) {
+		openApi.setServers(List.of(new Server().url("/")));
+	}
+
 	@Bean
 	ModelConverter applicationResponseSchemaNames() {
 		return new ModelConverter() {

@@ -257,6 +257,34 @@ class OpenApiMigrationFixtures(unittest.TestCase):
         self.assertIn("findings differ", reason)
         self.assertIn("GET /items: anonymous security alternative introduced", findings)
 
+    def test_patch_version_only_reuses_exact_reviewed_contract(self):
+        self.review_fixture()
+        candidate = copy.deepcopy(self.candidate)
+        candidate["info"]["version"] = "2.0.1"
+        allowed, _, _ = GATE.evaluate(raw(self.base), raw(candidate), self.base_ref,
+                                     self.commit, raw(self.manifest), raw(self.candidate))
+        self.assertTrue(allowed)
+
+    def test_patch_cannot_carry_schema_changes_or_unverified_evidence(self):
+        self.review_fixture()
+        for change in ("schema", "digest", "minor", "approval"):
+            with self.subTest(change=change):
+                candidate = copy.deepcopy(self.candidate)
+                manifest = copy.deepcopy(self.manifest)
+                candidate["info"]["version"] = "2.0.1"
+                if change == "schema":
+                    candidate["components"]["schemas"]["Item"]["properties"].pop("name")
+                elif change == "digest":
+                    manifest["candidate"]["sha256"] = "0" * 64
+                elif change == "minor":
+                    candidate["info"]["version"] = "2.1.0"
+                else:
+                    manifest["approval"] = {"status": "proposed", "owner": None,
+                                            "decision_url": None, "decided_at": None}
+                allowed, _, _ = GATE.evaluate(raw(self.base), raw(candidate), self.base_ref,
+                                             self.commit, raw(manifest), raw(self.candidate))
+                self.assertFalse(allowed)
+
     def test_repository_manifest_matches_exact_evidence_and_approval_status(self):
         root = SCRIPT.resolve().parents[2]
         manifest_raw = (root / GATE.DEFAULT_MANIFEST).read_bytes()
@@ -267,6 +295,8 @@ class OpenApiMigrationFixtures(unittest.TestCase):
                          "v0.19.0", "v0.20.0", "v0.21.0"}
         self.assertEqual(expected_refs, {baseline["ref"] for baseline in manifest["baselines"]})
         candidate_raw = (root / GATE.SNAPSHOT).read_bytes()
+        reviewed_candidate_raw = subprocess.check_output(
+            ["git", "show", f'refs/tags/v{manifest["candidate"]["version"]}:{GATE.SNAPSHOT}'], cwd=root)
         for baseline in manifest["baselines"]:
             with self.subTest(base_ref=baseline["ref"]):
                 commit = subprocess.check_output(
@@ -275,7 +305,7 @@ class OpenApiMigrationFixtures(unittest.TestCase):
                 base_raw = subprocess.check_output(
                     ["git", "show", f"{commit}:{GATE.SNAPSHOT}"], cwd=root)
                 allowed, reason, findings = GATE.evaluate(
-                    base_raw, candidate_raw, baseline["ref"], commit, manifest_raw)
+                    base_raw, candidate_raw, baseline["ref"], commit, manifest_raw, reviewed_candidate_raw)
                 self.assertEqual(reviewed, allowed)
                 self.assertIn("exact reviewed migration" if reviewed else "proposed", reason)
                 self.assertEqual(baseline["findings"], findings)

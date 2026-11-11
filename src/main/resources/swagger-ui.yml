@@ -1,0 +1,10 @@
+springdoc:
+  swagger-ui:
+    urls-primary-name: presentation
+    doc-expansion: none
+    default-models-expand-depth: -1
+    filter: true
+    display-request-duration: true
+    syntax-highlight:
+      activated: false
+    persist-authorization: false
