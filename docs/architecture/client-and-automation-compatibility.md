@@ -24,13 +24,12 @@ This document defines constraints for future Angular, Kotlin, Swift and automati
 - Errors follow Problem Details.
 - API versioning is explicit.
 
-## Automation and AI readiness
+## Automation boundaries
 
-- Future agents enter through Application use cases.
-- No agent accesses tables directly.
-- No agent bypasses authorization.
+- Future automated clients enter through Application use cases.
+- No automated client accesses tables directly.
+- No automated client bypasses authorization.
 - Automated actions are auditable.
 - Automated commands carry actor, tenant, correlation ID and purpose when those concepts are defined.
-- AI integrations are Infrastructure adapters.
-- Domain code does not depend on AI SDKs.
-- No AI SDK, chatbot or agent is added in this task.
+- External integrations belong to Infrastructure adapters.
+- Domain code remains independent of external integration SDKs.

@@ -118,7 +118,7 @@ def validate_manifest(raw):
     return manifest
 
 
-def evaluate(base_raw, candidate_raw, base_ref, base_commit, manifest_raw=None):
+def evaluate(base_raw, candidate_raw, base_ref, base_commit, manifest_raw=None, reviewed_candidate_raw=None):
     """Return (allowed, reason, findings); every comparison uses the strict checker.
 
     Compatible comparisons do not consume a historical migration allowance.
@@ -134,6 +134,22 @@ def evaluate(base_raw, candidate_raw, base_ref, base_commit, manifest_raw=None):
     manifest = validate_manifest(manifest_raw)
     if manifest["checker_sha256"] != CHECKER_SHA256:
         return False, "compatibility checker differs from migration evidence", findings
+    if reviewed_candidate_raw is not None:
+        reviewed = _document(reviewed_candidate_raw, "reviewed snapshot")
+        reviewed_version = manifest["candidate"]["version"]
+        current_version = candidate.get("info", {}).get("version", "")
+        versions = [re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", value)
+                    for value in (reviewed_version, current_version)]
+        if (all(versions) and versions[0].groups()[:2] == versions[1].groups()[:2]
+                and int(versions[1][3]) > int(versions[0][3])
+                and reviewed.get("info", {}).get("version") == reviewed_version
+                and sha256(reviewed_candidate_raw) == manifest["candidate"]["sha256"]):
+            normalized = _document(candidate_raw, "candidate snapshot")
+            normalized["info"]["version"] = reviewed_version
+            if normalized == reviewed:
+                # Reuse only the exact approved contract; all baseline and approval checks below still apply.
+                candidate = reviewed
+                candidate_raw = reviewed_candidate_raw
     if manifest["candidate"]["version"] != candidate.get("info", {}).get("version"):
         return False, "candidate version differs from migration evidence", findings
     if manifest["candidate"]["sha256"] != sha256(candidate_raw):
@@ -166,8 +182,15 @@ def main():
             ["git", "show", f"{commit}:{SNAPSHOT}"], stderr=subprocess.PIPE)
         manifest_path = Path(args.manifest)
         manifest_raw = manifest_path.read_bytes() if manifest_path.exists() else None
+        reviewed_candidate_raw = None
+        if manifest_raw is not None:
+            version = validate_manifest(manifest_raw)["candidate"]["version"]
+            if re.fullmatch(r"\d+\.\d+\.\d+", version):
+                reviewed_candidate_raw = subprocess.check_output(
+                    ["git", "show", f"refs/tags/v{version}:{SNAPSHOT}"], stderr=subprocess.PIPE)
         allowed, reason, findings = evaluate(
-            base_raw, Path(SNAPSHOT).read_bytes(), args.base_ref, commit, manifest_raw)
+            base_raw, Path(SNAPSHOT).read_bytes(), args.base_ref, commit, manifest_raw,
+            reviewed_candidate_raw)
     except (MigrationError, OSError, subprocess.CalledProcessError, TypeError,
             AttributeError, KeyError) as error:
         print(f"OpenAPI migration gate ERROR: {error}", file=sys.stderr)
