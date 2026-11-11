@@ -57,15 +57,16 @@ scope are described in [`inventory-lot-temperature-readings.md`](./inventory-lot
 
 ## Swagger para presentación
 
-Swagger abre el grupo `presentation`: autenticación, marcas, categorías y
-almacenes. El selector permite abrir `complete` para consultar toda la API.
+Swagger abre el grupo `complete`, con todas las operaciones disponibles en el
+runtime y los tags desplegados. El selector conserva `presentation` como vista
+acotada opcional para autenticación, marcas, categorías y almacenes.
 `/v3/api-docs` conserva el contrato completo usado por consumidores y por el
 snapshot. `/v3/api-docs/presentation` excluye operaciones deprecated; los aliases
 siguen disponibles en runtime y en `complete` por compatibilidad. No se elimina
 un endpoint publicado por aparecer tachado: su retirada requiere análisis de
 consumidores y migración.
 
-La interfaz inicia con tags cerrados, sin renderizar el panel global de schemas,
+La interfaz inicia con tags abiertos y operaciones cerradas, sin renderizar el panel global de schemas,
 con filtro y sin resaltado de sintaxis. Los cuerpos y respuestas siguen
 consultables al abrir cada operación. `Try it out` sigue siendo explícito; no se
 almacena el token entre recargas. Estas opciones están en `swagger-ui.yml`.
@@ -131,3 +132,41 @@ puede reutilizarla para un patch posterior del mismo major/minor únicamente si
 el snapshot revisado conserva su SHA256 y el documento nuevo cambia solo
 `info.version`. Los schemas, seguridad, findings y baselines deben conservarse
 exactamente; cualquier cambio adicional requiere evaluación independiente.
+
+
+## Autorización y validaciones durante el ensayo
+
+Para consultas y cambios de usuario se usa **bearerAuth**, con el access token
+actual. No es necesario rellenar los demás esquemas de Authorize:
+
+- `refreshCookie` pertenece a renovación de sesión browser, con cookie HttpOnly,
+  origen permitido y CSRF; no reemplaza el access token.
+- `nativeRefreshToken` pertenece a renovación nativa y requiere
+  `X-Nexa-Client: NATIVE`. El refresh token rota; no usarlo como bearer.
+- `contextTicket` permite escoger un contexto autorizado cuando el login de
+  identidad todavía no creó sesión de Tenant/Workspace. No autoriza el catálogo.
+- `systemOperator` y la pareja `internalOperatorId`/`internalOperatorToken`
+  pertenecen a administración interna. No usar credenciales internas para
+  demostrar acciones de Buyer, Ventas o Almacén.
+
+`PLATFORM` y `PORTAL` son superficies, no roles. El servidor revalida la sesión,
+la membership, permisos y alcance de cada petición; elegir una superficie no
+concede permisos adicionales.
+
+`ETag` e `If-Match` protegen la versión del recurso: leer la versión actual y
+reenviarla al cambiarlo. Un header ausente puede producir `428`; una versión
+obsoleta puede producir `409` o `412` según el contrato de esa operación.
+`Idempotency-Key` identifica un mismo intento de mutación para evitar que una
+repetición cree un segundo efecto. No reutilizar una clave para otro payload.
+
+Resultados negativos también deben explicarse: `401` significa credencial
+inválida/ausente; `403`, acceso no autorizado; `400`, datos inválidos;
+`503 TECHNICAL_CAPABILITY_UNAVAILABLE`, una capacidad que el despliegue todavía
+no ofrece. Un token válido y una ruta visible en Swagger no habilitan una
+capacidad cloud desactivada.
+
+Para una demostración completa de una funcionalidad, comprobar acceso,
+lectura con datos reales, cambio autorizado cuando corresponda, persistencia y
+sus rechazos previstos. No declarar todas las operaciones operativas por haber
+cargado el documento OpenAPI; probar cada recorrido escogido y registrar los
+límites restantes.

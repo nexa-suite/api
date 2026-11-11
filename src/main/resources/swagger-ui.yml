@@ -1,7 +1,7 @@
 springdoc:
   swagger-ui:
-    urls-primary-name: presentation
-    doc-expansion: none
+    urls-primary-name: complete
+    doc-expansion: list
     default-models-expand-depth: -1
     filter: true
     display-request-duration: true
