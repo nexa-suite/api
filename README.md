@@ -25,9 +25,17 @@ established by a verified signed Git tag and its corresponding GitHub Release.
 An API release does not claim complete Nexa System Acceptance or full-system
 Production Readiness.
 
-The OpenAPI compatibility workflow checks the published [v0.21.0](
-./docs/releases/v0.21.0.md), v0.20.0, v0.19.0, v0.18.0 and v0.17.1 consumer
-baselines.
+The current published source release is [v2.0.1](
+https://github.com/nexa-suite/api/releases/tag/v2.0.1). Its bounded cloud
+composition supports the explicitly enabled reads documented in the
+[release notes](./docs/releases/v2.0.1.md); source publication does not imply
+that every implemented business workflow is enabled in a managed deployment.
+
+The OpenAPI migration workflow checks the published v2.0.0 and historical
+consumer baselines, including [v0.21.0](./docs/releases/v0.21.0.md), v0.20.0,
+v0.19.0, v0.18.0 and v0.17.1. An exact approved migration is distinct from a
+claim of backward compatibility; see the [migration policy](
+./docs/openapi/migrations/README.md).
 
 The v1.0.0 API boundary aligns the Maven, Render and OpenAPI version metadata
 and carries the compatible Swagger/OpenAPI runtime configuration work recorded
@@ -66,11 +74,14 @@ Academic report and delivery evidence for Nexa Mobile.
 
 ### [Nexa Mobile](https://github.com/nexa-suite/mobile)
 
-Partial Operations Android/Kotlin/Jetpack Compose implementation evidence is
-integrated in the current Mobile baseline, not a completed Mobile V1. Buyer
-Mobile remains an accepted Flutter/Dart target.
+Operations Android/Kotlin/Jetpack Compose and Buyer Flutter/Dart both have
+implemented clients and APKs in the [Mobile v2.0.1 source release](
+https://github.com/nexa-suite/mobile/releases/tag/v2.0.1). Their application
+versions are independent of the repository release version. Implemented
+screens and published APKs do not establish complete business journeys,
+Product Acceptance or Production Readiness.
 
-![Operations Android](https://img.shields.io/badge/Operations%20Mobile-partial%20evidence-3DDC84?style=flat-square&logo=android&logoColor=white) ![Buyer target](https://img.shields.io/badge/Buyer%20Mobile-TARGET%20Flutter%2FDart-64748B?style=flat-square)
+![Operations Android](https://img.shields.io/badge/Operations%20Mobile-Android-3DDC84?style=flat-square&logo=android&logoColor=white) ![Buyer Flutter](https://img.shields.io/badge/Buyer%20Mobile-Flutter%2FDart-02569B?style=flat-square&logo=flutter&logoColor=white)
 
 </td>
 </tr>

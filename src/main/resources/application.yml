@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: classpath:swagger-ui.yml
   application:
     name: nexa-api
     version: ${NEXA_API_VERSION:${nexa.api.version:unknown}}

@@ -11,7 +11,9 @@ GitHub Release; a preparation branch alone is not released support.
 
 | Release | Summary |
 |---|---|
-| [v2.0.0](./v2.0.0.md) | Candidate: five-business-day delivery rule and Buyer password recovery; not published |
+| [v2.0.2](./v2.0.2.md) | Swagger presentation and compatible patch verification; publication requires signed tag and GitHub Release |
+| [v2.0.1](./v2.0.1.md) | Published source patch: bounded Tenant-routed customer, catalog/SKU and notification capabilities; [release](https://github.com/nexa-suite/api/releases/tag/v2.0.1) |
+| [v2.0.0](./v2.0.0.md) | Published source release: five-business-day delivery rule, Buyer password recovery and reviewed contract migration; [release](https://github.com/nexa-suite/api/releases/tag/v2.0.0) |
 | [v1.2.0](./v1.2.0.md) | NEXA Academic Stable Checkpoint; [published release](https://github.com/nexa-suite/api/releases/tag/v1.2.0) |
 | [v1.1.0](./v1.1.0.md) | Tenant-scoped business database routing and local suite review; [published release](https://github.com/nexa-suite/api/releases/tag/v1.1.0) |
 | [v1.0.0](./v1.0.0.md) | First stable-version API boundary with scoped local-fixture and technical-gauge fixes |
