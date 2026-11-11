@@ -155,3 +155,21 @@ presented as a fresh policy attestation.
 Unit/context tests and compilation are Technical Verification evidence only;
 they do not establish cloud delivery, Product/UX Acceptance, System Acceptance
 or Production Readiness.
+
+
+## Mobile stock and preparation reads
+
+With the verified cloud router already configured, the independent opt-in
+`NEXA_TENANT_BUSINESS_CLOUD_OPERATIONS_READ_ENABLED=true` routes existing
+inventory list/lot/detail, per-Warehouse availability, fulfillment work-list/detail
+and physical-allocation GET requests to the authorized
+Tenant database. They retain permission and Warehouse-grant checks and run in
+PostgreSQL `READ ONLY`, `REPEATABLE READ` transactions. Missing bindings,
+physical identities, schema manifests or scope fail closed. No fallback to
+central business tables is introduced.
+
+Keep the general Warehouse and Fulfillment flags disabled. The read flag does
+not enable mutations, workers or complete inventory/picking workflows. Verify
+both authorized reads and rejected commands before rehearsing Mobile. A
+successful empty list indicates no visible business rows; it is not evidence
+that data were seeded or a workflow completed.

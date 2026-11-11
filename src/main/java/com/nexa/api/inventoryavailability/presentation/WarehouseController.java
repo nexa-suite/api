@@ -4,6 +4,7 @@ import com.nexa.api.shared.context.RequestMetadata;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
+import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -38,9 +39,11 @@ public final class WarehouseController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final WarehouseOperationsRequestRunner operations;
     private final WarehouseOperationalSettingsCommands operationalSettings;
+    private final InventoryLotsRead lotsRead;
 
     public WarehouseController(WarehouseOperationsRequestRunner operations,
-                               WarehouseOperationalSettingsCommands operationalSettings) {
+                               WarehouseOperationalSettingsCommands operationalSettings, InventoryLotsRead lotsRead) {
+        this.lotsRead = lotsRead;
         this.operations = operations;
         this.operationalSettings = operationalSettings;
     }
@@ -245,7 +248,7 @@ public final class WarehouseController {
     @GetMapping("/inventory")
     @Operation(operationId = "listInventory")
     public PageResponse<LotResponse> inventory(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required = false) String catalogItemId, @RequestParam(required = false) String warehouseId, @RequestParam(required = false) String zoneId, @RequestParam(required = false) String status, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "expirationDate,asc") String sort) {
-        return execute(c, service -> page(service.lots(c, catalogItemId, warehouseId, zoneId, status, page, size, sort), this::lot));
+        return page(lotsRead.list(c, catalogItemId, warehouseId, zoneId, status, page, size, sort), this::lot);
     }
 
     @GetMapping("/inventory/lots")
@@ -256,7 +259,7 @@ public final class WarehouseController {
 
     @GetMapping("/inventory/lots/{lotId}")
     public LotResponse lot(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String lotId) {
-        return execute(c, service -> lot(service.lot(c, lotId)));
+        return lot(lotsRead.lot(c, lotId));
     }
 
     @GetMapping("/inventory/lots/{lotId}/temperature-readings")
@@ -369,9 +372,9 @@ public final class WarehouseController {
     public List<AvailabilityResponse> warehouseAvailability(@RequestAttribute(ACCESS) CurrentAccessContext c,
             @PathVariable String warehouseId, @RequestParam(required = false) String catalogItemId,
             @RequestParam(required = false) List<String> catalogItemIds) {
-        return execute(c, service -> service.warehouseAvailability(c, warehouseId,
+        return lotsRead.warehouseAvailability(c, warehouseId,
                 catalogItemIds != null && !catalogItemIds.isEmpty() ? catalogItemIds : java.util.Collections.singletonList(catalogItemId))
-                .stream().map(this::availability).toList());
+                .stream().map(this::availability).toList();
     }
 
     @GetMapping("/inventory/safety-stocks")

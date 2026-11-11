@@ -53,6 +53,13 @@ public final class TenantBusinessDatabaseRouter implements AutoCloseable {
 		this.requiredSchemaManifestSha256 = requiredSchemaManifestSha256;
 	}
 
+	/** Executes a routed read with PostgreSQL enforcing transaction read-only mode. */
+	public <T> T inReadOnlyTransaction(CurrentAccessContext accessContext, TenantBusinessDatabaseWork<T> work) {
+		Objects.requireNonNull(accessContext, "Verified Tenant access context is required");
+		Objects.requireNonNull(work, "Tenant database work is required");
+		return inTenantSession(accessContext, session -> session.inReadOnlyTransaction(work));
+	}
+
 	public <T> T inTransaction(CurrentAccessContext accessContext, TenantBusinessDatabaseWork<T> work) {
 		Objects.requireNonNull(accessContext, "Verified Tenant access context is required");
 		Objects.requireNonNull(work, "Tenant database work is required");
@@ -145,6 +152,18 @@ public final class TenantBusinessDatabaseRouter implements AutoCloseable {
 
 		public JdbcTemplate jdbcTemplate() { return jdbc; }
 		public PlatformTransactionManager transactionManager() { return transactionManager; }
+
+		private <T> T inReadOnlyTransaction(TenantBusinessDatabaseWork<T> work) {
+			TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+			transaction.setReadOnly(true);
+			transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+			return transaction.execute(status -> {
+				jdbc.execute("SET TRANSACTION READ ONLY");
+				T result = work.execute(jdbc);
+				rejectEscapedResource(result);
+				return result;
+			});
+		}
 
 		public <T> T inTransaction(TenantBusinessDatabaseWork<T> work) {
 			Objects.requireNonNull(work, "Tenant database work is required");

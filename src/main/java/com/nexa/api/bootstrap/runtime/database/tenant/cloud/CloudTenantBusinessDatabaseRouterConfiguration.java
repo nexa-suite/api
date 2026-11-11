@@ -47,6 +47,10 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 				throw new IllegalStateException("Cloud Tenant business capabilities require cloud composition before activation");
 			}
 		}
+		if (enabled(environment, "nexa.tenant-business.cloud-operations-read.enabled")
+				&& !enabled(environment, "nexa.tenant-business.cloud-router.enabled")) {
+			throw new IllegalStateException("Cloud operations reads require the explicit cloud router");
+		}
 		boolean readEnabled = enabled(environment, "nexa.tenant-business.cloud-read.enabled");
 		boolean catalogEnabled = enabled(environment, "nexa.tenant-business.catalog-detail-read.enabled");
 		if ((readEnabled || catalogEnabled) && (!readEnabled || !catalogEnabled

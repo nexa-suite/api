@@ -76,6 +76,16 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 	}
 
 	@Test
+	void cloudOperationsReadRequiresExplicitCloudRouter() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.cloud-operations-read.enabled=true")
+				.run(context -> assertThat(context).hasFailed().getFailure()
+						.hasRootCauseMessage("Cloud operations reads require the explicit cloud router"));
+		context().withPropertyValues("nexa.tenant-business.cloud-operations-read.enabled=true",
+				"nexa.tenant-business.cloud-router.enabled=true")
+				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
+	}
+
+	@Test
 	void allowsExistingTenantNotificationCompositionAlongsideExplicitCloudRouter() throws IOException {
 		context().withPropertyValues("nexa.tenant-business.cloud-router.enabled=true",
 				"nexa.tenant-business.notifications.enabled=true")

@@ -199,6 +199,27 @@ class TenantBusinessDatabaseRouterIT {
 	}
 
 	@Test
+	void routedReadOnlyTransactionRejectsWritesAndPreservesTenantIsolation() {
+		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
+		CurrentAccessContext tenantB = resolveContext(fixture.tenantB());
+		CountingFactory pools = new CountingFactory(credentialsFor(fixture, false));
+		try (TenantBusinessDatabaseRouter router = router(pools)) {
+			setRequestScope(fixture.tenantA());
+			insertProbe(router, tenantA, "read-only-a");
+			assertThat((Integer) router.inReadOnlyTransaction(tenantA, jdbc -> jdbc.queryForObject(
+					"select count(*) from nexa_platform.route_probe", Integer.class))).isEqualTo(1);
+			assertThatThrownBy(() -> router.inReadOnlyTransaction(tenantA, jdbc -> jdbc.update(
+					"INSERT INTO nexa_platform.route_probe (id, tenant_id, workspace_id, marker) VALUES (?, ?, ?, ?)",
+					UUID.randomUUID(), fixture.tenantA().tenantId().value(), fixture.tenantA().workspaceId().value(), "forbidden")))
+					.hasRootCauseInstanceOf(SQLException.class).hasStackTraceContaining("read-only transaction");
+			setRequestScope(fixture.tenantB());
+			assertThat((Integer) router.inReadOnlyTransaction(tenantB, jdbc -> jdbc.queryForObject(
+					"select count(*) from nexa_platform.route_probe", Integer.class))).isZero();
+		}
+		assertThat(countProbe(tenantAAdmin, "forbidden")).isZero();
+	}
+
+	@Test
 	void verifiedCentralBindingRoutesToTwoPhysicalDatabasesAndReusesTenantPools() {
 		CurrentAccessContext tenantA = resolveContext(fixture.tenantA());
 		CurrentAccessContext tenantB = resolveContext(fixture.tenantB());

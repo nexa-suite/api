@@ -29,11 +29,11 @@ class SwaggerSecurityConfigurationTests {
 	}
 
 	@Test
-	void swaggerStartsWithSmallCollapsedPresentationAndNoStoredToken() throws Exception {
+	void swaggerStartsWithCompleteVisibleOperationsAndNoStoredToken() throws Exception {
 		mockMvc.perform(get("/v3/api-docs/swagger-config"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$['urls.primaryName']").value("presentation"))
-				.andExpect(jsonPath("$.docExpansion").value("none"))
+				.andExpect(jsonPath("$['urls.primaryName']").value("complete"))
+				.andExpect(jsonPath("$.docExpansion").value("list"))
 				.andExpect(jsonPath("$.defaultModelsExpandDepth").value(-1))
 				.andExpect(jsonPath("$.filter").value("true"))
 				.andExpect(jsonPath("$.persistAuthorization").value(false));

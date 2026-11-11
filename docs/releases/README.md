@@ -11,6 +11,7 @@ GitHub Release; a preparation branch alone is not released support.
 
 | Release | Summary |
 |---|---|
+| [v2.0.3](./v2.0.3.md) | Complete Swagger navigation and opt-in Tenant-routed inventory/picking reads; publication requires signed tag and GitHub Release |
 | [v2.0.2](./v2.0.2.md) | Swagger presentation and compatible patch verification; publication requires signed tag and GitHub Release |
 | [v2.0.1](./v2.0.1.md) | Published source patch: bounded Tenant-routed customer, catalog/SKU and notification capabilities; [release](https://github.com/nexa-suite/api/releases/tag/v2.0.1) |
 | [v2.0.0](./v2.0.0.md) | Published source release: five-business-day delivery rule, Buyer password recovery and reviewed contract migration; [release](https://github.com/nexa-suite/api/releases/tag/v2.0.0) |

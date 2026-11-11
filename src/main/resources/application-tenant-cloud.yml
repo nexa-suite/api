@@ -1,5 +1,7 @@
 nexa:
   tenant-business:
+    cloud-operations-read:
+      enabled: ${NEXA_TENANT_BUSINESS_CLOUD_OPERATIONS_READ_ENABLED:false}
     cloud-read:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_READ_ENABLED:false}
     catalog-detail-read:
