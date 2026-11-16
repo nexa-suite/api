@@ -4,6 +4,8 @@ import com.nexa.api.businesstraceability.tenantdatabase.TenantBusinessTraceabili
 import com.nexa.api.notifications.application.model.NotificationModels;
 import com.nexa.api.notifications.application.port.out.PushProviderPort;
 import com.nexa.api.notifications.application.service.PushRoutingService;
+import com.nexa.api.notifications.infrastructure.PushDestinationCipher;
+import com.nexa.api.notifications.infrastructure.persistence.JdbcFcmPushDestinationStore;
 import com.nexa.api.notifications.infrastructure.persistence.JdbcPushSubscriptionAdapter;
 import com.nexa.api.notifications.infrastructure.persistence.JdbcPushTransactionScopeGuard;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
@@ -68,6 +70,9 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
     @Autowired
     private PushProviderPort pushProvider;
+
+    @Autowired
+    private PushDestinationCipher pushDestinationCipher;
 
     @Test
     void resolvesIdentifiersAndRejectsUnsafePhysicalPickingScans() throws Exception {
@@ -1080,9 +1085,25 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", firstKey).contentType(MediaType.APPLICATION_JSON).content(firstBody))
                 .andExpect(status().isCreated()).andReturn();
         String subscriptionId = json(registered).get("id").asText();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID subscriptionUuid = UUID.fromString(subscriptionId);
         assertThat(registered.getResponse().getContentAsString()).doesNotContain("providerToken", firstToken);
         assertThat(tenantJdbc().queryForObject("select provider_token_hash from notifications.push_subscription where id=?", String.class,
-                UUID.fromString(subscriptionId))).hasSize(64).doesNotContain(firstToken);
+                subscriptionUuid)).hasSize(64).doesNotContain(firstToken);
+        String firstCiphertext = tenantJdbc().queryForObject("select provider_destination_ciphertext from notifications.push_subscription where id=?",
+                String.class, subscriptionUuid);
+        assertThat(firstCiphertext).isNotBlank().doesNotContain(firstToken);
+        assertThat(tenantJdbc().queryForObject("select provider_destination_key_version from notifications.push_subscription where id=?",
+                String.class, subscriptionUuid)).isEqualTo("integration-v1");
+        String firstResolved = tenantTraceabilityWorkerRouter.inTransaction(tenant, workspace,
+                (tenantSession, ignored) -> new JdbcFcmPushDestinationStore(tenantSession, pushDestinationCipher)
+                        .resolve(tenant, workspace, subscriptionUuid));
+        assertThat(firstResolved).isEqualTo(firstToken);
+        String wrongTenantResolved = tenantTraceabilityWorkerRouter.inTransaction(tenant, workspace,
+                (tenantSession, ignored) -> new JdbcFcmPushDestinationStore(tenantSession, pushDestinationCipher)
+                        .resolve(UUID.randomUUID(), workspace, subscriptionUuid));
+        assertThat(wrongTenantResolved).isNull();
 
         String secondBody = "{\"installationId\":\"" + installation + "\",\"platform\":\"IOS\",\"providerToken\":\"" + secondToken + "\"}";
         MvcResult rotated = mockMvc.perform(post("/api/v1/notifications/push-subscriptions")
@@ -1091,12 +1112,50 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isCreated()).andReturn();
         assertThat(json(rotated).get("id").asText()).isEqualTo(subscriptionId);
         assertThat(json(rotated).get("version").asLong()).isEqualTo(1);
+        String secondCiphertext = tenantJdbc().queryForObject("select provider_destination_ciphertext from notifications.push_subscription where id=?",
+                String.class, subscriptionUuid);
+        assertThat(secondCiphertext).isNotBlank().isNotEqualTo(firstCiphertext).doesNotContain(secondToken);
+        String rotatedDestination = tenantTraceabilityWorkerRouter.inTransaction(tenant, workspace,
+                (tenantSession, ignored) -> new JdbcFcmPushDestinationStore(tenantSession, pushDestinationCipher)
+                        .resolve(tenant, workspace, subscriptionUuid));
+        assertThat(rotatedDestination).isEqualTo(secondToken);
+        tenantTraceabilityWorkerRouter.inTransaction(tenant, workspace, (tenantSession, ignored) -> {
+            new JdbcFcmPushDestinationStore(tenantSession, pushDestinationCipher)
+                    .invalidate(tenant, workspace, subscriptionUuid, firstToken);
+            return null;
+        });
+        assertThat(tenantJdbc().queryForObject("select status from notifications.push_subscription where id=?",
+                String.class, subscriptionUuid)).isEqualTo("ENABLED");
+        String stillCurrentDestination = tenantTraceabilityWorkerRouter.inTransaction(tenant, workspace,
+                (tenantSession, ignored) -> new JdbcFcmPushDestinationStore(tenantSession, pushDestinationCipher)
+                        .resolve(tenant, workspace, subscriptionUuid));
+        assertThat(stillCurrentDestination).isEqualTo(secondToken);
         assertThat(tenantJdbc().queryForObject("select count(*) from notifications.push_subscription where recipient_membership_id=? and installation_id=?",
                 Integer.class, UUID.fromString(membershipId(BUYER_EMAIL)), installation)).isEqualTo(1);
 
+        String invalidationInstallation = "mobile-it-invalidation-" + uuid();
+        String invalidationToken = "provider-token-invalid-" + uuid();
+        MvcResult invalidationRegistration = mockMvc.perform(post("/api/v1/notifications/push-subscriptions")
+                        .header("Authorization", "Bearer " + buyer).header("X-Nexa-Client", "NATIVE")
+                        .header("Idempotency-Key", "push-invalidation-register-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"installationId\":\"" + invalidationInstallation
+                                + "\",\"platform\":\"android\",\"providerToken\":\"" + invalidationToken + "\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        UUID invalidationSubscriptionId = UUID.fromString(json(invalidationRegistration).get("id").asText());
+        tenantTraceabilityWorkerRouter.inTransaction(tenant, workspace, (tenantSession, ignored) -> {
+            new JdbcFcmPushDestinationStore(tenantSession, pushDestinationCipher)
+                    .invalidate(tenant, workspace, invalidationSubscriptionId, invalidationToken);
+            return null;
+        });
+        assertThat(tenantJdbc().queryForObject("select status from notifications.push_subscription where id=?",
+                String.class, invalidationSubscriptionId)).isEqualTo("UNREGISTERED");
+        assertThat(tenantJdbc().queryForObject("select provider_destination_ciphertext from notifications.push_subscription where id=?",
+                String.class, invalidationSubscriptionId)).isNull();
+        assertThat(tenantJdbc().queryForObject("select provider_destination_key_version from notifications.push_subscription where id=?",
+                String.class, invalidationSubscriptionId)).isNull();
+
         UUID eventId = UUID.randomUUID();
-        UUID tenant = UUID.fromString(tenantId());
-        UUID workspace = UUID.fromString(workspaceId());
         var projection = new com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection(
                 eventId.toString(), tenant.toString(), workspace.toString(), buyerClientAccountId(), "SalesOrder",
                 UUID.randomUUID().toString(), "SALES_ORDER_CONFIRMED", "CONFIRMED", Instant.now(),
@@ -1124,7 +1183,9 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "push-unregister-" + uuid()))
                 .andExpect(status().isNoContent());
         assertThat(tenantJdbc().queryForObject("select status from notifications.push_subscription where id=?", String.class,
-                UUID.fromString(subscriptionId))).isEqualTo("UNREGISTERED");
+                subscriptionUuid)).isEqualTo("UNREGISTERED");
+        assertThat(tenantJdbc().queryForObject("select provider_destination_ciphertext from notifications.push_subscription where id=?",
+                String.class, subscriptionUuid)).isNull();
     }
 
     @Test
