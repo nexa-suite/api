@@ -26,7 +26,7 @@ import java.util.UUID;
 @Profile("!test")
 public class FulfillmentWorkListService implements com.nexa.api.fulfillmentdelivery.application.publicapi.FulfillmentWorkListQueries {
     private static final Set<String> WAREHOUSE_WORK_STATES =
-            Set.of("ALLOCATED", "PICKING", "READY_FOR_DISPATCH");
+            Set.of("ALLOCATED", "PICKING", "PICKED", "PACKED", "STAGED", "READY_FOR_DISPATCH");
     private static final String ALLOCATED = "ALLOCATED";
 
     private final DispatchReadinessPersistencePort fulfillments;
