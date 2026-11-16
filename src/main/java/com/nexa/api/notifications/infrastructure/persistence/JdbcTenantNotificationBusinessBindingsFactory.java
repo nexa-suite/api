@@ -14,6 +14,9 @@ import com.nexa.api.notifications.application.service.PushSubscriptionService;
 import com.nexa.api.notifications.application.service.TenantNotificationProjectionService;
 import com.nexa.api.notifications.application.port.out.PushProviderPort;
 import com.nexa.api.notifications.application.service.PushRoutingService;
+import com.nexa.api.notifications.infrastructure.PushDestinationCipher;
+import com.nexa.api.notifications.tenantdatabase.TenantPushProviderFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -28,13 +31,21 @@ import java.util.Objects;
 public final class JdbcTenantNotificationBusinessBindingsFactory
         implements TenantNotificationBusinessBindingsFactory {
     private final Clock clock;
-    private final PushProviderPort pushProvider;
+    private final ObjectProvider<PushProviderPort> pushProviders;
+    private final ObjectProvider<TenantPushProviderFactory> tenantPushProviderFactories;
+    private final ObjectProvider<PushDestinationCipher> destinationCiphers;
     private final PushDeliveryRetryPolicy pushRetryPolicy;
 
-    public JdbcTenantNotificationBusinessBindingsFactory(Clock clock, PushProviderPort pushProvider,
+    public JdbcTenantNotificationBusinessBindingsFactory(Clock clock, ObjectProvider<PushProviderPort> pushProviders,
+            ObjectProvider<TenantPushProviderFactory> tenantPushProviderFactories,
+            ObjectProvider<PushDestinationCipher> destinationCiphers,
             PushDeliveryRetryPolicy pushRetryPolicy) {
         this.clock = Objects.requireNonNull(clock, "Application clock is required");
-        this.pushProvider = Objects.requireNonNull(pushProvider, "Push provider is required");
+        this.pushProviders = Objects.requireNonNull(pushProviders, "Push provider lookup is required");
+        this.tenantPushProviderFactories = Objects.requireNonNull(tenantPushProviderFactories,
+                "Tenant push-provider factory lookup is required");
+        this.destinationCiphers = Objects.requireNonNull(destinationCiphers,
+                "Push destination cipher lookup is required");
         this.pushRetryPolicy = Objects.requireNonNull(pushRetryPolicy, "Push retry policy is required");
     }
 
@@ -49,12 +60,20 @@ public final class JdbcTenantNotificationBusinessBindingsFactory
         CustomerAccountQuery accountQuery = Objects.requireNonNull(customerAccounts,
                 "Tenant BC-02 account query is required");
         CanonicalOutboxPort outbox = Objects.requireNonNull(tenantOutbox, "Tenant canonical outbox is required");
+        PushDestinationCipher destinationCipher = destinationCiphers.getIfAvailable();
+        if (destinationCipher == null) {
+            throw new IllegalStateException("Push destination encryption is not configured");
+        }
+        TenantPushProviderFactory scopedProviderFactory = tenantPushProviderFactories.getIfAvailable();
+        PushProviderPort provider = scopedProviderFactory == null
+                ? pushProviders.getIfAvailable() : scopedProviderFactory.bindTo(jdbc);
+        if (provider == null) throw new IllegalStateException("Tenant push provider is not configured");
 
         JdbcNotificationInboxAdapter inbox = new JdbcNotificationInboxAdapter(jdbc, recipients);
         JdbcNotificationPreferenceAdapter preferences = new JdbcNotificationPreferenceAdapter(jdbc,
                 recipients.tenantId(), recipients.workspaceId());
-        JdbcPushSubscriptionAdapter subscriptions = new JdbcPushSubscriptionAdapter(jdbc);
-        PushRoutingService pushRouting = new PushRoutingService(subscriptions, pushProvider, tenantTransactionManager,
+        JdbcPushSubscriptionAdapter subscriptions = new JdbcPushSubscriptionAdapter(jdbc, destinationCipher);
+        PushRoutingService pushRouting = new PushRoutingService(subscriptions, provider, tenantTransactionManager,
                 pushRetryPolicy, new JdbcPushTransactionScopeGuard(jdbc), recipients.tenantId(),
                 recipients.workspaceId());
         NotificationService service = new NotificationService(inbox, preferences, accountQuery, pushRouting,

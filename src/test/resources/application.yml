@@ -18,3 +18,8 @@ nexa:
     reset:
       throttle-key: test-reset-throttle-key-012345678901234567890123456789
     notification-outbox-key: test-notification-outbox-key-012345678901234567890123456789
+  notifications:
+    push:
+      provider: deferred
+      destination-key: test-push-destination-key-012345678901234567890123456789
+      destination-key-version: test-v1
