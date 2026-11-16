@@ -36,9 +36,16 @@
 		<archunit.version>1.5.0</archunit.version>
 		<testcontainers.version>2.0.5</testcontainers.version>
 		<stripe-java.version>33.4.0</stripe-java.version>
+		<guava.version>33.8.0-jre</guava.version>
 	</properties>
 	<dependencyManagement>
 		<dependencies>
+            <!-- Patch the Google Auth transitive dependency for CVE-2026-102554. -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
+            </dependency>
 			<dependency>
 				<groupId>org.testcontainers</groupId>
 				<artifactId>testcontainers-bom</artifactId>
