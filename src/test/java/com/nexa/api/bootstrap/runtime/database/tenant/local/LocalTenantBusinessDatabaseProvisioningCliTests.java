@@ -88,6 +88,15 @@ class LocalTenantBusinessDatabaseProvisioningCliTests {
     }
 
     @Test
+    void tenantDatabaseCannotBecomeReadyWithoutEncryptedPushDestinationMigration() {
+        Set<String> versions = new HashSet<>(TenantBusinessDatabaseMigrationRequirements.load().requiredVersions());
+        versions.remove("44");
+
+        assertThatThrownBy(() -> LocalTenantBusinessDatabaseProvisioningCli.verifyRequiredMigrations(versions))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("V44");
+    }
+
+    @Test
     void tenantDatabaseCannotBecomeReadyWithoutEveryActiveCapabilityMigration() {
         assertThatThrownBy(() -> LocalTenantBusinessDatabaseProvisioningCli
                 .verifyRequiredMigrations(Set.of("1", "2", "3", "4", "5", "7")))
@@ -101,7 +110,7 @@ class LocalTenantBusinessDatabaseProvisioningCliTests {
                 .verifyRequiredMigrations(Set.of("1", "2", "3", "4", "5", "7", "8", "9", "10", "11",
                         "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25",
                         "26", "27", "28", "29", "30", "31", "33", "34", "35", "36", "37", "38", "39",
-                        "40", "41", "42", "43")))
+                        "40", "41", "42", "43", "44")))
                 .doesNotThrowAnyException();
     }
 
@@ -122,7 +131,7 @@ class LocalTenantBusinessDatabaseProvisioningCliTests {
         assertThat(requirements.requiredVersions()).containsExactly(
                 "1", "2", "3", "4", "5", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
                 "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31",
-                "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43");
+                "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44");
         Set<String> requiredAssets = new HashSet<>();
         ClassLoader recordingClassLoader = new ClassLoader(getClass().getClassLoader()) {
             @Override
@@ -157,6 +166,7 @@ class LocalTenantBusinessDatabaseProvisioningCliTests {
         assertThat(requiredAssets).contains("db/tenant-migration/V41__bind_buyer_handoff_to_active_attempt.sql");
         assertThat(requiredAssets).contains("db/tenant-migration/V42__grant_payment_callback_buyer_link_read.sql");
         assertThat(requiredAssets).contains("db/tenant-migration/V43__grant_buyer_address_geography_updates.sql");
+        assertThat(requiredAssets).contains("db/tenant-migration/V44__store_encrypted_push_destinations.sql");
         assertThat(requirements.schemaManifestDigest()).matches("[0-9a-f]{64}");
         assertThat(TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest())
                 .isEqualTo(requirements.schemaManifestDigest());
