@@ -1,7 +1,6 @@
 package com.nexa.api.bootstrap.runtime.events;
 
 import com.nexa.api.bootstrap.runtime.boundaries.TenantBusinessTraceabilityBindingsFactory;
-import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantCreditAccountAdapterFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerMembershipQueryFactory;
@@ -16,7 +15,7 @@ import com.nexa.api.notifications.tenantdatabase.TenantNotificationBusinessBindi
 import com.nexa.api.salescommitment.application.publicapi.SalesWorkflowEventSnapshotQuery;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesWorkflowEventSnapshotQueryFactory;
 import com.nexa.api.shared.events.TenantOutboxEvent;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -34,8 +33,8 @@ import java.util.stream.Collectors;
 
 /** Projects accepted business events to BC-10 after central recipient preflight. */
 @Component
-@Profile("local")
-@ConditionalOnProperty(name = "nexa.tenant-business.business-traceability.enabled", havingValue = "true")
+@Profile({"local", "tenant-cloud"})
+@ConditionalOnExpression("${nexa.tenant-business.business-traceability.enabled:false} || ${nexa.tenant-business.cloud-notification-push.enabled:false}")
 public final class TenantBusinessNotificationProjectionConsumer implements TenantOutboxEventConsumer {
     private static final String CONSUMER = "notifications-business-projection-v1";
     private static final Set<String> EVENT_TYPES = Set.of("PURCHASE_REQUEST_SUBMITTED", "PURCHASE_REQUEST_APPROVED",
@@ -145,11 +144,11 @@ public final class TenantBusinessNotificationProjectionConsumer implements Tenan
             if (payloadDeliveryId != null && !deliveryId.equals(uuid(payloadDeliveryId))) {
                 throw new IllegalArgumentException("Delivery completion notification escaped its Delivery scope");
             }
-            FulfillmentDocumentSourceQuery.ProofOfDelivery pod = fulfillmentDocuments.bindTo(jdbc)
-                    .findSealedPodForDelivery(event.tenantId(), event.workspaceId(), deliveryId)
+            FulfillmentDocumentSourceQuery.SealedPodNotificationSource pod = fulfillmentDocuments.bindTo(jdbc)
+                    .findSealedPodNotificationSource(event.tenantId(), event.workspaceId(), deliveryId)
                     .orElseThrow(() -> new IllegalStateException(
                             "Delivery completion notification has no immutable Tenant POD source"));
-            if (!"SEALED".equals(pod.status()) || !deliveryId.equals(pod.deliveryId())) {
+            if (!deliveryId.equals(pod.deliveryId())) {
                 throw new IllegalStateException("Delivery completion notification escaped its sealed Tenant POD source");
             }
             Object payloadPodId = payload.get("podId");
@@ -182,14 +181,12 @@ public final class TenantBusinessNotificationProjectionConsumer implements Tenan
                         .findDispatch(event.tenantId(), event.workspaceId(), uuid(dispatchId))
                         .map(LogisticsEventContextQueryPort.DispatchSnapshot::clientAccountId).orElse(null);
             }
-            case "Receivable" -> creditAdapters.bindReceivablePaymentAccessTo(jdbc)
-                    .find(event.tenantId(), event.workspaceId(), event.aggregateId())
-                    .map(ReceivablePaymentAccess.Snapshot::clientAccountId).orElse(null);
+            case "Receivable" -> creditAdapters.bindReceivableNotificationSourceTo(jdbc)
+                    .findClientAccountId(event.tenantId(), event.workspaceId(), event.aggregateId()).orElse(null);
             case "Payment" -> {
                 Object receivableId = payload.get("receivableId");
-                yield receivableId == null ? null : creditAdapters.bindReceivablePaymentAccessTo(jdbc)
-                        .find(event.tenantId(), event.workspaceId(), uuid(receivableId))
-                        .map(ReceivablePaymentAccess.Snapshot::clientAccountId).orElse(null);
+                yield receivableId == null ? null : creditAdapters.bindReceivableNotificationSourceTo(jdbc)
+                        .findClientAccountId(event.tenantId(), event.workspaceId(), uuid(receivableId)).orElse(null);
             }
             default -> null;
         };

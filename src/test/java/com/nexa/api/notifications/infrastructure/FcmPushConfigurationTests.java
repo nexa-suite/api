@@ -11,7 +11,7 @@ class FcmPushConfigurationTests {
     void rejectsFcmOutsideTheLocalTenantRuntime() {
         assertThatThrownBy(() -> new FcmPushConfiguration(new MockEnvironment()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("FCM push delivery currently requires the local Tenant database runtime");
+                .hasMessage("FCM push delivery requires one supported Tenant runtime");
     }
 
     @Test
@@ -26,7 +26,7 @@ class FcmPushConfigurationTests {
         local.setProperty("nexa.tenant-business.notifications.enabled", "true");
         assertThatThrownBy(() -> new FcmPushConfiguration(local))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("FCM push delivery requires the Tenant traceability worker to be enabled");
+                .hasMessage("FCM push delivery requires its dedicated Tenant worker to be enabled");
 
         local.setProperty("nexa.tenant-business.business-traceability.enabled", "true");
         assertThatCode(() -> new FcmPushConfiguration(local)).doesNotThrowAnyException();
@@ -41,6 +41,16 @@ class FcmPushConfigurationTests {
 
         assertThatThrownBy(() -> new FcmPushConfiguration(localAndCloud))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("FCM push delivery currently requires the local Tenant database runtime");
+                .hasMessage("FCM push delivery requires one supported Tenant runtime");
+    }
+    @Test
+    void cloudRequiresItsOwnWorkerWithoutEnablingGeneralTraceability() {
+        MockEnvironment cloud = new MockEnvironment();
+        cloud.setActiveProfiles("tenant-cloud");
+        cloud.setProperty("nexa.tenant-business.notifications.enabled", "true");
+        assertThatThrownBy(() -> new FcmPushConfiguration(cloud))
+                .isInstanceOf(IllegalStateException.class);
+        cloud.setProperty("nexa.tenant-business.cloud-notification-push.enabled", "true");
+        assertThatCode(() -> new FcmPushConfiguration(cloud)).doesNotThrowAnyException();
     }
 }

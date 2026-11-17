@@ -17,15 +17,15 @@ import tools.jackson.databind.ObjectMapper;
 @ConditionalOnProperty(prefix = "nexa.notifications.push", name = "provider", havingValue = "fcm")
 public class FcmPushConfiguration {
     public FcmPushConfiguration(Environment environment) {
-        if (!environment.acceptsProfiles(Profiles.of("local"))
-                || environment.acceptsProfiles(Profiles.of("tenant-cloud"))) {
-            throw new IllegalStateException("FCM push delivery currently requires the local Tenant database runtime");
-        }
+        boolean local = environment.acceptsProfiles(Profiles.of("local"));
+        boolean cloud = environment.acceptsProfiles(Profiles.of("tenant-cloud"));
+        if (local == cloud) throw new IllegalStateException("FCM push delivery requires one supported Tenant runtime");
         if (!environment.getProperty("nexa.tenant-business.notifications.enabled", Boolean.class, false)) {
             throw new IllegalStateException("FCM push delivery requires Tenant notifications to be enabled");
         }
-        if (!environment.getProperty("nexa.tenant-business.business-traceability.enabled", Boolean.class, false)) {
-            throw new IllegalStateException("FCM push delivery requires the Tenant traceability worker to be enabled");
+        if (local && !environment.getProperty("nexa.tenant-business.business-traceability.enabled", Boolean.class, false)
+                || cloud && !environment.getProperty("nexa.tenant-business.cloud-notification-push.enabled", Boolean.class, false)) {
+            throw new IllegalStateException("FCM push delivery requires its dedicated Tenant worker to be enabled");
         }
     }
 
