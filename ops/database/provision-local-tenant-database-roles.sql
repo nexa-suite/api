@@ -214,6 +214,9 @@ BEGIN
             current_setting('nexa.local.reservation_expiry_worker_password'));
     END IF;
 
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_notification_push_worker') THEN
+        CREATE ROLE nexa_notification_push_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+    END IF;
 END
 $provision$;
 
