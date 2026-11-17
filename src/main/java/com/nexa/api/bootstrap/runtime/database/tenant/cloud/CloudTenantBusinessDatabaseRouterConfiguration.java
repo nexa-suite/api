@@ -51,6 +51,12 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 				&& !enabled(environment, "nexa.tenant-business.cloud-router.enabled")) {
 			throw new IllegalStateException("Cloud operations reads require the explicit cloud router");
 		}
+		if (enabled(environment, "nexa.tenant-business.cloud-notification-push.enabled")
+                && (!enabled(environment, "nexa.tenant-business.cloud-router.enabled")
+                    || !enabled(environment, "nexa.tenant-business.notifications.enabled")
+                    || !"fcm".equals(environment.getProperty("nexa.notifications.push.provider")))) {
+            throw new IllegalStateException("Cloud notification push requires the cloud router, Tenant notifications and FCM");
+        }
 		boolean readEnabled = enabled(environment, "nexa.tenant-business.cloud-read.enabled");
 		boolean catalogEnabled = enabled(environment, "nexa.tenant-business.catalog-detail-read.enabled");
 		if ((readEnabled || catalogEnabled) && (!readEnabled || !catalogEnabled
