@@ -149,6 +149,21 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			assertThat(readBinding(readyTenantId)).isEqualTo(ready);
 			assertTenantScope(readyStateDirectory, readyTenantId, readyWorkspaceId, ready);
 			assertThat(volumeExists(readyVolume)).isTrue();
+
+			String bootstrapPassword = Files.readString(readyStateDirectory.resolve(readyTenantId.toString())
+					.resolve("bootstrap-admin-password"), StandardCharsets.UTF_8).strip();
+			try (Connection admin = DriverManager.getConnection(jdbcUrl(readyPort), "nexa_tenant_bootstrap_admin",
+					bootstrapPassword); Statement sql = admin.createStatement()) {
+				sql.execute("ALTER ROLE nexa_notification_push_worker INHERIT");
+				String unsafeSnapshot = notificationRoleSnapshot(sql);
+				ProcessResult rejected = runProvisioner(temporaryDirectory, centralConfig, readyStateDirectory,
+						readyTenantId, readyWorkspaceId, readyPort, false);
+				assertThat(rejected.exitCode()).isNotZero();
+				assertThat(redactedProvisionerDiagnostic(rejected.output()))
+						.contains("Existing Tenant notification-push worker role has unsafe privileges or memberships");
+				assertThat(notificationRoleSnapshot(sql)).isEqualTo(unsafeSnapshot);
+				assertThat(readBinding(readyTenantId)).isEqualTo(ready);
+			}
 		} finally {
 			stopTenantDatabase(readyStateDirectory, readyTenantId);
 		}
@@ -587,6 +602,30 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		assertThat(Files.getPosixFilePermissions(tenantDirectory.resolve("credentials.properties")))
 				.isEqualTo(PRIVATE_FILE_PERMISSIONS);
 		assertPolicySnapshotWriterCredentials(stateRoot, tenantId, workspaceId, binding);
+	}
+
+	private static String notificationRoleSnapshot(Statement sql) throws Exception {
+		try (ResultSet result = sql.executeQuery("""
+				SELECT row_to_json(r)::text || ':' || r.rolinherit::text || ':' ||
+				       has_column_privilege(r.oid, 'integration.outbox_event', 'event_id', 'SELECT')::text || ':' ||
+				       COALESCE((SELECT string_agg(grant_row, ',' ORDER BY grant_row) FROM (
+				           SELECT 'table:' || c.oid || ':' || a.privilege_type || ':' || a.is_grantable AS grant_row
+				           FROM pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a WHERE a.grantee = r.oid
+				           UNION ALL
+				           SELECT 'column:' || c.oid || ':' || col.attnum || ':' || a.privilege_type || ':' || a.is_grantable
+				           FROM pg_class c JOIN pg_attribute col ON col.attrelid = c.oid
+				           CROSS JOIN LATERAL aclexplode(col.attacl) a WHERE a.grantee = r.oid
+				           UNION ALL
+				           SELECT 'schema:' || n.oid || ':' || a.privilege_type || ':' || a.is_grantable
+				           FROM pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a WHERE a.grantee = r.oid
+				       ) grants), '')
+				FROM pg_roles r WHERE r.rolname = 'nexa_notification_push_worker'
+				""")) {
+			assertThat(result.next()).isTrue();
+			String snapshot = result.getString(1);
+			assertThat(snapshot).contains(":true:true:");
+			return snapshot;
+		}
 	}
 
 	private static void makeTenantRuntimeAndMigratorInherit(int port) throws Exception {
