@@ -224,6 +224,8 @@ class TenantBoundSalesOrderSummaryExportIT {
 			for (String role : WORKER_ROLES) {
 				statement.execute("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			}
+			statement.execute("CREATE ROLE nexa_notification_push_worker NOLOGIN NOINHERIT "
+			        + "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + database.getDatabaseName() + "\" TO " + MIGRATOR);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + database.getDatabaseName() + "\" TO "
 					+ RUNTIME + ", " + POLICY_WRITER);

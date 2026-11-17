@@ -319,6 +319,8 @@ class TenantBoundCatalogDetailReaderIT {
 				statement.execute("CREATE ROLE " + role
 						+ " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			}
+			statement.execute("CREATE ROLE nexa_notification_push_worker NOLOGIN NOINHERIT "
+			        + "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + tenant.getDatabaseName() + "\" TO nexa_migrator");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + tenant.getDatabaseName() + "\" TO nexa_runtime");
 			statement.execute("GRANT CONNECT ON DATABASE \"" + tenant.getDatabaseName()
