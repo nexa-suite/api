@@ -147,6 +147,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 					readyTenantId, readyWorkspaceId, readyPort, false);
 			assertProvisionSucceeded(idempotent);
 			assertThat(readBinding(readyTenantId)).isEqualTo(ready);
+			assertTenantScope(readyStateDirectory, readyTenantId, readyWorkspaceId, ready);
 			assertThat(volumeExists(readyVolume)).isTrue();
 		} finally {
 			stopTenantDatabase(readyStateDirectory, readyTenantId);
@@ -562,6 +563,17 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 				assertThat(result.getObject(1, UUID.class)).isEqualTo(tenantId);
 				assertThat(result.getObject(2, UUID.class)).isEqualTo(workspaceId);
 				assertThat(result.next()).isFalse();
+			}
+			try (PreparedStatement pushRole = connection.prepareStatement("""
+					SELECT NOT rolcanlogin AND NOT rolinherit AND NOT rolsuper AND NOT rolcreatedb
+					       AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+					       AND NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE member = r.oid OR roleid = r.oid),
+					       has_column_privilege(r.oid, 'integration.outbox_event', 'event_id', 'SELECT')
+					FROM pg_roles r WHERE rolname = 'nexa_notification_push_worker'
+					"""); ResultSet result = pushRole.executeQuery()) {
+				assertThat(result.next()).isTrue();
+				assertThat(result.getBoolean(1)).as("notification worker remains isolated").isTrue();
+				assertThat(result.getBoolean(2)).as("notification worker retains its V46 grant").isTrue();
 			}
 			try (PreparedStatement roleInheritance = connection.prepareStatement("""
 					SELECT COUNT(*)=2 AND bool_and(NOT rolinherit)

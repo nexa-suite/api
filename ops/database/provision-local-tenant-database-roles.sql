@@ -23,6 +23,7 @@ DECLARE
     payments_worker_role pg_roles%ROWTYPE;
     business_traceability_worker_role pg_roles%ROWTYPE;
     reservation_expiry_worker_role pg_roles%ROWTYPE;
+    notification_push_worker_role pg_roles%ROWTYPE;
 BEGIN
     IF current_user <> 'nexa_tenant_bootstrap_admin' THEN
         RAISE EXCEPTION 'Tenant roles must be provisioned by the isolated bootstrap administrator';
@@ -214,7 +215,23 @@ BEGIN
             current_setting('nexa.local.reservation_expiry_worker_password'));
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_notification_push_worker') THEN
+    SELECT * INTO notification_push_worker_role FROM pg_roles WHERE rolname = 'nexa_notification_push_worker';
+    IF FOUND THEN
+        IF notification_push_worker_role.rolcanlogin OR notification_push_worker_role.rolinherit
+           OR notification_push_worker_role.rolsuper OR notification_push_worker_role.rolcreatedb
+           OR notification_push_worker_role.rolcreaterole OR notification_push_worker_role.rolreplication
+           OR notification_push_worker_role.rolbypassrls
+           OR EXISTS (SELECT 1 FROM pg_auth_members
+                      WHERE member = notification_push_worker_role.oid OR roleid = notification_push_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_database WHERE datdba = notification_push_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = notification_push_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_class WHERE relowner = notification_push_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_proc WHERE proowner = notification_push_worker_role.oid)
+           OR EXISTS (SELECT 1 FROM pg_namespace
+                      WHERE has_schema_privilege(notification_push_worker_role.oid, oid, 'CREATE')) THEN
+            RAISE EXCEPTION 'Existing Tenant notification-push worker role has unsafe privileges or memberships';
+        END IF;
+    ELSE
         CREATE ROLE nexa_notification_push_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
     END IF;
 END
