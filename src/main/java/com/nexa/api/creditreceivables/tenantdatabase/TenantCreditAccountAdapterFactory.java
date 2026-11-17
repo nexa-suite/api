@@ -14,6 +14,7 @@ import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentU
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableApplicationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
+import com.nexa.api.creditreceivables.application.publicapi.ReceivableNotificationSourceQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -23,6 +24,8 @@ import java.time.Clock;
 /** Binds BC-07 owner ports to the exact Tenant JDBC session supplied by the router callback. */
 public interface TenantCreditAccountAdapterFactory {
     ReceivablePaymentAccess bindReceivablePaymentAccessTo(JdbcTemplate tenantJdbc);
+
+    ReceivableNotificationSourceQuery bindReceivableNotificationSourceTo(JdbcTemplate tenantJdbc);
 
     ConfigurationBindings bindConfigurationTo(JdbcTemplate tenantJdbc,
                                                 BusinessTraceabilityCommands tenantTraceability);
