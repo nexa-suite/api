@@ -50,6 +50,7 @@ class ModernPostgresNormalizationRegressionTests {
 					"nexa_payments_worker", "nexa_business_traceability_worker")) {
 				statement.execute("create role " + role);
 			}
+			statement.execute("create role nexa_notification_push_worker NOLOGIN NOINHERIT");
 			statement.execute("create role nexa_warehouse_reservation_expiry_worker NOLOGIN NOINHERIT "
 					+ "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("create database nexa_tenant");

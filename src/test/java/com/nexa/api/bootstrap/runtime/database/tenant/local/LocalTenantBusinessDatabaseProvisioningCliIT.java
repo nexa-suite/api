@@ -62,6 +62,7 @@ class LocalTenantBusinessDatabaseProvisioningCliIT {
 			statement.execute("CREATE ROLE nexa_business_traceability_worker LOGIN PASSWORD '"
 					+ TRACEABILITY_WORKER_PASSWORD
 					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+			statement.execute("CREATE ROLE nexa_notification_push_worker NOLOGIN NOINHERIT");
 			statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker LOGIN PASSWORD '"
 					+ RESERVATION_EXPIRY_WORKER_PASSWORD
 					+ "' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");

@@ -206,6 +206,11 @@ public abstract class PostgresIntegrationSupport {
 		return TenantBusinessIntegrationFixture.jdbcFor(tenantId);
 	}
 
+	/** Direct test-only SQL handle using the notification worker login. */
+	protected JdbcTemplate tenantNotificationWorkerJdbc(UUID tenantId) {
+		return TenantBusinessIntegrationFixture.notificationWorkerJdbc(tenantId);
+	}
+
 	/** Direct test-only SQL handle using the least-privileged Buyer payment callback worker role. */
 	protected JdbcTemplate tenantPaymentCallbackWorkerJdbc(UUID tenantId) {
 		String reference = "local-tenant-payment-callback-worker:" + tenantId;
