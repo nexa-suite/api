@@ -4,6 +4,7 @@ import com.nexa.api.businesstraceability.tenantdatabase.TenantBusinessTraceabili
 import com.nexa.api.notifications.application.model.NotificationModels;
 import com.nexa.api.notifications.application.port.out.PushProviderPort;
 import com.nexa.api.notifications.application.service.PushRoutingService;
+import com.nexa.api.notifications.application.service.PushDeliveryRetryPolicy;
 import com.nexa.api.notifications.infrastructure.PushDestinationCipher;
 import com.nexa.api.notifications.infrastructure.persistence.JdbcFcmPushDestinationStore;
 import com.nexa.api.notifications.infrastructure.persistence.JdbcPushSubscriptionAdapter;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.math.BigDecimal;
 import java.sql.Connection;
@@ -33,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.awaitility.Awaitility.await;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -73,6 +76,8 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
     @Autowired
     private PushDestinationCipher pushDestinationCipher;
+    @MockitoSpyBean
+    private PushDeliveryRetryPolicy pushRetryPolicy;
     @Autowired
     private com.nexa.api.bootstrap.runtime.boundaries.TenantBusinessTraceabilityBindingsFactory traceabilityBindings;
     @Autowired
@@ -88,6 +93,10 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
     @Test
     void notificationWorkerProjectsRealSourceAndRetriesDurablePushWithoutDuplicateAttempt() throws Exception {
+        // Keep the retry deadline in the future until this test explicitly expires its durable lease.
+        org.mockito.Mockito.doAnswer(invocation -> invocation.getArgument(1, Instant.class).plus(1, ChronoUnit.HOURS))
+                .when(pushRetryPolicy).retryAt(org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.any(Instant.class));
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
         String sales = accessToken(SALES_EMAIL, "PLATFORM");
@@ -138,7 +147,14 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                     + "where subscription_id=? and event_id=?", Integer.class, subscription, source)).isEqualTo(1);
             tenantJdbc().update("update notifications.push_delivery_claim set lease_until=now()-interval '1 second' "
                     + "where subscription_id=? and event_id=?", subscription, source);
-            scheduler.processNextWorkspacePage();
+            // Other pending events may lie ahead of this retry in the bounded scan cursor.
+            await().atMost(30, TimeUnit.SECONDS).pollInterval(100, TimeUnit.MILLISECONDS).untilAsserted(() -> {
+                scheduler.processNextWorkspacePage();
+                assertThat(tenantJdbc().queryForObject("select count(*) from notifications.push_delivery_attempt "
+                        + "where subscription_id=? and event_id=? and status='DEFERRED'",
+                        Integer.class, subscription, source)).isEqualTo(2);
+            });
+            for (int i = 0; i < 4; i++) scheduler.processNextWorkspacePage();
         }
         assertThat(tenantJdbc().queryForObject("select count(*) from integration.inbox_event where event_id=? "
                 + "and consumer_name='notifications-business-projection-v1'", Integer.class, source)).isEqualTo(1);
