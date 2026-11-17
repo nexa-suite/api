@@ -173,3 +173,33 @@ not enable mutations, workers or complete inventory/picking workflows. Verify
 both authorized reads and rejected commands before rehearsing Mobile. A
 successful empty list indicates no visible business rows; it is not evidence
 that data were seeded or a workflow completed.
+
+## Opt-in notification push worker
+
+The cloud push composition is disabled unless
+`NEXA_TENANT_BUSINESS_CLOUD_NOTIFICATION_PUSH_ENABLED=true`. It also requires the
+cloud router, Tenant notifications, FCM provider and the existing least-privilege
+runtime check. General business traceability remains disabled and is still
+rejected in this profile. The worker handles only the existing notification
+projection and push-delivery consumers; it does not run the general traceability
+scheduler.
+
+V46 requires `nexa_notification_push_worker` to exist before migration. Local
+provisioning creates this role as NOLOGIN. A cloud operator must independently
+provision an isolated LOGIN role and protected credential before migrating; do
+not reuse the runtime, policy writer, central, migrator or owner credentials.
+This repository does not provision that cloud role or configure FCM IAM. The
+current worker credential source supports the explicit single-binding
+`environment` source only. It requires
+`NEXA_TENANT_BUSINESS_CLOUD_NOTIFICATION_WORKER_PASSWORD`
+in addition to the existing environment binding settings and the dedicated
+central `NEXA_BUSINESS_DOCUMENTS_SCOPE_READER_PASSWORD`. Missing or unsafe
+configuration fails closed. The router checks the READY binding, physical
+Tenant and database identities, Workspace anchor, schema manifest and worker
+role before work; RLS restricts the worker's outbox visibility to its scoped
+Workspace and approved event types.
+
+This contract does not establish cloud deployment, Neon role configuration,
+FCM sender IAM, live delivery, Product acceptance or production readiness.
+The external AES-GCM key and ADC configuration must be managed separately;
+never publish a developer's local ADC credential in the deployment.
