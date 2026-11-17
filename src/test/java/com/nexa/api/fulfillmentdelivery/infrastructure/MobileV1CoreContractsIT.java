@@ -73,6 +73,143 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
 
     @Autowired
     private PushDestinationCipher pushDestinationCipher;
+    @Autowired
+    private com.nexa.api.bootstrap.runtime.boundaries.TenantBusinessTraceabilityBindingsFactory traceabilityBindings;
+    @Autowired
+    private com.nexa.api.bootstrap.runtime.events.TenantBusinessNotificationProjectionConsumer notificationProjectionConsumer;
+    @Autowired
+    private com.nexa.api.bootstrap.runtime.events.TenantNotificationPushDeliveryConsumer notificationDeliveryConsumer;
+    @Autowired
+    private com.nexa.api.salescommitment.tenantdatabase.TenantSalesWorkflowEventSnapshotQueryFactory salesSnapshots;
+    @Autowired
+    private com.nexa.api.creditreceivables.tenantdatabase.TenantCreditAccountAdapterFactory creditAdapters;
+    @Autowired
+    private com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantLogisticsEventContextQueryFactory logisticsSnapshots;
+
+    @Test
+    void notificationWorkerProjectsRealSourceAndRetriesDurablePushWithoutDuplicateAttempt() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        MvcResult registered = mockMvc.perform(post("/api/v1/notifications/push-subscriptions")
+                        .header("Authorization", "Bearer " + sales).header("X-Nexa-Client", "NATIVE")
+                        .header("Idempotency-Key", "isolated-worker-registration-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"installationId\":\"isolated-worker-" + uuid()
+                                + "\",\"platform\":\"android\",\"providerToken\":\"isolated-token-" + uuid() + "\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        UUID subscription = UUID.fromString(json(registered).get("id").asText());
+        var request = createApprovedPurchaseRequest();
+        UUID source = tenantJdbc().queryForObject("select event_id from integration.outbox_event "
+                + "where tenant_id=? and workspace_id=? and aggregate_id=? and event_type='PURCHASE_REQUEST_SUBMITTED' "
+                + "order by created_at desc limit 1", UUID.class, tenant, workspace, UUID.fromString(request.id()));
+        var credentials = (org.springframework.jdbc.datasource.DriverManagerDataSource)
+                tenantNotificationWorkerJdbc(tenant).getDataSource();
+        var registry = org.mockito.Mockito.mock(
+                com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry.class);
+        var scopes = org.mockito.Mockito.mock(
+                com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.class);
+        UUID identity = tenantJdbc().queryForObject("select database_identity from nexa_platform.tenant_business_database_identity where singleton", UUID.class);
+        var binding = new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding(
+                new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId(tenant), identity,
+                "cloud-tenant-db:0123456789abcdef0123456789abcdef",
+                com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest());
+        org.mockito.Mockito.when(registry.findReadyBinding(binding.tenantId())).thenReturn(java.util.Optional.of(binding));
+        org.mockito.Mockito.when(scopes.isReadyWorkspace(tenant, workspace)).thenReturn(true);
+        org.mockito.Mockito.when(scopes.listReadyWorkspaces(null, null, 50)).thenReturn(
+                List.of(new com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.Scope(tenant, workspace)));
+        var factory = new com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory(
+                ignored -> new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials(
+                        credentials.getUrl(), credentials.getUsername(), credentials.getPassword()), 2);
+        try (var router = new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseTraceabilityWorkerRouter(
+                registry, factory, scopes, 1, "nexa_notification_push_worker", true)) {
+            router.inTransaction(tenant, workspace, (jdbc, ignored) -> {
+                assertThat(salesSnapshots.bindTo(jdbc).findPurchaseRequest(tenant, workspace, UUID.fromString(request.id())))
+                        .isPresent();
+                assertThat(creditAdapters.bindReceivableNotificationSourceTo(jdbc)
+                        .findClientAccountId(tenant, workspace, UUID.randomUUID())).isEmpty();
+                assertThat(logisticsSnapshots.bindTo(jdbc).findDispatch(tenant, workspace, UUID.randomUUID())).isEmpty();
+                return null;
+            });
+            var scheduler = new com.nexa.api.bootstrap.runtime.boundaries.TenantNotificationPushWorkerScheduler(
+                    scopes, router, traceabilityBindings, notificationProjectionConsumer, notificationDeliveryConsumer);
+            for (int i = 0; i < 4; i++) scheduler.processNextWorkspacePage();
+            assertThat(tenantJdbc().queryForObject("select count(*) from notifications.push_delivery_attempt "
+                    + "where subscription_id=? and event_id=?", Integer.class, subscription, source)).isEqualTo(1);
+            tenantJdbc().update("update notifications.push_delivery_claim set lease_until=now()-interval '1 second' "
+                    + "where subscription_id=? and event_id=?", subscription, source);
+            scheduler.processNextWorkspacePage();
+        }
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.inbox_event where event_id=? "
+                + "and consumer_name='notifications-business-projection-v1'", Integer.class, source)).isEqualTo(1);
+        UUID pushWork = tenantJdbc().queryForObject("select event_id from integration.outbox_event "
+                + "where causation_id=? and event_type='NOTIFICATION_PUSH_DELIVERY_REQUESTED'", UUID.class, source);
+        assertThat(pushWork).isNotNull();
+        assertThat(tenantJdbc().queryForObject("select count(*) from notifications.push_delivery_attempt "
+                + "where subscription_id=? and event_id=? and status='DEFERRED'", Integer.class, subscription, source)).isEqualTo(2);
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.inbox_event where event_id=? "
+                + "and consumer_name='notifications-push-delivery-v1'", Integer.class, pushWork)).isZero();
+    }
+
+    @Test
+    void notificationWorkerOutboxIsScopedAndCannotWriteBusinessTables() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID otherWorkspace = UUID.randomUUID();
+        UUID visibleEvent = UUID.randomUUID();
+        UUID otherEvent = UUID.randomUUID();
+        UUID unrelatedEvent = UUID.randomUUID();
+        tenantJdbc().update("insert into nexa_platform.tenant_workspace_scope_anchor(tenant_id,workspace_id) values (?,?)",
+                tenant, otherWorkspace);
+        try {
+            for (Object[] event : new Object[][] {
+                    {visibleEvent, workspace, "PURCHASE_REQUEST_SUBMITTED"},
+                    {otherEvent, otherWorkspace, "PURCHASE_REQUEST_SUBMITTED"},
+                    {unrelatedEvent, workspace, "UNRELATED_EVENT"}}) {
+                tenantJdbc().update("insert into integration.outbox_event(event_id,event_type,aggregate_type,aggregate_id,"
+                                + "tenant_id,workspace_id,occurred_at,correlation_id,schema_version,payload) "
+                                + "values (?,?, 'PurchaseRequest', ?,?,?,now(),'notification-test','1','{}'::jsonb)",
+                        event[0], event[2], UUID.randomUUID(), tenant, event[1]);
+            }
+            assertThat(tenantJdbc().queryForObject("select has_column_privilege('nexa_notification_push_worker', "
+                    + "'logistics.proof_of_delivery', 'receiver_name', 'SELECT')", Boolean.class)).isFalse();
+            assertThat(tenantJdbc().queryForObject("select has_any_column_privilege('nexa_notification_push_worker', "
+                    + "'payments.receivable', 'UPDATE')", Boolean.class)).isFalse();
+            assertThat(tenantJdbc().queryForObject("select has_any_column_privilege('nexa_notification_push_worker', "
+                    + "'logistics.delivery', 'UPDATE')", Boolean.class)).isFalse();
+            try (Connection connection = tenantNotificationWorkerJdbc(tenant).getDataSource().getConnection()) {
+                connection.setAutoCommit(false);
+                try (PreparedStatement count = connection.prepareStatement(
+                        "select count(*) from integration.outbox_event where event_id in (?,?,?)")) {
+                    count.setObject(1, visibleEvent); count.setObject(2, otherEvent); count.setObject(3, unrelatedEvent);
+                    try (var rows = count.executeQuery()) { rows.next(); assertThat(rows.getInt(1)).isZero(); }
+                    try (PreparedStatement scope = connection.prepareStatement(
+                            "select set_config('app.current_tenant_id',?,true),set_config('app.current_workspace_id',?,true)")) {
+                        scope.setString(1, tenant.toString()); scope.setString(2, workspace.toString()); scope.execute();
+                    }
+                    try (var rows = count.executeQuery()) { rows.next(); assertThat(rows.getInt(1)).isEqualTo(1); }
+                }
+                try (PreparedStatement lock = connection.prepareStatement(
+                        "select event_id from integration.outbox_event where event_id=? for update skip locked")) {
+                    lock.setObject(1, visibleEvent);
+                    try (var rows = lock.executeQuery()) { assertThat(rows.next()).isTrue(); }
+                }
+                var savepoint = connection.setSavepoint();
+                try (PreparedStatement insert = connection.prepareStatement(
+                        "insert into integration.outbox_event(event_id,event_type,aggregate_type,aggregate_id,tenant_id,workspace_id,"
+                        + "occurred_at,correlation_id,schema_version,payload) values (?, 'UNRELATED_EVENT', 'Test', ?,?,?,now(),'test','1','{}'::jsonb)")) {
+                    insert.setObject(1, UUID.randomUUID()); insert.setObject(2, UUID.randomUUID());
+                    insert.setObject(3, tenant); insert.setObject(4, workspace);
+                    assertThatThrownBy(insert::executeUpdate).isInstanceOf(java.sql.SQLException.class);
+                }
+                connection.rollback(savepoint);
+                connection.rollback();
+            }
+        } finally {
+            tenantJdbc().update("delete from integration.outbox_event where event_id in (?,?,?)", visibleEvent, otherEvent, unrelatedEvent);
+            tenantJdbc().update("delete from nexa_platform.tenant_workspace_scope_anchor where tenant_id=? and workspace_id=?", tenant, otherWorkspace);
+        }
+    }
 
     @Test
     void resolvesIdentifiersAndRejectsUnsafePhysicalPickingScans() throws Exception {
@@ -1174,6 +1311,47 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         assertThat(jdbc.queryForObject("select count(*) from notifications.push_delivery_attempt where event_id=?",
                 Integer.class, eventId)).isZero();
 
+        // Exercise the same claim and retry path through the isolated notification login.
+        var credentials = (org.springframework.jdbc.datasource.DriverManagerDataSource)
+                tenantNotificationWorkerJdbc(tenant).getDataSource();
+        var registry = org.mockito.Mockito.mock(
+                com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry.class);
+        var scopes = org.mockito.Mockito.mock(
+                com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.class);
+        UUID databaseIdentity = tenantJdbc().queryForObject(
+                "select database_identity from nexa_platform.tenant_business_database_identity where singleton", UUID.class);
+        String reference = "cloud-tenant-db:0123456789abcdef0123456789abcdef";
+        String digest = com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements
+                .load().schemaManifestDigest();
+        var binding = new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding(
+                new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId(tenant),
+                databaseIdentity, reference, digest);
+        org.mockito.Mockito.when(registry.findReadyBinding(binding.tenantId())).thenReturn(java.util.Optional.of(binding));
+        org.mockito.Mockito.when(scopes.isReadyWorkspace(tenant, workspace)).thenReturn(true);
+        var factory = new com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory(
+                ignored -> new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials(
+                        credentials.getUrl(), credentials.getUsername(), credentials.getPassword()), 2);
+        UUID isolatedEvent = UUID.randomUUID();
+        var isolatedProjection = new com.nexa.api.notifications.application.publicapi.NotificationProjectionModels.NotificationProjection(
+                isolatedEvent.toString(), tenant.toString(), workspace.toString(), buyerClientAccountId(), "SalesOrder",
+                UUID.randomUUID().toString(), "SALES_ORDER_CONFIRMED", "CONFIRMED", Instant.now(),
+                Set.of(membershipId(BUYER_EMAIL)));
+        try (var isolatedRouter = new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseTraceabilityWorkerRouter(
+                registry, factory, scopes, 1, "nexa_notification_push_worker", true)) {
+            for (int attempt = 0; attempt < 2; attempt++) {
+                isolatedRouter.inTransaction(tenant, workspace, (tenantSession, transactionManager) -> {
+                    assertThat(new JdbcFcmPushDestinationStore(tenantSession, pushDestinationCipher)
+                            .resolve(tenant, workspace, subscriptionUuid)).isEqualTo(secondToken);
+                    new PushRoutingService(new JdbcPushSubscriptionAdapter(tenantSession), pushProvider,
+                            transactionManager, new JdbcPushTransactionScopeGuard(tenantSession), tenant, workspace)
+                            .route(isolatedProjection, "ORDER_STATUS", "Order confirmed", "Safe notification", "/sales-orders/1");
+                    return null;
+                });
+            }
+        }
+        assertThat(tenantJdbc().queryForObject("select count(*) from notifications.push_delivery_attempt "
+                + "where subscription_id=? and event_id=?", Integer.class, subscriptionUuid, isolatedEvent)).isEqualTo(1);
+
         mockMvc.perform(post("/api/v1/notifications/push-subscriptions/" + subscriptionId + "/disable")
                         .header("Authorization", "Bearer " + buyer).header("X-Nexa-Client", "NATIVE")
                         .header("Idempotency-Key", "push-disable-" + uuid()))
@@ -1689,6 +1867,8 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
                 Integer.class, fixture.deliveryId(), UUID.fromString(terminal.attemptId()), driverMembership)).isEqualTo(1);
         assertThat(documentSource.findSealedPodForDelivery(UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), fixture.deliveryId())).isEmpty();
+        assertThat(documentSource.findSealedPodNotificationSource(UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), fixture.deliveryId())).isEmpty();
         assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where tenant_id=? "
                         + "and workspace_id=? and aggregate_type='Delivery' and aggregate_id=? "
                         + "and event_type='DeliveryCompleted.v1'", Integer.class,
@@ -1740,6 +1920,24 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
         assertThat(documentPod.completedAt()).isEqualTo(Instant.parse(sealedAt));
         assertThat(documentSource.findSealedPodForDelivery(UUID.fromString(tenantId()),
                 UUID.fromString(workspaceId()), fixture.deliveryId())).contains(documentPod);
+        var notificationPod = documentSource.findSealedPodNotificationSource(UUID.fromString(tenantId()),
+                UUID.fromString(workspaceId()), fixture.deliveryId()).orElseThrow();
+        assertThat(notificationPod.id()).isEqualTo(podId);
+        assertThat(notificationPod.deliveryId()).isEqualTo(fixture.deliveryId());
+        assertThat(notificationPod.salesOrderId()).isEqualTo(documentPod.salesOrderId());
+        try (Connection worker = tenantNotificationWorkerJdbc(UUID.fromString(tenantId())).getDataSource().getConnection()) {
+            worker.setAutoCommit(false);
+            try (PreparedStatement scope = worker.prepareStatement(
+                    "select set_config('app.current_tenant_id',?,true),set_config('app.current_workspace_id',?,true)")) {
+                scope.setString(1, tenantId()); scope.setString(2, workspaceId()); scope.execute();
+            }
+            var scopedJdbc = new org.springframework.jdbc.core.JdbcTemplate(
+                    new org.springframework.jdbc.datasource.SingleConnectionDataSource(worker, true));
+            assertThat(new JdbcFulfillmentDocumentSourceQuery(scopedJdbc)
+                    .findSealedPodNotificationSource(UUID.fromString(tenantId()), UUID.fromString(workspaceId()),
+                            fixture.deliveryId())).contains(notificationPod);
+            worker.rollback();
+        }
 
         mockMvc.perform(post(sealPath).header("Authorization", "Bearer " + logistics)
                         .header("If-Match", capturedEtag).header("Idempotency-Key", sealKey))
