@@ -962,6 +962,102 @@ class MobileV1CoreContractsIT extends NexaWorkflowIntegrationSupport {
     }
 
     @Test
+    void deliveredBuyerAcceptanceProjectsCorrelatedInboxAndDeferredPush() throws Exception {
+        ensureCommercialInventory();
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String sales = accessToken(SALES_EMAIL, "PLATFORM");
+        String logistics = accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        MvcResult registered = mockMvc.perform(post("/api/v1/notifications/push-subscriptions")
+                        .header("Authorization", "Bearer " + buyer).header("X-Nexa-Client", "NATIVE")
+                        .header("Idempotency-Key", "delivery-push-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"installationId\":\"delivery-" + uuid()
+                                + "\",\"platform\":\"android\",\"providerToken\":\"delivery-token-" + uuid() + "\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        UUID subscription = UUID.fromString(json(registered).path("id").asText());
+        DriverDeliveryFixture delivery = createDriverDelivery(warehouse, sales,
+                UUID.fromString(membershipId(LOGISTICS_EMAIL)), "delivery-e2e-" + uuid());
+        ActiveDriverAttemptFixture attempt = startDriverDeliveryAttempt(delivery, logistics, "delivery-e2e-" + uuid());
+        AttemptOutcomeLine line = tenantJdbc().queryForObject(
+                "select fl.id,fl.sku_id,fl.dispatched_quantity,fl.unit from logistics.fulfillment_line fl "
+                        + "join logistics.delivery d on d.tenant_id=fl.tenant_id and d.workspace_id=fl.workspace_id "
+                        + "and d.fulfillment_id=fl.fulfillment_id where d.tenant_id=? and d.workspace_id=? and d.id=?",
+                (rs, row) -> new AttemptOutcomeLine(rs.getObject("id", UUID.class), rs.getObject("sku_id", UUID.class),
+                        rs.getBigDecimal("dispatched_quantity"), rs.getString("unit")), tenant, workspace, delivery.deliveryId());
+        String body = "{\"outcome\":\"DELIVERED\",\"lines\":[{\"fulfillmentLineId\":\""
+                + line.fulfillmentLineId() + "\",\"skuId\":\"" + line.skuId()
+                + "\",\"attemptedQuantity\":" + line.quantity().toPlainString()
+                + ",\"deliveredQuantity\":" + line.quantity().toPlainString()
+                + ",\"rejectedQuantity\":0,\"cancelledQuantity\":0,\"unit\":\"" + line.unit() + "\"}]}";
+        mockMvc.perform(post("/api/v1/driver/deliveries/" + delivery.deliveryId() + "/attempts/"
+                        + attempt.attemptId() + "/outcomes").header("Authorization", "Bearer " + logistics)
+                        .header("If-Match", attempt.deliveryEtag()).header("Idempotency-Key", "delivery-outcome-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.delivery.status").value("DELIVERED"));
+        String token = issueBuyerQrToken(delivery.deliveryId(), attempt.attemptId(), logistics);
+        String acceptanceKey = "delivery-accept-" + uuid();
+        String acceptanceBody = "{\"token\":\"" + token + "\"}";
+        MvcResult accepted = mockMvc.perform(post("/api/v1/delivery-handoff/receipts")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", acceptanceKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(acceptanceBody))
+                .andExpect(status().isCreated()).andReturn();
+        UUID receipt = UUID.fromString(json(accepted).path("receiptId").asText());
+        MvcResult replay = mockMvc.perform(post("/api/v1/delivery-handoff/receipts")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", acceptanceKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(acceptanceBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.replayed").value(true)).andReturn();
+        assertThat(json(replay).path("receiptId").asText()).isEqualTo(receipt.toString());
+        MvcResult receipts = mockMvc.perform(get("/api/v1/buyer/deliveries/" + delivery.deliveryId() + "/buyer-receipts")
+                        .header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
+        assertThat(json(receipts).toString()).contains(receipt.toString(), attempt.attemptId().toString(), "ACCEPTED");
+        UUID pod = tenantJdbc().queryForObject("select id from logistics.proof_of_delivery where tenant_id=? "
+                        + "and workspace_id=? and delivery_id=? and attempt_id=? and status='SEALED' and buyer_receipt_fact_id=?",
+                UUID.class, tenant, workspace, delivery.deliveryId(), attempt.attemptId(), receipt);
+        UUID source = tenantJdbc().queryForObject("select event_id from integration.outbox_event where tenant_id=? "
+                        + "and workspace_id=? and aggregate_type='Delivery' and aggregate_id=? "
+                        + "and event_type='DeliveryCompleted.v1' and payload=jsonb_build_object('deliveryId',aggregate_id,'podId',?::uuid)",
+                UUID.class, tenant, workspace, delivery.deliveryId(), pod);
+        var credentials = (org.springframework.jdbc.datasource.DriverManagerDataSource) tenantNotificationWorkerJdbc(tenant).getDataSource();
+        var registry = org.mockito.Mockito.mock(com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry.class);
+        var scopes = org.mockito.Mockito.mock(com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.class);
+        UUID identity = tenantJdbc().queryForObject("select database_identity from nexa_platform.tenant_business_database_identity where singleton", UUID.class);
+        var binding = new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding(
+                new com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId(tenant), identity,
+                "cloud-tenant-db:0123456789abcdef0123456789abcdef",
+                com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest());
+        org.mockito.Mockito.when(registry.findReadyBinding(binding.tenantId())).thenReturn(java.util.Optional.of(binding));
+        org.mockito.Mockito.when(scopes.isReadyWorkspace(tenant, workspace)).thenReturn(true);
+        org.mockito.Mockito.when(scopes.listReadyWorkspaces(null, null, 50)).thenReturn(List.of(
+                new com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery.Scope(tenant, workspace)));
+        var factory = new com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory(
+                ignored -> new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials(
+                        credentials.getUrl(), credentials.getUsername(), credentials.getPassword()), 2);
+        try (var router = new com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseTraceabilityWorkerRouter(
+                registry, factory, scopes, 1, "nexa_notification_push_worker", true)) {
+            var scheduler = new com.nexa.api.bootstrap.runtime.boundaries.TenantNotificationPushWorkerScheduler(
+                    scopes, router, traceabilityBindings, notificationProjectionConsumer, notificationDeliveryConsumer);
+            await().atMost(30, TimeUnit.SECONDS).pollInterval(100, TimeUnit.MILLISECONDS).untilAsserted(() -> {
+                scheduler.processNextWorkspacePage();
+                assertThat(tenantJdbc().queryForObject("select count(*) from notifications.push_delivery_attempt "
+                        + "where subscription_id=? and event_id=? and status='DEFERRED'", Integer.class, subscription, source)).isEqualTo(1);
+            });
+        }
+        UUID inbox = tenantJdbc().queryForObject("select id from notifications.inbox_item where tenant_id=? and workspace_id=? "
+                        + "and recipient_membership_id=? and event_id=? and subject_type='Delivery' and subject_id=?",
+                UUID.class, tenant, workspace, UUID.fromString(membershipId(BUYER_EMAIL)), source, delivery.deliveryId());
+        MvcResult notifications = mockMvc.perform(get("/api/v1/notifications").param("page", "0").param("size", "100")
+                        .header("Authorization", "Bearer " + buyer)).andExpect(status().isOk()).andReturn();
+        assertThat(json(notifications).toString()).contains(inbox.toString(), delivery.deliveryId().toString());
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.inbox_event where event_id=? "
+                        + "and consumer_name='notifications-business-projection-v1'", Integer.class, source)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select count(*) from integration.outbox_event where causation_id=? "
+                        + "and event_type='NOTIFICATION_PUSH_DELIVERY_REQUESTED'", Integer.class, source)).isEqualTo(1);
+    }
+
+    @Test
     void buyerQrAcceptanceConcurrentRetriesCompleteTheOrderOnce() throws Exception {
         ensureCommercialInventory();
         String warehouse = accessToken(WAREHOUSE_EMAIL, "PLATFORM");
