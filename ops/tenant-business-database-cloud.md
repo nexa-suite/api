@@ -185,11 +185,14 @@ projection and push-delivery consumers; it does not run the general traceability
 scheduler.
 
 V46 requires `nexa_notification_push_worker` to exist before migration. Local
-provisioning creates this role as NOLOGIN. A cloud operator must independently
-provision an isolated LOGIN role and protected credential before migrating; do
-not reuse the runtime, policy writer, central, migrator or owner credentials.
-This repository does not provision that cloud role or configure FCM IAM. The
-current worker credential source supports the explicit single-binding
+provisioning creates this role as `NOLOGIN`. On Neon, create the worker with SQL
+as the database owner and provision its own protected `LOGIN` credential. The
+worker requires `NOINHERIT`, `NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`,
+`NOREPLICATION` and `NOBYPASSRLS`. Both V46 and the router permit the exact
+creator grant from `cloud_admin` to the database owner `neondb_owner` with
+`ADMIN TRUE`, `INHERIT FALSE` and `SET FALSE`. Any additional membership
+involving the worker fails validation. The worker credential source supports
+the explicit single-binding
 `environment` source only. It requires
 `NEXA_TENANT_BUSINESS_CLOUD_NOTIFICATION_WORKER_PASSWORD`
 in addition to the existing environment binding settings and the dedicated

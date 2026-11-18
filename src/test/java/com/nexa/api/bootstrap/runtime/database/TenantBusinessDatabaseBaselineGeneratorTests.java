@@ -15,6 +15,7 @@ class TenantBusinessDatabaseBaselineGeneratorTests {
 
 		assertThat(tables).hasSize(167);
 		assertThat(tables).noneMatch(table -> table.name().startsWith("payments.buyer_wallet_"));
+		assertThat(tables).noneMatch(table -> table.name().equals("iam.legal_acceptance"));
 		assertThat(tables).anyMatch(table -> table.name().equals("payments.payment"));
 	}
 

@@ -23,7 +23,18 @@ BEGIN
        OR owner_id IN (migrator.oid, runtime_role.oid)
        OR NOT migrator.rolcanlogin OR migrator.rolinherit OR migrator.rolsuper OR migrator.rolcreatedb
        OR migrator.rolcreaterole OR migrator.rolreplication OR migrator.rolbypassrls
-       OR EXISTS (SELECT 1 FROM pg_auth_members WHERE member=migrator.oid OR roleid=migrator.oid)
+       -- Neon grants its database owner role administration without inheritance or SET ROLE.
+       OR EXISTS (
+           SELECT 1 FROM pg_auth_members membership
+           WHERE (membership.member = migrator.oid OR membership.roleid = migrator.oid)
+             AND (membership.roleid = migrator.oid
+                  AND membership.member = (SELECT datdba FROM pg_database WHERE datname = current_database())
+                  AND pg_get_userbyid(membership.member) = 'neondb_owner'
+                  AND pg_get_userbyid(membership.grantor) = 'cloud_admin'
+                  AND membership.admin_option
+                  AND NOT membership.inherit_option
+                  AND NOT membership.set_option) IS NOT TRUE
+       )
        OR runtime_role.rolsuper OR runtime_role.rolcreatedb OR runtime_role.rolcreaterole OR runtime_role.rolreplication OR runtime_role.rolbypassrls
        OR pg_has_role(runtime_role.oid, owner_id, 'MEMBER')
        OR has_schema_privilege(migrator.oid, 'iam', 'CREATE')

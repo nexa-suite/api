@@ -2,9 +2,11 @@ package com.nexa.api.tenantaccessgovernance.iam.legalacceptance;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.service.LegalAcceptance;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.LegalAcceptanceModels;
-import com.nexa.api.tenantaccessgovernance.iam.application.port.out.LegalAcceptanceStore;
 import com.nexa.api.tenantaccessgovernance.iam.infrastructure.persistence.JdbcLegalAcceptanceStore;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -12,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import java.nio.charset.StandardCharsets;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -22,22 +23,39 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers(disabledWithoutDocker = true)
 class LegalAcceptancePostgresTests {
-    @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine");
+    @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4-alpine")
+            .withUsername("cloud_admin");
     static JdbcTemplate jdbc;
 
     @BeforeAll static void setup() throws Exception {
-        var ds = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-        jdbc = new JdbcTemplate(ds);
+        jdbc = connect(POSTGRES.getUsername(), POSTGRES.getPassword());
+        jdbc.execute("create role neondb_owner login createrole password 'test-only-owner'");
+        jdbc.execute("alter database test owner to neondb_owner");
         jdbc.execute("create role nexa_runtime login noinherit password 'test-only-runtime'");
-        jdbc.execute("create role nexa_migrator login noinherit password 'test-only-migrator'");
         jdbc.execute("create table public.flyway_schema_history (version varchar(50), success boolean)");
         jdbc.execute("insert into public.flyway_schema_history values ('189', true)");
-        jdbc.execute("create schema iam");
-        jdbc.execute("grant usage on schema iam to nexa_runtime, nexa_migrator");
-        jdbc.execute("create table iam.user_account (id uuid primary key)");
-        jdbc.execute(java.nio.file.Files.readString(java.nio.file.Path.of("ops/database/prepare-v190-individual-legal-acceptance.sql")));
-        var migrator = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), "nexa_migrator", "test-only-migrator"));
-        migrator.execute(new String(new ClassPathResource("db/migration/V190__record_individual_legal_acceptance.sql").getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+        jdbc.execute("grant select on public.flyway_schema_history to neondb_owner");
+
+        var owner = connect("neondb_owner", "test-only-owner");
+        owner.execute("create role nexa_migrator login noinherit password 'test-only-migrator'");
+        owner.execute("create schema iam");
+        owner.execute("grant usage on schema iam to nexa_runtime, nexa_migrator");
+        owner.execute("create table iam.user_account (id uuid primary key)");
+        String preparation = Files.readString(Path.of("ops/database/prepare-v190-individual-legal-acceptance.sql"));
+        jdbc.execute("grant nexa_migrator to neondb_owner with set true");
+        assertThatThrownBy(() -> owner.execute(preparation)).rootCause()
+                .hasMessageContaining("V190 requires isolated IAM ownership and restricted roles");
+        jdbc.execute("grant nexa_migrator to neondb_owner with set false");
+        owner.execute(preparation);
+
+        var migrator = connect("nexa_migrator", "test-only-migrator");
+        try (var source = new ClassPathResource("db/migration/V190__record_individual_legal_acceptance.sql").getInputStream()) {
+            migrator.execute(new String(source.readAllBytes(), StandardCharsets.UTF_8));
+        }
+    }
+
+    private static JdbcTemplate connect(String username, String password) {
+        return new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), username, password));
     }
 
     @Test void persistsOnlyOneAcceptancePerUserVersionAndPreservesFirstTimestamp() {
@@ -56,7 +74,7 @@ class LegalAcceptancePostgresTests {
         var first = UUID.randomUUID();
         var second = UUID.randomUUID();
         jdbc.update("insert into iam.user_account (id) values (?), (?)", first, second);
-        var runtime = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), "nexa_runtime", "test-only-runtime"));
+        var runtime = connect("nexa_runtime", "test-only-runtime");
         var store = new JdbcLegalAcceptanceStore(runtime);
         var service = new LegalAcceptance(store);
         var request = new LegalAcceptanceModels.Request(LegalAcceptance.DOCUMENT_ID, LegalAcceptance.VERSION, LegalAcceptance.DIGEST);

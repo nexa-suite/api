@@ -2,6 +2,7 @@ package com.nexa.api.tenantaccessgovernance.iam.presentation.rest;
 
 import com.nexa.api.tenantaccessgovernance.iam.application.service.LegalAcceptance;
 import com.nexa.api.tenantaccessgovernance.iam.application.model.LegalAcceptanceModels;
+import io.swagger.v3.oas.annotations.Operation;
 
 import java.util.UUID;
 
@@ -27,11 +28,13 @@ public class LegalAcceptanceController {
     private final LegalAcceptance acceptance;
     public LegalAcceptanceController(LegalAcceptance acceptance) { this.acceptance = acceptance; }
 
+    @Operation(operationId = "getCurrentLegalAcceptance")
     @GetMapping
     public LegalAcceptanceModels.View current(Authentication authentication) {
         return acceptance.current(userId(authentication));
     }
 
+    @Operation(operationId = "acceptCurrentMobileTerms")
     @PostMapping
     public LegalAcceptanceModels.View accept(Authentication authentication, @RequestBody LegalAcceptanceModels.Request request) {
         return acceptance.accept(userId(authentication), request);

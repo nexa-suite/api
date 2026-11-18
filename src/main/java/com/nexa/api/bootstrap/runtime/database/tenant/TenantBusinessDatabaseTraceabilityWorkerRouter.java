@@ -161,15 +161,28 @@ public final class TenantBusinessDatabaseTraceabilityWorkerRouter
 
     private void verifyWorkerRole(JdbcTemplate jdbc) {
         String role = jdbc.queryForObject("select current_user", String.class);
-        Boolean safeRole = jdbc.queryForObject("select rolcanlogin and not rolsuper and not rolcreatedb "
-                + "and not rolcreaterole and not rolreplication and not rolbypassrls "
-                + "and not exists (select 1 from pg_auth_members where member=pg_roles.oid or roleid=pg_roles.oid) "
-                + "and not exists (select 1 from pg_database where datdba=pg_roles.oid) "
-                + "and not exists (select 1 from pg_namespace where nspowner=pg_roles.oid) "
-                + "and not exists (select 1 from pg_class where relowner=pg_roles.oid) "
-                + "and not exists (select 1 from pg_proc where proowner=pg_roles.oid) "
-                + "and not exists (select 1 from pg_namespace where has_schema_privilege(pg_roles.oid, oid, 'CREATE')) "
-                + "from pg_roles where rolname=current_user", Boolean.class);
+        Boolean safeRole = jdbc.queryForObject("""
+                SELECT worker.rolcanlogin AND NOT worker.rolsuper AND NOT worker.rolcreatedb
+                    AND NOT worker.rolcreaterole AND NOT worker.rolreplication AND NOT worker.rolbypassrls
+                    AND NOT EXISTS (
+                        SELECT 1 FROM pg_auth_members membership
+                        WHERE (membership.member = worker.oid OR membership.roleid = worker.oid)
+                          AND (worker.rolname = 'nexa_notification_push_worker'
+                               AND membership.roleid = worker.oid
+                               AND membership.member = (SELECT datdba FROM pg_database WHERE datname = current_database())
+                               AND pg_get_userbyid(membership.member) = 'neondb_owner'
+                               AND pg_get_userbyid(membership.grantor) = 'cloud_admin'
+                               AND membership.admin_option
+                               AND NOT membership.inherit_option
+                               AND NOT membership.set_option) IS NOT TRUE
+                    )
+                    AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datdba = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relowner = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proowner = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE has_schema_privilege(worker.oid, oid, 'CREATE'))
+                FROM pg_roles worker WHERE worker.rolname = current_user
+                """, Boolean.class);
         if ("nexa_notification_push_worker".equals(workerRole)) {
             Boolean noInheritance = jdbc.queryForObject("select not rolinherit from pg_roles where rolname=current_user", Boolean.class);
             safeRole = Boolean.TRUE.equals(safeRole) && Boolean.TRUE.equals(noInheritance);
