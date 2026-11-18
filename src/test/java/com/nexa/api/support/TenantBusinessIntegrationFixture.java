@@ -44,6 +44,8 @@ final class TenantBusinessIntegrationFixture {
 	private static final String DOCUMENTS_WORKER_PASSWORD = "test-only-documents-worker-password";
 	private static final String PAYMENTS_WORKER_USERNAME = "nexa_payments_worker";
 	private static final String PAYMENTS_WORKER_PASSWORD = "test-only-payments-worker-password";
+	private static final String NOTIFICATION_WORKER_USERNAME = "nexa_notification_push_worker";
+	private static final String NOTIFICATION_WORKER_PASSWORD = "test-only-notification-worker-password";
 	private static final String TRACEABILITY_WORKER_USERNAME = "nexa_business_traceability_worker";
 	private static final String TRACEABILITY_WORKER_PASSWORD = "test-only-traceability-worker-password";
 	private static final String RESERVATION_EXPIRY_WORKER_USERNAME = "nexa_warehouse_reservation_expiry_worker";
@@ -97,6 +99,12 @@ final class TenantBusinessIntegrationFixture {
 	static TenantBusinessDatabaseCredentials documentWorkerCredentials(String reference) {
 		return workerCredentials(reference, "local-tenant-business-documents-worker:",
 				DOCUMENTS_WORKER_USERNAME, DOCUMENTS_WORKER_PASSWORD);
+	}
+
+	static JdbcTemplate notificationWorkerJdbc(UUID tenantId) {
+		String databaseName = DATABASE_NAMES.get(tenantId);
+		if (databaseName == null) throw new IllegalStateException("Tenant database not provisioned");
+		return new JdbcTemplate(dataSource(jdbcUrl(databaseName), NOTIFICATION_WORKER_USERNAME, NOTIFICATION_WORKER_PASSWORD));
 	}
 
 	static TenantBusinessDatabaseCredentials traceabilityWorkerCredentials(String reference) {
@@ -187,6 +195,7 @@ final class TenantBusinessIntegrationFixture {
 			createRole(statement, DOCUMENTS_WORKER_USERNAME, DOCUMENTS_WORKER_PASSWORD, true, false);
 			createRole(statement, PAYMENTS_WORKER_USERNAME, PAYMENTS_WORKER_PASSWORD, true, false);
 			createRole(statement, TRACEABILITY_WORKER_USERNAME, TRACEABILITY_WORKER_PASSWORD, true, false);
+			createRole(statement, NOTIFICATION_WORKER_USERNAME, NOTIFICATION_WORKER_PASSWORD, true, false);
 			createRole(statement, RESERVATION_EXPIRY_WORKER_USERNAME, RESERVATION_EXPIRY_WORKER_PASSWORD, true, false);
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + MIGRATOR_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + TEST_USERNAME);
@@ -195,6 +204,7 @@ final class TenantBusinessIntegrationFixture {
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + DOCUMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + PAYMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + TRACEABILITY_WORKER_USERNAME);
+			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + NOTIFICATION_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + DATABASE_TEMPLATE + "\" TO " + RESERVATION_EXPIRY_WORKER_USERNAME);
 			statement.execute("GRANT CREATE ON SCHEMA public TO " + MIGRATOR_USERNAME);
 		} catch (SQLException exception) {
@@ -229,6 +239,7 @@ final class TenantBusinessIntegrationFixture {
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + DOCUMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + PAYMENTS_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + TRACEABILITY_WORKER_USERNAME);
+			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + NOTIFICATION_WORKER_USERNAME);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + databaseName + "\" TO " + RESERVATION_EXPIRY_WORKER_USERNAME);
 		} catch (SQLException exception) {
 			throw new IllegalStateException("Could not create the physical Tenant integration database", exception);

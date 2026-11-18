@@ -81,7 +81,12 @@ public final class PushSubscriptionController {
 
     public record RegisterRequest(@NotBlank @Size(max = 160) String installationId,
                                   @NotBlank @Size(max = 16) String platform,
-                                  @NotBlank @Size(max = 4096) String providerToken) { }
+                                  @NotBlank @Size(max = 4096) String providerToken) {
+        @Override public String toString() {
+            return "RegisterRequest[installationId=" + installationId + ", platform=" + platform
+                    + ", providerToken=<redacted>]";
+        }
+    }
     public record PushSubscriptionResponse(UUID id, UUID recipientMembershipId, String installationId,
                                            String platform, String surface, String status, Instant createdAt,
                                            Instant updatedAt, long version) { }

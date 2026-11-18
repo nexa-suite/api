@@ -158,7 +158,8 @@ public final class TenantBusinessTraceabilityWorkerScheduler {
                 // Authority reads happen with no Tenant connection held. The prepared
                 // callback carries immutable central facts into a fresh routed tx.
                 TenantOutboxEventConsumer.PreparedCallback prepared = Objects.requireNonNull(
-                        snapshot.get().preflight(), "Tenant outbox consumer preflight returned no callback");
+                        TenantWorkerCentralScope.call(scope.tenantId(), scope.workspaceId(), snapshot.get()::preflight),
+                        "Tenant outbox consumer preflight returned no callback");
                 router.inTransaction(scope.tenantId(), scope.workspaceId(), (tenantJdbc, transactionManager) ->
                         bindings.bindWorker(tenantJdbc).worker().consumePendingEvent(event, consumerName,
                                 transactionManager, (jdbc, tx, candidate) -> prepared.consume(jdbc, tx, candidate)));

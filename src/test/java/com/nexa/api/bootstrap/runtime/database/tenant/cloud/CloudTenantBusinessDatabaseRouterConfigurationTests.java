@@ -93,6 +93,22 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 	}
 
 	@Test
+	void notificationPushRequiresItsExplicitDependenciesAndKeepsGeneralTraceabilityDisabled() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.cloud-notification-push.enabled=true")
+				.run(context -> assertThat(context).hasFailed().getFailure()
+						.hasRootCauseMessage("Cloud notification push requires the cloud router, Tenant notifications and FCM"));
+		context().withPropertyValues("nexa.tenant-business.cloud-notification-push.enabled=true",
+				"nexa.tenant-business.cloud-router.enabled=true", "nexa.tenant-business.notifications.enabled=true",
+				"nexa.notifications.push.provider=fcm")
+				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
+		context().withPropertyValues("nexa.tenant-business.cloud-notification-push.enabled=true",
+				"nexa.tenant-business.cloud-router.enabled=true", "nexa.tenant-business.notifications.enabled=true",
+				"nexa.notifications.push.provider=fcm", "nexa.tenant-business.business-traceability.enabled=true")
+				.run(context -> assertThat(context).hasFailed().getFailure()
+						.hasRootCauseMessage("Cloud Tenant business capabilities require cloud composition before activation"));
+	}
+
+	@Test
 	void requiresTheCompleteExplicitReadCompositionAndAcceptsNoOtherCapabilities() throws IOException {
 		context().withPropertyValues("nexa.tenant-business.catalog-detail-read.enabled=true")
 				.run(context -> assertThat(context).hasFailed());

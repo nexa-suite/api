@@ -16,6 +16,11 @@ public interface FulfillmentDocumentSourceQuery {
 
     Optional<ProofOfDelivery> findSealedPodForDelivery(UUID tenantId, UUID workspaceId, UUID deliveryId);
 
+    /** Sealed POD identifiers needed for a notification source, without document contents. */
+    Optional<SealedPodNotificationSource> findSealedPodNotificationSource(UUID tenantId, UUID workspaceId, UUID deliveryId);
+
+    record SealedPodNotificationSource(UUID id, UUID deliveryId, UUID salesOrderId) { }
+
     Optional<Incident> findIncident(UUID tenantId, UUID workspaceId, UUID incidentId);
 
     /** Minimal customer-scoped projection used only to bind BC-09 incident evidence to its subject. */

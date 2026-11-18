@@ -35,6 +35,12 @@ public class TenantFinancialAdjustmentFixtureConfiguration {
             }
 
             @Override
+            public com.nexa.api.creditreceivables.application.publicapi.ReceivableNotificationSourceQuery
+                    bindReceivableNotificationSourceTo(JdbcTemplate tenantJdbc) {
+                return delegate.bindReceivableNotificationSourceTo(tenantJdbc);
+            }
+
+            @Override
             public ConfigurationBindings bindConfigurationTo(JdbcTemplate tenantJdbc,
                     BusinessTraceabilityCommands tenantTraceability) {
                 return delegate.bindConfigurationTo(tenantJdbc, tenantTraceability);

@@ -2,6 +2,8 @@ package com.nexa.api.notifications.infrastructure.persistence;
 
 import com.nexa.api.notifications.application.exception.NotificationOperationException;
 import com.nexa.api.notifications.application.port.out.PushSubscriptionPersistencePort;
+import com.nexa.api.notifications.infrastructure.PushDestinationCipher;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -14,20 +16,29 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** JDBC adapter for subscription routing; only token hashes are persisted. */
+/** JDBC adapter for Tenant-scoped subscription routing and encrypted provider destinations. */
 @Repository
 @Profile("!test")
 public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistencePort {
     private final JdbcTemplate jdbc;
+    private final PushDestinationCipher destinationCipher;
 
-    public JdbcPushSubscriptionAdapter(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    @Autowired
+    public JdbcPushSubscriptionAdapter(JdbcTemplate jdbc) {
+        this(jdbc, null);
+    }
+
+    public JdbcPushSubscriptionAdapter(JdbcTemplate jdbc, PushDestinationCipher destinationCipher) {
+        this.jdbc = jdbc;
+        this.destinationCipher = destinationCipher;
+    }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public PushSubscription register(RegisterRequest request) {
         require(request.tenantId(), request.workspaceId(), request.recipientMembershipId(), request.userId(),
                 request.installationId(), request.platform(), request.tokenHash(), request.actorMembershipId(),
-                request.idempotencyKey(), request.requestHash(), request.now());
+                request.providerDestination(), request.idempotencyKey(), request.requestHash(), request.now());
         lock(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "REGISTER", request.idempotencyKey());
         lockInstallation(request.tenantId(), request.workspaceId(), request.recipientMembershipId(), request.installationId());
         Idempotency prior = findIdempotency(request.tenantId(), request.workspaceId(), request.actorMembershipId(), "REGISTER", request.idempotencyKey());
@@ -42,16 +53,20 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
         UUID id;
         if (existing == null) {
             id = UUID.randomUUID();
-            jdbc.update("insert into notifications.push_subscription(id,tenant_id,workspace_id,recipient_membership_id,user_id,surface,installation_id,platform,provider_token_hash,status,created_at,updated_at,last_seen_at,version) values (?,?,?,?,?,?,?,?,?,'ENABLED',?,?,?,0)",
+            PushDestinationCipher.EncryptedDestination encrypted = encryptDestination(request, id);
+            jdbc.update("insert into notifications.push_subscription(id,tenant_id,workspace_id,recipient_membership_id,user_id,surface,installation_id,platform,provider_token_hash,provider_destination_ciphertext,provider_destination_key_version,status,created_at,updated_at,last_seen_at,version) values (?,?,?,?,?,?,?,?,?,?,?,'ENABLED',?,?,?,0)",
                     id, request.tenantId(), request.workspaceId(), request.recipientMembershipId(), request.userId(), request.surface(),
-                    request.installationId(), request.platform(), request.tokenHash(), Timestamp.from(request.now()), Timestamp.from(request.now()), Timestamp.from(request.now()));
+                    request.installationId(), request.platform(), request.tokenHash(), encrypted.ciphertext(),
+                    encrypted.keyVersion(), Timestamp.from(request.now()), Timestamp.from(request.now()), Timestamp.from(request.now()));
         } else {
             if ("UNREGISTERED".equals(existing.status())) {
                 throw new NotificationOperationException("PUSH_SUBSCRIPTION_CONFLICT", false);
             }
             id = existing.id();
-            jdbc.update("update notifications.push_subscription set user_id=?,surface=?,platform=?,provider_token_hash=?,status='ENABLED',updated_at=?,last_seen_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=?",
-                    request.userId(), request.surface(), request.platform(), request.tokenHash(), Timestamp.from(request.now()), Timestamp.from(request.now()),
+            PushDestinationCipher.EncryptedDestination encrypted = encryptDestination(request, id);
+            jdbc.update("update notifications.push_subscription set user_id=?,surface=?,platform=?,provider_token_hash=?,provider_destination_ciphertext=?,provider_destination_key_version=?,status='ENABLED',updated_at=?,last_seen_at=?,version=version+1 where tenant_id=? and workspace_id=? and id=?",
+                    request.userId(), request.surface(), request.platform(), request.tokenHash(), encrypted.ciphertext(),
+                    encrypted.keyVersion(), Timestamp.from(request.now()), Timestamp.from(request.now()),
                     request.tenantId(), request.workspaceId(), id);
         }
         jdbc.update("insert into notifications.push_subscription_command_idempotency(tenant_id,workspace_id,actor_membership_id,operation,idempotency_key,request_hash,subscription_id,created_at) values (?,?,?,?,?,?,?,?)",
@@ -70,7 +85,7 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
             ensureHash(prior.hash(), request.requestHash());
             return load(request.tenantId(), request.workspaceId(), prior.subscriptionId());
         }
-        int changed = jdbc.update("update notifications.push_subscription set status=?,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and recipient_membership_id=? and id=?",
+        int changed = jdbc.update("update notifications.push_subscription set status=?,provider_destination_ciphertext=null,provider_destination_key_version=null,updated_at=?,version=version+1 where tenant_id=? and workspace_id=? and recipient_membership_id=? and id=?",
                 "UNREGISTER".equals(request.operation()) ? "UNREGISTERED" : "DISABLED", Timestamp.from(request.now()),
                 request.tenantId(), request.workspaceId(), request.recipientMembershipId(), request.subscriptionId());
         if (changed != 1) throw new NotificationOperationException("PUSH_SUBSCRIPTION_NOT_FOUND", true);
@@ -206,6 +221,13 @@ public class JdbcPushSubscriptionAdapter implements PushSubscriptionPersistenceP
         return jdbc.query("select id,recipient_membership_id,installation_id,platform,surface,status,created_at,updated_at,version from notifications.push_subscription where tenant_id=? and workspace_id=? and id=?",
                 (rs, row) -> subscription(rs), tenant, workspace, id).stream().findFirst()
                 .orElseThrow(() -> new NotificationOperationException("PUSH_SUBSCRIPTION_NOT_FOUND", true));
+    }
+
+    private PushDestinationCipher.EncryptedDestination encryptDestination(RegisterRequest request, UUID id) {
+        if (destinationCipher == null) {
+            throw new IllegalStateException("Push destination encryption is not configured");
+        }
+        return destinationCipher.encrypt(request.providerDestination(), request.tenantId(), request.workspaceId(), id);
     }
 
     private Idempotency findIdempotency(UUID tenant, UUID workspace, UUID actor, String operation, String key) {

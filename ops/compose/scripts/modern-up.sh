@@ -798,6 +798,14 @@ if [ "$flyway_version" -eq 188 ]; then
 	docker compose --env-file "$env_file" -f "$compose_file" exec -T modern-postgres \
 		psql -q -v ON_ERROR_STOP=1 -U "$NEXA_MODERN_POSTGRES_USER" -d "$NEXA_MODERN_POSTGRES_DB" \
 		< "$api_dir/ops/database/prepare-v189-client-account-buyer-memberships.sql"
+	apply_staged_flyway_migration 189 189
+fi
+
+if [ "$flyway_version" -eq 189 ]; then
+	# V190 installs the individual acceptance table through a restricted IAM owner helper.
+	docker compose --env-file "$env_file" -f "$compose_file" exec -T modern-postgres \
+		psql -q -v ON_ERROR_STOP=1 -U "$NEXA_MODERN_POSTGRES_USER" -d "$NEXA_MODERN_POSTGRES_DB" \
+		< "$api_dir/ops/database/prepare-v190-individual-legal-acceptance.sql"
 fi
 
 if [ "$requested_mode" = "api-runtime" ]; then

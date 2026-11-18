@@ -64,6 +64,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 		"nexa.tenant-business.business-documents.enabled=true",
 		"nexa.tenant-business.business-traceability.enabled=true",
 		"nexa.tenant-business.notifications.enabled=true",
+		"nexa.notifications.push.provider=deferred",
+		"nexa.notifications.push.destination-key=integration-push-destination-key-012345678901234567890123456789",
+		"nexa.notifications.push.destination-key-version=integration-v1",
 		"nexa.business-traceability.worker-delay-ms=3600000",
 		"nexa.scheduling.enabled=false",
 		"spring.modulith.moments.enabled=false"
@@ -201,6 +204,11 @@ public abstract class PostgresIntegrationSupport {
 	/** Direct test-only SQL handle for an explicitly provisioned Tenant database. */
 	protected JdbcTemplate tenantJdbcFor(UUID tenantId) {
 		return TenantBusinessIntegrationFixture.jdbcFor(tenantId);
+	}
+
+	/** Direct test-only SQL handle using the notification worker login. */
+	protected JdbcTemplate tenantNotificationWorkerJdbc(UUID tenantId) {
+		return TenantBusinessIntegrationFixture.notificationWorkerJdbc(tenantId);
 	}
 
 	/** Direct test-only SQL handle using the least-privileged Buyer payment callback worker role. */

@@ -19,6 +19,9 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
+      - name: Fetch published v2.0.3 patch baseline
+        if: ${{ github.event_name == 'pull_request' }}
+        run: git fetch --no-tags --depth=1 origin refs/tags/v2.0.3:refs/tags/v2.0.3
       - name: Fetch published v2.0.1 reviewed contract
         run: git fetch --no-tags --depth=1 origin refs/tags/v2.0.1:refs/tags/v2.0.1
       - name: Fetch published v2.0.0 consumer baseline

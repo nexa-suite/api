@@ -7,6 +7,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCred
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.customerbuyerrelationships.infrastructure.persistence.ClientAccountPersistenceAdapter;
+import com.nexa.api.customerbuyerrelationships.infrastructure.persistence.JdbcCustomerMembershipQuery;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.salescommitment.application.exception.SalesResourceNotFoundException;
 import com.nexa.api.salescommitment.application.salesorder.export.model.SalesOrderSummaryExportFormat;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.security.access.AccessDeniedException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -137,6 +139,37 @@ class TenantBoundSalesOrderSummaryExportIT {
 	}
 
 	@Test
+	void traceabilityWorkerReadsOnlyActiveBuyerRelationshipsWithinWorkspace() throws SQLException {
+		UUID inactiveAccount = UUID.randomUUID();
+		UUID inactiveMembership = UUID.randomUUID();
+		seedBuyerAccount(TENANT_A, fixtureA.tenantId().value(), fixtureA.workspaceId().value(),
+				inactiveAccount, inactiveMembership, "INACTIVE");
+		adminJdbc(TENANT_A).update("UPDATE sales.client_account_membership SET status='INACTIVE' "
+				+ "WHERE client_account_id=?", inactiveAccount);
+		try (Connection connection = adminConnection(TENANT_A); Statement sql = connection.createStatement()) {
+			sql.execute("SET ROLE nexa_business_traceability_worker");
+			JdbcTemplate jdbc = new JdbcTemplate(new SingleConnectionDataSource(connection, true));
+			jdbc.queryForObject("SELECT set_config('app.current_tenant_id', ?, false)", String.class,
+					fixtureA.tenantId().value().toString());
+			jdbc.queryForObject("SELECT set_config('app.current_workspace_id', ?, false)", String.class,
+					fixtureA.workspaceId().value().toString());
+			var memberships = new JdbcCustomerMembershipQuery(jdbc);
+			assertThat(memberships.findMembershipIds(fixtureA.tenantId().value(), fixtureA.workspaceId().value(),
+					fixtureA.clientAccountId())).containsExactly(fixtureA.buyerMembershipId());
+			assertThat(memberships.findMembershipIds(fixtureA.tenantId().value(), fixtureA.workspaceId().value(),
+					inactiveAccount)).isEmpty();
+			assertThat(jdbc.queryForObject("SELECT has_table_privilege(current_user, "
+					+ "'sales.client_account_membership', 'SELECT')", Boolean.class)).isFalse();
+			assertThat(jdbc.queryForObject("SELECT has_column_privilege(current_user, "
+					+ "'sales.client_account_membership', 'version', 'SELECT')", Boolean.class)).isFalse();
+			jdbc.queryForObject("SELECT set_config('app.current_workspace_id', ?, false)", String.class,
+					UUID.randomUUID().toString());
+			assertThat(memberships.findMembershipIds(fixtureA.tenantId().value(), fixtureA.workspaceId().value(),
+					fixtureA.clientAccountId())).isEmpty();
+		}
+	}
+
+	@Test
 	void orderIdFromAnotherTenantIsNotFound() {
 		assertThatThrownBy(() -> export(ownerContext(fixtureA), fixtureB.orderId()))
 				.isInstanceOf(SalesResourceNotFoundException.class)
@@ -224,6 +257,8 @@ class TenantBoundSalesOrderSummaryExportIT {
 			for (String role : WORKER_ROLES) {
 				statement.execute("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			}
+			statement.execute("CREATE ROLE nexa_notification_push_worker NOLOGIN NOINHERIT "
+			        + "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
 			statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + database.getDatabaseName() + "\" TO " + MIGRATOR);
 			statement.execute("GRANT CONNECT ON DATABASE \"" + database.getDatabaseName() + "\" TO "
 					+ RUNTIME + ", " + POLICY_WRITER);

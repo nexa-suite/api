@@ -9,7 +9,7 @@ import com.nexa.api.notifications.application.publicapi.NotificationRecipientPre
 import com.nexa.api.notifications.application.publicapi.PreflightedNotificationRecipients;
 import com.nexa.api.notifications.tenantdatabase.TenantNotificationBusinessBindingsFactory;
 import com.nexa.api.shared.events.TenantOutboxEvent;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -28,8 +28,8 @@ import java.util.stream.Collectors;
 
 /** Delivers durable BC-10 push work after its source projection transaction commits. */
 @Component
-@Profile("local")
-@ConditionalOnProperty(name = "nexa.tenant-business.business-traceability.enabled", havingValue = "true")
+@Profile({"local", "tenant-cloud"})
+@ConditionalOnExpression("${nexa.tenant-business.business-traceability.enabled:false} || ${nexa.tenant-business.cloud-notification-push.enabled:false}")
 public final class TenantNotificationPushDeliveryConsumer implements TenantOutboxEventConsumer {
     private static final String CONSUMER = "notifications-push-delivery-v1";
     private static final String EVENT_TYPE = "NOTIFICATION_PUSH_DELIVERY_REQUESTED";

@@ -24,8 +24,15 @@ public final class JdbcTenantBusinessDocumentWorkerScopeQuery
 	private final AutoCloseable pool;
 	private final JdbcTemplate jdbc;
 	private final TransactionTemplate transaction;
+	private final UUID boundTenantId;
 
 	public JdbcTenantBusinessDocumentWorkerScopeQuery(DataSource pool) {
+		this(pool, null);
+	}
+
+	/** Restricts single-binding workers before enumerating central READY metadata. */
+	public JdbcTenantBusinessDocumentWorkerScopeQuery(DataSource pool, UUID boundTenantId) {
+		this.boundTenantId = boundTenantId;
 		DataSource requiredPool = Objects.requireNonNull(pool, "Dedicated central scope-reader pool is required");
 		if (!(requiredPool instanceof AutoCloseable closeable)) {
 			throw new IllegalArgumentException("Central scope-reader pool must be closeable");
@@ -45,8 +52,13 @@ public final class JdbcTenantBusinessDocumentWorkerScopeQuery
 			throw new IllegalArgumentException("Both pagination cursor identifiers must be supplied together");
 		}
 		if (limit < 1 || limit > 100) throw new IllegalArgumentException("Scope page size must be between 1 and 100");
+		if (boundTenantId != null && afterTenantId != null && !boundTenantId.equals(afterTenantId)) {
+			throw new IllegalArgumentException("Scope cursor escaped the configured Tenant binding");
+		}
+		String tenantFilter = boundTenantId == null ? "" : " AND w.tenant_id=?";
 		String cursor = afterTenantId == null ? "" : " AND (w.tenant_id,w.id) > (?::uuid,?::uuid)";
 		List<Object> arguments = new ArrayList<>();
+		if (boundTenantId != null) arguments.add(boundTenantId);
 		if (afterTenantId != null) {
 			arguments.add(afterTenantId);
 			arguments.add(afterWorkspaceId);
@@ -56,7 +68,7 @@ public final class JdbcTenantBusinessDocumentWorkerScopeQuery
 			verifyScopeReaderRole();
 			return jdbc.query("SELECT w.tenant_id,w.id " + SCOPE_FROM
 					+ "WHERE w.status='ACTIVE' AND b.lifecycle_state='READY' AND a.status='READY'"
-					+ cursor + " ORDER BY w.tenant_id,w.id LIMIT ?",
+					+ tenantFilter + cursor + " ORDER BY w.tenant_id,w.id LIMIT ?",
 				(rs, row) -> new Scope(rs.getObject("tenant_id", UUID.class),
 						rs.getObject("id", UUID.class)), arguments.toArray());
 		}));
@@ -66,6 +78,7 @@ public final class JdbcTenantBusinessDocumentWorkerScopeQuery
 	public boolean isReadyWorkspace(UUID tenantId, UUID workspaceId) {
 		Objects.requireNonNull(tenantId, "Tenant scope is required");
 		Objects.requireNonNull(workspaceId, "Workspace scope is required");
+		if (boundTenantId != null && !boundTenantId.equals(tenantId)) return false;
 		return withCrossScope(() -> Boolean.TRUE.equals(transaction.execute(status -> {
 			verifyScopeReaderRole();
 			return jdbc.queryForObject("SELECT EXISTS (SELECT 1 " + SCOPE_FROM

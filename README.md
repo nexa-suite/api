@@ -282,6 +282,22 @@ Follow the repository [Security Policy](./.github/SECURITY.md) for reporting
 vulnerabilities. Tenant isolation, authorization, secret handling and data
 integrity remain server-side responsibilities.
 
+### Optional Firebase push delivery
+
+Firebase Cloud Messaging is currently wired to the local Tenant database
+runtime. Enable `NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED=true` and
+`NEXA_TENANT_BUSINESS_BUSINESS_TRACEABILITY_ENABLED=true`, then select it with
+`NEXA_PUSH_PROVIDER=fcm`, set `NEXA_FCM_PROJECT_ID`, and provide Google
+Application Default Credentials. The API fails startup if FCM is selected
+outside the local profile or without either Tenant capability. Push
+destinations are stored encrypted in each routed Tenant business database;
+provide the external
+`NEXA_PUSH_DESTINATION_KEY` (at least 32 characters) and its
+`NEXA_PUSH_DESTINATION_KEY_VERSION`. During key rotation, keep old versions in
+`NEXA_PUSH_DESTINATION_PREVIOUS_KEYS` as comma-separated `version=key` entries
+until stored destinations have been re-registered. The default provider remains
+`deferred`; cloud-profile push delivery is not wired yet.
+
 ## Legal
 
 Copyright © 2026 Nexa. All rights reserved. No open-source license is claimed

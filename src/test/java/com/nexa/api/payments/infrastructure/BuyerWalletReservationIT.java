@@ -888,6 +888,7 @@ class BuyerWalletReservationIT extends PaymentIntegrationSupport {
                     + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("CREATE ROLE nexa_business_traceability_worker NOLOGIN NOSUPERUSER NOCREATEDB "
                     + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+            statement.execute("CREATE ROLE nexa_notification_push_worker NOLOGIN NOINHERIT");
             statement.execute("CREATE ROLE nexa_warehouse_reservation_expiry_worker NOLOGIN NOSUPERUSER NOCREATEDB "
                     + "NOCREATEROLE NOREPLICATION NOBYPASSRLS");
             statement.execute("GRANT CONNECT, CREATE ON DATABASE \"" + TENANT_DATABASE.getDatabaseName()

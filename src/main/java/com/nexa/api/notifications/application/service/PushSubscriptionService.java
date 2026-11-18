@@ -50,11 +50,13 @@ public class PushSubscriptionService implements PushSubscriptionUseCase {
         String normalizedPlatform = platform == null ? "" : platform.trim().toUpperCase(Locale.ROOT);
         if (!normalizedPlatform.equals("IOS") && !normalizedPlatform.equals("ANDROID")) throw invalid("PUSH_PLATFORM_INVALID");
         if (providerToken == null || providerToken.isBlank() || providerToken.trim().length() > 4096) throw invalid("PUSH_TOKEN_INVALID");
+        String destination = providerToken.trim();
+        validateDestination(destination);
         return view(persistence.register(new PushSubscriptionPersistencePort.RegisterRequest(
                 context.tenantId().value(), context.workspaceId().value(), context.membershipId().value(),
                 context.userId().value(), context.surface().name(), installationId.trim(), normalizedPlatform,
-                hash(providerToken.trim()), context.membershipId().value(), idempotencyKey.trim(),
-                hash("push-register-v1|" + installationId.trim() + "|" + normalizedPlatform + "|" + hash(providerToken.trim())),
+                hash(destination), destination, context.membershipId().value(), idempotencyKey.trim(),
+                hash("push-register-v1|" + installationId.trim() + "|" + normalizedPlatform + "|" + hash(destination)),
                 clock.instant())));
     }
 
@@ -84,6 +86,15 @@ public class PushSubscriptionService implements PushSubscriptionUseCase {
 
     private static void requireKey(String value) {
         if (value == null || value.isBlank() || value.trim().length() > 160) throw invalid("IDEMPOTENCY_KEY_REQUIRED");
+    }
+
+    private static void validateDestination(String value) {
+        if (value.startsWith("fcm-fid:")) {
+            String fid = value.substring("fcm-fid:".length());
+            if (!fid.matches("[A-Za-z0-9_-]{11,160}")) throw invalid("PUSH_TOKEN_INVALID");
+        } else if (value.startsWith("fcm-")) {
+            throw invalid("PUSH_TOKEN_INVALID");
+        }
     }
 
     private static NotificationOperationException invalid(String code) { return new NotificationOperationException(code, false); }
