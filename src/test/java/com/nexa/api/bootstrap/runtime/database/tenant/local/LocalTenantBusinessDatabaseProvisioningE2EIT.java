@@ -19,6 +19,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -53,6 +54,8 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 	private static String apiContainerName;
 	private static String apiComposeProject;
 	private static boolean apiContainerStarted;
+	private static Path provisioningFixture;
+	private static String provisioningClasspath;
 	private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS = Set.of(
 			PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
 	private static final Set<PosixFilePermission> PRIVATE_FILE_PERMISSIONS = Set.of(
@@ -66,7 +69,8 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			.withLabel("com.nexa.local-provisioning.disposable-test", "true");
 
 	@BeforeAll
-	static void startApiNetworkAnchor() throws Exception {
+	static void startApiNetworkAnchor(@TempDir Path operatorFixture) throws Exception {
+		prepareProvisioningFixture(operatorFixture);
 		apiContainerName = "nexa-modern-api-it-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
 		apiComposeProject = "nexa-tenant-provisioning-it-"
 				+ UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -84,6 +88,42 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		assertThat(process.exitValue()).as("the disposable API network-anchor container should start").isZero();
 		apiContainerStarted = true;
 		migrateCentral();
+	}
+
+	private static void prepareProvisioningFixture(Path operatorFixture) throws IOException {
+		provisioningFixture = operatorFixture;
+		for (Path source : List.of(PROVISIONER, WORKER, TENANT_COMPOSE,
+				REPOSITORY_ROOT.resolve("ops/database/provision-local-tenant-database-roles.sql"),
+				REPOSITORY_ROOT.resolve("ops/database/seed-local-tenant-database-scope.sql"))) {
+			Path destination = fixtureCopy(source);
+			Files.createDirectories(destination.getParent());
+			Files.copy(source, destination, StandardCopyOption.COPY_ATTRIBUTES);
+		}
+		String[] classpathEntries = System.getProperty("java.class.path").split(File.pathSeparator);
+		for (int index = 0; index < classpathEntries.length; index++) {
+			classpathEntries[index] = REPOSITORY_ROOT.resolve(classpathEntries[index]).normalize().toString();
+		}
+		provisioningClasspath = String.join(File.pathSeparator, classpathEntries);
+
+		// The copied operator scripts call ./mvnw. The enclosing test has already compiled the real CLI.
+		Path launcher = operatorFixture.resolve("mvnw");
+		Files.writeString(launcher, """
+				#!/usr/bin/env bash
+				set -euo pipefail
+				if [[ "$#" != 4 || "$1" != -q || "$2" != "-Dspring-boot.run.main-class=$NEXA_TEST_PROVISIONING_MAIN" ||
+				      "$3" != "-Dspring-boot.run.arguments=--mode="* || "$4" != spring-boot:run ]]; then
+				  echo 'Unexpected provisioning CLI invocation' >&2
+				  exit 2
+				fi
+				read -r -a arguments <<< "${3#-Dspring-boot.run.arguments=}"
+				exec "$NEXA_TEST_PROVISIONING_JAVA" -cp "$NEXA_TEST_PROVISIONING_CLASSPATH" "$NEXA_TEST_PROVISIONING_MAIN" "${arguments[@]}"
+				""", StandardCharsets.UTF_8);
+		Files.setPosixFilePermissions(launcher, Set.of(PosixFilePermission.OWNER_READ,
+				PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE));
+	}
+
+	private static Path fixtureCopy(Path source) {
+		return provisioningFixture.resolve(REPOSITORY_ROOT.relativize(source));
 	}
 
 	@AfterAll
@@ -726,15 +766,11 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			UUID tenantId, UUID workspaceId, int port, boolean retryFailed) throws Exception {
 		Path log = temporaryDirectory.resolve("provision-" + tenantId + "-" + (retryFailed ? "retry" : "run") + ".log");
 		writePrivateFile(log, "");
-		List<String> command = new ArrayList<>(List.of("bash", PROVISIONER.toString(), tenantId.toString(),
+		List<String> command = new ArrayList<>(List.of("bash", fixtureCopy(PROVISIONER).toString(), tenantId.toString(),
 				workspaceId.toString(), Integer.toString(port), "--central-configfile", centralConfig.toString(),
 				"--local-state-dir", stateDirectory.toString()));
 		if (retryFailed) command.add("--retry-failed");
-		ProcessBuilder processBuilder = new ProcessBuilder(command).directory(REPOSITORY_ROOT.toFile())
-				.redirectErrorStream(true).redirectOutput(log.toFile());
-		processBuilder.environment().put("NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD", TENANT_DATABASE_PROVISIONER_PASSWORD);
-		processBuilder.environment().put("NEXA_LOCAL_API_CONTAINER_NAME", apiContainerName);
-		processBuilder.environment().put("NEXA_LOCAL_API_COMPOSE_PROJECT", apiComposeProject);
+		ProcessBuilder processBuilder = provisioningProcess(command, log);
 		Process process = processBuilder.start();
 		if (!process.waitFor(240, TimeUnit.SECONDS)) {
 			process.destroyForcibly();
@@ -760,13 +796,9 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 			UUID taskId, Path dockerShimDirectory, Path dockerMarker, String dockerInspection) throws Exception {
 		Path log = temporaryDirectory.resolve("worker-once-" + taskId + ".log");
 		writePrivateFile(log, "");
-		List<String> command = List.of("bash", WORKER.toString(), "--once", "--task-id", taskId.toString(),
+		List<String> command = List.of("bash", fixtureCopy(WORKER).toString(), "--once", "--task-id", taskId.toString(),
 				"--central-configfile", centralConfig.toString(), "--local-state-dir", localStateDirectory.toString());
-		ProcessBuilder processBuilder = new ProcessBuilder(command).directory(REPOSITORY_ROOT.toFile())
-				.redirectErrorStream(true).redirectOutput(log.toFile());
-		processBuilder.environment().put("NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD", TENANT_DATABASE_PROVISIONER_PASSWORD);
-		processBuilder.environment().put("NEXA_LOCAL_API_CONTAINER_NAME", apiContainerName);
-		processBuilder.environment().put("NEXA_LOCAL_API_COMPOSE_PROJECT", apiComposeProject);
+		ProcessBuilder processBuilder = provisioningProcess(command, log);
 		if (dockerShimDirectory != null && dockerMarker != null) {
 			String path = processBuilder.environment().getOrDefault("PATH", "");
 			processBuilder.environment().put("PATH", dockerShimDirectory + File.pathSeparator + path);
@@ -790,6 +822,19 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		String output = Files.readString(log, StandardCharsets.UTF_8);
 		assertNoTestCredentialsInOutput(output);
 		return new ProcessResult(process.exitValue(), output);
+	}
+
+	private static ProcessBuilder provisioningProcess(List<String> command, Path log) {
+		ProcessBuilder builder = new ProcessBuilder(command).directory(provisioningFixture.toFile())
+				.redirectErrorStream(true).redirectOutput(log.toFile());
+		var environment = builder.environment();
+		environment.put("NEXA_TENANT_DATABASE_PROVISIONER_PASSWORD", TENANT_DATABASE_PROVISIONER_PASSWORD);
+		environment.put("NEXA_LOCAL_API_CONTAINER_NAME", apiContainerName);
+		environment.put("NEXA_LOCAL_API_COMPOSE_PROJECT", apiComposeProject);
+		environment.put("NEXA_TEST_PROVISIONING_JAVA", Path.of(System.getProperty("java.home"), "bin", "java").toString());
+		environment.put("NEXA_TEST_PROVISIONING_CLASSPATH", provisioningClasspath);
+		environment.put("NEXA_TEST_PROVISIONING_MAIN", LocalTenantBusinessDatabaseProvisioningCli.class.getName());
+		return builder;
 	}
 
 	private static void assertProvisionSucceeded(ProcessResult result) {
@@ -864,7 +909,7 @@ class LocalTenantBusinessDatabaseProvisioningE2EIT {
 		disconnectTestApiAnchorFromTenantNetwork(stateRoot, tenantId);
 		String projectName = "nexa-tenant-db-" + tenantId;
 		ProcessResult cleanup = runDockerCommand(stateRoot, List.of("compose", "--project-name", projectName,
-				"--env-file", composeEnvironment.toString(), "-f", TENANT_COMPOSE.toString(), "down", "-v",
+				"--env-file", composeEnvironment.toString(), "-f", fixtureCopy(TENANT_COMPOSE).toString(), "down", "-v",
 				"--remove-orphans"), 60);
 		boolean volumeRemains = volumeExists(volumeName(tenantId));
 		boolean networkRemains = dockerNetworkExists(stateRoot, tenantNetworkName(tenantId));
