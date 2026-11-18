@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [3.0.0]
+
+- Serve versioned mobile terms and record acceptance per individual account.
+- Deliver scoped Firebase Cloud Messaging notifications with a dedicated worker and encrypted destinations.
+- Keep picked, packed, and staged work visible to Warehouse.
+- Allow Buyers to attach proof to their own bank-transfer reports while Finance retains approval.
+- Preserve worker isolation on Neon and require the V48 audit-event conflict-key grant.
+
+See the [release notes](docs/releases/v3.0.0.md).
+
 ## [2.0.3] — Release preparation
 
 - Restore the complete Swagger definition with visible operation groups by default; retain the optional smaller presentation view and same-origin HTTPS requests.
