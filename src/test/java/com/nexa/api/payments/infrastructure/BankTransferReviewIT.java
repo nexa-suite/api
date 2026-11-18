@@ -26,6 +26,7 @@ class BankTransferReviewIT extends PaymentIntegrationSupport {
                         .content("{\"reference\":\"BT-NO-PROOF-" + uuid() + "\"}"))
                 .andExpect(status().isCreated()).andReturn();
         String paymentId = json(created).get("id").asText();
+        assertThat(json(created).get("status").asText()).isEqualTo("PROCESSING");
 
         MvcResult approved = mockMvc.perform(post("/api/v1/payments/" + paymentId + "/bank-transfer/approve")
                         .header("Authorization", "Bearer " + owner).header("Idempotency-Key", "bank-approve-no-proof-" + uuid()))
@@ -86,6 +87,85 @@ class BankTransferReviewIT extends PaymentIntegrationSupport {
         assertThat(tenantJdbc().queryForObject("select amount_paid from payments.receivable where id=?", java.math.BigDecimal.class, receivable.id()))
                 .isEqualByComparingTo(receivable.amount());
         assertThat(tenantJdbc().queryForObject("select count(*) from payments.receivable_allocation where payment_id=?", Integer.class, UUID.fromString(paymentId))).isEqualTo(1);
+    }
+
+    @Test
+    void buyerCanUploadOwnReceivableProofAndPaymentRemainsPendingUntilReview() throws Exception {
+        OpenReceivable receivable = createOpenReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        String proofKey = "buyer-transfer-proof-" + uuid();
+        String proof = uploadAvailableProof(buyer, receivable.id().toString(), proofKey);
+        String proofReplay = uploadAvailableProof(buyer, receivable.id().toString(), proofKey);
+        assertThat(proofReplay).isEqualTo(proof);
+
+        MvcResult evidence = mockMvc.perform(get("/api/v1/business-document-evidence/" + proof)
+                        .header("Authorization", "Bearer " + buyer))
+                .andExpect(status().isOk()).andReturn();
+        assertThat(json(evidence).get("lifecycleStatus").asText()).isEqualTo("AVAILABLE");
+
+        String createKey = "buyer-bank-transfer-" + uuid();
+        String reference = "BT-BUYER-" + uuid();
+        String request = "{\"reference\":\"" + reference + "\",\"proofEvidenceId\":\"" + proof + "\"}";
+        MvcResult created = mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", createKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isCreated()).andReturn();
+        MvcResult replay = mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer).header("Idempotency-Key", createKey)
+                        .contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isCreated()).andReturn();
+
+        String paymentId = json(created).get("id").asText();
+        assertThat(paymentId).isEqualTo(json(replay).get("id").asText());
+        assertThat(json(created).get("status").asText()).isEqualTo("PROCESSING");
+        assertThat(tenantJdbc().queryForObject(
+                "select bank_transfer_proof_evidence_id from payments.payment where id=?",
+                UUID.class, UUID.fromString(paymentId))).isEqualTo(UUID.fromString(proof));
+        assertThat(tenantJdbc().queryForObject("select amount_paid from payments.receivable where id=?",
+                BigDecimal.class, receivable.id())).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void buyerCannotUploadProofForReceivableOutsideCurrentTenantWorkspace() throws Exception {
+        ForeignReceivable foreign = createForeignReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        mockMvc.perform(post("/api/v1/business-document-evidence/requests")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("Idempotency-Key", "foreign-proof-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"subjectType\":\"RECEIVABLE\",\"subjectId\":\""
+                                + foreign.receivableId() + "\",\"originalFilename\":\"proof.png\","
+                                + "\"declaredContentType\":\"image/png\"}"))
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void bankTransferRejectsEvidenceStillInQuarantine() throws Exception {
+        OpenReceivable receivable = createOpenReceivable();
+        String buyer = accessToken(BUYER_EMAIL, "PORTAL");
+        MvcResult requested = mockMvc.perform(post("/api/v1/business-document-evidence/requests")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("Idempotency-Key", "quarantined-proof-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"subjectType\":\"RECEIVABLE\",\"subjectId\":\""
+                                + receivable.id() + "\",\"originalFilename\":\"proof.png\","
+                                + "\"declaredContentType\":\"image/png\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        UUID evidenceId = UUID.fromString(json(requested).get("id").asText());
+        tenantJdbc().update("update business_documents.evidence_object set lifecycle_status='QUARANTINED' "
+                + "where tenant_id=? and workspace_id=? and id=?", tenantUuid(), workspaceUuid(), evidenceId);
+
+        mockMvc.perform(post("/api/v1/receivables/" + receivable.id() + "/bank-transfer-payments")
+                        .header("Authorization", "Bearer " + buyer)
+                        .header("Idempotency-Key", "quarantined-payment-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reference\":\"BT-QUARANTINED-" + uuid()
+                                + "\",\"proofEvidenceId\":\"" + evidenceId + "\"}"))
+                .andExpect(status().is4xxClientError());
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.payment where receivable_id=? "
+                + "and method='BANK_TRANSFER'", Integer.class, receivable.id())).isZero();
+        assertThat(tenantJdbc().queryForObject("select amount_paid from payments.receivable where id=?",
+                BigDecimal.class, receivable.id())).isEqualByComparingTo(BigDecimal.ZERO);
     }
 
     @Test
