@@ -135,3 +135,13 @@ The document differs from published v2.0.0 only in `info.version`; their strict 
 The [v2.0.1 manifest](v2.0.1.json) explicitly records all seven historical baselines.
 Its findings also enumerate the four private Buyer self-account fields already removed in v2.0.0, because the historical checker exception is tied to version 2.0.0.
 The strict compatibility checker and its digest remain unchanged. Any extra finding or different candidate hash fails.
+
+## Sprint 4 mobile contract
+
+[PR #151 records Diego Sandoval's Owner decision](https://github.com/nexa-suite/api/pull/151#issuecomment-6988769281)
+for candidate commit `88099ab55f01585ff77e2c9763478e6b030aef35` on 2026-11-18.
+The [active manifest](./v2.0.3-88099ab5.json) binds the candidate SHA256
+`57f4e6578863d2562aa4eee24c7c0a88ad422975f63a076d580b6cf1c7fe2039`.
+All seven historical baseline commits, snapshot hashes and finding lists match
+the reviewed v2.0.1 record. The strict comparison to published v2.0.3 reports
+zero findings.
