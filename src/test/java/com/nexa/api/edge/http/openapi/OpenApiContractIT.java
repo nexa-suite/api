@@ -675,6 +675,13 @@ class OpenApiContractIT extends NexaWorkflowIntegrationSupport {
                 .get("schema").get("$ref").asText();
         assertThat(buyerClientAccountNotFound).isEqualTo("#/components/schemas/NexaProblemDetail");
 
+        assertThat(document.at("/paths/~1api~1v1~1legal~1mobile-terms/get/operationId").asText())
+                .isEqualTo("getCurrentMobileTerms");
+        assertThat(document.at("/paths/~1api~1v1~1me~1legal-acceptance/get/operationId").asText())
+                .isEqualTo("getCurrentLegalAcceptance");
+        assertThat(document.at("/paths/~1api~1v1~1me~1legal-acceptance/post/operationId").asText())
+                .isEqualTo("acceptCurrentMobileTerms");
+
         var operationIds = new HashSet<String>();
         document.get("paths").properties().forEach(path -> path.getValue().properties().forEach(operation -> {
             var operationId = operation.getValue().get("operationId");
