@@ -117,6 +117,13 @@ public final class CentralMigrationTestBootstrap {
 		String clientAccountRls = tableRlsSnapshot(postgres, "sales.client_account");
 		prepareV189ClientAccountBuyerMemberships(postgres);
 		Flyway.configure().dataSource(postgres.getJdbcUrl(), MIGRATOR_USERNAME, MIGRATOR_PASSWORD)
+				.locations("classpath:db/migration").target("189").load().migrate();
+		try (Connection connection = adminConnection(postgres); Statement statement = connection.createStatement()) {
+			statement.execute(Files.readString(Path.of("ops/database/prepare-v190-individual-legal-acceptance.sql")));
+		} catch (Exception exception) {
+			throw new IllegalStateException("Could not prepare the fixed V190 IAM helper", exception);
+		}
+		Flyway.configure().dataSource(postgres.getJdbcUrl(), MIGRATOR_USERNAME, MIGRATOR_PASSWORD)
 				.locations("classpath:db/migration").load().migrate();
 		verifyTableRlsPreserved(postgres, "sales.client_account_membership", accountMembershipRls);
 		verifyTableRlsPreserved(postgres, "sales.client_account", clientAccountRls);
