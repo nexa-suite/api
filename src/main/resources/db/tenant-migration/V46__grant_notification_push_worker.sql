@@ -7,7 +7,18 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = 'nexa_notification_push_worker'
             AND (r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls
-                OR EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid OR m.roleid=r.oid)
+                -- A Neon SQL-created role has one administrative grant to the database owner.
+                OR EXISTS (
+                    SELECT 1 FROM pg_auth_members membership
+                    WHERE (membership.member = r.oid OR membership.roleid = r.oid)
+                      AND (membership.roleid = r.oid
+                           AND membership.member = (SELECT datdba FROM pg_database WHERE datname = current_database())
+                           AND pg_get_userbyid(membership.member) = 'neondb_owner'
+                           AND pg_get_userbyid(membership.grantor) = 'cloud_admin'
+                           AND membership.admin_option
+                           AND NOT membership.inherit_option
+                           AND NOT membership.set_option) IS NOT TRUE
+                )
                 OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datdba=r.oid)
                 OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspowner=r.oid OR has_schema_privilege(r.oid,n.oid,'CREATE'))
                 OR EXISTS (SELECT 1 FROM pg_class c WHERE c.relowner=r.oid)

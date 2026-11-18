@@ -1,19 +1,25 @@
 package com.nexa.api.bootstrap.runtime.database.tenant.cloud;
 
 import com.nexa.api.bootstrap.runtime.boundaries.TenantBusinessTraceabilityBindingsFactory;
-import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDocumentWorkerScopeQuery;
-import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
-import java.util.UUID;
 import com.nexa.api.bootstrap.runtime.boundaries.TenantNotificationPushWorkerScheduler;
 import com.nexa.api.bootstrap.runtime.events.TenantBusinessNotificationProjectionConsumer;
 import com.nexa.api.bootstrap.runtime.events.TenantNotificationPushDeliveryConsumer;
+import com.nexa.api.bootstrap.runtime.database.tenant.HikariTenantBusinessDatabaseDataSourceFactory;
+import com.nexa.api.bootstrap.runtime.database.tenant.JdbcTenantBusinessDocumentWorkerScopeQuery;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBinding;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseBindingRegistry;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseCredentials;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseTraceabilityWorkerRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.local.TenantBusinessDatabaseMigrationRequirements;
+import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessDocumentWorkerScopeQuery;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import com.nexa.api.businesstraceability.tenantdatabase.TenantBusinessTraceabilityWorkerRouter;
 import com.nexa.api.notifications.infrastructure.FcmPushConfiguration;
 import com.nexa.api.notifications.infrastructure.PushDestinationCipher;
 import com.nexa.api.notifications.tenantdatabase.TenantPushProviderFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.TenantId;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -23,6 +29,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.Optional;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -30,7 +39,8 @@ import static org.mockito.Mockito.when;
 
 @Testcontainers(disabledWithoutDocker = true)
 class CloudTenantNotificationPushCompositionIT {
-    @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4");
+    @Container static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18.4")
+            .withUsername("cloud_admin");
 
     @BeforeAll static void createScopeReader() throws Exception {
         try (var connection = POSTGRES.createConnection(""); var sql = connection.createStatement()) {
@@ -78,7 +88,7 @@ class CloudTenantNotificationPushCompositionIT {
         }
     }
 
-    @Test void migrationRejectsAWorkerWithExistingTableAccessOrUnsafeRoleFlags() throws Exception {
+    @Test void migrationAndRouterRequireAnIsolatedNotificationWorker() throws Exception {
         String migration;
         try (var source = getClass().getClassLoader().getResourceAsStream(
                 "db/tenant-migration/V46__grant_notification_push_worker.sql")) {
@@ -86,7 +96,11 @@ class CloudTenantNotificationPushCompositionIT {
         }
         String precondition = migration.substring(0, migration.indexOf("END $$;") + "END $$;".length());
         try (var connection = POSTGRES.createConnection(""); var sql = connection.createStatement()) {
-            sql.execute("create role nexa_notification_push_worker nologin noinherit");
+            sql.execute("create role neondb_owner createrole");
+            sql.execute("alter database test owner to neondb_owner");
+            sql.execute("set role neondb_owner");
+            sql.execute("create role nexa_notification_push_worker login noinherit password 'test-only-notification-worker'");
+            sql.execute("reset role");
             sql.execute("create schema integration");
             sql.execute("create table integration.outbox_event(id integer)");
             sql.execute("create schema sales");
@@ -96,6 +110,48 @@ class CloudTenantNotificationPushCompositionIT {
             sql.execute("revoke select on sales.private_fixture from nexa_notification_push_worker");
             sql.execute("alter role nexa_notification_push_worker inherit");
             assertThatThrownBy(() -> sql.execute(precondition)).hasMessageContaining("isolated notification worker role");
+            sql.execute("alter role nexa_notification_push_worker noinherit");
+            sql.execute(precondition);
+
+            String grantToOwner = "grant nexa_notification_push_worker to neondb_owner with set ";
+            sql.execute(grantToOwner + "true");
+            assertThatThrownBy(() -> sql.execute(precondition)).hasMessageContaining("isolated notification worker role");
+            sql.execute(grantToOwner + "false");
+
+            var tenant = new UUID(0, 1);
+            var workspace = new UUID(1, 1);
+            var databaseIdentity = new UUID(2, 1);
+            sql.execute("""
+                    CREATE SCHEMA nexa_platform;
+                    CREATE TABLE nexa_platform.tenant_business_database_identity
+                        (singleton boolean, tenant_id uuid, database_identity uuid);
+                    CREATE TABLE nexa_platform.tenant_workspace_scope_anchor (tenant_id uuid, workspace_id uuid);
+                    INSERT INTO nexa_platform.tenant_business_database_identity VALUES (true, '%s', '%s');
+                    INSERT INTO nexa_platform.tenant_workspace_scope_anchor VALUES ('%s', '%s');
+                    GRANT USAGE ON SCHEMA nexa_platform TO nexa_notification_push_worker;
+                    GRANT SELECT (singleton, tenant_id, database_identity) ON nexa_platform.tenant_business_database_identity
+                        TO nexa_notification_push_worker;
+                    GRANT SELECT (tenant_id, workspace_id) ON nexa_platform.tenant_workspace_scope_anchor
+                        TO nexa_notification_push_worker;
+                    """.formatted(tenant, databaseIdentity, tenant, workspace));
+            var binding = new TenantBusinessDatabaseBinding(new TenantId(tenant), databaseIdentity,
+                    "cloud-tenant-db:0123456789abcdef0123456789abcdef",
+                    TenantBusinessDatabaseMigrationRequirements.load().schemaManifestDigest());
+            var bindings = mock(TenantBusinessDatabaseBindingRegistry.class);
+            when(bindings.findReadyBinding(binding.tenantId())).thenReturn(Optional.of(binding));
+            var scopes = mock(TenantBusinessDocumentWorkerScopeQuery.class);
+            when(scopes.isReadyWorkspace(tenant, workspace)).thenReturn(true);
+            var factory = new HikariTenantBusinessDatabaseDataSourceFactory(ignored -> new TenantBusinessDatabaseCredentials(
+                    POSTGRES.getJdbcUrl(), "nexa_notification_push_worker", "test-only-notification-worker"), 1);
+            try (var router = new TenantBusinessDatabaseTraceabilityWorkerRouter(
+                    bindings, factory, scopes, 1, "nexa_notification_push_worker", true)) {
+                String worker = router.inTransaction(tenant, workspace,
+                        (jdbc, transactionManager) -> jdbc.queryForObject("select current_user", String.class));
+                assertThat(worker).isEqualTo("nexa_notification_push_worker");
+                sql.execute(grantToOwner + "true");
+                assertThatThrownBy(() -> router.inTransaction(tenant, workspace, (jdbc, transactionManager) -> null))
+                        .hasMessageContaining("requires its isolated least-privilege role");
+            }
         }
     }
 
