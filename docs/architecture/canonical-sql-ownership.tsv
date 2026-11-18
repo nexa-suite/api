@@ -30,7 +30,7 @@ catalog_management.sellable_sku	BC03	V40__introduce_product_families_and_sellabl
 catalog_management.sku_price	BC03	V40__introduce_product_families_and_sellable_skus.sql:83 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 iam.access_context_selection_ticket	BC01	V101__create_access_context_selection_ticket.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 iam.authentication_failure	BC01	V7__create_authentication_throttle.sql:1 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
-iam.legal_acceptance	BC01	ops/database/prepare-v190-individual-legal-acceptance.sql:46 CREATE TABLE; V190 IAM owner helper stores individual identity acceptance.
+iam.legal_acceptance	BC01	V190__record_individual_legal_acceptance.sql:19 invokes IAM owner helper; ops/database/prepare-v190-individual-legal-acceptance.sql:46 CREATE TABLE for individual identity acceptance.
 iam.password_credential	BC01	V3__create_iam_identity_tables.sql:15 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 iam.password_reset_request	BC01	V24__create_password_reset_and_security_audit.sql:7 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
 iam.password_reset_throttle_bucket	BC01	V26__close_iam_security_boundaries.sql:14 CREATE TABLE; owner per accepted v0.19 schema/table ownership specification.
