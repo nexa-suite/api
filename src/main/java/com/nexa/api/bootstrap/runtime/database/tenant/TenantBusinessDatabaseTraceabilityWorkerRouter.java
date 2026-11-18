@@ -32,6 +32,8 @@ public final class TenantBusinessDatabaseTraceabilityWorkerRouter
     private static final String WORKER_ROLE = "nexa_business_traceability_worker";
     private static final String CREDENTIAL_REFERENCE_PREFIX = "local-tenant-business-traceability-worker:";
 
+    private final String workerRole;
+    private final boolean useBindingReference;
     private final TenantBusinessDatabaseBindingRegistry bindings;
     private final TenantBusinessDatabasePoolRegistry pools;
     private final TenantBusinessDocumentWorkerScopeQuery scopes;
@@ -39,6 +41,18 @@ public final class TenantBusinessDatabaseTraceabilityWorkerRouter
     public TenantBusinessDatabaseTraceabilityWorkerRouter(TenantBusinessDatabaseBindingRegistry bindings,
             TenantBusinessDatabaseDataSourceFactory workerDataSources,
             TenantBusinessDocumentWorkerScopeQuery scopes, int maximumCachedPools) {
+        this(bindings, workerDataSources, scopes, maximumCachedPools, WORKER_ROLE, false);
+    }
+
+    public TenantBusinessDatabaseTraceabilityWorkerRouter(TenantBusinessDatabaseBindingRegistry bindings,
+            TenantBusinessDatabaseDataSourceFactory workerDataSources,
+            TenantBusinessDocumentWorkerScopeQuery scopes, int maximumCachedPools,
+            String workerRole, boolean useBindingReference) {
+        if (!WORKER_ROLE.equals(workerRole) && !"nexa_notification_push_worker".equals(workerRole)) {
+            throw new IllegalArgumentException("Unsupported Tenant worker role");
+        }
+        this.workerRole = workerRole;
+        this.useBindingReference = useBindingReference;
         this.bindings = Objects.requireNonNull(bindings, "Central Tenant binding registry is required");
         this.pools = new TenantBusinessDatabasePoolRegistry(
                 Objects.requireNonNull(workerDataSources, "BC-11 worker data-source factory is required"),
@@ -69,7 +83,8 @@ public final class TenantBusinessDatabaseTraceabilityWorkerRouter
             }
 
             TenantBusinessDatabaseBinding workerBinding = new TenantBusinessDatabaseBinding(tenantId,
-                    centralBinding.databaseIdentity(), CREDENTIAL_REFERENCE_PREFIX + tenantId.value(),
+                    centralBinding.databaseIdentity(), useBindingReference ? centralBinding.credentialSecretReference()
+                            : CREDENTIAL_REFERENCE_PREFIX + tenantId.value(),
                     centralBinding.verifiedSchemaManifestSha256());
             T result;
             try (TenantBusinessDatabasePoolRegistry.Lease lease = pools.acquire(workerBinding)) {
@@ -96,6 +111,8 @@ public final class TenantBusinessDatabaseTraceabilityWorkerRouter
 
             TenantBusinessDatabaseBinding currentBinding = readyBinding(tenantId);
             if (!sameReadyBinding(centralBinding, currentBinding)
+                    || (useBindingReference && !Objects.equals(centralBinding.credentialSecretReference(),
+                            currentBinding.credentialSecretReference()))
                     || !scopes.isReadyWorkspace(tenantId.value(), workspaceId.value())) {
                 pools.retireTenant(tenantId);
                 throw new TenantBusinessDatabaseUnavailableException(
@@ -142,18 +159,42 @@ public final class TenantBusinessDatabaseTraceabilityWorkerRouter
         }
     }
 
-    private static void verifyWorkerRole(JdbcTemplate jdbc) {
+    private void verifyWorkerRole(JdbcTemplate jdbc) {
         String role = jdbc.queryForObject("select current_user", String.class);
-        Boolean safeRole = jdbc.queryForObject("select rolcanlogin and not rolsuper and not rolcreatedb "
-                + "and not rolcreaterole and not rolreplication and not rolbypassrls "
-                + "and not exists (select 1 from pg_auth_members where member=pg_roles.oid or roleid=pg_roles.oid) "
-                + "and not exists (select 1 from pg_database where datdba=pg_roles.oid) "
-                + "and not exists (select 1 from pg_namespace where nspowner=pg_roles.oid) "
-                + "and not exists (select 1 from pg_class where relowner=pg_roles.oid) "
-                + "and not exists (select 1 from pg_proc where proowner=pg_roles.oid) "
-                + "and not exists (select 1 from pg_namespace where has_schema_privilege(pg_roles.oid, oid, 'CREATE')) "
-                + "from pg_roles where rolname=current_user", Boolean.class);
-        if (!WORKER_ROLE.equals(role) || !Boolean.TRUE.equals(safeRole)) {
+        Boolean safeRole = jdbc.queryForObject("""
+                SELECT worker.rolcanlogin AND NOT worker.rolsuper AND NOT worker.rolcreatedb
+                    AND NOT worker.rolcreaterole AND NOT worker.rolreplication AND NOT worker.rolbypassrls
+                    AND NOT EXISTS (
+                        SELECT 1 FROM pg_auth_members membership
+                        WHERE (membership.member = worker.oid OR membership.roleid = worker.oid)
+                          AND (worker.rolname = 'nexa_notification_push_worker'
+                               AND membership.roleid = worker.oid
+                               AND membership.member = (SELECT datdba FROM pg_database WHERE datname = current_database())
+                               AND pg_get_userbyid(membership.member) = 'neondb_owner'
+                               AND pg_get_userbyid(membership.grantor) = 'cloud_admin'
+                               AND membership.admin_option
+                               AND NOT membership.inherit_option
+                               AND NOT membership.set_option) IS NOT TRUE
+                    )
+                    AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datdba = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relowner = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proowner = worker.oid)
+                    AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE has_schema_privilege(worker.oid, oid, 'CREATE'))
+                FROM pg_roles worker WHERE worker.rolname = current_user
+                """, Boolean.class);
+        if ("nexa_notification_push_worker".equals(workerRole)) {
+            Boolean noInheritance = jdbc.queryForObject("select not rolinherit from pg_roles where rolname=current_user", Boolean.class);
+            safeRole = Boolean.TRUE.equals(safeRole) && Boolean.TRUE.equals(noInheritance);
+            Boolean businessWrites = jdbc.queryForObject("select exists (select 1 from pg_class c "
+                    + "join pg_namespace n on n.oid=c.relnamespace "
+                    + "where n.nspname in ('sales','payments','warehouse','logistics','catalog_management','business_documents') "
+                    + "and c.relkind in ('r','p','v','m','f') and "
+                    + "(has_table_privilege(c.oid,'INSERT,UPDATE,DELETE,TRUNCATE') "
+                    + "or has_any_column_privilege(c.oid,'INSERT,UPDATE'))) ", Boolean.class);
+            safeRole = Boolean.TRUE.equals(safeRole) && Boolean.FALSE.equals(businessWrites);
+        }
+        if (!workerRole.equals(role) || !Boolean.TRUE.equals(safeRole)) {
             throw new TenantBusinessDatabaseUnavailableException(
                     "Tenant traceability worker requires its isolated least-privilege role");
         }

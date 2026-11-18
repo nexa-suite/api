@@ -31,7 +31,14 @@ public interface PushSubscriptionPersistencePort {
 
     record RegisterRequest(UUID tenantId, UUID workspaceId, UUID recipientMembershipId, UUID userId,
                            String surface, String installationId, String platform, String tokenHash,
-                           UUID actorMembershipId, String idempotencyKey, String requestHash, Instant now) { }
+                           String providerDestination, UUID actorMembershipId, String idempotencyKey,
+                           String requestHash, Instant now) {
+        @Override public String toString() {
+            return "RegisterRequest[tenantId=" + tenantId + ", workspaceId=" + workspaceId
+                    + ", recipientMembershipId=" + recipientMembershipId + ", installationId=" + installationId
+                    + ", platform=" + platform + ", providerDestination=<redacted>]";
+        }
+    }
 
     record DisableRequest(UUID tenantId, UUID workspaceId, UUID recipientMembershipId, UUID subscriptionId,
                           String operation, UUID actorMembershipId, String idempotencyKey,

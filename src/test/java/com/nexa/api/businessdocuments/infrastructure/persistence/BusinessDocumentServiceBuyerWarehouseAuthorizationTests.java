@@ -9,6 +9,8 @@ import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectReference;
 import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectSnapshot;
 import com.nexa.api.businessdocuments.domain.publicapi.DocumentSubjectType;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference;
+import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
@@ -18,6 +20,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.members
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.membership.VerifiedMembership;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.tenant.TenantStatus;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.model.workspace.WorkspaceStatus;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipId;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
@@ -33,6 +36,7 @@ import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,9 +47,11 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class BusinessDocumentServiceBuyerWarehouseAuthorizationTests {
@@ -95,6 +101,109 @@ class BusinessDocumentServiceBuyerWarehouseAuthorizationTests {
                 .hasMessage("Evidence not found");
         verify(warehouseAccess, never()).hasActiveGrant(buyer, warehouseId);
         verify(subjects, never()).lookup(anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void buyerWithPaymentCreateCanRequestEvidenceForTheActiveRelatedReceivable() {
+        CurrentAccessContext buyer = context(MembershipRole.BUYER);
+        UUID receivableId = UUID.randomUUID();
+        UUID clientAccountId = UUID.randomUUID();
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        DocumentSubjectLookupPort subjects = mock(DocumentSubjectLookupPort.class);
+        CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+        DocumentSubjectReference reference = new DocumentSubjectReference(
+                DocumentSubjectType.RECEIVABLE, receivableId.toString());
+        when(subjects.lookup(buyer.tenantId().toString(), buyer.workspaceId().toString(),
+                buyer.membershipId().value().toString(), reference))
+                .thenReturn(receivableSnapshot(buyer, receivableId, clientAccountId));
+        when(accounts.findBuyerReference(buyer.tenantId().toString(), buyer.workspaceId().toString(),
+                buyer.membershipId().value().toString()))
+                .thenReturn(Optional.of(new CustomerAccountReference(clientAccountId.toString(), "ACTIVE")));
+        doThrow(new IllegalStateException("scoped persistence reached")).when(jdbc)
+                .query(anyString(), any(RowMapper.class), any(Object[].class));
+
+        BusinessDocumentService service = service(jdbc, subjects, accounts);
+
+        assertThat(buyer.allows(PermissionKey.PAYMENT_CREATE)).isTrue();
+        assertThat(buyer.allows(PermissionKey.DOCUMENT_UPLOAD)).isFalse();
+        assertThatThrownBy(() -> service.requestEvidence(buyer, "RECEIVABLE", receivableId,
+                "transfer.png", "image/png", "buyer-transfer-proof"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("scoped persistence reached");
+        verify(accounts).findBuyerReference(buyer.tenantId().toString(), buyer.workspaceId().toString(),
+                buyer.membershipId().value().toString());
+    }
+
+    @Test
+    void paymentCreateDoesNotAuthorizeBuyerEvidenceForOtherSubjects() {
+        CurrentAccessContext buyer = context(MembershipRole.BUYER);
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        DocumentSubjectLookupPort subjects = mock(DocumentSubjectLookupPort.class);
+        CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+        BusinessDocumentService service = service(jdbc, subjects, accounts);
+
+        assertThatThrownBy(() -> service.requestEvidence(buyer, "PAYMENT", UUID.randomUUID(),
+                "transfer.png", "image/png", "buyer-payment-evidence"))
+                .isInstanceOf(AccessPolicyViolation.class);
+        verifyNoInteractions(jdbc, subjects, accounts);
+    }
+
+    @Test
+    void buyerReceivableEvidenceRequiresTheExactTenantWorkspaceAndActiveAccountLink() {
+        CurrentAccessContext buyer = context(MembershipRole.BUYER);
+        UUID receivableId = UUID.randomUUID();
+        UUID activeAccountId = UUID.randomUUID();
+
+        assertBuyerReceivableDenied(buyer,
+                new DocumentSubjectSnapshot(UUID.randomUUID().toString(), buyer.workspaceId().toString(),
+                        DocumentSubjectType.RECEIVABLE, receivableId.toString(), activeAccountId.toString(),
+                        "OPEN", true),
+                activeAccountId, "ACTIVE");
+        assertBuyerReceivableDenied(buyer,
+                new DocumentSubjectSnapshot(buyer.tenantId().toString(), UUID.randomUUID().toString(),
+                        DocumentSubjectType.RECEIVABLE, receivableId.toString(), activeAccountId.toString(),
+                        "OPEN", true),
+                activeAccountId, "ACTIVE");
+        assertBuyerReceivableDenied(buyer,
+                receivableSnapshot(buyer, receivableId, UUID.randomUUID()), activeAccountId, "ACTIVE");
+        assertBuyerReceivableDenied(buyer,
+                receivableSnapshot(buyer, receivableId, activeAccountId), activeAccountId, "PENDING");
+        assertBuyerReceivableDenied(buyer,
+                receivableSnapshot(buyer, receivableId, activeAccountId), activeAccountId, "REVOKED");
+    }
+
+    private void assertBuyerReceivableDenied(CurrentAccessContext buyer, DocumentSubjectSnapshot snapshot,
+                                               UUID linkedAccountId, String relationshipStatus) {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        DocumentSubjectLookupPort subjects = mock(DocumentSubjectLookupPort.class);
+        CustomerAccountQuery accounts = mock(CustomerAccountQuery.class);
+        DocumentSubjectReference reference = new DocumentSubjectReference(
+                DocumentSubjectType.RECEIVABLE, snapshot.subjectId());
+        when(subjects.lookup(buyer.tenantId().toString(), buyer.workspaceId().toString(),
+                buyer.membershipId().value().toString(), reference)).thenReturn(snapshot);
+        when(accounts.findBuyerReference(buyer.tenantId().toString(), buyer.workspaceId().toString(),
+                buyer.membershipId().value().toString()))
+                .thenReturn(Optional.of(new CustomerAccountReference(linkedAccountId.toString(), relationshipStatus)));
+        BusinessDocumentService service = service(jdbc, subjects, accounts);
+
+        assertThatThrownBy(() -> service.requestEvidence(buyer, "RECEIVABLE", UUID.fromString(snapshot.subjectId()),
+                "transfer.png", "image/png", "buyer-transfer-proof"))
+                .isInstanceOf(ApiResourceNotFoundException.class);
+        verifyNoInteractions(jdbc);
+    }
+
+    private static DocumentSubjectSnapshot receivableSnapshot(CurrentAccessContext buyer, UUID receivableId,
+                                                                UUID clientAccountId) {
+        return new DocumentSubjectSnapshot(buyer.tenantId().toString(), buyer.workspaceId().toString(),
+                DocumentSubjectType.RECEIVABLE, receivableId.toString(), clientAccountId.toString(), "OPEN", true);
+    }
+
+    private BusinessDocumentService service(JdbcTemplate jdbc, DocumentSubjectLookupPort subjects,
+                                             CustomerAccountQuery accounts) {
+        return new BusinessDocumentService(jdbc, mock(ObjectStoragePort.class), mock(ContentScannerPort.class),
+                mock(DocumentRendererPort.class), subjects, mock(DocumentProjectionLookupPort.class), accounts,
+                mock(WorkspaceDirectory.class), mock(WarehouseObjectAccess.class), null,
+                mock(CanonicalOutboxPort.class));
     }
 
     private CurrentAccessContext context(MembershipRole role) {

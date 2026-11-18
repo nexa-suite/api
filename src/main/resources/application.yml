@@ -87,6 +87,14 @@ nexa:
     notification-outbox-key: ${NEXA_NOTIFICATION_OUTBOX_KEY:}
     notification-outbox-key-version: ${NEXA_NOTIFICATION_OUTBOX_KEY_VERSION:v1}
     notification-outbox-previous-keys: ${NEXA_NOTIFICATION_OUTBOX_PREVIOUS_KEYS:}
+  notifications:
+    push:
+      provider: ${NEXA_PUSH_PROVIDER:deferred}
+      destination-key: ${NEXA_PUSH_DESTINATION_KEY:}
+      destination-key-version: ${NEXA_PUSH_DESTINATION_KEY_VERSION:v1}
+      destination-previous-keys: ${NEXA_PUSH_DESTINATION_PREVIOUS_KEYS:}
+      fcm:
+        project-id: ${NEXA_FCM_PROJECT_ID:}
   payments:
     provider: ${NEXA_PAYMENTS_PROVIDER:disabled}
     secret-key: ${STRIPE_SECRET_KEY:}

@@ -12,6 +12,7 @@ import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentS
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableApplicationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
+import com.nexa.api.creditreceivables.application.publicapi.ReceivableNotificationSourceQuery;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantCreditAccountAdapterFactory;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.LegacyCustomerCreditInitializationQuery;
@@ -42,6 +43,15 @@ public final class JdbcTenantCreditAccountAdapterFactory implements TenantCredit
     @Override
     public ReceivablePaymentAccess bindReceivablePaymentAccessTo(JdbcTemplate tenantJdbc) {
         return new JdbcReceivablePaymentAccess(requireTenantJdbc(tenantJdbc));
+    }
+
+    @Override
+    public ReceivableNotificationSourceQuery bindReceivableNotificationSourceTo(JdbcTemplate tenantJdbc) {
+        JdbcTemplate jdbc = requireTenantJdbc(tenantJdbc);
+        return (tenantId, workspaceId, receivableId) -> jdbc.query(
+                "select client_account_id from payments.receivable where tenant_id=? and workspace_id=? and id=?",
+                rs -> rs.next() ? java.util.Optional.ofNullable(rs.getObject(1, UUID.class)) : java.util.Optional.empty(),
+                tenantId, workspaceId, receivableId);
     }
 
     @Override

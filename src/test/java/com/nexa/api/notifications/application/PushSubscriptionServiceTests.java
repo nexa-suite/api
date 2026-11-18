@@ -63,7 +63,35 @@ class PushSubscriptionServiceTests {
         verify(persistence).register(request.capture());
         assertThat(request.getValue().tokenHash()).isEqualTo(sha256("provider-secret-token"));
         assertThat(request.getValue().tokenHash()).doesNotContain("provider-secret-token");
+        assertThat(request.getValue().providerDestination()).isEqualTo("provider-secret-token");
+        assertThat(request.getValue().toString()).doesNotContain("provider-secret-token");
         assertThat(request.getValue().surface()).isEqualTo("PLATFORM");
+    }
+
+    @Test
+    void registersFirebaseInstallationIdsWithAnExplicitDestinationPrefix() {
+        PushSubscriptionPersistencePort persistence = mock(PushSubscriptionPersistencePort.class);
+        when(persistence.register(any())).thenAnswer(invocation -> new PushSubscriptionPersistencePort.PushSubscription(
+                UUID.randomUUID(), MEMBERSHIP, "install-fid", "ANDROID", "PORTAL", "ENABLED",
+                Instant.EPOCH, Instant.EPOCH, 0));
+
+        new PushSubscriptionService(persistence).register(context(), "NATIVE", "install-fid", "android",
+                "fcm-fid:abcdefghijk12345678901", "push-fid-1");
+
+        var request = org.mockito.ArgumentCaptor.forClass(PushSubscriptionPersistencePort.RegisterRequest.class);
+        verify(persistence).register(request.capture());
+        assertThat(request.getValue().providerDestination()).isEqualTo("fcm-fid:abcdefghijk12345678901");
+        assertThat(request.getValue().tokenHash()).isEqualTo(sha256("fcm-fid:abcdefghijk12345678901"));
+    }
+
+    @Test
+    void rejectsMalformedExplicitFidWithoutCallingPersistence() {
+        PushSubscriptionPersistencePort persistence = mock(PushSubscriptionPersistencePort.class);
+
+        assertThatThrownBy(() -> new PushSubscriptionService(persistence).register(context(), "NATIVE", "install-fid",
+                "android", "fcm-fid:short", "push-fid-invalid"))
+                .isInstanceOf(NotificationOperationException.class).hasMessage("PUSH_TOKEN_INVALID");
+        verify(persistence, never()).register(any());
     }
 
     @Test
@@ -160,6 +188,37 @@ class PushSubscriptionServiceTests {
 
         verify(provider, never()).deliver(any());
         verify(persistence, never()).completeDelivery(any(), any(), anyInt(), anyInt(), anyBoolean(), any());
+    }
+
+    @Test
+    void providerRetryAfterIsPreservedWhenSchedulingRetry() {
+        var persistence = mock(PushSubscriptionPersistencePort.class);
+        var provider = mock(PushProviderPort.class);
+        var transactions = mock(PlatformTransactionManager.class);
+        when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        UUID subscription = UUID.randomUUID();
+        UUID claimToken = UUID.randomUUID();
+        Instant now = Instant.parse("2026-10-11T12:00:00Z");
+        Instant retryAfter = now.plusSeconds(120);
+        when(persistence.activeForRecipient(TENANT, WORKSPACE, MEMBERSHIP)).thenReturn(List.of(
+                new PushSubscriptionPersistencePort.PushSubscription(subscription, MEMBERSHIP, "install", "ANDROID",
+                        "PLATFORM", "ENABLED", now, now, 0)));
+        when(persistence.claimDelivery(any(), any(), any(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(new PushSubscriptionPersistencePort.DeliveryClaim(
+                        PushSubscriptionPersistencePort.DeliveryClaimStatus.CLAIMED, claimToken, 1));
+        when(provider.deliver(any())).thenReturn(new PushProviderPort.DeliveryResult("RETRYABLE", "FCM_TEMPORARY_FAILURE", null, retryAfter));
+        when(persistence.completeDelivery(any(), any(), anyInt(), anyInt(), anyBoolean(), nullable(Instant.class)))
+                .thenReturn(PushSubscriptionPersistencePort.DeliveryCompletion.RETRY_SCHEDULED);
+        var policy = new com.nexa.api.notifications.application.service.PushDeliveryRetryPolicy(20, 300,
+                Clock.fixed(now, java.time.ZoneOffset.UTC), () -> 0.0d);
+        var routing = new PushRoutingService(persistence, provider, transactions, policy,
+                mock(PushTransactionScopeGuard.class), TENANT, WORKSPACE);
+        var projection = new NotificationProjection(UUID.randomUUID().toString(), TENANT.toString(), WORKSPACE.toString(), null,
+                "Delivery", UUID.randomUUID().toString(), "DELIVERY_UPDATED", null, now, Set.of(MEMBERSHIP.toString()));
+        assertThatThrownBy(() -> routing.routeDurable(projection, "DELIVERY", "Title", "Message", "/"))
+                .isInstanceOf(NotificationOperationException.class);
+        verify(persistence).completeDelivery(any(), org.mockito.ArgumentMatchers.eq(claimToken), org.mockito.ArgumentMatchers.eq(1),
+                org.mockito.ArgumentMatchers.eq(20), org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(retryAfter));
     }
 
     @Test

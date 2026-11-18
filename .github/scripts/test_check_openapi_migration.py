@@ -285,30 +285,44 @@ class OpenApiMigrationFixtures(unittest.TestCase):
                                              self.commit, raw(manifest), raw(self.candidate))
                 self.assertFalse(allowed)
 
-    def test_repository_manifest_matches_exact_evidence_and_approval_status(self):
+    def test_repository_manifests_match_exact_evidence_and_approval_status(self):
         root = SCRIPT.resolve().parents[2]
-        manifest_raw = (root / GATE.DEFAULT_MANIFEST).read_bytes()
-        manifest = GATE.validate_manifest(manifest_raw)
-        reviewed = manifest["approval"]["status"] == "reviewed"
         expected_refs = {"689be612d96079feb02a155fbe76d829a10bdeb1",
                          "acbb76f56deba09fcb0ee31ea6854238dcb7486b", "v0.17.1", "v0.18.0",
                          "v0.19.0", "v0.20.0", "v0.21.0"}
-        self.assertEqual(expected_refs, {baseline["ref"] for baseline in manifest["baselines"]})
-        candidate_raw = (root / GATE.SNAPSHOT).read_bytes()
-        reviewed_candidate_raw = subprocess.check_output(
-            ["git", "show", f'refs/tags/v{manifest["candidate"]["version"]}:{GATE.SNAPSHOT}'], cwd=root)
-        for baseline in manifest["baselines"]:
-            with self.subTest(base_ref=baseline["ref"]):
-                commit = subprocess.check_output(
-                    ["git", "rev-parse", f'{baseline["ref"]}^{{commit}}'], cwd=root,
-                    text=True).strip()
-                base_raw = subprocess.check_output(
-                    ["git", "show", f"{commit}:{GATE.SNAPSHOT}"], cwd=root)
-                allowed, reason, findings = GATE.evaluate(
-                    base_raw, candidate_raw, baseline["ref"], commit, manifest_raw, reviewed_candidate_raw)
-                self.assertEqual(reviewed, allowed)
-                self.assertIn("exact reviewed migration" if reviewed else "proposed", reason)
-                self.assertEqual(baseline["findings"], findings)
+        archived_candidates = {
+            "docs/openapi/migrations/v2.0.1.json": "refs/tags/v2.0.1",
+            "docs/openapi/migrations/v2.0.3-88099ab5.json": "88099ab55f01585ff77e2c9763478e6b030aef35",
+        }
+        for path in (*archived_candidates, GATE.DEFAULT_MANIFEST):
+            manifest_raw = (root / path).read_bytes()
+            manifest = GATE.validate_manifest(manifest_raw)
+            version = manifest["candidate"]["version"]
+            reviewed = manifest["approval"]["status"] == "reviewed"
+            self.assertEqual(expected_refs, {baseline["ref"] for baseline in manifest["baselines"]}, path)
+            reviewed_ref = archived_candidates.get(path)
+            if reviewed_ref is not None:
+                reviewed_candidate_raw = subprocess.check_output(
+                    ["git", "show", f"{reviewed_ref}:{GATE.SNAPSHOT}"], cwd=root)
+            else:
+                result = subprocess.run(
+                    ["git", "show", f"refs/tags/v{version}:{GATE.SNAPSHOT}"], cwd=root,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+                reviewed_candidate_raw = result.stdout if result.returncode == 0 else None
+            candidate_raw = ((root / GATE.SNAPSHOT).read_bytes()
+                             if path == GATE.DEFAULT_MANIFEST else reviewed_candidate_raw)
+            for baseline in manifest["baselines"]:
+                ref = baseline["ref"]
+                with self.subTest(manifest=path, base_ref=ref):
+                    commit = subprocess.check_output(
+                        ["git", "rev-parse", f"{ref}^{{commit}}"], cwd=root, text=True).strip()
+                    base_raw = subprocess.check_output(
+                        ["git", "show", f"{commit}:{GATE.SNAPSHOT}"], cwd=root)
+                    allowed, reason, findings = GATE.evaluate(
+                        base_raw, candidate_raw, ref, commit, manifest_raw, reviewed_candidate_raw)
+                    self.assertEqual(reviewed, allowed)
+                    self.assertIn("exact reviewed migration" if reviewed else "proposed", reason)
+                    self.assertEqual(baseline["findings"], findings)
 
 
 if __name__ == "__main__":

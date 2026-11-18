@@ -7,6 +7,7 @@ import com.nexa.api.notifications.application.port.out.PushSubscriptionPersisten
 import com.nexa.api.notifications.application.port.out.PushTransactionScopeGuard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -19,6 +20,7 @@ import java.util.UUID;
 /** Routes existing notification facts to opted-in subscriptions without provider I/O in the business transaction. */
 @Service
 @Profile("!test")
+@ConditionalOnProperty(prefix = "nexa.notifications.push", name = "provider", havingValue = "deferred", matchIfMissing = true)
 public final class PushRoutingService {
     private final PushSubscriptionPersistencePort subscriptions;
     private final PushProviderPort provider;
@@ -123,7 +125,7 @@ public final class PushRoutingService {
                 PushProviderPort.DeliveryResult result;
                 boolean sent = false;
                 try {
-                    PushProviderPort.Delivery delivery = new PushProviderPort.Delivery(subscription.id(), event.eventId(),
+                    PushProviderPort.Delivery delivery = new PushProviderPort.Delivery(tenant, workspace, subscription.id(), event.eventId(),
                             event.eventType(), category, title, message, deepLink,
                             deliveryKey(event.eventId(), subscription.id()));
                     result = deliverWithoutTransaction(delivery);
@@ -144,6 +146,9 @@ public final class PushRoutingService {
                             || (retryDeferred && "DEFERRED".equals(status))
                             || (scopeGuard == null && !sent);
                     Instant retryAt = retryable ? nextRetryAt(claim.attemptNumber(), attemptAt) : null;
+                    if (retryAt != null && result.retryAfter() != null && result.retryAfter().isAfter(retryAt)) {
+                        retryAt = result.retryAfter();
+                    }
                     var completion = completeDelivery(attempt, claim.claimToken(), claim.attemptNumber(),
                             maxAttempts(), retryable, retryAt);
                     if (completion == PushSubscriptionPersistencePort.DeliveryCompletion.RETRY_SCHEDULED

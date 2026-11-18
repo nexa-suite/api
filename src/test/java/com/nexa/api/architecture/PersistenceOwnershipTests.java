@@ -23,6 +23,8 @@ class PersistenceOwnershipTests {
     private static final Path MIGRATION_ROOT = Path.of("src/main/resources/db/migration");
     private static final Path TENANT_MIGRATION_ROOT = Path.of("src/main/resources/db/tenant-migration");
     private static final Path OWNERSHIP_FILE = Path.of("docs/architecture/canonical-sql-ownership.tsv");
+    private static final Path V190_MIGRATION = MIGRATION_ROOT.resolve("V190__record_individual_legal_acceptance.sql");
+    private static final Path V190_HELPER = Path.of("ops/database/prepare-v190-individual-legal-acceptance.sql");
     private static final Pattern SQL_TABLE = Pattern.compile(
             "\\b(?:from|join|into|update|delete\\s+from)\\s+(?:only\\s+)?"
                     + "\\\"?([a-z_][\\w$]*)\\\"?\\s*\\.\\s*\\\"?([a-z_][\\w$]*)\\\"?",
@@ -182,6 +184,17 @@ class PersistenceOwnershipTests {
                 }
             }
         }
+        // V190 invokes a fixed IAM-owner helper because the migrator cannot create IAM tables.
+        assertThat(Files.readString(V190_MIGRATION)).contains("SELECT iam.apply_v190_individual_legal_acceptance();");
+        String helper = Files.readString(V190_HELPER);
+        assertThat(helper).contains("CREATE OR REPLACE FUNCTION iam.apply_v190_individual_legal_acceptance()");
+        Matcher helperTables = CREATED_TABLE.matcher(helper);
+        Set<String> createdByHelper = new HashSet<>();
+        while (helperTables.find()) {
+            createdByHelper.add((helperTables.group(1) + "." + helperTables.group(2)).toLowerCase(Locale.ROOT));
+        }
+        assertThat(createdByHelper).containsExactly("iam.legal_acceptance");
+        result.addAll(createdByHelper);
         return Set.copyOf(result);
     }
 

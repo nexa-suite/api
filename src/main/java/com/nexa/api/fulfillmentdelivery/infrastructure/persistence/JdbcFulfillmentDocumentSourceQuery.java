@@ -113,6 +113,30 @@ public class JdbcFulfillmentDocumentSourceQuery implements FulfillmentDocumentSo
     }
 
     @Override
+    public Optional<SealedPodNotificationSource> findSealedPodNotificationSource(UUID tenantId, UUID workspaceId,
+            UUID deliveryId) {
+        var sealedPodIds = jdbc.query("select id from logistics.proof_of_delivery where tenant_id=? and workspace_id=? "
+                        + "and delivery_id=? and status='SEALED' order by sealed_at,id limit 2",
+                (rs, row) -> rs.getObject("id", UUID.class), tenantId, workspaceId, deliveryId);
+        if (sealedPodIds.size() > 1) throw new IllegalStateException("Delivery has multiple sealed proof-of-delivery sources");
+        if (sealedPodIds.isEmpty()) return Optional.empty();
+        var results = jdbc.query("select p.id,delivery.id delivery_id,coalesce(d.sales_order_id,fulfillment.sales_order_id) sales_order_id "
+                        + "from logistics.proof_of_delivery p "
+                        + "left join logistics.dispatch_order d on d.tenant_id=p.tenant_id and d.workspace_id=p.workspace_id "
+                        + "and d.id=p.dispatch_order_id "
+                        + "left join logistics.delivery delivery on delivery.tenant_id=p.tenant_id "
+                        + "and delivery.workspace_id=p.workspace_id and delivery.id=p.delivery_id "
+                        + "left join logistics.fulfillment fulfillment on fulfillment.tenant_id=delivery.tenant_id "
+                        + "and fulfillment.workspace_id=delivery.workspace_id and fulfillment.id=delivery.fulfillment_id "
+                        + "where p.tenant_id=? and p.workspace_id=? and p.id=? and p.status='SEALED' "
+                        + "and (d.id is not null or fulfillment.sales_order_id is not null)",
+                (rs, row) -> new SealedPodNotificationSource(rs.getObject("id", UUID.class),
+                        rs.getObject("delivery_id", UUID.class), rs.getObject("sales_order_id", UUID.class)),
+                tenantId, workspaceId, sealedPodIds.getFirst());
+        return results.stream().findFirst();
+    }
+
+    @Override
     public Optional<Incident> findIncident(UUID tenantId, UUID workspaceId, UUID incidentId) {
         return jdbc.query("select i.id,d.client_account_id,i.incident_type,i.severity,i.description,i.occurred_at,"
                         + "i.resolution,d.id dispatch_id from logistics.delivery_incident i join logistics.dispatch_order d "

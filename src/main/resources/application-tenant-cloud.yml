@@ -6,6 +6,8 @@ nexa:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_READ_ENABLED:false}
     catalog-detail-read:
       enabled: ${NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED:false}
+    cloud-notification-push:
+      enabled: ${NEXA_TENANT_BUSINESS_CLOUD_NOTIFICATION_PUSH_ENABLED:false}
     cloud-router:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_ROUTER_ENABLED:false}
       credentials-source: ${NEXA_TENANT_BUSINESS_CLOUD_CREDENTIALS_SOURCE:files}
@@ -20,3 +22,4 @@ nexa:
         runtime-password: ${NEXA_TENANT_BUSINESS_CLOUD_RUNTIME_PASSWORD:}
         policy-writer-username: ${NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_USERNAME:}
         policy-writer-password: ${NEXA_TENANT_BUSINESS_CLOUD_POLICY_WRITER_PASSWORD:}
+        notification-worker-password: ${NEXA_TENANT_BUSINESS_CLOUD_NOTIFICATION_WORKER_PASSWORD:}

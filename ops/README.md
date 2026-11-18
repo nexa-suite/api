@@ -174,6 +174,20 @@ capability manifest; V30 similarly narrows Tenant runtime access to
 `SELECT`/`INSERT` while preserving retention. This repository change does not
 execute either migration against a managed database.
 
+### V190 central individual legal acceptance
+
+With central Flyway at V189, run
+[`database/prepare-v190-individual-legal-acceptance.sql`](./database/prepare-v190-individual-legal-acceptance.sql)
+as the IAM schema owner. That session must be able to read the applied version
+from `public.flyway_schema_history`. The preparation accepts a migrator with
+zero role memberships or the exact Neon grant of `nexa_migrator` by
+`cloud_admin` to the database owner `neondb_owner`, with `ADMIN TRUE`,
+`INHERIT FALSE`, and `SET FALSE`.
+
+Run central Flyway as the direct `nexa_migrator` login. V190 calls the
+IAM-owned helper to create `iam.legal_acceptance` with runtime `SELECT` and
+`INSERT` only. The helper revokes the migration execution grant on success.
+
 ### V146 Tenant business database binding migration grant
 
 V146 adds the central `tenant_management.tenant_business_database_binding`

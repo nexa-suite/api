@@ -30,6 +30,7 @@ internal_operator_database_password="$(random_secret)"
 tenant_database_provisioner_password="$(random_base64_secret)"
 reset_throttle_key="$(random_secret)"
 notification_outbox_key="$(random_secret)"
+push_destination_key="$(random_secret)"
 system_operator_token="$(random_secret)"
 minio_root_user="ci$(openssl rand -hex 8)"
 minio_root_password="$(random_secret)"
@@ -43,7 +44,7 @@ buyer_password="$(random_secret)"
 for secret in \
 	"$postgres_password" "$runtime_password" "$migrator_password" "$documents_reader_password" \
 	"$workspace_scope_reader_password" "$internal_operator_database_password" "$tenant_database_provisioner_password" "$reset_throttle_key" \
-	"$notification_outbox_key" "$system_operator_token" "$minio_root_user" "$minio_root_password" \
+	"$notification_outbox_key" "$push_destination_key" "$system_operator_token" "$minio_root_user" "$minio_root_password" \
 	"$owner_password" "$tenant_admin_password" "$sales_password" \
 	"$warehouse_password" "$logistics_password" "$buyer_password"; do
 	mask_secret "$secret"
@@ -89,6 +90,11 @@ NEXA_SECURITY_ISSUER=http://127.0.0.1:8080
 NEXA_SECURITY_AUDIENCE=nexa-local
 NEXA_PASSWORD_RESET_THROTTLE_KEY=$reset_throttle_key
 NEXA_NOTIFICATION_OUTBOX_KEY=$notification_outbox_key
+NEXA_PUSH_DESTINATION_KEY=$push_destination_key
+NEXA_PUSH_DESTINATION_KEY_VERSION=v1
+NEXA_PUSH_DESTINATION_PREVIOUS_KEYS=
+NEXA_PUSH_PROVIDER=deferred
+NEXA_FCM_PROJECT_ID=
 NEXA_SYSTEM_OPERATOR_TOKEN=$system_operator_token
 NEXA_SECURITY_RSA_PUBLIC_KEY=./.local-keys/access-token-public.pem
 NEXA_SECURITY_RSA_PRIVATE_KEY=./.local-keys/access-token-private.pem

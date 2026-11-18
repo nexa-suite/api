@@ -581,9 +581,26 @@ class DispatchReadinessIntegrationTests extends NexaWorkflowIntegrationSupport {
                         .header("Idempotency-Key", "readiness-pick-" + uuid())
                         .contentType(MediaType.APPLICATION_JSON).content(pickingBody(fixture, fixture.quantity())))
                 .andExpect(status().isOk()).andReturn();
+        assertPreparationRemainsVisible(fixture, picked, "PICKED");
         MvcResult packed = step(fixture, "packing", picked.getResponse().getHeader("ETag"));
+        assertPreparationRemainsVisible(fixture, packed, "PACKED");
         MvcResult staged = step(fixture, "staging", packed.getResponse().getHeader("ETag"));
+        assertPreparationRemainsVisible(fixture, staged, "STAGED");
         return step(fixture, "ready-for-dispatch", staged.getResponse().getHeader("ETag"));
+    }
+
+    private void assertPreparationRemainsVisible(Fixture fixture, MvcResult transition, String expectedStatus)
+            throws Exception {
+        var page = json(mockMvc.perform(get("/api/v1/fulfillments")
+                        .param("page", "0").param("size", "100")
+                        .header("Authorization", "Bearer " + fixture.warehouseToken()))
+                .andExpect(status().isOk()).andReturn());
+        var item = java.util.stream.StreamSupport.stream(page.get("items").spliterator(), false)
+                .filter(value -> fixture.fulfillmentId().toString().equals(value.path("fulfillmentId").asText()))
+                .findFirst().orElseThrow();
+        assertThat(item.path("status").asText()).isEqualTo(expectedStatus);
+        assertThat(item.path("version").asLong())
+                .isEqualTo(etagVersion(transition.getResponse().getHeader("ETag")));
     }
 
     private MvcResult startPicking(Fixture fixture) throws Exception {

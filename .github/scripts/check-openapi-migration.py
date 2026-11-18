@@ -23,7 +23,7 @@ SPEC = importlib.util.spec_from_file_location("openapi_compatibility", SCRIPT)
 CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
 CHECKER_SHA256 = hashlib.sha256(SCRIPT.read_bytes()).hexdigest()
-DEFAULT_MANIFEST = "docs/openapi/migrations/v2.0.1.json"
+DEFAULT_MANIFEST = "docs/openapi/migrations/v3.0.0.json"
 SNAPSHOT = "docs/openapi/openapi.json"
 
 
@@ -182,15 +182,16 @@ def main():
             ["git", "show", f"{commit}:{SNAPSHOT}"], stderr=subprocess.PIPE)
         manifest_path = Path(args.manifest)
         manifest_raw = manifest_path.read_bytes() if manifest_path.exists() else None
+        candidate_raw = Path(SNAPSHOT).read_bytes()
         reviewed_candidate_raw = None
         if manifest_raw is not None:
             version = validate_manifest(manifest_raw)["candidate"]["version"]
-            if re.fullmatch(r"\d+\.\d+\.\d+", version):
+            candidate_version = _document(candidate_raw, "candidate snapshot").get("info", {}).get("version")
+            if version != candidate_version and re.fullmatch(r"\d+\.\d+\.\d+", version):
                 reviewed_candidate_raw = subprocess.check_output(
                     ["git", "show", f"refs/tags/v{version}:{SNAPSHOT}"], stderr=subprocess.PIPE)
         allowed, reason, findings = evaluate(
-            base_raw, Path(SNAPSHOT).read_bytes(), args.base_ref, commit, manifest_raw,
-            reviewed_candidate_raw)
+            base_raw, candidate_raw, args.base_ref, commit, manifest_raw, reviewed_candidate_raw)
     except (MigrationError, OSError, subprocess.CalledProcessError, TypeError,
             AttributeError, KeyError) as error:
         print(f"OpenAPI migration gate ERROR: {error}", file=sys.stderr)

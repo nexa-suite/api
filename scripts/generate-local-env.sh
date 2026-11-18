@@ -62,6 +62,20 @@ notification_outbox_key=$(existing_value NEXA_NOTIFICATION_OUTBOX_KEY)
 if [ -z "${notification_outbox_key}" ]; then
   notification_outbox_key=$(random_password)
 fi
+push_destination_key=$(existing_value NEXA_PUSH_DESTINATION_KEY)
+if [ -z "${push_destination_key}" ]; then
+  push_destination_key=$(random_password)
+fi
+push_destination_key_version=$(existing_value NEXA_PUSH_DESTINATION_KEY_VERSION)
+if [ -z "${push_destination_key_version}" ]; then
+  push_destination_key_version=v1
+fi
+push_destination_previous_keys=$(existing_value NEXA_PUSH_DESTINATION_PREVIOUS_KEYS)
+push_provider=$(existing_value NEXA_PUSH_PROVIDER)
+if [ -z "${push_provider}" ]; then
+  push_provider=deferred
+fi
+fcm_project_id=$(existing_value NEXA_FCM_PROJECT_ID)
 system_operator_token=$(existing_value NEXA_SYSTEM_OPERATOR_TOKEN)
 if [ -z "${system_operator_token}" ]; then
   system_operator_token=$(random_password)
@@ -95,6 +109,11 @@ NEXA_SECURITY_ISSUER=http://localhost:8080
 NEXA_SECURITY_AUDIENCE=nexa-local
 NEXA_PASSWORD_RESET_THROTTLE_KEY=${password_reset_throttle_key}
 NEXA_NOTIFICATION_OUTBOX_KEY=${notification_outbox_key}
+NEXA_PUSH_DESTINATION_KEY=${push_destination_key}
+NEXA_PUSH_DESTINATION_KEY_VERSION=${push_destination_key_version}
+NEXA_PUSH_DESTINATION_PREVIOUS_KEYS=${push_destination_previous_keys}
+NEXA_PUSH_PROVIDER=${push_provider}
+NEXA_FCM_PROJECT_ID=${fcm_project_id}
 NEXA_SYSTEM_OPERATOR_TOKEN=${system_operator_token}
 NEXA_INTERNAL_OPERATOR_ALLOWLIST=${internal_operator_allowlist}
 NEXA_SECURITY_RSA_PUBLIC_KEY=./.local-keys/access-token-public.pem

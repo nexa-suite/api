@@ -51,13 +51,17 @@ abstract class PaymentIntegrationSupport extends NexaWorkflowIntegrationSupport 
     }
 
     protected String uploadAvailableProof(String buyerToken, String receivableId) throws Exception {
+        return uploadAvailableProof(buyerToken, receivableId, "proof-" + UUID.randomUUID());
+    }
+
+    protected String uploadAvailableProof(String buyerToken, String receivableId, String idempotencyKey) throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "proof.png", "image/png", ONE_PIXEL_PNG);
         MvcResult uploaded = mockMvc.perform(multipart("/api/v1/business-document-evidence")
                         .file(file)
                         .param("subjectType", "RECEIVABLE")
                         .param("subjectId", receivableId)
                         .header("Authorization", "Bearer " + buyerToken)
-                        .header("Idempotency-Key", "proof-" + UUID.randomUUID()))
+                        .header("Idempotency-Key", idempotencyKey))
                 .andExpect(status().isCreated()).andReturn();
         return json(uploaded).get("id").asText();
     }

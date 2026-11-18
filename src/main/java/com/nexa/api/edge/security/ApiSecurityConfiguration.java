@@ -119,6 +119,7 @@ public class ApiSecurityConfiguration {
 			.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
 				.authenticationEntryPoint(authenticationEntryPoint))
 			.authorizeHttpRequests(authorize -> {
+				authorize.requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/legal/mobile-terms").permitAll();
 				authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
 				if (observabilityProfile) {
 					if (localProfile) authorize.requestMatchers("/actuator/metrics/**", "/actuator/prometheus").permitAll();

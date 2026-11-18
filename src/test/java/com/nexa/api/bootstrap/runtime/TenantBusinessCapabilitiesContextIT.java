@@ -109,6 +109,27 @@ class TenantBusinessCapabilitiesContextIT extends NexaWorkflowIntegrationSupport
     }
 
     @Test
+    void dedicatedTraceabilityWorkerCanIdempotentlyInsertAuditWithoutReadingMetadata() {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID auditId = UUID.randomUUID();
+        traceabilityWorkerRouter.inTransaction(tenant, workspace, (tenantJdbc, ignored) -> {
+            assertThat(tenantJdbc.queryForObject("select current_user='nexa_business_traceability_worker' "
+                    + "and has_column_privilege(current_user,'audit.event','id','SELECT') "
+                    + "and not has_column_privilege(current_user,'audit.event','safe_metadata','SELECT') "
+                    + "and not has_table_privilege(current_user,'audit.event','SELECT')", Boolean.class)).isTrue();
+            String insert = "insert into audit.event(id,tenant_id,workspace_id,actor_work_area,event_type,"
+                    + "subject_type,subject_id,correlation_id,safe_metadata,occurred_at) "
+                    + "values (?,?,?,?,?,?,?,?,?::jsonb,?) on conflict (id) do nothing";
+            Object[] args = {auditId, tenant, workspace, "SYSTEM", "TEST_AUDIT_CONFLICT",
+                    "Test", UUID.randomUUID(), "audit-conflict-regression", "{}", Timestamp.from(Instant.now())};
+            assertThat(tenantJdbc.update(insert, args)).isEqualTo(1);
+            assertThat(tenantJdbc.update(insert, args)).isZero();
+            return null;
+        });
+    }
+
+    @Test
     void dedicatedTraceabilityWorkerCanRunScopedOutboxRowLockQueries() {
         UUID tenant = UUID.fromString(tenantId());
         UUID workspace = UUID.fromString(workspaceId());
@@ -193,7 +214,14 @@ class TenantBusinessCapabilitiesContextIT extends NexaWorkflowIntegrationSupport
                                 + "and has_column_privilege(current_user,'notifications.push_subscription','created_at','SELECT') "
                                 + "and has_column_privilege(current_user,'notifications.push_subscription','updated_at','SELECT') "
                                 + "and has_column_privilege(current_user,'notifications.push_subscription','version','SELECT') "
+                                + "and has_column_privilege(current_user,'notifications.push_subscription','provider_destination_ciphertext','SELECT') "
+                                + "and has_column_privilege(current_user,'notifications.push_subscription','provider_destination_key_version','SELECT') "
                                 + "and not has_column_privilege(current_user,'notifications.push_subscription','provider_token_hash','SELECT') "
+                                + "and has_column_privilege(current_user,'notifications.push_subscription','status','UPDATE') "
+                                + "and has_column_privilege(current_user,'notifications.push_subscription','updated_at','UPDATE') "
+                                + "and has_column_privilege(current_user,'notifications.push_subscription','version','UPDATE') "
+                                + "and has_column_privilege(current_user,'notifications.push_subscription','provider_destination_ciphertext','UPDATE') "
+                                + "and has_column_privilege(current_user,'notifications.push_subscription','provider_destination_key_version','UPDATE') "
                                 + "and not has_table_privilege(current_user,'notifications.push_subscription','SELECT') "
                                 + "and not has_table_privilege(current_user,'notifications.push_subscription','INSERT') "
                                 + "and not has_table_privilege(current_user,'notifications.push_subscription','UPDATE') "

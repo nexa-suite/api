@@ -29,6 +29,16 @@ class ApiSecurityBoundaryTests {
 	private MockMvc mockMvc;
 
 	@Test
+	void mobileTermsArePublicButAcceptanceRequiresAuthentication() throws Exception {
+		mockMvc.perform(get("/api/v1/legal/mobile-terms")).andExpect(status().isOk())
+				.andExpect(jsonPath("$.documentId").value("mobile-terms"))
+				.andExpect(jsonPath("$.version").value("1"));
+		mockMvc.perform(post("/api/v1/legal/mobile-terms")).andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/v1/me/legal-acceptance")).andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/api/v1/me/legal-acceptance")).andExpect(status().isUnauthorized());
+	}
+
+	@Test
 	void healthIsPublic() throws Exception {
 		mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
 	}
