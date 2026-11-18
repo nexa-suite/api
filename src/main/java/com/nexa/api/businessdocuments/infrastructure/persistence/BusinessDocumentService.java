@@ -268,6 +268,8 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         }
         if (subject == DocumentSubjectType.BUYER_RECEIPT) {
             snapshot = requireAccessibleBuyerReceipt(context, subjectId, uuid(snapshot.clientAccountId()));
+        } else if (subject == DocumentSubjectType.RECEIVABLE && context.hasRole(MembershipRole.BUYER)) {
+            snapshot = requireAccessibleBuyerReceivable(context, subjectId, snapshot, null);
         } else {
             authorizeClientScope(context, snapshot.clientAccountId());
         }
@@ -300,7 +302,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
 
     public BusinessDocumentModels.EvidenceView completeEvidence(CurrentAccessContext context, UUID evidenceId, String originalFilename,
             String declaredContentType, InputStream content, long contentLength, String idempotencyKey) {
-        requireEvidenceUploadPermission(context, null);
+        requireEvidenceUploadPermissionForUnknownSubject(context);
         requireIdempotencyKey(idempotencyKey);
         String filename = sanitizedRequiredFilename(originalFilename);
         String contentType = requiredContentType(declaredContentType);
@@ -390,7 +392,18 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
             if (requestedType == null) {
                 where.append(" and e.subject_type <> ?");
                 params.add(DocumentSubjectType.BUYER_RECEIPT.name());
+                if (context.hasRole(MembershipRole.BUYER)) {
+                    where.append(" and e.subject_type <> ?");
+                    params.add(DocumentSubjectType.RECEIVABLE.name());
+                }
             }
+        }
+        if (requestedType == DocumentSubjectType.RECEIVABLE && context.hasRole(MembershipRole.BUYER)) {
+            if (subjectId == null) throw new IllegalArgumentException("Buyer receivable evidence requires a receivable subject");
+            DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                    context.membershipId().value().toString(), new DocumentSubjectReference(
+                            DocumentSubjectType.RECEIVABLE, subjectId.toString()));
+            requireAccessibleBuyerReceivable(context, subjectId, snapshot, null);
         }
         if (requestedType == DocumentSubjectType.WAREHOUSE && subjectId != null) {
             requireAccessibleWarehouse(context, subjectId);
@@ -423,8 +436,10 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     public void deleteEvidence(CurrentAccessContext context, UUID evidenceId) {
         context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
         EvidenceRow row = loadEvidenceScoped(context, evidenceId);
-        if (parseSubject(row.subjectType()) == DocumentSubjectType.BUYER_RECEIPT) {
-            throw new AccessPolicyViolation("Evidence attached to a Buyer receipt is immutable");
+        DocumentSubjectType subject = parseSubject(row.subjectType());
+        if (subject == DocumentSubjectType.BUYER_RECEIPT
+                || context.hasRole(MembershipRole.BUYER) && subject == DocumentSubjectType.RECEIVABLE) {
+            throw new AccessPolicyViolation("Buyer-submitted evidence is immutable");
         }
         if ("DELETED".equals(row.lifecycleStatus())) return;
         int deleted = jdbc.update("update business_documents.evidence_object set lifecycle_status='DELETED',claim_token=null,lease_until=null,upload_claim_token=null,upload_lease_until=null,updated_at=current_timestamp where tenant_id=? and workspace_id=? and id=? and lifecycle_status <> 'DELETED'",
@@ -646,12 +661,9 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private String evidenceSelect() { return "select e.id,e.client_account_id,e.subject_type,e.subject_id,e.requested_by_membership_id,e.idempotency_key,e.request_fingerprint,e.upload_content_sha256,e.object_key,e.lifecycle_status,e.declared_content_type,e.detected_content_type,e.original_filename,e.checksum_sha256,e.byte_size,e.created_at,e.scanned_at,e.failure_code,e.updated_at from business_documents.evidence_object e"; }
     private EvidenceAccess loadEvidence(CurrentAccessContext context, UUID evidenceId) { context.requirePermission(PermissionKey.DOCUMENT_READ); return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
     private EvidenceAccess loadEvidenceForWrite(CurrentAccessContext context, UUID evidenceId) {
-        requireEvidenceUploadPermission(context, null);
+        requireEvidenceUploadPermissionForUnknownSubject(context);
         EvidenceRow row = loadEvidenceScoped(context, evidenceId);
-        if (context.hasRole(MembershipRole.BUYER)
-                && parseSubject(row.subjectType()) != DocumentSubjectType.BUYER_RECEIPT) {
-            throw new IllegalArgumentException("Evidence not found");
-        }
+        requireEvidenceUploadPermission(context, parseSubject(row.subjectType()));
         return evidenceAccess(row);
     }
     private EvidenceAccess loadEvidenceForDownload(CurrentAccessContext context, UUID evidenceId) { return evidenceAccess(loadEvidenceScoped(context, evidenceId)); }
@@ -661,7 +673,12 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
                         (rs, n) -> evidenceRow(rs), tenant(context), workspace(context), evidenceId)
                 .stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Evidence not found"));
         DocumentSubjectType subject = parseSubject(row.subjectType());
-        if (subject != DocumentSubjectType.BUYER_RECEIPT && !authorizedDocument(context,
+        if (subject == DocumentSubjectType.RECEIVABLE && context.hasRole(MembershipRole.BUYER)) {
+            DocumentSubjectSnapshot snapshot = subjects.lookup(tenant(context).toString(), workspace(context).toString(),
+                    context.membershipId().value().toString(), new DocumentSubjectReference(
+                            DocumentSubjectType.RECEIVABLE, row.subjectId().toString()));
+            requireAccessibleBuyerReceivable(context, row.subjectId(), snapshot, row.clientAccountId());
+        } else if (subject != DocumentSubjectType.BUYER_RECEIPT && !authorizedDocument(context,
                 row.clientAccountId() == null ? null : row.clientAccountId().toString())) {
             throw new IllegalArgumentException("Evidence not found");
         }
@@ -692,8 +709,31 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
             throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
         }
         if (context.hasRole(MembershipRole.BUYER)) {
-            requireCurrentBuyerReceiptRelationship(context, snapshot.clientAccountId());
+            requireCurrentBuyerAccountRelationship(context, snapshot.clientAccountId());
         }
+        return snapshot;
+    }
+
+    private DocumentSubjectSnapshot requireAccessibleBuyerReceivable(CurrentAccessContext context, UUID receivableId,
+                                                                       DocumentSubjectSnapshot snapshot,
+                                                                       UUID expectedClientAccountId) {
+        if (!snapshot.subjectExists() || snapshot.subjectType() != DocumentSubjectType.RECEIVABLE
+                || !tenant(context).toString().equals(snapshot.tenantId())
+                || !workspace(context).toString().equals(snapshot.workspaceId())
+                || !receivableId.toString().equals(snapshot.subjectId())
+                || snapshot.clientAccountId() == null) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        UUID clientAccountId;
+        try {
+            clientAccountId = UUID.fromString(snapshot.clientAccountId());
+        } catch (RuntimeException invalid) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        if (expectedClientAccountId != null && !expectedClientAccountId.equals(clientAccountId)) {
+            throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
+        }
+        requireCurrentBuyerAccountRelationship(context, clientAccountId.toString());
         return snapshot;
     }
 
@@ -713,7 +753,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         return snapshot;
     }
 
-    private void requireCurrentBuyerReceiptRelationship(CurrentAccessContext context, String clientAccountId) {
+    private void requireCurrentBuyerAccountRelationship(CurrentAccessContext context, String clientAccountId) {
         if (clientAccountId == null) {
             throw new com.nexa.api.shared.application.error.ApiResourceNotFoundException("business-document-subject");
         }
@@ -727,13 +767,28 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
         }
     }
 
+    private void requireEvidenceUploadPermissionForUnknownSubject(CurrentAccessContext context) {
+        if (context.hasRole(MembershipRole.BUYER)) {
+            if (!context.allows(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH)
+                    && !context.allows(PermissionKey.PAYMENT_CREATE)) {
+                throw new AccessPolicyViolation("Buyer is not authorized to upload this evidence");
+            }
+            return;
+        }
+        context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
+    }
+
     private void requireEvidenceUploadPermission(CurrentAccessContext context, DocumentSubjectType subject) {
         if (context.hasRole(MembershipRole.BUYER)) {
-            if (subject != null && subject != DocumentSubjectType.BUYER_RECEIPT) {
-                throw new AccessPolicyViolation("Buyer evidence is limited to disputed buyer receipts");
+            if (subject == DocumentSubjectType.BUYER_RECEIPT) {
+                context.requirePermission(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH);
+                return;
             }
-            context.requirePermission(PermissionKey.BUYER_RECEIPT_EVIDENCE_ATTACH);
-            return;
+            if (subject == DocumentSubjectType.RECEIVABLE) {
+                context.requirePermission(PermissionKey.PAYMENT_CREATE);
+                return;
+            }
+            throw new AccessPolicyViolation("Buyer evidence is limited to own receivables and disputed buyer receipts");
         }
         context.requirePermission(PermissionKey.DOCUMENT_UPLOAD);
     }
