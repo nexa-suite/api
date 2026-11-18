@@ -7,6 +7,7 @@ RUN mvn -B -ntp dependency:go-offline
 
 COPY src ./src
 COPY docs ./docs
+COPY ops/database/prepare-v190-individual-legal-acceptance.sql ./ops/database/prepare-v190-individual-legal-acceptance.sql
 # GitHub runners can inject a Unix OTEL socket that is invalid for Spring's
 # build-time test context. Runtime observability remains deployment-configured.
 RUN OTEL_SDK_DISABLED=true \
