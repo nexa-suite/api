@@ -78,8 +78,9 @@ public final class PdfSalesOrderSummaryRenderer implements SalesOrderSummaryRend
 			}
 			stream.setFont(heading ? bold : regular, heading ? 12 : 9);
 			stream.showText(safeText(value == null ? "-" : value));
-			stream.newLine();
-			y -= heading ? 17 : 13;
+			float lineSpacing = heading ? 17 : 13;
+			stream.newLineAtOffset(0, -lineSpacing);
+			y -= lineSpacing;
 		}
 
 		private void openPage() throws IOException {
