@@ -1,6 +1,7 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
@@ -21,7 +22,10 @@ class CentralFulfillmentFallbackGuardConfiguration {
     @Primary
     FulfillmentDeliveryRequestRunner centralFallbackFulfillmentDeliveryRequestRunner(
             @Qualifier("localFulfillmentDeliveryRequestRunner") FulfillmentDeliveryRequestRunner central,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard,
+            ObjectProvider<CloudMobileFulfillmentConfiguration.Route> cloud) {
+        var route = cloud.getIfAvailable();
+        if (route != null) return route.commands();
         return new CentralFallbackFulfillmentDeliveryRequestRunner(central, guard);
     }
 

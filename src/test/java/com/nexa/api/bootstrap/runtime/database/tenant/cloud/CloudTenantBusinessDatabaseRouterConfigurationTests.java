@@ -97,6 +97,19 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 	}
 
 	@Test
+	void mobileFulfillmentRequiresBothCheckoutAndOperationsReads() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.cloud-mobile-fulfillment.enabled=true")
+				.run(context -> assertThat(context).hasFailed().getFailure()
+						.hasRootCauseMessage("Cloud mobile fulfillment requires Buyer checkout and Operations reads"));
+		context().withPropertyValues("nexa.tenant-business.cloud-mobile-fulfillment.enabled=true",
+				"nexa.tenant-business.cloud-buyer-checkout.enabled=true",
+				"nexa.tenant-business.cloud-buyer-journey-read.enabled=true",
+				"nexa.tenant-business.cloud-operations-read.enabled=true",
+				"nexa.tenant-business.cloud-router.enabled=true")
+				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
+	}
+
+	@Test
 	void allowsExistingTenantNotificationCompositionAlongsideExplicitCloudRouter() throws IOException {
 		context().withPropertyValues("nexa.tenant-business.cloud-router.enabled=true",
 				"nexa.tenant-business.notifications.enabled=true")

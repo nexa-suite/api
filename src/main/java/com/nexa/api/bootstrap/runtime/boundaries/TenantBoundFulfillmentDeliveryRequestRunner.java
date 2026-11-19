@@ -33,17 +33,27 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
     private final TenantFulfillmentDeliveryCompositionProviderAdapter compositions;
     private final WarehouseObjectAccess centralWarehouseAccess;
     private final WorkforceDirectory centralWorkforce;
+    private final boolean storedDriverLocationEnabled;
 
     public TenantBoundFulfillmentDeliveryRequestRunner(TenantBusinessDatabaseRouter router,
                                                        TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
                                                        WarehouseObjectAccess centralWarehouseAccess,
                                                        WorkforceDirectory centralWorkforce) {
+        this(router, compositions, centralWarehouseAccess, centralWorkforce, false);
+    }
+
+    TenantBoundFulfillmentDeliveryRequestRunner(TenantBusinessDatabaseRouter router,
+                                                TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
+                                                WarehouseObjectAccess centralWarehouseAccess,
+                                                WorkforceDirectory centralWorkforce,
+                                                boolean storedDriverLocationEnabled) {
         this.router = Objects.requireNonNull(router, "Tenant business database router is required");
         this.compositions = Objects.requireNonNull(compositions, "Tenant BC-06 composition factory is required");
         this.centralWarehouseAccess = Objects.requireNonNull(centralWarehouseAccess,
                 "BC-01 Warehouse access is required for preflight");
         this.centralWorkforce = Objects.requireNonNull(centralWorkforce,
                 "BC-01 workforce is required for preflight");
+        this.storedDriverLocationEnabled = storedDriverLocationEnabled;
     }
 
     @Override
@@ -87,7 +97,7 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
         Function<FulfillmentDeliveryComposition, T> action = Objects.requireNonNull(work,
                 "BC-06 request work is required");
 
-        if (needed.storedDriverLocation()) {
+        if (needed.storedDriverLocation() && !storedDriverLocationEnabled) {
             throw new FulfillmentOperationException("DRIVER_LOCATION_UNAVAILABLE", false);
         }
 

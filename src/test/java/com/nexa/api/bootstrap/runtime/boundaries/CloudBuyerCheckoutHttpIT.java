@@ -9,6 +9,8 @@ import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.ActiveSalesMembershipDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.OperationalSettingsAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.config.AutowireCapableBeanFactory;
@@ -19,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import tools.jackson.databind.JsonNode;
 
 import java.time.Clock;
 import java.util.UUID;
@@ -32,14 +35,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Exercises the cloud checkout composition with isolated PostgreSQL business data. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-@TestPropertySource(properties = "nexa.tenant-business.purchase-request.enabled=false")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.purchase-request.enabled=false",
+        "nexa.tenant-business.fulfillment-delivery.enabled=false"
+})
 @Import(CloudBuyerCheckoutHttpIT.CheckoutComposition.class)
 class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
     private static final String DRAFTS = "/api/v1/buyer/purchase-request-drafts";
     private static final String ADDRESSES = "/api/v1/client-accounts/{accountId}/addresses";
 
     @Test
-    void buyerSubmitsAndSalesConvertsTheSameScopedRequest() throws Exception {
+    void buyerAndOperationsCompleteTheSameOrderThroughTheCloudComposition() throws Exception {
         ensureCommercialInventory();
         String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
         String account = buyerClientAccountId();
@@ -127,6 +133,129 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
                 "select source_purchase_request_id from sales.sales_order where id=?", UUID.class, order)).isEqualTo(id);
         assertThat(jdbc.queryForObject(
                 "select count(*) from sales.sales_order where id=?", Integer.class, order)).isZero();
+        String warehouse = "Bearer " + accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        String delivery = dispatchOrder(order, converted, warehouse);
+        String logistics = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        acceptDelivery(delivery, sku, logistics, buyer);
+        assertThat(tenantJdbc().queryForObject("""
+                select o.status from logistics.delivery d
+                join logistics.fulfillment f on f.id=d.fulfillment_id and f.tenant_id=d.tenant_id
+                    and f.workspace_id=d.workspace_id
+                join sales.sales_order o on o.id=f.sales_order_id and o.tenant_id=f.tenant_id
+                    and o.workspace_id=f.workspace_id
+                where d.id=? and o.id=? and o.source_purchase_request_id=?
+                """, String.class, UUID.fromString(delivery), order, id)).isEqualTo("COMPLETED");
+    }
+
+    private String dispatchOrder(UUID order, MvcResult orderView, String warehouse) throws Exception {
+        var fulfill = post("/api/v1/sales-orders/{id}/fulfillments", order);
+        var created = command(fulfill, warehouse, orderView, null, 201);
+        String fulfillment = "/api/v1/fulfillments/" + json(created).path("id").asText();
+        String lineId = json(created).path("lines").get(0).path("id").asText();
+        var started = command(post(fulfillment + "/picking-starts"), warehouse, created, null, 200);
+        var allocation = readAllocation(fulfillment, warehouse);
+        JsonNode line = allocation.path("lines").get(0);
+        assertThat(line.path("quantity").decimalValue()).isEqualByComparingTo("1");
+        String picking = """
+                {"allocationVersion":%d,"lines":[{"fulfillmentLineId":"%s","skuId":"%s",
+                  "quantity":1,"unit":"UNIT","physicalAllocationLineId":"%s","lotId":"%s","warehouseId":"%s"}]}
+                """.formatted(allocation.path("version").asLong(), lineId, line.path("skuId").asText(),
+                line.path("physicalAllocationLineId").asText(), line.path("lotId").asText(),
+                line.path("warehouseId").asText());
+        var current = command(post(fulfillment + "/picking-confirmations"), warehouse, started, picking, 200);
+        for (String step : new String[]{"/packing", "/staging", "/ready-for-dispatch"}) {
+            current = command(post(fulfillment + step), warehouse, current, null, 200);
+        }
+        allocation = readAllocation(fulfillment, warehouse);
+        String driverMembership = membershipId(LOGISTICS_EMAIL);
+        grantWarehouseAccess(allocation.path("lines").get(0).path("warehouseId").asText(), driverMembership);
+        String logistics = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        startDriverWorkday(logistics);
+        String assignment = """
+                {"responsibleMembershipId":"%s","physicalAllocationId":"%s","physicalAllocationVersion":%d}
+                """.formatted(driverMembership, allocation.path("allocationId").asText(),
+                allocation.path("version").asLong());
+        var assigned = command(post(fulfillment + "/driver-assignments"), logistics, current, assignment, 200);
+        allocation = readAllocation(fulfillment, warehouse);
+        line = allocation.path("lines").get(0);
+        String check = """
+                {"physicalAllocationId":"%s","physicalAllocationVersion":%d,"observations":[
+                  {"physicalAllocationLineId":"%s","observedLotId":"%s","observedQuantity":%s}]}
+                """.formatted(allocation.path("allocationId").asText(), allocation.path("version").asLong(),
+                line.path("physicalAllocationLineId").asText(), line.path("lotId").asText(),
+                line.path("remainingQuantity").decimalValue().toPlainString());
+        var outgoing = command(post(fulfillment + "/outgoing-checks"), warehouse, assigned, check, 201);
+        String dispatch = """
+                {"physicalAllocationId":"%s","physicalAllocationVersion":%d,"driverAssignmentId":"%s",
+                  "driverAssignmentVersion":%d,"outgoingGoodsCheckId":"%s"}
+                """.formatted(allocation.path("allocationId").asText(), allocation.path("version").asLong(),
+                json(assigned).path("id").asText(), json(assigned).path("fulfillmentVersion").asLong(),
+                json(outgoing).path("id").asText());
+        var dispatched = command(post(fulfillment + "/dispatches"), logistics, assigned, dispatch, 200);
+        return json(dispatched).path("deliveryId").asText();
+    }
+
+    private JsonNode readAllocation(String fulfillment, String warehouse) throws Exception {
+        return json(mockMvc.perform(get(fulfillment + "/physical-allocation").header("Authorization", warehouse))
+                .andExpect(status().isOk()).andReturn());
+    }
+
+    private void startDriverWorkday(String logistics) throws Exception {
+        var workday = command(post("/api/v1/driver/workdays"), logistics, null,
+                """
+                {"locationAvailable":false}
+                """, 200);
+        String workdayId = json(workday).path("id").asText();
+        command(post("/api/v1/driver/workdays/{id}/location-availability", workdayId), logistics, workday,
+                """
+                {"locationAvailable":true}
+                """, 200);
+        mockMvc.perform(get("/api/v1/driver/location").header("Authorization", logistics))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("DRIVER_LOCATION_UNAVAILABLE"));
+    }
+
+    private void acceptDelivery(String delivery, String sku, String logistics, String buyer) throws Exception {
+        String driverPath = "/api/v1/driver/deliveries/" + delivery;
+        var driverDelivery = mockMvc.perform(get(driverPath).header("Authorization", logistics))
+                .andExpect(status().isOk()).andReturn();
+        String deliveryPath = "/api/v1/deliveries/" + delivery;
+        var transit = command(post(deliveryPath + "/transit-starts"), logistics, driverDelivery, null, 200);
+        var attempt = command(post(driverPath + "/attempts"), logistics, transit, "{}", 201);
+        String attemptId = json(attempt).path("attempt").path("id").asText();
+        String lineId = json(driverDelivery).path("outcomeLines").get(0).path("fulfillmentLineId").asText();
+        String outcome = """
+                {"outcome":"DELIVERED","lines":[{"fulfillmentLineId":"%s","skuId":"%s","unit":"UNIT",
+                  "attemptedQuantity":1,"deliveredQuantity":1,"rejectedQuantity":0,"cancelledQuantity":0}]}
+                """.formatted(lineId, sku);
+        var delivered = command(post(driverPath + "/attempts/" + attemptId + "/outcomes"), logistics,
+                attempt, outcome, 200);
+        assertThat(json(delivered).path("delivery").path("status").asText()).isEqualTo("DELIVERED");
+        var handoff = command(post(deliveryPath + "/handoff-tokens"), logistics, null,
+                """
+                {"attemptId":"%s"}
+                """.formatted(attemptId), 201);
+        String key = "cloud-receipt-" + uuid();
+        String receipt = """
+                {"token":"%s"}
+                """.formatted(json(handoff).path("token").asText());
+        var accepted = mockMvc.perform(post("/api/v1/delivery-handoff/receipts").header("Authorization", buyer)
+                        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(receipt))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.deliveryId").value(delivery))
+                .andExpect(jsonPath("$.podStatus").value("SEALED"))
+                .andExpect(jsonPath("$.salesOrderStatus").value("COMPLETED")).andReturn();
+        mockMvc.perform(post("/api/v1/delivery-handoff/receipts").header("Authorization", buyer)
+                        .header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON).content(receipt))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.replayed").value(true))
+                .andExpect(jsonPath("$.receiptId").value(json(accepted).path("receiptId").asText()));
+    }
+
+    private MvcResult command(MockHttpServletRequestBuilder request, String token, MvcResult previous,
+                              String body, int expectedStatus) throws Exception {
+        request.header("Authorization", token).header("X-Nexa-Client", "NATIVE")
+                .header("Idempotency-Key", "cloud-step-" + uuid());
+        if (previous != null) request.header("If-Match", previous.getResponse().getHeader("ETag"));
+        if (body != null) request.contentType(MediaType.APPLICATION_JSON).content(body);
+        return mockMvc.perform(request).andExpect(status().is(expectedStatus)).andReturn();
     }
 
     private MvcResult changeDraft(MockHttpServletRequestBuilder request, String buyer, MvcResult previous,
@@ -139,6 +268,14 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class CheckoutComposition {
+        @Bean
+        CloudMobileFulfillmentConfiguration.Route cloudFulfillmentForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
+                WarehouseObjectAccess warehouses, WorkforceDirectory workforce) {
+            return new CloudMobileFulfillmentConfiguration().cloudMobileFulfillmentRoute(
+                    router, compositions, warehouses, workforce);
+        }
+
         @Bean
         TenantSalesCommitmentCompositionProvider cloudSalesProviderForCheckoutTest(AutowireCapableBeanFactory factory) {
             return factory.createBean(TenantSalesCommitmentCompositionProviderAdapter.class);

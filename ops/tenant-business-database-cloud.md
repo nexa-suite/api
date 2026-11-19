@@ -200,8 +200,21 @@ outbox recording within the routed transaction.
 
 Rehearse address selection, draft submission, Sales conversion and a denied
 foreign account request with synthetic data on isolated cloud databases before
-activation. Dispatch and receipt confirmation require their own command
-composition.
+activation.
+
+## Fulfillment through Buyer receipt
+
+Set `NEXA_TENANT_BUSINESS_CLOUD_MOBILE_FULFILLMENT_ENABLED=true` with Buyer
+checkout and Operations reads to route the existing fulfillment, load,
+dispatch, driver workday, delivery and Buyer receipt use cases. They use the
+same Tenant transaction, Warehouse grants, driver assignment and Buyer
+relationship checks as the fulfillment domain. Stored driver coordinates
+require separate cloud activation and remain disabled in this composition.
+
+Verify the same order through picking, dispatch, an assigned Driver outcome
+and Buyer receipt in the isolated cloud database before enabling this flag.
+Check receipt replay, the final order state and the linked sealed proof of
+delivery. Push delivery is verified separately through the worker below.
 
 ## Opt-in notification push worker
 
