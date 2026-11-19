@@ -10,6 +10,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequ
 import com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.inventoryavailability.application.port.InventoryTransfersRead;
 import com.nexa.api.fulfillmentdelivery.application.FulfillmentDeliveryComposition;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
@@ -76,6 +77,12 @@ public class MobileOperationsReadConfiguration {
                 return requests.execute(c, service -> service.warehouseAvailability(c, warehouse, ids));
             }
         };
+    }
+
+    @Bean
+    InventoryTransfersRead inventoryTransfersRead(WarehouseOperationsRequestRunner requests) {
+        return (c, source, destination, page, size) -> requests.execute(c,
+                service -> service.transfers(c, source, destination, page, size));
     }
 
     @Bean
@@ -157,6 +164,20 @@ public class MobileOperationsReadConfiguration {
                     return runner.warehouseAvailability(c, warehouse, ids);
                 }
             };
+        }
+
+        @Bean
+        @Primary
+        InventoryTransfersRead cloudInventoryTransfersRead(TenantBusinessDatabaseRouter router,
+                TenantWarehouseOperationsCompositionFactory compositions, TenantCustomerAccountQueryFactory accounts,
+                TenantSellableSkuQueryFactory skus, TenantSalesOrderFulfillmentQueryFactory orders,
+                TenantFulfillmentInventoryQueryFactory fulfillment, TenantBusinessEvidenceQueryFactory evidence,
+                TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
+                WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
+            var runner = new TenantBoundWarehouseOperationsRequestRunner(router, compositions, accounts, skus,
+                    orders, fulfillment, evidence, events, traceability, warehouses, settings);
+            return (c, source, destination, page, size) -> runner.read(c,
+                    service -> service.transfers(c, source, destination, page, size));
         }
 
         @Bean

@@ -181,18 +181,25 @@ both authorized reads and rejected commands before rehearsing Mobile. A
 successful empty list indicates no visible business rows; it is not evidence
 that data were seeded or a workflow completed.
 
+With the cloud account reads configured, set
+`NEXA_TENANT_BUSINESS_CLOUD_FIELD_VISITS_ENABLED=true` to route customer visit
+history and recording to the Tenant database. Existing account assignment,
+permission, version and idempotency checks still apply.
+
 ## Buyer request, order, delivery and credit reads
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED=true` with the
 existing cloud router to route authenticated Buyer purchase-request and sales-order
-lists, detail and history, delivery tracking and receipt history, and the
+lists, detail and history, Buyer order-summary PDF and CSV downloads,
+delivery tracking and receipt history, and the
 current Buyer credit exposure to the authorized Tenant database. It also
 routes Buyer receivable list/detail, payment history, saved payment-method
 reads, the Buyer wallet read and Buyer document and evidence reads. Document
 reads retain the existing permissions and account checks. Downloads also
 require access to the private object store. Document generation and evidence
 uploads remain outside this cloud route. Sales credit exposure uses the
-existing account assignment policy. Wallet-funded orders and provider
+existing account assignment policy. Buyer change-feed streams replay events
+marked for the active Buyer account and audience. Wallet-funded orders and provider
 callbacks require separate activation. The queries retain active Buyer account and Workspace
 checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
 binding is reported as unavailable.

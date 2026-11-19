@@ -14,6 +14,11 @@ public interface SalesOrderSummaryExportUseCase {
 	SalesOrderSummaryExportResult export(CurrentAccessContext context, String orderId,
 			SalesOrderSummaryExportFormat format);
 
+	default SalesOrderSummaryExportResult exportBuyer(CurrentAccessContext context, String orderId,
+			SalesOrderSummaryExportFormat format) {
+		return export(context, orderId, format);
+	}
+
 	/** Checks export capability before a Tenant router acquires a business database connection. */
 	static void requireExportPermission(CurrentAccessContext context) {
 		Objects.requireNonNull(context, "Access context is required");

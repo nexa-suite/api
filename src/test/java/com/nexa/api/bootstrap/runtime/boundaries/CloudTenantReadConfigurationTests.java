@@ -66,6 +66,22 @@ class CloudTenantReadConfigurationTests {
         });
     }
 
+    @Test
+    void fieldVisitOptInSelectsOnlyTheFieldVisitUseCase() {
+        enabled().withPropertyValues("nexa.tenant-business.cloud-field-visits.enabled=true").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(FieldVisitUseCase.class))
+                    .isInstanceOf(CloudTenantReadConfiguration.CloudFieldVisits.class);
+            assertThat(context.getBean(ClientAccountUseCase.class)).isInstanceOf(CloudBuyerSelfAccountReadUseCase.class);
+            var access = mock(CurrentAccessContext.class);
+            when(access.tenantId()).thenReturn(new TenantId(UUID.randomUUID()));
+            when(access.workspaceId()).thenReturn(new WorkspaceId(UUID.randomUUID()));
+            assertThatThrownBy(() -> context.getBean(FieldVisitUseCase.class).listForCustomer(access, "account-id"))
+                    .isInstanceOf(AccessPolicyViolation.class);
+            verifyNoInteractions(context.getBean("fieldVisitService"), context.getBean(TenantBusinessDatabaseRouter.class));
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(strings = { "nexa.tenant-business.cloud-router.enabled", "nexa.tenant-business.cloud-read.enabled",
             "nexa.tenant-business.catalog-detail-read.enabled" })

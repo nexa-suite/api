@@ -8,11 +8,20 @@ import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentU
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.port.ClientAccountUseCase;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.application.fieldvisit.port.FieldVisitUseCase;
+import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
+import com.nexa.api.edge.streaming.ChangeEventAudience;
+import com.nexa.api.edge.streaming.ChangeEventView;
 import com.nexa.api.edge.streaming.ChangeFeedReadUseCase;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeFeedQueryFactory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
@@ -22,6 +31,9 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Profiles;
 import org.springframework.core.type.AnnotatedTypeMetadata;
+
+import java.util.List;
+import java.util.Set;
 
 /** Guards central-backed tenant business use cases while their Tenant database routes are not selected. */
 @Configuration(proxyBeanMethods = false)
@@ -56,8 +68,11 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
     @Conditional(CentralCustomerRelationshipsRouteNotSelected.class)
     FieldVisitUseCase centralFallbackFieldVisitUseCase(
             @Qualifier("fieldVisitService") FieldVisitUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
-        return CentralFallbackUseCaseGuard.protect(FieldVisitUseCase.class, delegate, guard);
+            CentralTenantBusinessDataAccessGuard guard,
+            ObjectProvider<CloudTenantReadConfiguration.CloudFieldVisits> cloud) {
+        var visits = cloud.getIfAvailable();
+        return visits == null ? CentralFallbackUseCaseGuard.protect(FieldVisitUseCase.class, delegate, guard)
+                : visits;
     }
 
     @Bean
@@ -94,16 +109,26 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
 
     @Configuration(proxyBeanMethods = false)
     @Profile("tenant-cloud")
-    @ConditionalOnProperty(
-            name = "nexa.tenant-business.cloud-buyer-journey-read.enabled", havingValue = "true")
+    @Conditional(CloudDocumentReadsEnabled.class)
     static class CloudBuyerBusinessDocumentConfiguration {
         @Bean
         CloudBuyerBusinessDocuments cloudBuyerBusinessDocuments(
                 TenantBusinessDatabaseRouter router,
                 TenantBusinessDocumentBindingsFactory bindings,
-                WarehouseObjectAccess warehouses) {
-            return new CloudBuyerBusinessDocuments(new TenantBoundBusinessDocumentPort(router, bindings, warehouses, true));
+                WarehouseObjectAccess warehouses,
+                @Value("${nexa.tenant-business.cloud-buyer-journey-read.enabled:false}") boolean buyerReads,
+                @Value("${nexa.tenant-business.cloud-operations-read.enabled:false}") boolean salesReads) {
+            return new CloudBuyerBusinessDocuments(new TenantBoundBusinessDocumentPort(router, bindings, warehouses,
+                    buyerReads, salesReads));
         }
+    }
+
+    static final class CloudDocumentReadsEnabled extends AnyNestedCondition {
+        CloudDocumentReadsEnabled() { super(ConfigurationPhase.REGISTER_BEAN); }
+        @ConditionalOnProperty(name = "nexa.tenant-business.cloud-buyer-journey-read.enabled", havingValue = "true")
+        static class Buyer { }
+        @ConditionalOnProperty(name = "nexa.tenant-business.cloud-operations-read.enabled", havingValue = "true")
+        static class Sales { }
     }
 
     record CloudBuyerBusinessDocuments(BusinessDocumentUseCase useCase) { }
@@ -122,8 +147,45 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
     @Conditional(CentralBusinessTraceabilityRouteNotSelected.class)
     ChangeFeedReadUseCase centralFallbackChangeFeedReadUseCase(
             @Qualifier("centralChangeFeedReadUseCase") ChangeFeedReadUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
-        return CentralFallbackUseCaseGuard.protect(ChangeFeedReadUseCase.class, delegate, guard);
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerChangeFeed> cloud) {
+        var existing = CentralFallbackUseCaseGuard.protect(ChangeFeedReadUseCase.class, delegate, guard);
+        var buyerFeed = cloud.getIfAvailable();
+        return buyerFeed == null ? existing : buyerFeed.withFallback(existing);
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @Profile("tenant-cloud")
+    @ConditionalOnProperty(name = "nexa.tenant-business.cloud-buyer-journey-read.enabled", havingValue = "true")
+    static class CloudBuyerChangeFeedConfiguration {
+        @Bean
+        CloudBuyerChangeFeed cloudBuyerChangeFeed(TenantBusinessDatabaseRouter router,
+                TenantCustomerAccountQueryFactory accounts, TenantChangeFeedQueryFactory feed) {
+            return new CloudBuyerChangeFeed(new TenantBoundChangeFeedReadUseCase(router, accounts, feed));
+        }
+    }
+
+    record CloudBuyerChangeFeed(ChangeFeedReadUseCase reader) {
+        ChangeFeedReadUseCase withFallback(ChangeFeedReadUseCase fallback) {
+            return new ChangeFeedReadUseCase() {
+                @Override
+                public long minimumId(CurrentAccessContext context) {
+                    return (isPortalBuyer(context) ? reader : fallback).minimumId(context);
+                }
+
+                @Override
+                public List<ChangeEventView> after(CurrentAccessContext context, Set<ChangeEventAudience> audiences,
+                        long lastEventId, int limit) {
+                    if (!isPortalBuyer(context)) return fallback.after(context, audiences, lastEventId, limit);
+                    Set<ChangeEventAudience> buyerAudience = audiences != null && audiences.contains(ChangeEventAudience.BUYER)
+                            ? Set.of(ChangeEventAudience.BUYER) : Set.of();
+                    return reader.after(context, buyerAudience, lastEventId, limit);
+                }
+            };
+        }
+
+        private static boolean isPortalBuyer(CurrentAccessContext context) {
+            return context != null && context.surface() == Surface.PORTAL && context.hasRole(MembershipRole.BUYER);
+        }
     }
 
     private static boolean tenantRouteSelected(ConditionContext context, String property) {

@@ -6,6 +6,8 @@ nexa:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_BUYER_CHECKOUT_ENABLED:false}
     cloud-operations-read:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_OPERATIONS_READ_ENABLED:false}
+    cloud-field-visits:
+      enabled: ${NEXA_TENANT_BUSINESS_CLOUD_FIELD_VISITS_ENABLED:false}
     cloud-mobile-fulfillment:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_MOBILE_FULFILLMENT_ENABLED:false}
     cloud-read:

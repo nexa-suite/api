@@ -5,6 +5,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.inventoryavailability.application.port.InventoryTransfersRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands;
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,15 +43,17 @@ public final class WarehouseController {
     private final WarehouseOperationsRequestRunner operations;
     private final WarehouseOperationalSettingsCommands operationalSettings;
     private final InventoryLotsRead lotsRead;
+    private final InventoryTransfersRead transfersRead;
     private final WarehouseDirectoryRead directory;
     private final WarehouseOperationsRequestRunner.Receiving cloudReceiving;
 
     public WarehouseController(WarehouseOperationsRequestRunner operations,
                                WarehouseOperationalSettingsCommands operationalSettings, InventoryLotsRead lotsRead,
-                               WarehouseDirectoryRead directory,
+                               WarehouseDirectoryRead directory, InventoryTransfersRead transfersRead,
                                ObjectProvider<WarehouseOperationsRequestRunner.Receiving> cloudReceiving) {
         this.cloudReceiving = cloudReceiving.getIfAvailable();
         this.directory = directory;
+        this.transfersRead = transfersRead;
         this.lotsRead = lotsRead;
         this.operations = operations;
         this.operationalSettings = operationalSettings;
@@ -430,7 +433,7 @@ public final class WarehouseController {
                                                     @RequestParam(required = false) String destinationWarehouseId,
                                                     @RequestParam(defaultValue = "0") int page,
                                                     @RequestParam(defaultValue = "25") int size) {
-        return execute(c, service -> page(service.transfers(c, sourceWarehouseId, destinationWarehouseId, page, size), this::transfer));
+        return page(transfersRead.list(c, sourceWarehouseId, destinationWarehouseId, page, size), this::transfer);
     }
 
     @GetMapping("/inventory/transfers/{id}")
