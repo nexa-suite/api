@@ -1,5 +1,6 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.businesstraceability.application.port.in.AuditViewerUseCase;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
@@ -8,8 +9,10 @@ import com.nexa.api.customerbuyerrelationships.application.clientaccount.port.Cl
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.application.fieldvisit.port.FieldVisitUseCase;
 import com.nexa.api.edge.streaming.ChangeFeedReadUseCase;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
@@ -86,9 +89,27 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
     @Conditional(CentralBusinessDocumentsRouteNotSelected.class)
     BusinessDocumentUseCase centralFallbackBusinessDocumentUseCase(
             @Qualifier("businessDocumentService") BusinessDocumentUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
-        return CentralFallbackUseCaseGuard.protect(BusinessDocumentUseCase.class, delegate, guard);
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerBusinessDocuments> cloud) {
+        var buyerDocuments = cloud.getIfAvailable();
+        return buyerDocuments == null ? CentralFallbackUseCaseGuard.protect(BusinessDocumentUseCase.class, delegate, guard)
+                : buyerDocuments.useCase();
     }
+
+    @Configuration(proxyBeanMethods = false)
+    @Profile("tenant-cloud")
+    @ConditionalOnProperty(
+            name = "nexa.tenant-business.cloud-buyer-journey-read.enabled", havingValue = "true")
+    static class CloudBuyerBusinessDocumentConfiguration {
+        @Bean
+        CloudBuyerBusinessDocuments cloudBuyerBusinessDocuments(
+                TenantBusinessDatabaseRouter router,
+                TenantBusinessDocumentBindingsFactory bindings,
+                WarehouseObjectAccess warehouses) {
+            return new CloudBuyerBusinessDocuments(new TenantBoundBusinessDocumentPort(router, bindings, warehouses, true));
+        }
+    }
+
+    record CloudBuyerBusinessDocuments(BusinessDocumentUseCase useCase) { }
 
     @Bean
     @Primary

@@ -37,7 +37,7 @@ import java.util.UUID;
 
 /** Composes BC-09 only from owner ports bound to the current Tenant session. */
 @Component
-@Profile("local")
+@Profile({"local", "tenant-cloud"})
 public final class TenantBusinessDocumentBindingsFactory {
     private final TenantBusinessDocumentServiceFactory documents;
     private final TenantCustomerAccountQueryFactory customerAccounts;

@@ -1,5 +1,6 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.businesstraceability.application.port.in.AuditViewerUseCase;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
@@ -10,6 +11,9 @@ import com.nexa.api.customerbuyerrelationships.application.fieldvisit.port.Field
 import com.nexa.api.edge.streaming.ChangeFeedReadUseCase;
 import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -19,11 +23,13 @@ import org.springframework.context.annotation.Primary;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 class CentralTenantUseCaseFallbackGuardConfigurationTests {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -98,6 +104,37 @@ class CentralTenantUseCaseFallbackGuardConfigurationTests {
                     assertThat(context.containsBean("centralFallbackBusinessDocumentUseCase")).isFalse();
                     assertThat(context.containsBean("centralFallbackAuditViewerUseCase")).isFalse();
                     assertThat(context.containsBean("centralFallbackChangeFeedReadUseCase")).isFalse();
+                });
+    }
+
+    @Test
+    void cloudBuyerReadsRequireTheJourneyFlagAndDocumentWritesStayClosed() {
+        contextRunner.withPropertyValues("spring.profiles.active=tenant-cloud").run(context ->
+                assertThat(context).hasNotFailed().doesNotHaveBean("cloudBuyerBusinessDocuments"));
+
+        var router = mock(TenantBusinessDatabaseRouter.class);
+        var bindings = mock(TenantBusinessDocumentBindingsFactory.class);
+        var warehouses = mock(WarehouseObjectAccess.class);
+        var buyer = mock(CurrentAccessContext.class);
+        when(buyer.surface()).thenReturn(Surface.PORTAL);
+        when(buyer.hasRole(MembershipRole.BUYER)).thenReturn(true);
+
+        contextRunner.withPropertyValues("spring.profiles.active=tenant-cloud",
+                        "nexa.tenant-business.cloud-buyer-journey-read.enabled=true")
+                .withBean(TenantBusinessDatabaseRouter.class, () -> router)
+                .withBean(TenantBusinessDocumentBindingsFactory.class, () -> bindings)
+                .withBean(WarehouseObjectAccess.class, () -> warehouses)
+                .run(context -> {
+                    assertThat(context).hasNotFailed().hasBean("cloudBuyerBusinessDocuments");
+                    var documents = context.getBean(BusinessDocumentUseCase.class);
+                    assertThat(documents).isInstanceOf(TenantBoundBusinessDocumentPort.class);
+                    assertThatThrownBy(() -> documents.request(buyer, "SALES_ORDER", UUID.randomUUID(),
+                            "ORDER_SUMMARY", "PDF", "test-document"))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    assertThatThrownBy(() -> documents.uploadEvidence(buyer, "RECEIVABLE", UUID.randomUUID(),
+                            "proof.pdf", "application/pdf", new byte[0]))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    verifyNoInteractions(router, bindings, warehouses, context.getBean("businessDocumentService"));
                 });
     }
 
