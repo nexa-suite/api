@@ -67,6 +67,7 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
                 UUID.class, tenant, workspace);
         UUID otherAccount = seedAccount(tenant, workspace);
         UUID actor = UUID.fromString(membershipId(SALES_EMAIL));
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=? where id=?", actor, ownAccount);
         UUID subject = seedOrder(tenant, workspace, actor, ownAccount);
         UUID otherSubject = seedOrder(tenant, workspace, actor, otherAccount);
         byte[] bytes = "%PDF-1.7\nBuyer document fixture".getBytes(StandardCharsets.US_ASCII);
@@ -98,6 +99,26 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
         mockMvc.perform(get(documents)).andExpect(status().isUnauthorized());
         mockMvc.perform(get(documents).header("Authorization", operations))
                 .andExpect(status().isServiceUnavailable());
+        String sales = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", subject.toString()).param("size", "1").header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(ownDocument.toString()));
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", otherSubject.toString()).header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
+        mockMvc.perform(get(documents + "/{id}", ownDocument).header("Authorization", sales))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(documents + "/{id}/events", ownDocument).header("Authorization", sales))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(documents + "/{id}/downloads", ownDocument).header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(content().bytes(bytes));
+        mockMvc.perform(get(documents + "/{id}", otherDocument).header("Authorization", sales))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents + "/{id}/events", otherDocument).header("Authorization", sales))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents + "/{id}/downloads", otherDocument).header("Authorization", sales))
+                .andExpect(status().isNotFound());
     }
 
     private UUID seedIssuedDocument(UUID tenant, UUID workspace, UUID account, UUID subject, byte[] bytes) {
@@ -419,7 +440,7 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
                 TenantBusinessDatabaseRouter router, TenantBusinessDocumentBindingsFactory bindings,
                 WarehouseObjectAccess warehouses) {
             return new CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerBusinessDocumentConfiguration()
-                    .cloudBuyerBusinessDocuments(router, bindings, warehouses);
+                    .cloudBuyerBusinessDocuments(router, bindings, warehouses, true, true);
         }
 
         @Bean

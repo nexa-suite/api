@@ -74,18 +74,31 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private final WarehouseObjectAccess warehouseAccess;
     private final TransactionTemplate transactionTemplate;
     private final JdbcBusinessDocumentCommands paymentReceiptCommands;
+    private final boolean requireSalesAssignment;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner, DocumentRendererPort renderer,
             DocumentSubjectLookupPort subjects, DocumentProjectionLookupPort projections,
             CustomerAccountQuery customerAccounts, WorkspaceDirectory workspaces,
             WarehouseObjectAccess warehouseAccess, PlatformTransactionManager transactionManager,
             CanonicalOutboxPort canonicalOutbox) {
+        this(jdbc, storage, scanner, renderer, subjects, projections, customerAccounts, workspaces,
+                warehouseAccess, transactionManager, canonicalOutbox, false);
+    }
+
+    BusinessDocumentService(JdbcTemplate jdbc, ObjectStoragePort storage, ContentScannerPort scanner,
+            DocumentRendererPort renderer, DocumentSubjectLookupPort subjects,
+            DocumentProjectionLookupPort projections, CustomerAccountQuery customerAccounts,
+            WorkspaceDirectory workspaces, WarehouseObjectAccess warehouseAccess,
+            PlatformTransactionManager transactionManager, CanonicalOutboxPort canonicalOutbox,
+            boolean requireSalesAssignment) {
         this.jdbc = jdbc; this.storage = storage; this.scanner = scanner; this.renderer = renderer; this.subjects = subjects; this.projections = projections;
         this.customerAccounts = customerAccounts; this.workspaces = workspaces;
         this.warehouseAccess = warehouseAccess;
         this.canonicalOutbox = canonicalOutbox;
         this.paymentReceiptCommands = new JdbcBusinessDocumentCommands(jdbc, canonicalOutbox);
         this.transactionTemplate = transactionManager == null ? null : new TransactionTemplate(transactionManager);
+        this.requireSalesAssignment = requireSalesAssignment;
     }
 
     @Transactional
@@ -167,6 +180,7 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
             params.add(subject); params.add(subjectId);
         }
         appendBuyerAccountFilter(whereBuilder, params, context, "d");
+        appendSalesAccountFilter(whereBuilder, params, context, "d");
         appendWarehouseGrantFilter(whereBuilder, params, context, "d");
         String where = whereBuilder.toString();
         long total = jdbc.queryForObject("select count(*) from business_documents.business_document d where " + where, Long.class, params.toArray());
@@ -892,7 +906,29 @@ public class BusinessDocumentService implements BusinessDocumentPort, BusinessDo
     private void read(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_READ); }
     private void requireGeneration(CurrentAccessContext context) { context.requirePermission(PermissionKey.DOCUMENT_GENERATE); }
     private void authorizeClientScope(CurrentAccessContext context, String clientAccountId) { if (context.hasRole(MembershipRole.BUYER)) { if (clientAccountId == null || !customerAccounts.hasBuyerRelationship(tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString(), clientAccountId)) throw new IllegalArgumentException("Document is outside buyer scope"); } }
-    private boolean authorizedDocument(CurrentAccessContext context, String clientAccountId) { return !context.hasRole(MembershipRole.BUYER) || clientAccountId != null && customerAccounts.hasBuyerRelationship(tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString(), clientAccountId); }
+    private boolean authorizedDocument(CurrentAccessContext context, String clientAccountId) {
+        if (context.hasRole(MembershipRole.BUYER) && (clientAccountId == null || !customerAccounts.hasBuyerRelationship(
+                tenant(context).toString(), workspace(context).toString(), context.membershipId().value().toString(), clientAccountId))) return false;
+        return !salesScoped(context) || clientAccountId != null && salesAccountIds(context).contains(uuid(clientAccountId));
+    }
+
+    private boolean salesScoped(CurrentAccessContext context) {
+        return requireSalesAssignment && context.hasRole(MembershipRole.SALES);
+    }
+
+    private List<UUID> salesAccountIds(CurrentAccessContext context) {
+        return customerAccounts.lockActiveSalesOwnerAccountIds(tenant(context).toString(), workspace(context).toString(),
+                context.membershipId().value().toString()).stream().map(BusinessDocumentService::uuid).distinct().toList();
+    }
+
+    private void appendSalesAccountFilter(StringBuilder where, List<Object> params, CurrentAccessContext context, String alias) {
+        if (!salesScoped(context)) return;
+        List<UUID> ids = salesAccountIds(context);
+        if (ids.isEmpty()) { where.append(" and false"); return; }
+        where.append(" and ").append(alias).append(".client_account_id in (")
+                .append(String.join(",", Collections.nCopies(ids.size(), "?"))).append(")");
+        params.addAll(ids);
+    }
     private static void requireWorkerScope(UUID tenantId, UUID workspaceId) {
         if (tenantId == null || workspaceId == null) {
             throw new IllegalArgumentException("Verified Tenant and Workspace scope is required");

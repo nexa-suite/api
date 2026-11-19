@@ -13,7 +13,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public interface TenantBusinessDocumentServiceFactory {
     BusinessDocumentUseCase bindTo(JdbcTemplate tenantJdbc, DocumentSubjectLookupPort tenantSubjects,
                     DocumentProjectionLookupPort tenantProjections, CustomerAccountQuery tenantCustomerAccounts,
-                    WarehouseObjectAccess tenantWarehouseAccess, CanonicalOutboxPort tenantCanonicalOutbox);
+                    WarehouseObjectAccess tenantWarehouseAccess, CanonicalOutboxPort tenantCanonicalOutbox,
+                    boolean requireSalesAssignment);
 
     /** Binds the payment receipt command without constructing unused document source adapters. */
     BusinessDocumentCommands bindCommandsTo(JdbcTemplate tenantJdbc, CanonicalOutboxPort tenantCanonicalOutbox);

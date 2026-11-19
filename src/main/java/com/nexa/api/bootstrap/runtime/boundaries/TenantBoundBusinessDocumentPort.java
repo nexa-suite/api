@@ -36,17 +36,25 @@ public final class TenantBoundBusinessDocumentPort implements BusinessDocumentUs
     private final TenantBusinessDocumentBindingsFactory bindings;
     private final WarehouseObjectAccess warehouseAccess;
     private final boolean cloudBuyerReadOnly;
+    private final boolean cloudSalesReadOnly;
 
     @Autowired
     public TenantBoundBusinessDocumentPort(TenantBusinessDatabaseRouter router,
             TenantBusinessDocumentBindingsFactory bindings, WarehouseObjectAccess warehouseAccess) {
-        this(router, bindings, warehouseAccess, false);
+        this(router, bindings, warehouseAccess, false, false);
     }
 
     TenantBoundBusinessDocumentPort(TenantBusinessDatabaseRouter router,
             TenantBusinessDocumentBindingsFactory bindings, WarehouseObjectAccess warehouseAccess,
             boolean cloudBuyerReadOnly) {
+        this(router, bindings, warehouseAccess, cloudBuyerReadOnly, false);
+    }
+
+    TenantBoundBusinessDocumentPort(TenantBusinessDatabaseRouter router,
+            TenantBusinessDocumentBindingsFactory bindings, WarehouseObjectAccess warehouseAccess,
+            boolean cloudBuyerReadOnly, boolean cloudSalesReadOnly) {
         this.cloudBuyerReadOnly = cloudBuyerReadOnly;
+        this.cloudSalesReadOnly = cloudSalesReadOnly;
         this.router = Objects.requireNonNull(router, "Tenant business database router is required");
         this.bindings = Objects.requireNonNull(bindings, "Tenant business-document bindings are required");
         this.warehouseAccess = Objects.requireNonNull(warehouseAccess, "Warehouse access snapshot source is required");
@@ -121,17 +129,20 @@ public final class TenantBoundBusinessDocumentPort implements BusinessDocumentUs
 
     @Override
     public BusinessDocumentModels.EvidenceView evidence(CurrentAccessContext context, UUID evidenceId) {
+        requireBuyerEvidenceRead(context);
         return execute(context, true, docs -> docs.evidence(context, evidenceId));
     }
 
     @Override
     public BusinessDocumentModels.Page<BusinessDocumentModels.EvidenceView> listEvidence(CurrentAccessContext context,
             String subjectType, UUID subjectId, int page, int size) {
+        requireBuyerEvidenceRead(context);
         return execute(context, true, docs -> docs.listEvidence(context, subjectType, subjectId, page, size));
     }
 
     @Override
     public BusinessDocumentModels.Download downloadEvidence(CurrentAccessContext context, UUID evidenceId) {
+        requireBuyerEvidenceRead(context);
         return execute(context, true, docs -> docs.downloadEvidence(context, evidenceId));
     }
 
@@ -145,18 +156,22 @@ public final class TenantBoundBusinessDocumentPort implements BusinessDocumentUs
 
     private <T> T execute(CurrentAccessContext context, boolean read, Function<BusinessDocumentUseCase, T> action) {
         Objects.requireNonNull(context, "Verified Tenant access context is required");
-        if (cloudBuyerReadOnly && (!read || context.surface() != Surface.PORTAL
-                || !context.hasRole(MembershipRole.BUYER))) {
+        boolean buyer = cloudBuyerReadOnly && context.surface() == Surface.PORTAL
+                && context.hasRole(MembershipRole.BUYER);
+        boolean sales = cloudSalesReadOnly && context.surface() == Surface.PLATFORM
+                && context.hasRole(MembershipRole.SALES) && !context.hasRole(MembershipRole.BUYER);
+        if ((cloudBuyerReadOnly || cloudSalesReadOnly) && (!read || (!buyer && !sales))) {
             throw new TenantBusinessDatabaseUnavailableException(
-                    "Cloud business-document access supports verified Buyer reads");
+                    "Cloud business-document access requires an enabled read route");
         }
         Set<UUID> activeWarehouseIds = Set.copyOf(warehouseAccess.activeWarehouseIds(context));
         try {
-            if (cloudBuyerReadOnly) {
+            if (buyer) {
                 return router.inReadOnlyTransaction(context,
-                        tenantJdbc -> invoke(tenantJdbc, context, activeWarehouseIds, action));
+                        tenantJdbc -> invoke(tenantJdbc, context, activeWarehouseIds, false, action));
             }
-            return router.inTransaction(context, tenantJdbc -> invoke(tenantJdbc, context, activeWarehouseIds, action));
+            return router.inTransaction(context, tenantJdbc -> invoke(tenantJdbc, context, activeWarehouseIds,
+                    sales, action));
         } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                  | DataAccessException | CannotCreateTransactionException unavailable) {
             throw new TechnicalFailureException(TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE,
@@ -164,9 +179,17 @@ public final class TenantBoundBusinessDocumentPort implements BusinessDocumentUs
         }
     }
 
+    private void requireBuyerEvidenceRead(CurrentAccessContext context) {
+        if ((cloudBuyerReadOnly || cloudSalesReadOnly)
+                && !(cloudBuyerReadOnly && context.surface() == Surface.PORTAL && context.hasRole(MembershipRole.BUYER))) {
+            throw new TenantBusinessDatabaseUnavailableException("Cloud evidence access supports verified Buyer reads");
+        }
+    }
+
     private <T> T invoke(JdbcTemplate tenantJdbc, CurrentAccessContext context, Set<UUID> activeWarehouseIds,
-            Function<BusinessDocumentUseCase, T> action) {
-        BusinessDocumentUseCase documents = bindings.bindRequest(tenantJdbc, context, activeWarehouseIds);
+            boolean requireSalesAssignment, Function<BusinessDocumentUseCase, T> action) {
+        BusinessDocumentUseCase documents = bindings.bindRequest(tenantJdbc, context, activeWarehouseIds,
+                requireSalesAssignment);
         // Download streams are backed by private storage; no JDBC object is returned past this boundary.
         return action.apply(documents);
     }

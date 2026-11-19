@@ -77,6 +77,11 @@ public final class TenantBusinessDocumentBindingsFactory {
 
     public BusinessDocumentUseCase bindRequest(JdbcTemplate tenantJdbc,
             CurrentAccessContext accessContext, Set<UUID> activeWarehouseIds) {
+        return bindRequest(tenantJdbc, accessContext, activeWarehouseIds, false);
+    }
+
+    BusinessDocumentUseCase bindRequest(JdbcTemplate tenantJdbc, CurrentAccessContext accessContext,
+            Set<UUID> activeWarehouseIds, boolean requireSalesAssignment) {
         Objects.requireNonNull(accessContext, "Verified access context is required");
         UUID tenantId = accessContext.tenantId().value();
         UUID workspaceId = accessContext.workspaceId().value();
@@ -96,7 +101,8 @@ public final class TenantBusinessDocumentBindingsFactory {
         DocumentProjectionLookupPort projections = projections(tenantId, workspaceId, tenantJdbc,
                 tenantSales, tenantAccounts, tenantReceivables, tenantPayments, tenantFulfillment, Optional.empty());
         CanonicalOutboxPort outbox = traceability.bindTo(tenantJdbc).canonicalOutbox();
-        return required(documents.bindTo(tenantJdbc, subjects, projections, tenantAccounts, warehouseSnapshot, outbox));
+        return required(documents.bindTo(tenantJdbc, subjects, projections, tenantAccounts, warehouseSnapshot,
+                outbox, requireSalesAssignment));
     }
 
     public FulfillmentDocumentSourceQuery bindFulfillmentSource(JdbcTemplate tenantJdbc) {

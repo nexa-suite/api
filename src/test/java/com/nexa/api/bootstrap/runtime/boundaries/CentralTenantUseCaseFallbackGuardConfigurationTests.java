@@ -138,6 +138,34 @@ class CentralTenantUseCaseFallbackGuardConfigurationTests {
                 });
     }
 
+    @Test
+    void salesDocumentReadsAreOptInAndWritesRemainClosed() {
+        var router = mock(TenantBusinessDatabaseRouter.class);
+        var bindings = mock(TenantBusinessDocumentBindingsFactory.class);
+        var warehouses = mock(WarehouseObjectAccess.class);
+        var sales = mock(CurrentAccessContext.class);
+        when(sales.surface()).thenReturn(Surface.PLATFORM);
+        when(sales.hasRole(MembershipRole.SALES)).thenReturn(true);
+        contextRunner.withPropertyValues("spring.profiles.active=tenant-cloud",
+                        "nexa.tenant-business.cloud-operations-read.enabled=true")
+                .withBean(TenantBusinessDatabaseRouter.class, () -> router)
+                .withBean(TenantBusinessDocumentBindingsFactory.class, () -> bindings)
+                .withBean(WarehouseObjectAccess.class, () -> warehouses)
+                .run(context -> {
+                    assertThat(context).hasNotFailed().hasBean("cloudBuyerBusinessDocuments");
+                    var documents = context.getBean(BusinessDocumentUseCase.class);
+                    assertThatThrownBy(() -> documents.request(sales, "SALES_ORDER", UUID.randomUUID(),
+                            "ORDER_SUMMARY", "PDF", "key"))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    assertThatThrownBy(() -> documents.uploadEvidence(sales, "SALES_ORDER", UUID.randomUUID(),
+                            "proof.pdf", "application/pdf", new byte[0]))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    assertThatThrownBy(() -> documents.evidence(sales, UUID.randomUUID()))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    verifyNoInteractions(router, bindings, warehouses);
+                });
+    }
+
     private static void assertBlocked(Object guarded, Object delegate) {
         Method entrypoint = Arrays.stream(guarded.getClass().getInterfaces())
                 .flatMap(contract -> Arrays.stream(contract.getMethods()))

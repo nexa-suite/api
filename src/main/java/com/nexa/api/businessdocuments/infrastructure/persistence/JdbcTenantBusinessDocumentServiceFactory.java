@@ -38,14 +38,15 @@ public final class JdbcTenantBusinessDocumentServiceFactory implements TenantBus
                            DocumentProjectionLookupPort tenantProjections,
                            CustomerAccountQuery tenantCustomerAccounts,
                            WarehouseObjectAccess tenantWarehouseAccess,
-                           CanonicalOutboxPort tenantCanonicalOutbox) {
+                           CanonicalOutboxPort tenantCanonicalOutbox, boolean requireSalesAssignment) {
         BusinessDocumentService service = new BusinessDocumentService(
                 Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required"), storage, scanner, renderer,
                 Objects.requireNonNull(tenantSubjects, "Tenant document subject query is required"),
                 Objects.requireNonNull(tenantProjections, "Tenant document projection query is required"),
                 Objects.requireNonNull(tenantCustomerAccounts, "Tenant customer account query is required"),
                 null, Objects.requireNonNull(tenantWarehouseAccess, "Tenant Warehouse access snapshot is required"),
-                null, Objects.requireNonNull(tenantCanonicalOutbox, "Tenant canonical outbox is required"));
+                null, Objects.requireNonNull(tenantCanonicalOutbox, "Tenant canonical outbox is required"),
+                requireSalesAssignment);
         return service;
     }
 

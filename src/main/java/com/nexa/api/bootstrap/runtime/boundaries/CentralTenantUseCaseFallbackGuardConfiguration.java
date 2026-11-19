@@ -13,6 +13,8 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicap
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
@@ -97,16 +99,26 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
 
     @Configuration(proxyBeanMethods = false)
     @Profile("tenant-cloud")
-    @ConditionalOnProperty(
-            name = "nexa.tenant-business.cloud-buyer-journey-read.enabled", havingValue = "true")
+    @Conditional(CloudDocumentReadsEnabled.class)
     static class CloudBuyerBusinessDocumentConfiguration {
         @Bean
         CloudBuyerBusinessDocuments cloudBuyerBusinessDocuments(
                 TenantBusinessDatabaseRouter router,
                 TenantBusinessDocumentBindingsFactory bindings,
-                WarehouseObjectAccess warehouses) {
-            return new CloudBuyerBusinessDocuments(new TenantBoundBusinessDocumentPort(router, bindings, warehouses, true));
+                WarehouseObjectAccess warehouses,
+                @Value("${nexa.tenant-business.cloud-buyer-journey-read.enabled:false}") boolean buyerReads,
+                @Value("${nexa.tenant-business.cloud-operations-read.enabled:false}") boolean salesReads) {
+            return new CloudBuyerBusinessDocuments(new TenantBoundBusinessDocumentPort(router, bindings, warehouses,
+                    buyerReads, salesReads));
         }
+    }
+
+    static final class CloudDocumentReadsEnabled extends AnyNestedCondition {
+        CloudDocumentReadsEnabled() { super(ConfigurationPhase.REGISTER_BEAN); }
+        @ConditionalOnProperty(name = "nexa.tenant-business.cloud-buyer-journey-read.enabled", havingValue = "true")
+        static class Buyer { }
+        @ConditionalOnProperty(name = "nexa.tenant-business.cloud-operations-read.enabled", havingValue = "true")
+        static class Sales { }
     }
 
     record CloudBuyerBusinessDocuments(BusinessDocumentUseCase useCase) { }
