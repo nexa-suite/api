@@ -8,6 +8,9 @@ import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFact
 import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantBuyerCreditExposureReaderFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
+import com.nexa.api.edge.streaming.ChangeFeedStreamService;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeFeedQueryFactory;
 import com.nexa.api.fulfillmentdelivery.application.port.BuyerDeliveryTrackingRequestRunner;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantBuyerDeliveryTrackingQueryFactory;
 import com.nexa.api.salescommitment.application.model.SalesCommitmentQueryRunner;
@@ -29,25 +32,31 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Runs the cloud read composition with a real, physically separate Tenant fixture database. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 @TestPropertySource(properties = {
         "nexa.tenant-business.business-documents.enabled=false",
+        "nexa.tenant-business.business-traceability.enabled=false",
         "nexa.tenant-business.fulfillment-delivery.enabled=false",
         "nexa.tenant-business.purchase-request.enabled=false"
 })
@@ -57,6 +66,72 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
 
     @Autowired
     private ObjectStoragePort storage;
+
+    @Autowired
+    private TenantChangeEventPersistenceFactory tenantChangeEvents;
+
+    @Autowired
+    private ChangeFeedStreamService streams;
+
+    @Test
+    void buyerStreamReplaysOnlyRetainedTenantAccountEventsAndCancelsPollingWhenClosed() throws Exception {
+        String tenant = tenantId();
+        String workspace = workspaceId();
+        String account = buyerClientAccountId();
+        String otherAccount = seedAccount(UUID.fromString(tenant), UUID.fromString(workspace)).toString();
+        String prior = uuid();
+        String visible = uuid();
+        String foreign = uuid();
+        String internal = uuid();
+        String expired = uuid();
+        String route = "/api/v1/change-feed/stream";
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String owner = "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM");
+        long now = System.currentTimeMillis();
+        var events = tenantChangeEvents.bindTo(tenantJdbc());
+        events.append(tenant, workspace, account, "sales_order", prior, "sales.sales-order.confirmed", "CONFIRMED", now, true);
+        events.append(tenant, workspace, otherAccount, "sales_order", foreign, "sales.sales-order.confirmed",
+                "CONFIRMED", now, true);
+        events.append(tenant, workspace, account, "sales_order", internal, "sales.sales-order.created", "CREATED", now, false);
+        events.append(tenant, workspace, account, "sales_order", expired, "sales.sales-order.confirmed", "CONFIRMED",
+                now - Duration.ofDays(15).toMillis(), true);
+        events.append(tenant, workspace, account, "sales_order", visible, "sales.sales-order.confirmed", "CONFIRMED", now, true);
+        long cursor = tenantJdbc().queryForObject("select sequence from integration.change_event where aggregate_id=?",
+                Long.class, UUID.fromString(prior));
+        long current = tenantJdbc().queryForObject("select sequence from integration.change_event where aggregate_id=?",
+                Long.class, UUID.fromString(visible));
+
+        var scheduler = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(streams, "scheduler");
+        var replay = mockMvc.perform(get(route).accept(MediaType.TEXT_EVENT_STREAM)
+                        .header(HttpHeaders.AUTHORIZATION, buyer).header("Last-Event-ID", cursor))
+                .andExpect(request().asyncStarted()).andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)).andReturn();
+        try {
+            assertThat(replay.getResponse().getContentAsString())
+                    .contains("event:sales.sales-order.confirmed", "id:" + current, visible)
+                    .doesNotContain(prior, foreign, internal, expired);
+            assertThat(scheduler.getQueue()).hasSize(1);
+        } finally {
+            replay.getRequest().getAsyncContext().complete();
+        }
+        assertThat(scheduler.getQueue()).isEmpty();
+
+        var caughtUp = mockMvc.perform(get(route).accept(MediaType.TEXT_EVENT_STREAM)
+                        .header(HttpHeaders.AUTHORIZATION, buyer).header("Last-Event-ID", current))
+                .andExpect(request().asyncStarted()).andExpect(status().isOk()).andReturn();
+        try {
+            assertThat(caughtUp.getResponse().getContentAsString()).contains("event:heartbeat");
+        } finally {
+            caughtUp.getRequest().getAsyncContext().complete();
+        }
+        assertThat(scheduler.getQueue()).isEmpty();
+
+        mockMvc.perform(get(route)).andExpect(status().isUnauthorized());
+        var forbidden = mockMvc.perform(get(route).accept(MediaType.TEXT_EVENT_STREAM)
+                        .header(HttpHeaders.AUTHORIZATION, owner))
+                .andExpect(request().asyncStarted()).andReturn();
+        mockMvc.perform(asyncDispatch(forbidden)).andExpect(status().isServiceUnavailable());
+    }
 
     @Test
     void buyerOpensOnlyOwnTenantDocumentsAndDownloadsTheStoredContent() throws Exception {
@@ -428,6 +503,14 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadComposition {
+        @Bean
+        CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerChangeFeed cloudChangeFeedForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantCustomerAccountQueryFactory accounts,
+                TenantChangeFeedQueryFactory feed) {
+            return new CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerChangeFeedConfiguration()
+                    .cloudBuyerChangeFeed(router, accounts, feed);
+        }
+
         @Bean
         TenantBoundSalesOrderSummaryExportConfiguration.CloudBuyerExports cloudBuyerExportsForHttpTest(
                 TenantBusinessDatabaseRouter router, TenantCustomerAccountQueryFactory accounts,

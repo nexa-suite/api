@@ -198,7 +198,8 @@ reads, the Buyer wallet read and Buyer document and evidence reads. Document
 reads retain the existing permissions and account checks. Downloads also
 require access to the private object store. Document generation and evidence
 uploads remain outside this cloud route. Sales credit exposure uses the
-existing account assignment policy. Wallet-funded orders and provider
+existing account assignment policy. Buyer change-feed streams replay events
+marked for the active Buyer account and audience. Wallet-funded orders and provider
 callbacks require separate activation. The queries retain active Buyer account and Workspace
 checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
 binding is reported as unavailable.
