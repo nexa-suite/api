@@ -190,7 +190,8 @@ permission, version and idempotency checks still apply.
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED=true` with the
 existing cloud router to route authenticated Buyer purchase-request and sales-order
-lists, detail and history, delivery tracking and receipt history, and the
+lists, detail and history, Buyer order-summary PDF and CSV downloads,
+delivery tracking and receipt history, and the
 current Buyer credit exposure to the authorized Tenant database. It also
 routes Buyer receivable list/detail, payment history, saved payment-method
 reads and the Buyer wallet read. Sales credit exposure uses the existing

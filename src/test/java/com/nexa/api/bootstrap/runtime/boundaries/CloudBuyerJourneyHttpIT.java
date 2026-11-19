@@ -12,7 +12,10 @@ import com.nexa.api.salescommitment.application.model.SalesCommitmentQueryRunner
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
+import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderSummaryExportFactory;
 import com.nexa.api.support.PostgresIntegrationSupport;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
@@ -20,15 +23,19 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -169,6 +176,55 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
     }
 
+    @Test
+    void buyerDownloadsExistingOwnOrderSummariesAndCannotExportAnotherAccountsOrder() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID buyerMembership = UUID.fromString(membershipId(BUYER_EMAIL));
+        UUID account = tenantJdbc().queryForObject(
+                "select id from sales.client_account where tenant_id=? and workspace_id=? and code='CLI-001'",
+                UUID.class, tenant, workspace);
+        UUID ownOrder = seedOrder(tenant, workspace, buyerMembership, account);
+        UUID foreignOrder = seedOrder(tenant, workspace, buyerMembership, seedAccount(tenant, workspace));
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String owner = "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM");
+        String route = "/api/v1/buyer/orders/{id}/exports/summary";
+        String number = "T" + ownOrder.toString().substring(0, 8);
+
+        var pdf = mockMvc.perform(get(route + ".pdf", ownOrder).header(HttpHeaders.AUTHORIZATION, buyer))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_PDF))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"nexa-order-summary-" + number + ".pdf\""))
+                .andReturn().getResponse();
+        try (var document = Loader.loadPDF(pdf.getContentAsByteArray())) {
+            assertThat(new PDFTextStripper().getText(document)).contains(ownOrder.toString(), number)
+                    .doesNotContain(foreignOrder.toString());
+        }
+
+        var csv = mockMvc.perform(get(route + ".csv", ownOrder).header(HttpHeaders.AUTHORIZATION, buyer))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/csv;charset=UTF-8"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"nexa-order-summary-" + number + ".csv\""))
+                .andReturn().getResponse();
+        assertThat(csv.getContentAsString(StandardCharsets.UTF_8)).contains(ownOrder.toString(), number)
+                .doesNotContain(foreignOrder.toString());
+
+        for (String format : new String[]{".pdf", ".csv"}) {
+            mockMvc.perform(get(route + format, foreignOrder).header(HttpHeaders.AUTHORIZATION, buyer))
+                    .andExpect(status().isNotFound());
+        }
+        mockMvc.perform(get(route + ".pdf", ownOrder)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(route + ".pdf", ownOrder).header(HttpHeaders.AUTHORIZATION, owner))
+                .andExpect(status().isServiceUnavailable());
+        mockMvc.perform(get("/api/v1/sales-orders/{id}/exports/summary.csv", ownOrder)
+                        .header(HttpHeaders.AUTHORIZATION, buyer))
+                .andExpect(status().isServiceUnavailable());
+    }
+
     private void assertBuyerReadsOnlyOwnRecords(String route, String buyer, UUID own, UUID other) throws Exception {
         mockMvc.perform(get(route).header("Authorization", buyer).param("size", "100"))
                 .andExpect(status().isOk())
@@ -281,6 +337,13 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadComposition {
+        @Bean
+        TenantBoundSalesOrderSummaryExportConfiguration.CloudBuyerExports cloudBuyerExportsForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantCustomerAccountQueryFactory accounts,
+                TenantSalesOrderSummaryExportFactory exports) {
+            return new TenantBoundSalesOrderSummaryExportConfiguration().cloudBuyerExports(router, accounts, exports);
+        }
+
         @Bean
         @Primary
         BuyerWalletReadPort cloudWalletReadsForHttpTest(TenantBusinessDatabaseRouter router,
