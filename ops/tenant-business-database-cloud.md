@@ -188,9 +188,12 @@ existing cloud router to route authenticated Buyer purchase-request and sales-or
 lists, detail and history, delivery tracking and receipt history, and the
 current Buyer credit exposure to the authorized Tenant database. It also
 routes Buyer receivable list/detail, payment history, saved payment-method
-reads and the Buyer wallet read. Sales credit exposure uses the existing
-account assignment policy. Wallet-funded orders and provider callbacks require
-separate activation. The queries retain active Buyer account and Workspace
+reads, the Buyer wallet read and Buyer document and evidence reads. Document
+reads retain the existing permissions and account checks. Downloads also
+require access to the private object store. Document generation and evidence
+uploads remain outside this cloud route. Sales credit exposure uses the
+existing account assignment policy. Wallet-funded orders and provider
+callbacks require separate activation. The queries retain active Buyer account and Workspace
 checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
 binding is reported as unavailable.
 

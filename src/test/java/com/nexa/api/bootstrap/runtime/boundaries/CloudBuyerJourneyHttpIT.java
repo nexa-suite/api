@@ -1,6 +1,8 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.businessdocuments.application.port.ObjectStoragePort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.payments.application.publicapi.BuyerWalletReadPort;
 import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFactory;
 import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
@@ -15,6 +17,7 @@ import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQu
 import com.nexa.api.support.PostgresIntegrationSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -23,12 +26,15 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -36,12 +42,78 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Runs the cloud read composition with a real, physically separate Tenant fixture database. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 @TestPropertySource(properties = {
+        "nexa.tenant-business.business-documents.enabled=false",
         "nexa.tenant-business.fulfillment-delivery.enabled=false",
         "nexa.tenant-business.purchase-request.enabled=false"
 })
 @Import(CloudBuyerJourneyHttpIT.ReadComposition.class)
 class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
     private static final String DELIVERIES = "/api/v1/buyer/deliveries";
+
+    @Autowired
+    private ObjectStoragePort storage;
+
+    @Test
+    void buyerOpensOnlyOwnTenantDocumentsAndDownloadsTheStoredContent() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID ownAccount = tenantJdbc().queryForObject(
+                "select id from sales.client_account where tenant_id=? and workspace_id=? and code='CLI-001'",
+                UUID.class, tenant, workspace);
+        UUID otherAccount = seedAccount(tenant, workspace);
+        UUID actor = UUID.fromString(membershipId(SALES_EMAIL));
+        UUID subject = seedOrder(tenant, workspace, actor, ownAccount);
+        UUID otherSubject = seedOrder(tenant, workspace, actor, otherAccount);
+        byte[] bytes = "%PDF-1.7\nBuyer document fixture".getBytes(StandardCharsets.US_ASCII);
+        UUID ownDocument = seedIssuedDocument(tenant, workspace, ownAccount, subject, bytes);
+        UUID otherDocument = seedIssuedDocument(tenant, workspace, otherAccount, otherSubject, bytes);
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String operations = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String documents = "/api/v1/business-documents";
+
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", subject.toString()).param("size", "1").header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(ownDocument.toString()));
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", otherSubject.toString()).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
+        mockMvc.perform(get(documents + "/{id}", ownDocument).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("GENERATED"));
+        mockMvc.perform(get(documents + "/{id}/events", ownDocument).header("Authorization", buyer))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(documents + "/{id}/downloads", ownDocument).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(content().bytes(bytes))
+                .andExpect(header().string("Cache-Control", "private, no-store"))
+                .andExpect(header().exists("X-Content-SHA256"));
+        mockMvc.perform(get(documents + "/{id}", otherDocument).header("Authorization", buyer))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents + "/{id}/downloads", otherDocument).header("Authorization", buyer))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(documents).header("Authorization", operations))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    private UUID seedIssuedDocument(UUID tenant, UUID workspace, UUID account, UUID subject, byte[] bytes) {
+        UUID id = UUID.randomUUID();
+        String object = "documents/" + tenant + "/" + id + ".pdf";
+        var stored = storage.put(object, new ByteArrayInputStream(bytes), bytes.length, "application/pdf");
+        tenantJdbc().update("""
+                insert into business_documents.object_storage_object
+                    (object_key,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at)
+                values (?,?,?,?,?,true,current_timestamp)
+                """, stored.objectKey(), "nexa-private", stored.checksumSha256(), stored.contentType(), stored.byteSize());
+        tenantJdbc().update("""
+                insert into business_documents.business_document
+                    (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,
+                     format,storage_object_key,checksum_sha256,content_type,byte_size,generated_at,created_at,updated_at)
+                values (?,?,?,?,'SALES_ORDER',?,'ORDER_SUMMARY',1,'GENERATED','PDF',?,?,?,?,current_timestamp,
+                        current_timestamp,current_timestamp)
+                """, id, tenant, workspace, account, subject, stored.objectKey(), stored.checksumSha256(),
+                stored.contentType(), stored.byteSize());
+        return id;
+    }
 
     @Test
     void walletReadsCurrentBuyerAndReportsOrderPaymentAvailability() throws Exception {
@@ -281,6 +353,14 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadComposition {
+        @Bean
+        CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerBusinessDocuments cloudDocumentsForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantBusinessDocumentBindingsFactory bindings,
+                WarehouseObjectAccess warehouses) {
+            return new CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerBusinessDocumentConfiguration()
+                    .cloudBuyerBusinessDocuments(router, bindings, warehouses);
+        }
+
         @Bean
         @Primary
         BuyerWalletReadPort cloudWalletReadsForHttpTest(TenantBusinessDatabaseRouter router,
