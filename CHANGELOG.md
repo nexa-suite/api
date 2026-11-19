@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [3.0.1]
+
+- Restore Buyer access to existing purchase requests, orders, delivery history, and receipt history on the cloud profile.
+- Preserve account and Workspace checks inside read-only Tenant transactions.
+- Cache stable Spring Boot image layers independently of application changes.
+
+See the [release notes](docs/releases/v3.0.1.md).
+
 ## [3.0.0]
 
 - Serve versioned mobile terms and record acceptance per individual account.
