@@ -54,9 +54,14 @@ public interface FulfillmentDeliveryRequestRunner {
             return new Requirements(false, true, false, Set.of());
         }
 
-        /** Marks API-as-is workday or coordinate endpoints that are outside the accepted Tenant target. */
+        /** Marks requests that read or write stored driver coordinates. */
         public static Requirements requiringStoredDriverLocation() {
-            return new Requirements(false, false, false, Set.of(), true);
+            return none().withStoredDriverLocation();
+        }
+
+        public Requirements withStoredDriverLocation() {
+            return new Requirements(warehouseGrants, currentDriver, logisticsAssignees, assignableMemberships,
+                    true, exceptionAssignees);
         }
 
         public static Requirements assignable(Collection<UUID> membershipIds) {

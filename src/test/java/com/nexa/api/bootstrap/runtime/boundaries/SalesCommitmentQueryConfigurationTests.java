@@ -79,12 +79,42 @@ class SalesCommitmentQueryConfigurationTests {
         verifyNoInteractions(existingOrders, provider);
     }
 
+    @Test
+    void salesOperationsOptInPreservesAccountLocksWithoutEnablingBuyerReads() {
+        CurrentAccessContext sales = mock(CurrentAccessContext.class);
+        when(sales.surface()).thenReturn(Surface.PLATFORM);
+        when(sales.hasRole(MembershipRole.SALES)).thenReturn(true);
+        when(buyer.surface()).thenReturn(Surface.PORTAL);
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        Composition tenant = mock(Composition.class);
+        PurchaseRequestUseCase tenantRequests = mock(PurchaseRequestUseCase.class);
+        SalesOrderUseCase tenantOrders = mock(SalesOrderUseCase.class);
+        when(tenant.purchaseRequests()).thenReturn(tenantRequests);
+        when(tenant.salesOrders()).thenReturn(tenantOrders);
+        when(provider.bindTo(jdbc)).thenReturn(tenant);
+        when(router.inReadOnlyTransaction(same(sales), any()))
+                .thenAnswer(invocation -> invocation.<TenantBusinessDatabaseWork<?>>getArgument(1).execute(jdbc));
+        when(router.inTransaction(same(sales), any()))
+                .thenAnswer(invocation -> invocation.<TenantBusinessDatabaseWork<?>>getArgument(1).execute(jdbc));
+        var runner = runner(false, true);
+        assertThat(runner.purchaseRequests(sales, Function.identity())).isSameAs(tenantRequests);
+        assertThat(runner.salesOrders(sales, Function.identity())).isSameAs(tenantOrders);
+        assertThat(runner.purchaseRequests(buyer, Function.identity())).isSameAs(existingRequests);
+        verify(sales).requirePermission(PermissionKey.SALES_PURCHASE_REQUEST_READ);
+        verify(sales).requirePermission(PermissionKey.SALES_ORDER_READ);
+    }
+
     private SalesCommitmentQueryRunner runner(boolean enabled) {
+        return runner(enabled, false);
+    }
+
+    private SalesCommitmentQueryRunner runner(boolean buyerEnabled, boolean operationsEnabled) {
         var beans = new StaticListableBeanFactory();
-        if (enabled) {
-            beans.addBean("cloudBuyerSalesReads", new SalesCommitmentQueryConfiguration.CloudBuyerSalesReads(router, provider));
+        if (buyerEnabled || operationsEnabled) {
+            beans.addBean("cloudSalesReads", new SalesCommitmentQueryConfiguration.CloudSalesReads(
+                    router, provider, buyerEnabled, operationsEnabled));
         }
         return new SalesCommitmentQueryConfiguration().salesCommitmentQueries(existingRequests, existingOrders,
-                beans.getBeanProvider(SalesCommitmentQueryConfiguration.CloudBuyerSalesReads.class));
+                beans.getBeanProvider(SalesCommitmentQueryConfiguration.CloudSalesReads.class));
     }
 }

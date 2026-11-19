@@ -24,6 +24,6 @@ public class TenantBoundFulfillmentDeliveryConfiguration {
             WarehouseObjectAccess warehouseAccess,
             WorkforceDirectory workforce) {
         return new TenantBoundFulfillmentDeliveryRequestRunner(router, compositions,
-                warehouseAccess, workforce);
+                warehouseAccess, workforce, true);
     }
 }

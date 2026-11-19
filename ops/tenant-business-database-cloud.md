@@ -157,14 +157,18 @@ they do not establish cloud delivery, Product/UX Acceptance, System Acceptance
 or Production Readiness.
 
 
-## Mobile stock and preparation reads
+## Mobile warehouse and dispatch reads
 
 With the verified cloud router already configured, the independent opt-in
 `NEXA_TENANT_BUSINESS_CLOUD_OPERATIONS_READ_ENABLED=true` routes existing
-inventory list/lot/detail, per-Warehouse availability, fulfillment work-list/detail
-and physical-allocation GET requests to the authorized
-Tenant database. They retain permission and Warehouse-grant checks and run in
-PostgreSQL `READ ONLY`, `REPEATABLE READ` transactions. Missing bindings,
+warehouse directory, inventory list/lot/detail, per-Warehouse availability,
+fulfillment work-list/detail and physical allocation, dispatch orders and loads,
+assigned-driver lists and details, and the Sales purchase request and order
+lists, details and histories to the authorized Tenant database. These queries
+retain permission, Warehouse-grant and assignment checks. Most queries run in
+PostgreSQL `READ ONLY`, `REPEATABLE READ` transactions. Dispatch and Sales order
+queries that use Sales account assignment locks use the existing routed
+transaction that supports those locks. Missing bindings,
 physical identities, schema manifests or scope fail closed. No fallback to
 central business tables is introduced.
 
@@ -174,20 +178,47 @@ both authorized reads and rejected commands before rehearsing Mobile. A
 successful empty list indicates no visible business rows; it is not evidence
 that data were seeded or a workflow completed.
 
-## Buyer request, order and delivery reads
+## Buyer request, order, delivery and credit reads
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED=true` with the
 existing cloud router to route authenticated Buyer purchase-request and sales-order
-lists, detail and history, plus delivery tracking and receipt history, to the
-authorized Tenant database. The queries retain active Buyer account and Workspace
+lists, detail and history, delivery tracking and receipt history, and the
+current Buyer credit exposure to the authorized Tenant database. The queries retain active Buyer account and Workspace
 checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
 binding is reported as unavailable.
 
 Keep the general Purchase Request and Fulfillment capability flags disabled.
-Draft creation, review, conversion, dispatch, receipt confirmation and live
-location are outside this read composition. Verify a visible fixture and a
+Verify a visible fixture and a
 different account's fixture before treating an empty list as successful
 ownership enforcement.
+
+## Buyer checkout
+
+Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_CHECKOUT_ENABLED=true` with Buyer
+journey reads and the verified cloud router to route the existing Buyer draft
+and submission endpoints and the Sales review and conversion commands.
+Buyer account addresses use the same scoped
+Tenant database and active relationship check. Submission verifies the current
+Workspace expiry policy and performs inventory backing, request persistence and
+outbox recording within the routed transaction.
+
+Rehearse address selection, draft submission, Sales conversion and a denied
+foreign account request with synthetic data on isolated cloud databases before
+activation.
+
+## Fulfillment through Buyer receipt
+
+Set `NEXA_TENANT_BUSINESS_CLOUD_MOBILE_FULFILLMENT_ENABLED=true` with Buyer
+checkout and Operations reads to route the existing fulfillment, load,
+dispatch, driver workday, delivery and Buyer receipt use cases. They use the
+same Tenant transaction, Warehouse grants, driver assignment and Buyer
+relationship checks as the fulfillment domain. Stored driver coordinates
+require separate cloud activation and remain disabled in this composition.
+
+Verify the same order through picking, dispatch, an assigned Driver outcome
+and Buyer receipt in the isolated cloud database before enabling this flag.
+Check receipt replay, the final order state and the linked sealed proof of
+delivery. Push delivery is verified separately through the worker below.
 
 ## Opt-in notification push worker
 
