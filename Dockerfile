@@ -17,6 +17,9 @@ RUN OTEL_SDK_DISABLED=true \
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:4317 \
     mvn -B -ntp package
 
+RUN java -Djarmode=tools -jar target/api-*.jar extract --layers \
+    --application-filename app.jar --destination /workspace/extracted
+
 FROM eclipse-temurin:25-jre-noble@sha256:b573af9e331196fbc42e246da4df24df9b6c556c73e7efddfde0511f1c9508c5
 
 RUN apt-get update \
@@ -30,13 +33,18 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=build /workspace/target/api-*.jar /app/app.jar
 COPY ops/healthcheck.sh /usr/local/bin/nexa-healthcheck
 
 RUN chmod 0755 /usr/local/bin/nexa-healthcheck \
     && mkdir -p /app/.local-object-storage \
     && chmod 0700 /app/.local-object-storage \
     && chown -R 10001:10001 /app
+
+# Cache the stable libraries independently of the application classes.
+COPY --link --chown=10001:10001 --from=build /workspace/extracted/dependencies/ /app/
+COPY --link --chown=10001:10001 --from=build /workspace/extracted/spring-boot-loader/ /app/
+COPY --link --chown=10001:10001 --from=build /workspace/extracted/snapshot-dependencies/ /app/
+COPY --link --chown=10001:10001 --from=build /workspace/extracted/application/ /app/
 
 ENV SERVER_PORT=8080
 

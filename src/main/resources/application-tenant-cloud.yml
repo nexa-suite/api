@@ -1,5 +1,7 @@
 nexa:
   tenant-business:
+    cloud-buyer-journey-read:
+      enabled: ${NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED:false}
     cloud-operations-read:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_OPERATIONS_READ_ENABLED:false}
     cloud-read:

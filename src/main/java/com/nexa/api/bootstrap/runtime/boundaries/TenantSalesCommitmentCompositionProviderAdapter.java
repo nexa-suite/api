@@ -31,7 +31,9 @@ import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQu
 import com.nexa.api.shared.application.port.out.ChangeEventPersistencePort;
 import com.nexa.api.shared.application.port.out.CanonicalOutboxPort;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -47,11 +49,24 @@ import java.util.UUID;
  * No central persistence adapter or data source is consulted by this binding.
  */
 @Component
-@Profile("local")
-@ConditionalOnProperty(prefix = "nexa.tenant-business.purchase-request", name = "enabled",
-        havingValue = "true", matchIfMissing = false)
+@Conditional(TenantSalesCommitmentCompositionProviderAdapter.Enabled.class)
 public final class TenantSalesCommitmentCompositionProviderAdapter
         implements TenantSalesCommitmentCompositionProvider {
+    static final class Enabled extends AnyNestedCondition {
+        Enabled() {
+            super(ConfigurationPhase.REGISTER_BEAN);
+        }
+
+        @Profile("local")
+        @ConditionalOnProperty(prefix = "nexa.tenant-business.purchase-request", name = "enabled", havingValue = "true")
+        static class LocalPurchaseRequests { }
+
+        @Profile("tenant-cloud")
+        @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-buyer-journey-read", name = "enabled",
+                havingValue = "true")
+        static class CloudBuyerReads { }
+    }
+
     private final TenantCustomerAccountQueryFactory customerAccounts;
     private final TenantCustomerAddressQueryFactory customerAddresses;
     private final TenantSellableSkuQueryFactory sellableSkus;
