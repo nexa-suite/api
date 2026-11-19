@@ -3,6 +3,7 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 import com.nexa.api.fulfillmentdelivery.application.exception.FulfillmentOperationException;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryLoadModels;
 import com.nexa.api.fulfillmentdelivery.application.model.DeliveryLoadModels.LoadView;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryReadRunner;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
@@ -33,15 +34,17 @@ import java.util.UUID;
 public final class DeliveryLoadController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final FulfillmentDeliveryRequestRunner runner;
+    private final FulfillmentDeliveryReadRunner reads;
 
-    public DeliveryLoadController(FulfillmentDeliveryRequestRunner runner) {
+    public DeliveryLoadController(FulfillmentDeliveryRequestRunner runner, FulfillmentDeliveryReadRunner reads) {
         this.runner = runner;
+        this.reads = reads;
     }
 
     @GetMapping("/dispatch/loads")
     @Operation(operationId = "listDispatchDeliveryLoads")
     public ResponseEntity<List<LoadView>> listDispatch(@RequestAttribute(ACCESS) CurrentAccessContext context) {
-        return ResponseEntity.ok().body(runner.execute(context, Requirements.warehouse(),
+        return ResponseEntity.ok().body(reads.read(context, Requirements.warehouse(),
                 composition -> composition.deliveryLoads().dispatchLoads(context)));
     }
 
@@ -59,7 +62,7 @@ public final class DeliveryLoadController {
     @Operation(operationId = "getDispatchDeliveryLoad")
     public ResponseEntity<LoadView> get(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                         @PathVariable UUID loadId) {
-        LoadView value = runner.execute(context, Requirements.warehouse(),
+        LoadView value = reads.read(context, Requirements.warehouse(),
                 composition -> composition.deliveryLoads().getDispatchLoad(context, loadId));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
@@ -109,7 +112,7 @@ public final class DeliveryLoadController {
     @GetMapping("/driver/loads")
     @Operation(operationId = "listCurrentDriverDeliveryLoads")
     public ResponseEntity<List<LoadView>> listDriver(@RequestAttribute(ACCESS) CurrentAccessContext context) {
-        return ResponseEntity.ok().body(runner.execute(context, Requirements.none(),
+        return ResponseEntity.ok().body(reads.read(context, Requirements.none(),
                 composition -> composition.deliveryLoads().driverLoads(context)));
     }
 

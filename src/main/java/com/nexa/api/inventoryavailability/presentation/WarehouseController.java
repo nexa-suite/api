@@ -5,6 +5,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -40,9 +41,12 @@ public final class WarehouseController {
     private final WarehouseOperationsRequestRunner operations;
     private final WarehouseOperationalSettingsCommands operationalSettings;
     private final InventoryLotsRead lotsRead;
+    private final WarehouseDirectoryRead directory;
 
     public WarehouseController(WarehouseOperationsRequestRunner operations,
-                               WarehouseOperationalSettingsCommands operationalSettings, InventoryLotsRead lotsRead) {
+                               WarehouseOperationalSettingsCommands operationalSettings, InventoryLotsRead lotsRead,
+                               WarehouseDirectoryRead directory) {
+        this.directory = directory;
         this.lotsRead = lotsRead;
         this.operations = operations;
         this.operationalSettings = operationalSettings;
@@ -54,12 +58,12 @@ public final class WarehouseController {
 
     @GetMapping("/warehouses")
     public PageResponse<WarehouseResponse> warehouses(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size, @RequestParam(defaultValue = "code,asc") String sort) {
-        return execute(c, service -> page(service.warehouses(c, page, size, sort), this::toWarehouse));
+        return page(directory.list(c, page, size, sort), this::toWarehouse);
     }
 
     @GetMapping("/warehouses/{id}")
     public ResponseEntity<WarehouseResponse> warehouse(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String id) {
-        WarehouseResponse value = execute(c, service -> toWarehouse(service.warehouse(c, id)));
+        WarehouseResponse value = toWarehouse(directory.get(c, id));
         return ResponseEntity.ok().eTag(etag(value.version())).body(value);
     }
 

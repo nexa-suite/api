@@ -157,13 +157,14 @@ they do not establish cloud delivery, Product/UX Acceptance, System Acceptance
 or Production Readiness.
 
 
-## Mobile stock and preparation reads
+## Mobile warehouse and dispatch reads
 
 With the verified cloud router already configured, the independent opt-in
 `NEXA_TENANT_BUSINESS_CLOUD_OPERATIONS_READ_ENABLED=true` routes existing
-inventory list/lot/detail, per-Warehouse availability, fulfillment work-list/detail
-and physical-allocation GET requests to the authorized
-Tenant database. They retain permission and Warehouse-grant checks and run in
+warehouse directory, inventory list/lot/detail, per-Warehouse availability,
+fulfillment work-list/detail and physical allocation, dispatch orders and loads,
+and assigned-driver lists and details to the authorized Tenant database.
+They retain permission, Warehouse-grant and assignment checks and run in
 PostgreSQL `READ ONLY`, `REPEATABLE READ` transactions. Missing bindings,
 physical identities, schema manifests or scope fail closed. No fallback to
 central business tables is introduced.
