@@ -10,4 +10,11 @@ import java.util.function.Function;
 public interface FulfillmentDeliveryReadRunner {
     <T> T read(CurrentAccessContext context, FulfillmentDeliveryRequestRunner.Requirements requirements,
                Function<FulfillmentDeliveryComposition, T> query);
+
+    /** Dispatch projections may lock the current Sales account assignment while selecting visible orders. */
+    default <T> T readWithAccountLocks(CurrentAccessContext context,
+                                       FulfillmentDeliveryRequestRunner.Requirements requirements,
+                                       Function<FulfillmentDeliveryComposition, T> query) {
+        return read(context, requirements, query);
+    }
 }

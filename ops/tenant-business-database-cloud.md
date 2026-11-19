@@ -163,9 +163,12 @@ With the verified cloud router already configured, the independent opt-in
 `NEXA_TENANT_BUSINESS_CLOUD_OPERATIONS_READ_ENABLED=true` routes existing
 warehouse directory, inventory list/lot/detail, per-Warehouse availability,
 fulfillment work-list/detail and physical allocation, dispatch orders and loads,
-and assigned-driver lists and details to the authorized Tenant database.
-They retain permission, Warehouse-grant and assignment checks and run in
-PostgreSQL `READ ONLY`, `REPEATABLE READ` transactions. Missing bindings,
+assigned-driver lists and details, and the Sales purchase request and order
+lists, details and histories to the authorized Tenant database. These queries
+retain permission, Warehouse-grant and assignment checks. Most queries run in
+PostgreSQL `READ ONLY`, `REPEATABLE READ` transactions. Dispatch and Sales order
+queries that use Sales account assignment locks use the existing routed
+transaction that supports those locks. Missing bindings,
 physical identities, schema manifests or scope fail closed. No fallback to
 central business tables is introduced.
 

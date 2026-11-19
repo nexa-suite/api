@@ -155,7 +155,7 @@ public final class LogisticsController {
     private static long version(String value){if(value==null||value.isBlank())throw new LogisticsException("PRECONDITION_REQUIRED",false);try{long parsed=Long.parseLong(value.replace("\"",""));if(parsed<0)throw new NumberFormatException();return parsed;}catch(NumberFormatException e){throw new LogisticsException("PRECONDITION_REQUIRED",false);}}
 
     private <T> T readLogistics(CurrentAccessContext context, Function<LogisticsOperations, T> work) {
-        return reads.read(context, FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
+        return reads.readWithAccountLocks(context, FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
                 composition -> work.apply(composition.logistics()));
     }
 

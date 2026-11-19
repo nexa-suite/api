@@ -123,6 +123,9 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
         String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
         mockMvc.perform(get("/api/v1/dispatch-orders").header("Authorization", dispatch))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.items").isArray());
+        mockMvc.perform(get("/api/v1/dispatch-orders")
+                        .header("Authorization", "Bearer " + accessToken(SALES_EMAIL, "PLATFORM")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items").isArray());
         for (String path : new String[]{"/api/v1/dispatch/loads", "/api/v1/driver/loads"}) {
             mockMvc.perform(get(path).header("Authorization", dispatch))
                     .andExpect(status().isOk()).andExpect(jsonPath("$").isArray());

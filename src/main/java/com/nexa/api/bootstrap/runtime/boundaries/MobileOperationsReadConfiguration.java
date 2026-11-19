@@ -10,6 +10,8 @@ import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequ
 import com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.fulfillmentdelivery.application.FulfillmentDeliveryComposition;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
@@ -24,6 +26,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationMode
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -104,7 +107,19 @@ public class MobileOperationsReadConfiguration {
                 TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
                 WarehouseObjectAccess warehouses, WorkforceDirectory workforce) {
             var runner = new TenantBoundFulfillmentDeliveryRequestRunner(router, compositions, warehouses, workforce);
-            return runner::read;
+            return new FulfillmentDeliveryReadRunner() {
+                @Override
+                public <T> T read(CurrentAccessContext context, Requirements requirements,
+                                  Function<FulfillmentDeliveryComposition, T> query) {
+                    return runner.read(context, requirements, query);
+                }
+
+                @Override
+                public <T> T readWithAccountLocks(CurrentAccessContext context, Requirements requirements,
+                                                   Function<FulfillmentDeliveryComposition, T> query) {
+                    return runner.readWithAccountLocks(context, requirements, query);
+                }
+            };
         }
 
         @Bean
