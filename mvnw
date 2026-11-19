@@ -108,11 +108,13 @@ trim() {
 scriptDir="$(dirname "$0")"
 scriptName="$(basename "$0")"
 
-# parse distributionUrl and optional distributionSha256Sum, requires .mvn/wrapper/maven-wrapper.properties
+# Read the primary archive, optional fallback and checksums from the wrapper properties.
 while IFS="=" read -r key value; do
   case "${key-}" in
   distributionUrl) distributionUrl=$(trim "${value-}") ;;
+  distributionFallbackUrl) distributionFallbackUrl=$(trim "${value-}") ;;
   distributionSha256Sum) distributionSha256Sum=$(trim "${value-}") ;;
+  distributionTarSha256Sum) distributionTarSha256Sum=$(trim "${value-}") ;;
   esac
 done <"$scriptDir/.mvn/wrapper/maven-wrapper.properties"
 [ -n "${distributionUrl-}" ] || die "cannot read distributionUrl property in $scriptDir/.mvn/wrapper/maven-wrapper.properties"
@@ -179,6 +181,12 @@ verbose "Downloading to: $TMP_DOWNLOAD_DIR/$distributionUrlName"
 if ! command -v unzip >/dev/null; then
   distributionUrl="${distributionUrl%.zip}.tar.gz"
   distributionUrlName="${distributionUrl##*/}"
+  if [ -n "${distributionFallbackUrl-}" ]; then
+    distributionFallbackUrl="${distributionFallbackUrl%.zip}.tar.gz"
+  fi
+  if [ -n "${distributionTarSha256Sum-}" ]; then
+    distributionSha256Sum="$distributionTarSha256Sum"
+  fi
 fi
 
 # verbose opt
@@ -191,12 +199,28 @@ case "${MVNW_PASSWORD:+has-password}" in
 has-password) [ -n "${MVNW_USERNAME-}" ] || MVNW_USERNAME='' MVNW_PASSWORD='' ;;
 esac
 
-if [ -z "${MVNW_USERNAME-}" ] && command -v wget >/dev/null; then
-  verbose "Found wget ... using wget"
-  wget ${__MVNW_QUIET_WGET:+"$__MVNW_QUIET_WGET"} "$distributionUrl" -O "$TMP_DOWNLOAD_DIR/$distributionUrlName" || die "wget: Failed to fetch $distributionUrl"
-elif [ -z "${MVNW_USERNAME-}" ] && command -v curl >/dev/null; then
-  verbose "Found curl ... using curl"
-  curl ${__MVNW_QUIET_CURL:+"$__MVNW_QUIET_CURL"} -f -L -o "$TMP_DOWNLOAD_DIR/$distributionUrlName" "$distributionUrl" || die "curl: Failed to fetch $distributionUrl"
+download_archive() {
+  if command -v wget >/dev/null && wget ${__MVNW_QUIET_WGET:+"$__MVNW_QUIET_WGET"} \
+      --tries=1 --timeout=20 "$1" -O "$TMP_DOWNLOAD_DIR/$distributionUrlName"; then
+    return 0
+  fi
+  command -v curl >/dev/null && curl ${__MVNW_QUIET_CURL:+"$__MVNW_QUIET_CURL"} \
+    -f -L --connect-timeout 10 --max-time 60 -o "$TMP_DOWNLOAD_DIR/$distributionUrlName" "$1"
+}
+
+if [ -z "${MVNW_USERNAME-}" ] && (command -v wget >/dev/null || command -v curl >/dev/null); then
+  if ! download_archive "$distributionUrl"; then
+    case "${distributionFallbackUrl-}" in
+    https://*)
+      [ -z "${MVNW_REPOURL-}" ] && [ -n "${distributionSha256Sum-}" ] \
+        && [ "${distributionFallbackUrl##*/}" = "$distributionUrlName" ] || die "Failed to fetch $distributionUrl"
+      verbose "Downloading the same archive from: $distributionFallbackUrl"
+      download_archive "$distributionFallbackUrl" || die "Failed to fetch the Maven distribution from either source"
+      distributionUrl="$distributionFallbackUrl"
+      ;;
+    *) die "Failed to fetch $distributionUrl" ;;
+    esac
+  fi
 elif set_java_home; then
   verbose "Falling back to use Java to download"
   javaSource="$TMP_DOWNLOAD_DIR/Downloader.java"
