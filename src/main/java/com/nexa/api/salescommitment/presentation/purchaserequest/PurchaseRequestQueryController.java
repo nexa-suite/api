@@ -1,7 +1,7 @@
 package com.nexa.api.salescommitment.presentation.purchaserequest;
 
+import com.nexa.api.salescommitment.application.model.SalesCommitmentQueryRunner;
 import com.nexa.api.salescommitment.application.purchaserequest.model.PurchaseRequestFilter;
-import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
 import com.nexa.api.salescommitment.presentation.SalesHttpHeaders;
 import com.nexa.api.salescommitment.presentation.purchaserequest.mapper.PurchaseRequestHttpMapper;
 import com.nexa.api.salescommitment.presentation.purchaserequest.response.PurchaseRequestDetailResponse;
@@ -33,9 +33,12 @@ import java.util.List;
 @SecurityRequirement(name = "bearerAuth")
 public class PurchaseRequestQueryController {
 	private static final String ACCESS_CONTEXT_ATTRIBUTE = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-	private final PurchaseRequestUseCase sales;
+	private final SalesCommitmentQueryRunner queries;
 	private final PurchaseRequestHttpMapper mapper;
-	public PurchaseRequestQueryController(PurchaseRequestUseCase sales, PurchaseRequestHttpMapper mapper) { this.sales = sales; this.mapper = mapper; }
+	public PurchaseRequestQueryController(SalesCommitmentQueryRunner queries, PurchaseRequestHttpMapper mapper) {
+		this.queries = queries;
+		this.mapper = mapper;
+	}
 
 	@GetMapping
 	@Operation(operationId = "listPurchaseRequests")
@@ -45,33 +48,35 @@ public class PurchaseRequestQueryController {
 			@RequestParam(required = false) LocalDate createdFrom, @RequestParam(required = false) LocalDate createdTo,
 			@RequestParam(defaultValue = "0") @Min(0) int page, @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
 			@RequestParam(defaultValue = "createdAt,desc") @Pattern(regexp = "(?i)(createdAt|updatedAt),(asc|desc)") String sort) {
-		return mapper.page(sales.list(context, new PurchaseRequestFilter(status, priority, search, createdFrom, createdTo, page, size, sort)));
+		var filter = new PurchaseRequestFilter(status, priority, search, createdFrom, createdTo, page, size, sort);
+		return mapper.page(queries.purchaseRequests(context, sales -> sales.list(context, filter)));
 	}
 
 	@GetMapping("/{id}")
 	@Operation(operationId = "getPurchaseRequest")
 	@ApiResponses({@ApiResponse(responseCode = "200", description = "Purchase Request returned", headers = @Header(name = "ETag", description = "Current entity version")), @ApiResponse(responseCode = "404", description = "Purchase Request not found")})
 	public ResponseEntity<PurchaseRequestDetailResponse> detail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
-		var value = sales.detail(context, id); return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
+		var value = queries.purchaseRequests(context, sales -> sales.detail(context, id));
+		return ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.detail(value));
 	}
 
 	@GetMapping("/{id}/events")
 	@Operation(operationId = "listPurchaseRequestEvents")
 	public List<com.nexa.api.salescommitment.presentation.purchaserequest.response.PurchaseRequestEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
-		return sales.events(context, id).stream().map(mapper::event).toList();
+		return queries.purchaseRequests(context, sales -> sales.events(context, id)).stream().map(mapper::event).toList();
 	}
 
 	@GetMapping("/{id}/material-changes/current")
 	@Operation(operationId = "getCurrentPurchaseRequestMaterialChange")
 	public com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView currentMaterialChange(
 			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
-		return sales.currentMaterialChange(context, id);
+		return queries.purchaseRequests(context, sales -> sales.currentMaterialChange(context, id));
 	}
 
 	@GetMapping("/{id}/material-changes")
 	@Operation(operationId = "listPurchaseRequestMaterialChanges")
 	public List<com.nexa.api.salescommitment.application.purchaserequest.model.MaterialChangeProposalView> materialChangeHistory(
 			@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
-		return sales.materialChangeHistory(context, id);
+		return queries.purchaseRequests(context, sales -> sales.materialChangeHistory(context, id));
 	}
 }

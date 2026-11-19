@@ -174,6 +174,21 @@ both authorized reads and rejected commands before rehearsing Mobile. A
 successful empty list indicates no visible business rows; it is not evidence
 that data were seeded or a workflow completed.
 
+## Buyer request, order and delivery reads
+
+Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED=true` with the
+existing cloud router to route authenticated Buyer purchase-request and sales-order
+lists, detail and history, plus delivery tracking and receipt history, to the
+authorized Tenant database. The queries retain active Buyer account and Workspace
+checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
+binding is reported as unavailable.
+
+Keep the general Purchase Request and Fulfillment capability flags disabled.
+Draft creation, review, conversion, dispatch, receipt confirmation and live
+location are outside this read composition. Verify a visible fixture and a
+different account's fixture before treating an empty list as successful
+ownership enforcement.
+
 ## Opt-in notification push worker
 
 The cloud push composition is disabled unless

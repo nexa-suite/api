@@ -1,5 +1,6 @@
 package com.nexa.api.salescommitment.presentation.salesorder;
 
+import com.nexa.api.salescommitment.application.model.SalesCommitmentQueryRunner;
 import com.nexa.api.salescommitment.application.salesorder.model.SalesOrderFilter;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.salescommitment.presentation.SalesHttpHeaders;
@@ -30,8 +31,14 @@ import org.springframework.format.annotation.DateTimeFormat;
 @SecurityRequirement(name = "bearerAuth")
 public final class SalesOrderQueryController {
 	private static final String ACCESS_CONTEXT_ATTRIBUTE = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-	private final SalesOrderUseCase sales; private final SalesOrderHttpMapper mapper;
-	public SalesOrderQueryController(SalesOrderUseCase sales, SalesOrderHttpMapper mapper) { this.sales = sales; this.mapper = mapper; }
+	private final SalesCommitmentQueryRunner queries;
+	private final SalesOrderUseCase sales;
+	private final SalesOrderHttpMapper mapper;
+	public SalesOrderQueryController(SalesCommitmentQueryRunner queries, SalesOrderUseCase sales, SalesOrderHttpMapper mapper) {
+		this.queries = queries;
+		this.sales = sales;
+		this.mapper = mapper;
+	}
 	@GetMapping("/api/v1/sales-orders")
 	@Operation(operationId = "listSalesOrders")
 	public SalesOrderPageResponse list(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
@@ -46,17 +53,21 @@ public final class SalesOrderQueryController {
 			@RequestParam(defaultValue = "0") @Min(0) int page,
 			@RequestParam(defaultValue = "25") @Min(1) @Max(100) int size,
 			@RequestParam(defaultValue = "createdAt,desc") @Pattern(regexp = "(?i)(createdAt|updatedAt|orderNumber|priority|total|requestedDeliveryDate),(asc|desc)") String sort) {
-		return mapper.page(sales.list(context, new SalesOrderFilter(status, priority, clientAccountId, search, createdFrom, createdTo,
-				requestedDeliveryFrom, requestedDeliveryTo, page, size, sort, statuses)));
+		var filter = new SalesOrderFilter(status, priority, clientAccountId, search, createdFrom, createdTo,
+				requestedDeliveryFrom, requestedDeliveryTo, page, size, sort, statuses);
+		return mapper.page(queries.salesOrders(context, sales -> sales.list(context, filter)));
 	}
 	@GetMapping("/api/v1/sales-orders/{id}")
 	@Operation(operationId = "getSalesOrder")
 	public org.springframework.http.ResponseEntity<SalesOrderResponse> detail(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
-		var value = sales.detail(context, id); return org.springframework.http.ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.response(value));
+		var value = queries.salesOrders(context, sales -> sales.detail(context, id));
+		return org.springframework.http.ResponseEntity.ok().eTag(SalesHttpHeaders.etag(value.version())).body(mapper.response(value));
 	}
 	@GetMapping("/api/v1/sales-orders/{id}/events")
 	@Operation(operationId = "listSalesOrderEvents")
-	public List<SalesOrderEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) { return sales.events(context, id).stream().map(mapper::event).toList(); }
+	public List<SalesOrderEventResponse> events(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context, @PathVariable String id) {
+		return queries.salesOrders(context, sales -> sales.events(context, id)).stream().map(mapper::event).toList();
+	}
 	@GetMapping("/api/v1/order-fulfillment-candidates")
 	@Operation(operationId = "listOrderFulfillmentCandidates")
 	public com.nexa.api.salescommitment.presentation.salesorder.response.FulfillmentCandidatePageResponse candidates(@RequestAttribute(ACCESS_CONTEXT_ATTRIBUTE) CurrentAccessContext context,
