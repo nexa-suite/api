@@ -81,8 +81,23 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
     }
 
     private <T> T read(CurrentAccessContext context, Function<FulfillmentDeliveryComposition, T> work) {
+        return read(context, Requirements.warehouse(), work);
+    }
+
+    <T> T read(CurrentAccessContext context, Requirements requirements,
+               Function<FulfillmentDeliveryComposition, T> work) {
+        return routeQuery(context, requirements, work, true);
+    }
+
+    <T> T readWithAccountLocks(CurrentAccessContext context, Requirements requirements,
+                               Function<FulfillmentDeliveryComposition, T> work) {
+        return routeQuery(context, requirements, work, false);
+    }
+
+    private <T> T routeQuery(CurrentAccessContext context, Requirements requirements,
+                             Function<FulfillmentDeliveryComposition, T> work, boolean readOnly) {
         try {
-            return execute(context, Requirements.warehouse(), work, true);
+            return execute(context, requirements, work, readOnly);
         } catch (TenantBusinessDatabaseSchemaManifestMismatchException
                  | CannotGetJdbcConnectionException | CannotCreateTransactionException unavailable) {
             throw new TenantBusinessDatabaseUnavailableException(

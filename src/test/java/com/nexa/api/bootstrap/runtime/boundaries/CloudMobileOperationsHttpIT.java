@@ -6,8 +6,10 @@ import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantSellableSkuQuer
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
 import com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryReadRunner;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
 import com.nexa.api.support.PostgresIntegrationSupport;
@@ -81,6 +83,15 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
                         + "values (?,?,?,?,'ACTIVE',?,current_timestamp)", tenant, workspace,
                 UUID.fromString(membershipId(WAREHOUSE_EMAIL)), grantedWarehouse, UUID.fromString(membershipId(OWNER_EMAIL)));
         String warehouse = "Bearer " + accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        mockMvc.perform(get("/api/v1/warehouses").param("size", "100")
+                        .header("Authorization", warehouse))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.id == '" + grantedWarehouse + "')]").isNotEmpty())
+                .andExpect(jsonPath("$.items[?(@.id == '" + hiddenWarehouse + "')]").isEmpty());
+        mockMvc.perform(get("/api/v1/warehouses/{id}", grantedWarehouse).header("Authorization", warehouse))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(grantedWarehouse.toString()));
+        mockMvc.perform(get("/api/v1/warehouses/{id}", hiddenWarehouse).header("Authorization", warehouse))
+                .andExpect(status().isNotFound());
         var response = mockMvc.perform(get("/api/v1/inventory/lots").param("catalogItemId", sku.item())
                         .param("size", "100").header("Authorization", warehouse))
                 .andExpect(status().isOk()).andReturn();
@@ -104,6 +115,25 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
         mockMvc.perform(get("/api/v1/inventory/lots").param("warehouseId", hiddenWarehouse.toString())
                         .header("Authorization", warehouse))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+    }
+
+    @Test
+    void dispatchNavigationUsesRoutedReadsAndRequiresLogisticsPermission() throws Exception {
+        String dispatch = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        mockMvc.perform(get("/api/v1/dispatch-orders").header("Authorization", dispatch))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items").isArray());
+        mockMvc.perform(get("/api/v1/dispatch-orders")
+                        .header("Authorization", "Bearer " + accessToken(SALES_EMAIL, "PLATFORM")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items").isArray());
+        for (String path : new String[]{"/api/v1/dispatch/loads", "/api/v1/driver/loads"}) {
+            mockMvc.perform(get(path).header("Authorization", dispatch))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$").isArray());
+            mockMvc.perform(get(path)).andExpect(status().isUnauthorized());
+            mockMvc.perform(get(path).header("Authorization", buyer)).andExpect(status().isForbidden());
+        }
+        mockMvc.perform(get("/api/v1/dispatch/loads/{id}", UUID.randomUUID()).header("Authorization", dispatch))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -157,6 +187,25 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadComposition {
+        @Bean @Primary
+        FulfillmentDeliveryReadRunner cloudFulfillmentDeliveryReadRunnerForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
+                WarehouseObjectAccess warehouses, WorkforceDirectory workforce) {
+            return new MobileOperationsReadConfiguration.CloudReads().cloudFulfillmentDeliveryReadRunner(
+                    router, compositions, warehouses, workforce);
+        }
+
+        @Bean @Primary
+        WarehouseDirectoryRead cloudWarehouseDirectoryReadForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantWarehouseOperationsCompositionFactory compositions, TenantCustomerAccountQueryFactory accounts,
+                TenantSellableSkuQueryFactory skus, TenantSalesOrderFulfillmentQueryFactory orders,
+                TenantFulfillmentInventoryQueryFactory fulfillment, TenantBusinessEvidenceQueryFactory evidence,
+                TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
+                WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
+            return new MobileOperationsReadConfiguration.CloudReads().cloudWarehouseDirectoryRead(router, compositions,
+                    accounts, skus, orders, fulfillment, evidence, events, traceability, warehouses, settings);
+        }
+
         @Bean @Primary
         InventoryLotsRead cloudInventoryLotsReadForHttpTest(TenantBusinessDatabaseRouter router,
                 TenantWarehouseOperationsCompositionFactory compositions, TenantCustomerAccountQueryFactory accounts,

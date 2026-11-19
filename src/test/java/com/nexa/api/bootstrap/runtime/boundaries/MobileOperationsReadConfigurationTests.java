@@ -6,9 +6,11 @@ import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantSellableSkuQuer
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryReadRunner;
 import com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
@@ -32,7 +34,8 @@ class MobileOperationsReadConfigurationTests {
     void cloudReadsRequireExplicitOptInAndLeaveGeneralRunnersUntouched() {
         context().run(ctx -> {
             assertThat(ctx).hasNotFailed().doesNotHaveBean("cloudInventoryLotsRead")
-                    .doesNotHaveBean("cloudPickingWorkRead");
+                    .doesNotHaveBean("cloudPickingWorkRead").doesNotHaveBean("cloudWarehouseDirectoryRead")
+                    .doesNotHaveBean("cloudFulfillmentDeliveryReadRunner");
         });
         context().withPropertyValues("nexa.tenant-business.cloud-operations-read.enabled=true").run(ctx -> {
             assertThat(ctx).hasNotFailed().hasBean("cloudInventoryLotsRead").hasBean("cloudPickingWorkRead");
@@ -43,7 +46,10 @@ class MobileOperationsReadConfigurationTests {
             when(ctx.getBean(OperationalSettingsAccess.class).find(any())).thenReturn(Optional.empty());
             ctx.getBean(InventoryLotsRead.class).list(scope, null, null, null, null, 0, 25, "expirationDate,asc");
             ctx.getBean(PickingWorkRead.class).list(scope, 0, 25);
-            verify(ctx.getBean(TenantBusinessDatabaseRouter.class), times(2)).inReadOnlyTransaction(any(), any());
+            ctx.getBean(WarehouseDirectoryRead.class).list(scope, 0, 25, "code,asc");
+            ctx.getBean(FulfillmentDeliveryReadRunner.class).read(scope,
+                    FulfillmentDeliveryRequestRunner.Requirements.warehouse(), composition -> null);
+            verify(ctx.getBean(TenantBusinessDatabaseRouter.class), times(4)).inReadOnlyTransaction(any(), any());
             verifyNoInteractions(ctx.getBean(WarehouseOperationsRequestRunner.class),
                     ctx.getBean(FulfillmentDeliveryRequestRunner.class));
         });
@@ -79,7 +85,7 @@ class MobileOperationsReadConfigurationTests {
             var fallbackWarehouse = new TenantBoundWarehouseOperationsConfiguration().unavailableWarehouseOperationsRequestRunner();
             var warehouse = new com.nexa.api.inventoryavailability.presentation.WarehouseController(fallbackWarehouse,
                     mock(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands.class),
-                    ctx.getBean(InventoryLotsRead.class));
+                    ctx.getBean(InventoryLotsRead.class), ctx.getBean(WarehouseDirectoryRead.class));
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> warehouse.blockLot(scope, "lot", null, "key",
                     new com.nexa.api.inventoryavailability.presentation.WarehouseController.ReasonRequest("reason"), null))
                     .isInstanceOf(com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationsStoreUnavailableException.class);

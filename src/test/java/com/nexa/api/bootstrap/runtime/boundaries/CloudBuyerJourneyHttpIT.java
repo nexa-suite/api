@@ -126,6 +126,32 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    void salesQueriesUseTenantDataAndRestrictOrdersToAssignedAccounts() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID salesperson = UUID.fromString(membershipId(SALES_EMAIL));
+        UUID buyer = UUID.fromString(membershipId(BUYER_EMAIL));
+        UUID assigned = seedAccount(tenant, workspace);
+        UUID unassigned = seedAccount(tenant, workspace);
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=? where id=?",
+                salesperson, assigned);
+        UUID request = seedPurchaseRequest(tenant, workspace, buyer, assigned);
+        UUID visible = seedOrder(tenant, workspace, salesperson, assigned);
+        UUID hidden = seedOrder(tenant, workspace, salesperson, unassigned);
+        String token = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        mockMvc.perform(get("/api/v1/purchase-requests/{id}", request).header("Authorization", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(request.toString()));
+        mockMvc.perform(get("/api/v1/sales-orders").param("size", "100").header("Authorization", token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id", hasItem(visible.toString())))
+                .andExpect(jsonPath("$.items[*].id", not(hasItem(hidden.toString()))));
+        mockMvc.perform(get("/api/v1/sales-orders/{id}", visible).header("Authorization", token))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/sales-orders/{id}", hidden).header("Authorization", token))
+                .andExpect(status().isNotFound());
+    }
+
     private UUID seedPurchaseRequest(UUID tenant, UUID workspace, UUID buyer, UUID account) {
         UUID request = UUID.randomUUID();
         tenantJdbc().update("""
@@ -209,10 +235,10 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
                 TenantSalesCommitmentCompositionProvider provider, PurchaseRequestUseCase purchaseRequests,
                 SalesOrderUseCase salesOrders) {
             var beans = new StaticListableBeanFactory();
-            beans.addBean("cloudBuyerReads",
-                    new SalesCommitmentQueryConfiguration.CloudReads().cloudBuyerSalesReads(router, provider));
+            beans.addBean("cloudSalesReads",
+                    new SalesCommitmentQueryConfiguration.CloudReads().cloudSalesReads(router, provider, true, true));
             return new SalesCommitmentQueryConfiguration().salesCommitmentQueries(purchaseRequests, salesOrders,
-                    beans.getBeanProvider(SalesCommitmentQueryConfiguration.CloudBuyerSalesReads.class));
+                    beans.getBeanProvider(SalesCommitmentQueryConfiguration.CloudSalesReads.class));
         }
     }
 }
