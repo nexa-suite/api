@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 
-/** Keeps payment commands disabled while allowing explicitly configured Buyer receivable reads. */
+/** Selects the Buyer receivable reads and transfer reporting supplied by the cloud profile. */
 public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, PaymentWebhookIntake {
     private final BuyerReceivableRoutes buyerReceivables;
 
@@ -94,7 +94,10 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
     @Override
     public PaymentModels.PaymentView createBankTransfer(CurrentAccessContext context, UUID receivableId,
             String idempotencyKey, String transferReference, UUID proofEvidenceId) {
-        throw unavailable();
+        BuyerReceivableRoutes routes = requireBuyerReceivableRoutes(context);
+        if (!routes.bankTransferReportingEnabled()) throw unavailable();
+        return routes.write(context, session -> session.createBankTransfer(context, receivableId, idempotencyKey,
+                transferReference, proofEvidenceId));
     }
 
     @Override
@@ -103,7 +106,10 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
         throw unavailable();
     }
 
-    @Override public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext context) { throw unavailable(); }
+    @Override
+    public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext context) {
+        return readBuyerReceivable(context, session -> session.listBuyerSavedPaymentMethods(context));
+    }
     @Override public PaymentModels.BuyerPaymentMethodSetupView createBuyerPaymentMethodSetup(CurrentAccessContext context, String idempotencyKey) { throw unavailable(); }
     @Override public PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext context, UUID paymentMethodId) { throw unavailable(); }
     @Override public void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId) { throw unavailable(); }
@@ -114,18 +120,33 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
     }
 
     private <T> T readBuyerReceivable(CurrentAccessContext context, Function<TenantPaymentSession, T> read) {
+        return requireBuyerReceivableRoutes(context).read(context, read);
+    }
+
+    private BuyerReceivableRoutes requireBuyerReceivableRoutes(CurrentAccessContext context) {
         if (buyerReceivables == null || context == null || context.surface() != Surface.PORTAL
                 || !context.hasRole(MembershipRole.BUYER)) {
             throw unavailable();
         }
-        return buyerReceivables.read(context, read);
+        return buyerReceivables;
     }
 
-    record BuyerReceivableRoutes(TenantBusinessDatabaseRouter router, TenantPaymentServiceBindingsFactory services) {
+    record BuyerReceivableRoutes(TenantBusinessDatabaseRouter router, TenantPaymentServiceBindingsFactory services,
+                                boolean bankTransferReportingEnabled) {
         private <T> T read(CurrentAccessContext context, Function<TenantPaymentSession, T> query) {
             try {
                 return router.inTenantSession(context, session -> session.inReadOnlyTransaction(
                         jdbc -> query.apply(services.bindTo(jdbc, session.transactionManager()))));
+            } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
+                     | DataAccessException | CannotCreateTransactionException failure) {
+                throw unavailable(failure);
+            }
+        }
+
+        private <T> T write(CurrentAccessContext context, Function<TenantPaymentSession, T> command) {
+            try {
+                return router.inTenantSession(context, session ->
+                        command.apply(services.bindTo(session.jdbcTemplate(), session.transactionManager())));
             } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                      | DataAccessException | CannotCreateTransactionException failure) {
                 throw unavailable(failure);

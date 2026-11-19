@@ -13,6 +13,8 @@ import org.springframework.test.context.TestPropertySource;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -63,10 +65,23 @@ class CloudBuyerReceivableReadsHttpIT extends PostgresIntegrationSupport {
         mockMvc.perform(get(RECEIVABLES)).andExpect(status().isUnauthorized());
         mockMvc.perform(get(RECEIVABLES).header("Authorization", owner))
                 .andExpect(status().isServiceUnavailable());
-        mockMvc.perform(post(RECEIVABLES + "/{id}/bank-transfer-payments", own).header("Authorization", buyer)
-                        .header("Idempotency-Key", "unchanged-" + UUID.randomUUID())
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"reference\":\"SYNTHETIC\"}"))
-                .andExpect(status().isServiceUnavailable());
+        mockMvc.perform(get("/api/v1/buyer/payment-methods").header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$").isArray());
+        String transfer = RECEIVABLES + "/{id}/bank-transfer-payments";
+        String key = "cloud-transfer-" + UUID.randomUUID();
+        String body = "{\"reference\":\"SYNTHETIC\"}";
+        mockMvc.perform(post(transfer, foreign).header("Authorization", buyer).header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post(transfer, own).header("Authorization", buyer).header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("PROCESSING"));
+        }
+        assertThat(tenantJdbc().queryForObject("select count(*) from payments.payment where receivable_id=?",
+                Integer.class, own)).isEqualTo(1);
+        assertThat(tenantJdbc().queryForObject("select amount_paid from payments.receivable where id=?",
+                java.math.BigDecimal.class, own)).isEqualByComparingTo("0");
     }
 
     private UUID seedReceivable(UUID tenant, UUID workspace, UUID account) {
@@ -85,7 +100,7 @@ class CloudBuyerReceivableReadsHttpIT extends PostgresIntegrationSupport {
         @Bean
         TenantPaymentUnavailableAdapter.BuyerReceivableRoutes cloudBuyerReceivablesForHttpTest(
                 TenantBusinessDatabaseRouter router, TenantPaymentServiceBindingsFactory services) {
-            return new TenantPaymentUnavailableConfiguration().cloudBuyerReceivableRoutes(router, services);
+            return new TenantPaymentUnavailableConfiguration().cloudBuyerReceivableRoutes(router, services, true);
         }
     }
 }
