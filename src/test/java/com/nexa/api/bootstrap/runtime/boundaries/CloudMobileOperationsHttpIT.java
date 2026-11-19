@@ -9,6 +9,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryReadRunner;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.inventoryavailability.application.port.InventoryTransfersRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
@@ -140,6 +141,67 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
     }
 
     @Test
+    void transferListFiltersDestinationAndRequiresBothWarehouseGrants() throws Exception {
+        UUID tenant = UUID.fromString(tenantId()), workspace = UUID.fromString(workspaceId());
+        UUID source = UUID.randomUUID(), destination = UUID.randomUUID(), hidden = UUID.randomUUID();
+        UUID sourceLot = UUID.randomUUID(), destinationLot = UUID.randomUUID(), hiddenLot = UUID.randomUUID();
+        UUID actor = UUID.fromString(membershipId(WAREHOUSE_EMAIL));
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        var db = tenantJdbc();
+        var sku = db.query("select id,coalesce(nullif(legacy_catalog_item_id,''),sku_code) item_id,unit_of_measure "
+                        + "from catalog_management.sellable_sku where tenant_id=? and workspace_id=? and status='ACTIVE' order by sku_code limit 1",
+                (rs, row) -> new Sku(rs.getObject("id", UUID.class), rs.getString("item_id"), rs.getString("unit_of_measure")),
+                tenant, workspace).stream().findFirst().orElseThrow();
+        seedLot(db, tenant, workspace, source, sourceLot, "S" + suffix, sku);
+        seedLot(db, tenant, workspace, destination, destinationLot, "D" + suffix, sku);
+        seedLot(db, tenant, workspace, hidden, hiddenLot, "H" + suffix, sku);
+        UUID visible = seedTransfer(db, tenant, workspace, source, sourceLot, destination, destinationLot, sku, actor);
+        seedTransfer(db, tenant, workspace, hidden, hiddenLot, destination, destinationLot, sku, actor);
+        seedTransfer(db, tenant, workspace, source, sourceLot, hidden, hiddenLot, sku, actor);
+        UUID owner = UUID.fromString(membershipId(OWNER_EMAIL));
+        for (UUID warehouse : new UUID[]{source, destination}) {
+            jdbc.update("insert into tenant_management.warehouse_access_grant "
+                    + "(tenant_id,workspace_id,membership_id,warehouse_id,status,changed_by_membership_id,changed_at) "
+                    + "values (?,?,?,?,'ACTIVE',?,current_timestamp)", tenant, workspace, actor, warehouse, owner);
+        }
+        String token = "Bearer " + accessToken(WAREHOUSE_EMAIL, "PLATFORM");
+        mockMvc.perform(get("/api/v1/inventory/transfers").param("destinationWarehouseId", destination.toString())
+                        .param("page", "0").param("size", "1").header("Authorization", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(visible.toString()))
+                .andExpect(jsonPath("$.total").value(1)).andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(1));
+        mockMvc.perform(get("/api/v1/inventory/transfers").param("destinationWarehouseId", hidden.toString())
+                        .header("Authorization", token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.total").value(0));
+        mockMvc.perform(get("/api/v1/inventory/transfers").param("destinationWarehouseId", destination.toString()))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/inventory/transfers").param("destinationWarehouseId", destination.toString())
+                        .header("Authorization", "Bearer " + accessToken(BUYER_EMAIL, "PORTAL")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/inventory/transfers").header("Authorization", token)
+                        .header("Idempotency-Key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    private static UUID seedTransfer(org.springframework.jdbc.core.JdbcTemplate db, UUID tenant, UUID workspace,
+            UUID source, UUID sourceLot, UUID destination, UUID destinationLot, Sku sku, UUID actor) {
+        UUID id = UUID.randomUUID();
+        UUID sourceZone = db.queryForObject("select zone_id from warehouse.inventory_lot where id=?", UUID.class, sourceLot);
+        UUID destinationZone = db.queryForObject("select zone_id from warehouse.inventory_lot where id=?", UUID.class, destinationLot);
+        db.update("insert into warehouse.inventory_transfer (id,tenant_id,workspace_id,source_warehouse_id,source_zone_id,"
+                + "source_lot_id,destination_warehouse_id,destination_zone_id,sku_id,catalog_item_id,batch_number,expiration_date,"
+                + "requested_quantity,transferred_quantity,unit,mode,status,reason,source_quantity_before,source_version_before,"
+                + "actor_membership_id,correlation_id,created_at,version) "
+                + "values (?,?,?,?,?,?,?,?,?,?,?,current_date+30,1,0,?,'PARTIAL','REQUESTED','test',10,0,?,?,current_timestamp,0)",
+                id, tenant, workspace, source, sourceZone, sourceLot, destination, destinationZone, sku.id(), sku.item(),
+                "TEST", sku.unit(), actor, "test");
+        return id;
+    }
+
+    @Test
     void dispatchNavigationUsesRoutedReadsAndRequiresLogisticsPermission() throws Exception {
         String dispatch = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
         String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
@@ -236,6 +298,17 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
                 TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
                 WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
             return new MobileOperationsReadConfiguration.CloudReads().cloudInventoryLotsRead(router, compositions,
+                    accounts, skus, orders, fulfillment, evidence, events, traceability, warehouses, settings);
+        }
+
+        @Bean @Primary
+        InventoryTransfersRead cloudInventoryTransfersReadForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantWarehouseOperationsCompositionFactory compositions, TenantCustomerAccountQueryFactory accounts,
+                TenantSellableSkuQueryFactory skus, TenantSalesOrderFulfillmentQueryFactory orders,
+                TenantFulfillmentInventoryQueryFactory fulfillment, TenantBusinessEvidenceQueryFactory evidence,
+                TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
+                WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
+            return new MobileOperationsReadConfiguration.CloudReads().cloudInventoryTransfersRead(router, compositions,
                     accounts, skus, orders, fulfillment, evidence, events, traceability, warehouses, settings);
         }
 
