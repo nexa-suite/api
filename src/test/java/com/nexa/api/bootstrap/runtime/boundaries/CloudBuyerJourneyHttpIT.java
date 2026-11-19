@@ -1,6 +1,8 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
+import com.nexa.api.creditreceivables.tenantdatabase.TenantBuyerCreditExposureReaderFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.fulfillmentdelivery.application.port.BuyerDeliveryTrackingRequestRunner;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantBuyerDeliveryTrackingQueryFactory;
@@ -35,6 +37,37 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import(CloudBuyerJourneyHttpIT.ReadComposition.class)
 class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
     private static final String DELIVERIES = "/api/v1/buyer/deliveries";
+
+    @Test
+    void buyerReadsOnlyOwnTenantCreditAndWorkforceCannotUseTheBuyerRoute() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID account = tenantJdbc().queryForObject(
+                "select id from sales.client_account where tenant_id=? and workspace_id=? and code='CLI-001'",
+                UUID.class, tenant, workspace);
+        UUID otherAccount = seedAccount(tenant, workspace);
+        tenantJdbc().update("""
+                insert into payments.credit_account
+                    (id,tenant_id,workspace_id,client_account_id,currency,credit_limit,status,version,created_at,updated_at)
+                values (?,?,?,?,'USD',750,'ACTIVE',0,current_timestamp,current_timestamp),
+                       (?,?,?,?,'USD',999,'ACTIVE',0,current_timestamp,current_timestamp)
+                """, UUID.randomUUID(), tenant, workspace, account,
+                UUID.randomUUID(), tenant, workspace, otherAccount);
+        String route = "/api/v1/client-accounts/me/credit-exposure";
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String logistics = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+
+        mockMvc.perform(get(route).param("currency", "USD").param("clientAccountId", otherAccount.toString())
+                        .header("Authorization", buyer))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.clientAccountId").value(account.toString()))
+                .andExpect(jsonPath("$.currency").value("USD"))
+                .andExpect(jsonPath("$.creditLimit").value(750))
+                .andExpect(jsonPath("$.active").value(true));
+        mockMvc.perform(get(route)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(route).header("Authorization", logistics)).andExpect(status().isForbidden());
+    }
 
     @Test
     void buyerReadsOnlyOwnTenantDeliveriesAndWriteRoutesRemainUnavailable() throws Exception {
@@ -195,6 +228,14 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadComposition {
+        @Bean
+        @Primary
+        BuyerCreditExposureReader cloudBuyerCreditExposureReadsForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantBuyerCreditExposureReaderFactory credit, TenantCustomerAccountQueryFactory accounts) {
+            return new BuyerCreditExposureReadConfiguration.CloudReads()
+                    .cloudBuyerCreditExposureReads(router, credit, accounts);
+        }
+
         @Bean
         @Primary
         BuyerDeliveryTrackingRequestRunner cloudBuyerDeliveryTrackingReadsForHttpTest(

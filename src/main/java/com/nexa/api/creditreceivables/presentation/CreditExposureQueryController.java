@@ -1,5 +1,6 @@
 package com.nexa.api.creditreceivables.presentation;
 
+import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import jakarta.servlet.http.HttpServletResponse;
@@ -28,9 +29,11 @@ import java.util.UUID;
 public class CreditExposureQueryController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final CreditExposureUseCase service;
+    private final BuyerCreditExposureReader buyerCredit;
 
-    public CreditExposureQueryController(CreditExposureUseCase service) {
+    public CreditExposureQueryController(CreditExposureUseCase service, BuyerCreditExposureReader buyerCredit) {
         this.service = service;
+        this.buyerCredit = buyerCredit;
     }
 
     @GetMapping("/me/credit-exposure")
@@ -41,7 +44,7 @@ public class CreditExposureQueryController {
             @RequestParam(defaultValue = "PEN") @Pattern(regexp = "[A-Za-z]{3}") String currency,
             HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-store");
-        return service.readBuyer(context, currency);
+        return buyerCredit.readBuyer(context, currency);
     }
 
     @GetMapping("/{clientAccountId}/credit-exposure")
