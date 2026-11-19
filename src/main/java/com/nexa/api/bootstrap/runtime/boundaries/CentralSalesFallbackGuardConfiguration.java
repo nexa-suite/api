@@ -67,7 +67,9 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     DirectOrderUseCase centralFallbackDirectOrderUseCase(
             @Qualifier("directOrderUseCase") DirectOrderUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var checkout = cloud.getIfAvailable();
+        if (checkout != null) return checkout.directOrders();
         return CentralFallbackUseCaseGuard.protect(DirectOrderUseCase.class, delegate, guard);
     }
 

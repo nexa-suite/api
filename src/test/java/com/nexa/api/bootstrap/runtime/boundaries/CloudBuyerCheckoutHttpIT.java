@@ -3,7 +3,13 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseAuthority;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestCompositionFactory;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
+import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantSellableSkuQueryFactory;
+import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerRelationshipsCompositionFactory;
+import com.nexa.api.inventoryavailability.tenantdatabase.TenantCatalogAvailabilityAdapterFactory;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.RegionalCurrencyQuery;
 import com.nexa.api.salescommitment.application.policy.BuyerDeliveryLeadBusinessPolicy;
 import com.nexa.api.support.NexaWorkflowIntegrationSupport;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.ActiveSalesMembershipDirectory;
@@ -147,6 +153,47 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
                 """, String.class, UUID.fromString(delivery), order, id)).isEqualTo("COMPLETED");
     }
 
+    @Test
+    void sellerReadsAnAssignedCustomerOfferAndConfirmsTheDirectOrder() throws Exception {
+        ensureCommercialInventory();
+        String account = buyerClientAccountId();
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=? where id=?",
+                UUID.fromString(membershipId(SALES_EMAIL)), UUID.fromString(account));
+        String sales = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String offer = "/api/v1/client-accounts/{id}/catalog-offers/CAT-0002";
+        String direct = "/api/v1/direct-orders";
+        mockMvc.perform(get(offer, account).param("quantity", "1").header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.clientAccountId").value(account))
+                .andExpect(jsonPath("$.unitPrice.amount").isNumber());
+        mockMvc.perform(get(offer, UUID.randomUUID()).header("Authorization", sales))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(offer, account).header("Authorization", buyer)).andExpect(status().isForbidden());
+        mockMvc.perform(get(direct + "/delivery-policy").header("Authorization", sales)).andExpect(status().isOk());
+        mockMvc.perform(get(direct + "/delivery-policy").header("Authorization", buyer)).andExpect(status().isForbidden());
+        String date = new BuyerDeliveryLeadBusinessPolicy().minimumAllowedDeliveryDate(Clock.systemUTC()).toString();
+        String body = """
+                {"clientAccountId":"%s","priority":"NORMAL","requestedDeliveryDate":"%s",
+                  "deliveryProfileSnapshot":"Direct order delivery","paymentOption":"IMMEDIATE",
+                  "lines":[{"catalogItemId":"CAT-0002","quantity":1,"unit":"UNIT"}]}
+                """.formatted(account, date);
+        String key = "cloud-direct-" + uuid();
+        String orderId = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            var result = mockMvc.perform(post(direct).header("Authorization", sales).header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("CONFIRMED"))
+                    .andExpect(jsonPath("$.originType").value("DIRECT_ORDER")).andReturn();
+            String current = json(result).path("id").asText();
+            if (orderId != null) assertThat(current).isEqualTo(orderId);
+            orderId = current;
+        }
+        assertThat(tenantJdbc().queryForObject("select count(*) from sales.sales_order where id=?",
+                Integer.class, UUID.fromString(orderId))).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from sales.sales_order where id=?",
+                Integer.class, UUID.fromString(orderId))).isZero();
+    }
+
     private String dispatchOrder(UUID order, MvcResult orderView, String warehouse) throws Exception {
         var fulfill = post("/api/v1/sales-orders/{id}/fulfillments", order);
         var created = command(fulfill, warehouse, orderView, null, 201);
@@ -279,6 +326,15 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
         @Bean
         TenantSalesCommitmentCompositionProvider cloudSalesProviderForCheckoutTest(AutowireCapableBeanFactory factory) {
             return factory.createBean(TenantSalesCommitmentCompositionProviderAdapter.class);
+        }
+
+        @Bean
+        TenantCatalogCommercialPolicyRequestPort.CustomerOfferReader cloudCustomerOfferForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantCustomerAccountQueryFactory accounts,
+                TenantSellableSkuQueryFactory skus, TenantCatalogAvailabilityAdapterFactory availability,
+                TenantCatalogCommercialPolicyRequestCompositionFactory compositions, RegionalCurrencyQuery currency) {
+            return new TenantBoundCatalogCommercialPolicyConfiguration().cloudCustomerOfferReader(router, accounts,
+                    skus, availability, compositions, currency);
         }
 
         @Bean
