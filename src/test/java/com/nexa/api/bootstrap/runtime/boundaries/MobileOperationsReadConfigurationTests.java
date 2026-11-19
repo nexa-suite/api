@@ -85,7 +85,8 @@ class MobileOperationsReadConfigurationTests {
             var fallbackWarehouse = new TenantBoundWarehouseOperationsConfiguration().unavailableWarehouseOperationsRequestRunner();
             var warehouse = new com.nexa.api.inventoryavailability.presentation.WarehouseController(fallbackWarehouse,
                     mock(com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands.class),
-                    ctx.getBean(InventoryLotsRead.class), ctx.getBean(WarehouseDirectoryRead.class));
+                    ctx.getBean(InventoryLotsRead.class), ctx.getBean(WarehouseDirectoryRead.class),
+                    ctx.getBeanProvider(com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner.Receiving.class));
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> warehouse.blockLot(scope, "lot", null, "key",
                     new com.nexa.api.inventoryavailability.presentation.WarehouseController.ReasonRequest("reason"), null))
                     .isInstanceOf(com.nexa.api.inventoryavailability.application.publicapi.WarehouseOperationsStoreUnavailableException.class);

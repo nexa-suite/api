@@ -160,6 +160,30 @@ public class MobileOperationsReadConfiguration {
         }
 
         @Bean
+        WarehouseOperationsRequestRunner.Receiving cloudWarehouseReceiving(TenantBusinessDatabaseRouter router,
+                TenantWarehouseOperationsCompositionFactory compositions, TenantCustomerAccountQueryFactory accounts,
+                TenantSellableSkuQueryFactory skus, TenantSalesOrderFulfillmentQueryFactory orders,
+                TenantFulfillmentInventoryQueryFactory fulfillment, TenantBusinessEvidenceQueryFactory evidence,
+                TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
+                WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
+            var runner = new TenantBoundWarehouseOperationsRequestRunner(router, compositions, accounts, skus,
+                    orders, fulfillment, evidence, events, traceability, warehouses, settings);
+            return new WarehouseOperationsRequestRunner.Receiving() {
+                @Override
+                public WarehouseOperationsService.Page<WarehouseOperationsService.ZoneSummary> zones(
+                        CurrentAccessContext context, String warehouseId, int page, int size) {
+                    return runner.read(context, service -> service.zones(context, warehouseId, page, size));
+                }
+
+                @Override
+                public WarehouseOperationsService.LotSummary receive(CurrentAccessContext context,
+                        WarehouseOperationsService.Receipt receipt, String key, String correlation) {
+                    return runner.execute(context, service -> service.receive(context, receipt, key, correlation));
+                }
+            };
+        }
+
+        @Bean
         @Primary
         PickingWorkRead cloudPickingWorkRead(TenantBusinessDatabaseRouter router,
                 TenantFulfillmentDeliveryCompositionProviderAdapter compositions,

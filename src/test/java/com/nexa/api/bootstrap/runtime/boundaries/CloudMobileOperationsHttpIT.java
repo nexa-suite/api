@@ -10,6 +10,7 @@ import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRead
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
+import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
 import com.nexa.api.support.PostgresIntegrationSupport;
@@ -92,6 +93,27 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(grantedWarehouse.toString()));
         mockMvc.perform(get("/api/v1/warehouses/{id}", hiddenWarehouse).header("Authorization", warehouse))
                 .andExpect(status().isNotFound());
+        var zones = mockMvc.perform(get("/api/v1/warehouses/{id}/zones", grantedWarehouse)
+                        .header("Authorization", warehouse))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1)).andReturn();
+        mockMvc.perform(get("/api/v1/warehouses/{id}/zones", hiddenWarehouse).header("Authorization", warehouse))
+                .andExpect(status().isNotFound());
+        String zone = tools.jackson.databind.json.JsonMapper.shared().readTree(zones.getResponse().getContentAsString())
+                .path("items").get(0).path("id").asText();
+        String batch = "RECEIVE-" + suffix;
+        String receipt = """
+                {"warehouseId":"%s","zoneId":"%s","catalogItemId":"%s","skuId":"%s","batchNumber":"%s",
+                  "expirationDate":"2099-12-31","quantity":1,"unit":"%s"}
+                """.formatted(grantedWarehouse, zone, sku.item(), sku.id(), batch, sku.unit());
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post("/api/v1/inventory/inbound-receipts").header("Authorization", warehouse)
+                            .header("Idempotency-Key", batch).contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                            .content(receipt))
+                    .andExpect(status().isCreated());
+        }
+        org.assertj.core.api.Assertions.assertThat(tenantJdbc.queryForObject(
+                "select stock_quantity from warehouse.inventory_lot where warehouse_id=? and batch_number=?",
+                java.math.BigDecimal.class, grantedWarehouse, batch)).isEqualByComparingTo("1");
         var response = mockMvc.perform(get("/api/v1/inventory/lots").param("catalogItemId", sku.item())
                         .param("size", "100").header("Authorization", warehouse))
                 .andExpect(status().isOk()).andReturn();
@@ -214,6 +236,17 @@ class CloudMobileOperationsHttpIT extends PostgresIntegrationSupport {
                 TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
                 WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
             return new MobileOperationsReadConfiguration.CloudReads().cloudInventoryLotsRead(router, compositions,
+                    accounts, skus, orders, fulfillment, evidence, events, traceability, warehouses, settings);
+        }
+
+        @Bean
+        WarehouseOperationsRequestRunner.Receiving cloudWarehouseReceivingForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantWarehouseOperationsCompositionFactory compositions, TenantCustomerAccountQueryFactory accounts,
+                TenantSellableSkuQueryFactory skus, TenantSalesOrderFulfillmentQueryFactory orders,
+                TenantFulfillmentInventoryQueryFactory fulfillment, TenantBusinessEvidenceQueryFactory evidence,
+                TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
+                WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
+            return new MobileOperationsReadConfiguration.CloudReads().cloudWarehouseReceiving(router, compositions,
                     accounts, skus, orders, fulfillment, evidence, events, traceability, warehouses, settings);
         }
 
