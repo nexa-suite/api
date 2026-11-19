@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
+import java.sql.SQLException;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,6 +45,9 @@ class CloudTenantNotificationPushCompositionIT {
 
     @BeforeAll static void createScopeReader() throws Exception {
         try (var connection = POSTGRES.createConnection(""); var sql = connection.createStatement()) {
+            sql.execute("create role neondb_owner createrole");
+            sql.execute("create role scope_reader_fixture_group nologin");
+            sql.execute("alter database test owner to neondb_owner");
             sql.execute("create role nexa_business_documents_scope_reader login password 'test-only-scope-reader' "
                     + "noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls");
             sql.execute("create schema tenant_management");
@@ -69,13 +73,8 @@ class CloudTenantNotificationPushCompositionIT {
     }
 
     @Test void singleBindingScopeReaderFiltersOtherReadyTenantsBeforePaging() {
-        HikariConfig config = new HikariConfig();
-        config.setJdbcUrl(POSTGRES.getJdbcUrl());
-        config.setUsername("nexa_business_documents_scope_reader");
-        config.setPassword("test-only-scope-reader");
-        config.setMaximumPoolSize(1);
         UUID tenant = new UUID(0,1);
-        try (var reader = new JdbcTenantBusinessDocumentWorkerScopeQuery(new HikariDataSource(config), tenant)) {
+        try (var reader = JdbcTenantBusinessDocumentWorkerScopeQuery.forCloudBinding(scopeReaderPool(), tenant)) {
             var first = reader.listReadyWorkspaces(null,null,1);
             assertThat(first).containsExactly(new TenantBusinessDocumentWorkerScopeQuery.Scope(tenant,new UUID(1,1)));
             assertThat(reader.listReadyWorkspaces(tenant,first.getFirst().workspaceId(),100))
@@ -88,6 +87,42 @@ class CloudTenantNotificationPushCompositionIT {
         }
     }
 
+    @Test void scopeReaderAcceptsOnlyTheNeonCreatorGrantInCloud() throws SQLException {
+        UUID tenant = new UUID(0, 1);
+        UUID workspace = new UUID(1, 1);
+        try (var connection = POSTGRES.createConnection(""); var sql = connection.createStatement();
+             var cloudReader = JdbcTenantBusinessDocumentWorkerScopeQuery.forCloudBinding(scopeReaderPool(), tenant);
+             var localReader = new JdbcTenantBusinessDocumentWorkerScopeQuery(scopeReaderPool())) {
+            sql.execute("grant nexa_business_documents_scope_reader to neondb_owner with admin true, inherit false, set false");
+            try {
+                assertThat(cloudReader.isReadyWorkspace(tenant, workspace)).isTrue();
+                assertThatThrownBy(() -> localReader.isReadyWorkspace(tenant, workspace))
+                        .hasMessageContaining("Dedicated Business Documents scope-reader role is required");
+
+                sql.execute("grant nexa_business_documents_scope_reader to neondb_owner with set true");
+                assertThatThrownBy(() -> cloudReader.isReadyWorkspace(tenant, workspace))
+                        .hasMessageContaining("Dedicated Business Documents scope-reader role is required");
+
+                sql.execute("grant nexa_business_documents_scope_reader to neondb_owner with set false");
+                sql.execute("grant scope_reader_fixture_group to nexa_business_documents_scope_reader with inherit false, set false");
+                assertThatThrownBy(() -> cloudReader.isReadyWorkspace(tenant, workspace))
+                        .hasMessageContaining("Dedicated Business Documents scope-reader role is required");
+            } finally {
+                sql.execute("revoke scope_reader_fixture_group from nexa_business_documents_scope_reader");
+                sql.execute("revoke nexa_business_documents_scope_reader from neondb_owner");
+            }
+        }
+    }
+
+    private static HikariDataSource scopeReaderPool() {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(POSTGRES.getJdbcUrl());
+        config.setUsername("nexa_business_documents_scope_reader");
+        config.setPassword("test-only-scope-reader");
+        config.setMaximumPoolSize(1);
+        return new HikariDataSource(config);
+    }
+
     @Test void migrationAndRouterRequireAnIsolatedNotificationWorker() throws Exception {
         String migration;
         try (var source = getClass().getClassLoader().getResourceAsStream(
@@ -96,8 +131,6 @@ class CloudTenantNotificationPushCompositionIT {
         }
         String precondition = migration.substring(0, migration.indexOf("END $$;") + "END $$;".length());
         try (var connection = POSTGRES.createConnection(""); var sql = connection.createStatement()) {
-            sql.execute("create role neondb_owner createrole");
-            sql.execute("alter database test owner to neondb_owner");
             sql.execute("set role neondb_owner");
             sql.execute("create role nexa_notification_push_worker login noinherit password 'test-only-notification-worker'");
             sql.execute("reset role");
