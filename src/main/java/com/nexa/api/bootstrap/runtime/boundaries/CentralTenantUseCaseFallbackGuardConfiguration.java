@@ -62,8 +62,11 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
     @Conditional(CentralCustomerRelationshipsRouteNotSelected.class)
     CreditExposureUseCase centralFallbackCreditExposureUseCase(
             @Qualifier("creditExposureApplicationService") CreditExposureUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
-        return CentralFallbackUseCaseGuard.protect(CreditExposureUseCase.class, delegate, guard);
+            CentralTenantBusinessDataAccessGuard guard,
+            ObjectProvider<BuyerCreditExposureReadConfiguration.CloudWorkforceCreditExposure> cloud) {
+        var workforce = cloud.getIfAvailable();
+        return workforce == null ? CentralFallbackUseCaseGuard.protect(CreditExposureUseCase.class, delegate, guard)
+                : workforce.useCase();
     }
 
     @Bean

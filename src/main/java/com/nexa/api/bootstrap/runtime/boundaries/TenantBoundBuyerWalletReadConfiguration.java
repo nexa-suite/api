@@ -9,8 +9,11 @@ import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFact
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 
 /** Supplies one explicit Tenant-only wallet reader or a closed unavailable port. */
 @Configuration(proxyBeanMethods = false)
@@ -30,6 +33,15 @@ public class TenantBoundBuyerWalletReadConfiguration {
         if (availableRouter == null || availableCustomerAccounts == null) return unavailable();
         return new TenantBoundBuyerWalletReadPort(availableRouter, availableCustomerAccounts, walletAdapters,
                 expiryPolicies.getIfAvailable(), salesCommitments.getIfAvailable(), metrics.getIfAvailable());
+    }
+
+    @Bean
+    @Primary
+    @Profile("tenant-cloud")
+    @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-buyer-journey-read", name = "enabled", havingValue = "true")
+    BuyerWalletReadPort cloudBuyerWalletReadPort(TenantBusinessDatabaseRouter router,
+            TenantCustomerAccountQueryFactory customerAccounts, BuyerWalletTenantDatabaseAdapterFactory walletAdapters) {
+        return new TenantBoundBuyerWalletReadPort(router, customerAccounts, walletAdapters);
     }
 
     private static BuyerWalletReadPort unavailable() {
