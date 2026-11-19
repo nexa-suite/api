@@ -51,6 +51,10 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 				&& !enabled(environment, "nexa.tenant-business.cloud-router.enabled")) {
 			throw new IllegalStateException("Cloud operations reads require the explicit cloud router");
 		}
+		if (enabled(environment, "nexa.tenant-business.cloud-buyer-journey-read.enabled")
+				&& !enabled(environment, "nexa.tenant-business.cloud-router.enabled")) {
+			throw new IllegalStateException("Cloud Buyer journey reads require the explicit cloud router");
+		}
 		if (enabled(environment, "nexa.tenant-business.cloud-notification-push.enabled")
                 && (!enabled(environment, "nexa.tenant-business.cloud-router.enabled")
                     || !enabled(environment, "nexa.tenant-business.notifications.enabled")
