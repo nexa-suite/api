@@ -10,6 +10,8 @@ import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerRelationshipsCompositionFactory;
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
+import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
+import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.ActiveSalesMembershipDirectory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.BuyerMembershipDirectory;
@@ -22,7 +24,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
-/** Selects the existing Buyer draft, submission and account-address use cases for the cloud router. */
+/** Selects the existing Buyer checkout and Sales queue use cases for the cloud router. */
 @Configuration(proxyBeanMethods = false)
 @Profile("tenant-cloud")
 @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-buyer-checkout", name = "enabled", havingValue = "true")
@@ -37,12 +39,15 @@ public class CloudBuyerCheckoutConfiguration {
         var policies = new TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver(
                 settings, router, authority, policyWriter);
         var drafts = new TenantBoundPurchaseRequestDraftPort(router, policies, sales);
+        var requests = new TenantBoundPurchaseRequestUseCase(router, policies, sales);
+        var orders = new TenantBoundSalesOrderUseCase(router, policies, sales, false);
         var addresses = new TenantBoundCustomerRelationshipsUseCase(router, accounts, buyers,
                 salesMemberships, traceability);
-        return new Routes(drafts, addresses);
+        return new Routes(drafts, addresses, requests, orders);
     }
 
-    record Routes(PurchaseRequestDraftPort drafts, ClientAccountAddressUseCase buyerAddresses) {
+    record Routes(PurchaseRequestDraftPort drafts, ClientAccountAddressUseCase buyerAddresses,
+                  PurchaseRequestUseCase purchaseRequests, SalesOrderUseCase salesOrders) {
         ClientAccountAddressUseCase routeAccountAddresses(ClientAccountAddressUseCase existing) {
             return new ClientAccountAddressUseCase() {
                 private ClientAccountAddressUseCase forCaller(CurrentAccessContext context) {

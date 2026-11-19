@@ -39,7 +39,7 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
     private static final String ADDRESSES = "/api/v1/client-accounts/{accountId}/addresses";
 
     @Test
-    void buyerCreatesAddressAndSubmitsDraftToTheScopedTenantDatabase() throws Exception {
+    void buyerSubmitsAndSalesConvertsTheSameScopedRequest() throws Exception {
         ensureCommercialInventory();
         String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
         String account = buyerClientAccountId();
@@ -90,7 +90,8 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
                 """.formatted(date));
         mockMvc.perform(get(draft + "/review").header("Authorization", buyer).header("X-Nexa-Client", "NATIVE"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.readyToSubmit").value(true));
-        mockMvc.perform(post(draft + "/submissions").header("Authorization", buyer).header("X-Nexa-Client", "NATIVE")
+        mockMvc.perform(post(draft + "/submissions")
+                        .header("Authorization", buyer).header("X-Nexa-Client", "NATIVE")
                         .header("If-Match", preferences.getResponse().getHeader("ETag"))
                         .header("Idempotency-Key", "cloud-checkout-" + uuid()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(draftId))
@@ -102,6 +103,30 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
         assertThat(jdbc.queryForObject(
                 "select count(*) from sales.purchase_request where id=?", Integer.class, id)).isZero();
         mockMvc.perform(get(draft)).andExpect(status().isUnauthorized());
+
+        String request = "/api/v1/purchase-requests/" + draftId;
+        String sales = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        var current = mockMvc.perform(get(request).header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("SUBMITTED")).andReturn();
+        mockMvc.perform(post(request + "/reviews").header("Authorization", buyer)
+                        .header("If-Match", current.getResponse().getHeader("ETag")))
+                .andExpect(status().isForbidden());
+        var reviewed = mockMvc.perform(post(request + "/reviews").header("Authorization", sales)
+                        .header("If-Match", current.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andReturn();
+        var approved = mockMvc.perform(post(request + "/approvals").header("Authorization", sales)
+                        .header("If-Match", reviewed.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andReturn();
+        var converted = mockMvc.perform(post(request + "/order-conversions").header("Authorization", sales)
+                        .header("If-Match", approved.getResponse().getHeader("ETag"))
+                        .header("Idempotency-Key", "cloud-convert-" + uuid())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("CONFIRMED")).andReturn();
+        UUID order = UUID.fromString(json(converted).path("id").asText());
+        assertThat(tenantJdbc().queryForObject(
+                "select source_purchase_request_id from sales.sales_order where id=?", UUID.class, order)).isEqualTo(id);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from sales.sales_order where id=?", Integer.class, order)).isZero();
     }
 
     private MvcResult changeDraft(MockHttpServletRequestBuilder request, String buyer, MvcResult previous,

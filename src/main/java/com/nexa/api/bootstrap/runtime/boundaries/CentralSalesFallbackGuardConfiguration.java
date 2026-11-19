@@ -39,7 +39,9 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     PurchaseRequestUseCase centralFallbackPurchaseRequestUseCase(
             @Qualifier("purchaseRequestUseCase") PurchaseRequestUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var checkout = cloud.getIfAvailable();
+        if (checkout != null) return checkout.purchaseRequests();
         return CentralFallbackUseCaseGuard.protect(PurchaseRequestUseCase.class, delegate, guard);
     }
 
@@ -55,7 +57,9 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     SalesOrderUseCase centralFallbackSalesOrderUseCase(
             @Qualifier("salesOrderUseCase") SalesOrderUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var checkout = cloud.getIfAvailable();
+        if (checkout != null) return checkout.salesOrders();
         return CentralFallbackUseCaseGuard.protect(SalesOrderUseCase.class, delegate, guard);
     }
 

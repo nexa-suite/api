@@ -191,15 +191,16 @@ ownership enforcement.
 ## Buyer checkout
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_CHECKOUT_ENABLED=true` with Buyer
-journey reads and the verified cloud router to route the existing native Buyer
-draft and submission endpoints. Buyer account addresses use the same scoped
+journey reads and the verified cloud router to route the existing Buyer draft
+and submission endpoints and the Sales review and conversion commands.
+Buyer account addresses use the same scoped
 Tenant database and active relationship check. Submission verifies the current
 Workspace expiry policy and performs inventory backing, request persistence and
 outbox recording within the routed transaction.
 
-Rehearse address selection, draft submission and a denied foreign account
-request with synthetic data on isolated cloud databases before activation.
-Sales conversion, dispatch and receipt confirmation require their own command
+Rehearse address selection, draft submission, Sales conversion and a denied
+foreign account request with synthetic data on isolated cloud databases before
+activation. Dispatch and receipt confirmation require their own command
 composition.
 
 ## Opt-in notification push worker
