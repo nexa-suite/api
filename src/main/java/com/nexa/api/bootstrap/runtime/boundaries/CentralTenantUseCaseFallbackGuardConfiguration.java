@@ -8,6 +8,7 @@ import com.nexa.api.customerbuyerrelationships.application.clientaccount.port.Cl
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.application.fieldvisit.port.FieldVisitUseCase;
 import com.nexa.api.edge.streaming.ChangeFeedReadUseCase;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
@@ -41,8 +42,10 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
     @Conditional(CentralCustomerRelationshipsRouteNotSelected.class)
     ClientAccountAddressUseCase centralFallbackClientAccountAddressUseCase(
             @Qualifier("clientAccountAddressUseCase") ClientAccountAddressUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
-        return CentralFallbackUseCaseGuard.protect(ClientAccountAddressUseCase.class, delegate, guard);
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var existing = CentralFallbackUseCaseGuard.protect(ClientAccountAddressUseCase.class, delegate, guard);
+        var checkout = cloud.getIfAvailable();
+        return checkout == null ? existing : checkout.routeAccountAddresses(existing);
     }
 
     @Bean

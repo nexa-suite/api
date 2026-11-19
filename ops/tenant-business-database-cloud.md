@@ -184,10 +184,23 @@ checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
 binding is reported as unavailable.
 
 Keep the general Purchase Request and Fulfillment capability flags disabled.
-Draft creation, review, conversion, dispatch, receipt confirmation and live
-location are outside this read composition. Verify a visible fixture and a
+Verify a visible fixture and a
 different account's fixture before treating an empty list as successful
 ownership enforcement.
+
+## Buyer checkout
+
+Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_CHECKOUT_ENABLED=true` with Buyer
+journey reads and the verified cloud router to route the existing native Buyer
+draft and submission endpoints. Buyer account addresses use the same scoped
+Tenant database and active relationship check. Submission verifies the current
+Workspace expiry policy and performs inventory backing, request persistence and
+outbox recording within the routed transaction.
+
+Rehearse address selection, draft submission and a denied foreign account
+request with synthetic data on isolated cloud databases before activation.
+Sales conversion, dispatch and receipt confirmation require their own command
+composition.
 
 ## Opt-in notification push worker
 
