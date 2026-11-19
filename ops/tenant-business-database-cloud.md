@@ -178,12 +178,12 @@ both authorized reads and rejected commands before rehearsing Mobile. A
 successful empty list indicates no visible business rows; it is not evidence
 that data were seeded or a workflow completed.
 
-## Buyer request, order and delivery reads
+## Buyer request, order, delivery and credit reads
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED=true` with the
 existing cloud router to route authenticated Buyer purchase-request and sales-order
-lists, detail and history, plus delivery tracking and receipt history, to the
-authorized Tenant database. The queries retain active Buyer account and Workspace
+lists, detail and history, delivery tracking and receipt history, and the
+current Buyer credit exposure to the authorized Tenant database. The queries retain active Buyer account and Workspace
 checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
 binding is reported as unavailable.
 
