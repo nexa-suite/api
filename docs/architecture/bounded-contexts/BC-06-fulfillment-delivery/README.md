@@ -33,6 +33,13 @@ fulfillment, driver, assignment and evidence-storage identifiers. The timeline
 uses stored handoff, transit, attempt and sealed-POD facts, and omits actor and
 reason text.
 
+In the `tenant-cloud` profile, enabling
+`nexa.tenant-business.cloud-buyer-journey-read.enabled` routes delivery list,
+detail, events, and Buyer receipt history through one read-only transaction in
+the verified Tenant database. The Customer Account and Sales Order owner
+queries use that same transaction. Live Driver location and delivery commands
+are outside this cloud capability.
+
 ## Driver incidents and operational exceptions
 
 The assigned Driver incident route is `POST

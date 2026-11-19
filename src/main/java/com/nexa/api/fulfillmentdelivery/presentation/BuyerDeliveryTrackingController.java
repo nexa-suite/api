@@ -4,7 +4,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingM
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.EventView;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.Page;
 import com.nexa.api.fulfillmentdelivery.application.model.BuyerDeliveryTrackingModels.ReceiptView;
-import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.BuyerDeliveryTrackingRequestRunner;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -30,9 +30,9 @@ import java.util.UUID;
 @SecurityRequirement(name = "bearerAuth")
 public final class BuyerDeliveryTrackingController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
-    private final FulfillmentDeliveryRequestRunner requests;
+    private final BuyerDeliveryTrackingRequestRunner requests;
 
-    public BuyerDeliveryTrackingController(FulfillmentDeliveryRequestRunner requests) {
+    public BuyerDeliveryTrackingController(BuyerDeliveryTrackingRequestRunner requests) {
         this.requests = requests;
     }
 
@@ -41,16 +41,16 @@ public final class BuyerDeliveryTrackingController {
     public PageResponse<DeliveryResponse> list(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                                 @RequestParam(defaultValue = "0") int page,
                                                 @RequestParam(defaultValue = "25") int size) {
-        return page(requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.none(),
-                composition -> composition.buyerTracking().list(context, page, size)));
+        return page(requests.execute(context,
+                tracking -> tracking.list(context, page, size)));
     }
 
     @GetMapping("/{deliveryId}")
     @Operation(operationId = "getBuyerDelivery")
     public ResponseEntity<DeliveryResponse> detail(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                                     @PathVariable UUID deliveryId) {
-        DeliveryView value = requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.none(),
-                composition -> composition.buyerTracking().detail(context, deliveryId));
+        DeliveryView value = requests.execute(context,
+                tracking -> tracking.detail(context, deliveryId));
         return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));
     }
 
@@ -58,8 +58,8 @@ public final class BuyerDeliveryTrackingController {
     @Operation(operationId = "listBuyerDeliveryEvents")
     public List<EventResponse> events(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                       @PathVariable UUID deliveryId) {
-        return requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.none(),
-                composition -> composition.buyerTracking().events(context, deliveryId)).stream()
+        return requests.execute(context,
+                tracking -> tracking.events(context, deliveryId)).stream()
                 .map(event -> new EventResponse(event.type(), event.occurredAt())).toList();
     }
 
@@ -67,8 +67,8 @@ public final class BuyerDeliveryTrackingController {
     @Operation(operationId = "listBuyerDeliveryReceipts")
     public List<ReceiptResponse> receipts(@RequestAttribute(ACCESS) CurrentAccessContext context,
                                           @PathVariable UUID deliveryId) {
-        return requests.execute(context, FulfillmentDeliveryRequestRunner.Requirements.none(),
-                composition -> composition.buyerTracking().receipts(context, deliveryId)).stream()
+        return requests.execute(context,
+                tracking -> tracking.receipts(context, deliveryId)).stream()
                 .map(BuyerDeliveryTrackingController::receiptResponse).toList();
     }
 

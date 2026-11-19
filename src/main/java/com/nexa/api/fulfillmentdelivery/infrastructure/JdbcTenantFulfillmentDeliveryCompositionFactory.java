@@ -1,7 +1,9 @@
 package com.nexa.api.fulfillmentdelivery.infrastructure;
 
+import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.fulfillmentdelivery.application.FulfillmentDeliveryComposition;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.BuyerDeliveryTrackingQueries;
 import com.nexa.api.fulfillmentdelivery.application.publicapi.DispatchWorkflowCommands;
 import com.nexa.api.fulfillmentdelivery.application.service.MobileDeliveryContractService;
 import com.nexa.api.fulfillmentdelivery.application.service.BuyerDeliveryTrackingService;
@@ -40,8 +42,10 @@ import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcMobileDel
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcOperationalExceptionPersistenceAdapter;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcOutgoingGoodsCheckAdapter;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.OperationalHandoffPersistenceAdapter;
+import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantBuyerDeliveryTrackingQueryFactory;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentDeliveryCompositionFactory;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentDeliveryCompositionFactory.Bindings;
+import com.nexa.api.salescommitment.application.publicapi.SalesOrderFulfillmentQuery;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WorkforceDirectory;
 import org.springframework.context.annotation.Profile;
@@ -58,7 +62,7 @@ import java.util.Objects;
 @Component
 @Profile("!test")
 public final class JdbcTenantFulfillmentDeliveryCompositionFactory
-        implements TenantFulfillmentDeliveryCompositionFactory {
+        implements TenantFulfillmentDeliveryCompositionFactory, TenantBuyerDeliveryTrackingQueryFactory {
     private final Clock clock;
     private final ObjectMapper mapper;
     private final Duration handoffTtl;
@@ -69,6 +73,13 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
         this.clock = Objects.requireNonNull(clock);
         this.mapper = Objects.requireNonNull(mapper);
         this.handoffTtl = Objects.requireNonNull(handoffTtl);
+    }
+
+    @Override
+    public BuyerDeliveryTrackingQueries bindBuyerTracking(JdbcTemplate tenantJdbc, CustomerAccountQuery accounts,
+                                                           SalesOrderFulfillmentQuery orders) {
+        return new BuyerDeliveryTrackingService(new JdbcBuyerDeliveryTrackingQueryAdapter(
+                Objects.requireNonNull(tenantJdbc, "Tenant JDBC session is required"), orders), accounts, orders);
     }
 
     @Override
@@ -112,8 +123,7 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
                 new JdbcDriverDeliveryPersistenceAdapter(jdbc, false), lifecycle, clock);
         DriverTrackingService driverTracking = new DriverTrackingService(new JdbcDriverTrackingAdapter(jdbc),
                 workforce, accounts, orders, readiness, clock);
-        BuyerDeliveryTrackingService buyerTracking = new BuyerDeliveryTrackingService(
-                new JdbcBuyerDeliveryTrackingQueryAdapter(jdbc, orders), accounts, orders);
+        BuyerDeliveryTrackingQueries buyerTracking = bindBuyerTracking(jdbc, accounts, orders);
         var operationalExceptions = new JdbcOperationalExceptionPersistenceAdapter(jdbc);
         DispatchWindowPlanService dispatchWindowPlans = new DispatchWindowPlanService(
                 new JdbcDispatchWindowPlanPersistenceAdapter(jdbc), readiness, bindings.physicalAllocations(), clock);
