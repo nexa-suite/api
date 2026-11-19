@@ -26,13 +26,21 @@ public final class TenantBoundSalesOrderUseCase implements SalesOrderUseCase {
     private final TenantBusinessDatabaseRouter router;
     private final TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies;
     private final TenantSalesCommitmentCompositionProvider compositions;
+    private final boolean walletRefundsEnabled;
 
     public TenantBoundSalesOrderUseCase(TenantBusinessDatabaseRouter router,
             TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
             TenantSalesCommitmentCompositionProvider compositions) {
+        this(router, expiryPolicies, compositions, true);
+    }
+
+    TenantBoundSalesOrderUseCase(TenantBusinessDatabaseRouter router,
+            TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver expiryPolicies,
+            TenantSalesCommitmentCompositionProvider compositions, boolean walletRefundsEnabled) {
         this.router = java.util.Objects.requireNonNull(router);
         this.expiryPolicies = java.util.Objects.requireNonNull(expiryPolicies);
         this.compositions = java.util.Objects.requireNonNull(compositions);
+        this.walletRefundsEnabled = walletRefundsEnabled;
     }
 
     @Override public SalesOrderView convert(CurrentAccessContext c, String request, long version,
@@ -84,6 +92,7 @@ public final class TenantBoundSalesOrderUseCase implements SalesOrderUseCase {
 
     private <T> T callRefundCapability(CurrentAccessContext context,
             Function<SalesOrderUseCase, T> action) {
+        if (!walletRefundsEnabled) throw new BuyerWalletRefundUnavailableException();
         try {
             return call(context, action);
         } catch (TenantBusinessDatabaseUnavailableException

@@ -8,6 +8,7 @@ import com.nexa.api.salescommitment.application.salesorder.export.port.SalesOrde
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderDraftUseCase;
 import com.nexa.api.salescommitment.application.salesorder.port.ManualSalesOrderUseCase;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -28,7 +29,9 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     PurchaseRequestDraftPort centralFallbackPurchaseRequestDraftPort(
             @Qualifier("purchaseRequestDraftService") PurchaseRequestDraftPort delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var checkout = cloud.getIfAvailable();
+        if (checkout != null) return checkout.drafts();
         return CentralFallbackUseCaseGuard.protect(PurchaseRequestDraftPort.class, delegate, guard);
     }
 
@@ -36,7 +39,9 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     PurchaseRequestUseCase centralFallbackPurchaseRequestUseCase(
             @Qualifier("purchaseRequestUseCase") PurchaseRequestUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var checkout = cloud.getIfAvailable();
+        if (checkout != null) return checkout.purchaseRequests();
         return CentralFallbackUseCaseGuard.protect(PurchaseRequestUseCase.class, delegate, guard);
     }
 
@@ -52,7 +57,9 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     SalesOrderUseCase centralFallbackSalesOrderUseCase(
             @Qualifier("salesOrderUseCase") SalesOrderUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var checkout = cloud.getIfAvailable();
+        if (checkout != null) return checkout.salesOrders();
         return CentralFallbackUseCaseGuard.protect(SalesOrderUseCase.class, delegate, guard);
     }
 

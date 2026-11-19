@@ -55,6 +55,15 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
 				&& !enabled(environment, "nexa.tenant-business.cloud-router.enabled")) {
 			throw new IllegalStateException("Cloud Buyer journey reads require the explicit cloud router");
 		}
+		if (enabled(environment, "nexa.tenant-business.cloud-buyer-checkout.enabled")
+				&& !enabled(environment, "nexa.tenant-business.cloud-buyer-journey-read.enabled")) {
+			throw new IllegalStateException("Cloud Buyer checkout requires the explicit cloud Buyer journey reads");
+		}
+		if (enabled(environment, "nexa.tenant-business.cloud-mobile-fulfillment.enabled")
+				&& (!enabled(environment, "nexa.tenant-business.cloud-buyer-checkout.enabled")
+				|| !enabled(environment, "nexa.tenant-business.cloud-operations-read.enabled"))) {
+			throw new IllegalStateException("Cloud mobile fulfillment requires Buyer checkout and Operations reads");
+		}
 		if (enabled(environment, "nexa.tenant-business.cloud-notification-push.enabled")
                 && (!enabled(environment, "nexa.tenant-business.cloud-router.enabled")
                     || !enabled(environment, "nexa.tenant-business.notifications.enabled")

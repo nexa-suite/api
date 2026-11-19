@@ -78,6 +78,10 @@ public final class TenantBoundWarehouseOperationsRequestRunner implements Wareho
         return execute(context, operation, false);
     }
 
+    <T> T read(CurrentAccessContext context, Function<WarehouseOperationsService, T> query) {
+        return execute(context, query, true);
+    }
+
     public WarehouseOperationsService.Page<WarehouseOperationsService.LotSummary> listLots(
             CurrentAccessContext context, String catalogItemId, String warehouseId, String zoneId,
             String status, int page, int size, String sort) {

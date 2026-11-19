@@ -5,7 +5,9 @@ import com.nexa.api.fulfillmentdelivery.application.model.LogisticsOperationsMod
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService;
 import com.nexa.api.fulfillmentdelivery.application.LogisticsOperationsService.LogisticsException;
 import com.nexa.api.fulfillmentdelivery.application.model.DriverDeliveryModels;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryReadRunner;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperations;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -32,20 +34,23 @@ import java.util.function.Function;
 public final class LogisticsController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
     private final FulfillmentDeliveryRequestRunner requests;
-    public LogisticsController(FulfillmentDeliveryRequestRunner requests) {
+    private final FulfillmentDeliveryReadRunner reads;
+
+    public LogisticsController(FulfillmentDeliveryRequestRunner requests, FulfillmentDeliveryReadRunner reads) {
         this.requests = requests;
+        this.reads = reads;
     }
 
-    @GetMapping("/dispatch-orders") public PageResponse<DispatchResponse> dispatches(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required=false) String status, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="25") int size, @RequestParam(defaultValue="updatedAt,desc") String sort) { return page(runLogistics(c, service -> service.list(c,status,page,size,sort))); }
-    @GetMapping("/dispatch-assignees") @Operation(operationId = "listDispatchAssignees") public List<LogisticsOperationsModels.AssigneeView> assignees(@RequestAttribute(ACCESS) CurrentAccessContext c) { return runLogistics(c, FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(), service -> service.assignees(c)); }
-    @GetMapping("/dispatch-orders/{id}") public ResponseEntity<DispatchResponse> dispatch(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){LogisticsOperationsModels.DispatchView value=runLogistics(c, service -> service.detail(c,id));return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));}
+    @GetMapping("/dispatch-orders") public PageResponse<DispatchResponse> dispatches(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestParam(required=false) String status, @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="25") int size, @RequestParam(defaultValue="updatedAt,desc") String sort) { return page(readLogistics(c, service -> service.list(c,status,page,size,sort))); }
+    @GetMapping("/dispatch-assignees") @Operation(operationId = "listDispatchAssignees") public List<LogisticsOperationsModels.AssigneeView> assignees(@RequestAttribute(ACCESS) CurrentAccessContext c) { return reads.read(c, FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignees(), composition -> composition.logistics().assignees(c)); }
+    @GetMapping("/dispatch-orders/{id}") public ResponseEntity<DispatchResponse> dispatch(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){LogisticsOperationsModels.DispatchView value=readLogistics(c, service -> service.detail(c,id));return ResponseEntity.ok().eTag(etag(value.version())).body(response(value));}
     @GetMapping("/dispatch-orders/{id}/deliveries")
     @Operation(operationId = "listDispatchOrderDeliveries",
             description = "Returns each Delivery linked to the Dispatch Order and its POD linked by deliveryId. A Dispatch Order may have zero or multiple Deliveries.")
     public DispatchDeliveriesResponse dispatchDeliveries(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                          @PathVariable @Parameter(description = "Dispatch Order UUID",
                                                                  schema = @Schema(type = "string", format = "uuid")) String id) {
-        LogisticsOperationsModels.DispatchDeliveriesView value = runLogistics(c,
+        LogisticsOperationsModels.DispatchDeliveriesView value = readLogistics(c,
                 service -> service.dispatchDeliveries(c, id));
         return new DispatchDeliveriesResponse(value.dispatchOrderId(), value.deliveries().stream()
                 .map(delivery -> new DispatchDeliveryResponse(delivery.deliveryId(), delivery.fulfillmentId(),
@@ -57,8 +62,8 @@ public final class LogisticsController {
                                 delivery.pod().signatureEvidenceDeclared())))
                 .toList());
     }
-    @GetMapping("/dispatch-orders/{id}/events") public List<DispatchEventResponse> events(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return runLogistics(c, service -> service.events(c,id)).stream().map(this::event).toList();}
-    @GetMapping("/dispatch-orders/{id}/handoff-notes") public List<HandoffNoteResponse> handoffNotes(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return runLogistics(c, service -> service.handoffNotes(c,id)).stream().map(this::handoffNote).toList();}
+    @GetMapping("/dispatch-orders/{id}/events") public List<DispatchEventResponse> events(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return readLogistics(c, service -> service.events(c,id)).stream().map(this::event).toList();}
+    @GetMapping("/dispatch-orders/{id}/handoff-notes") public List<HandoffNoteResponse> handoffNotes(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id){return readLogistics(c, service -> service.handoffNotes(c,id)).stream().map(this::handoffNote).toList();}
     @PostMapping("/inventory-reservations/{reservationId}/dispatch-orders") @Operation(operationId = "createDispatchOrder") public ResponseEntity<DispatchResponse> create(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String reservationId,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key){return created(response(runLogistics(c, service -> service.create(c,reservationId,version(ifMatch),key))));}
     @PostMapping("/dispatch-orders/{id}/preparation-starts") public ResponseEntity<DispatchResponse> prepare(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key){return mutation(runLogistics(c, service -> service.prepare(c,id,version(ifMatch),key)));}
     @PostMapping("/dispatch-orders/{id}/assignments") public ResponseEntity<DispatchResponse> assign(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable String id,@RequestHeader(name="If-Match",required=false) String ifMatch,@RequestHeader(name="Idempotency-Key",required=false) String key,@RequestBody AssignmentRequest r){return mutation(runLogistics(c, FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignable(assignableIds(r)), service -> service.assign(c,id,version(ifMatch),key,r.responsibleMembershipId(),r.vehicleReference(),r.routeName())));}
@@ -92,7 +97,7 @@ public final class LogisticsController {
         }
         if ("id,asc".equals(sort)) order = Comparator.comparing(DriverDeliveryModels.DeliveryView::id);
         if ("id,desc".equals(sort)) order = Comparator.comparing(DriverDeliveryModels.DeliveryView::id).reversed();
-        List<DispatchResponse> assigned = requests.execute(c, FulfillmentDeliveryRequestRunner.Requirements.driver(),
+        List<DispatchResponse> assigned = reads.read(c, FulfillmentDeliveryRequestRunner.Requirements.driver(),
                 composition -> composition.driverDeliveries().listAssigned(c)).stream()
                 .filter(value -> status == null || status.isBlank() || value.status().equalsIgnoreCase(status.trim()))
                 .sorted(order)
@@ -106,7 +111,7 @@ public final class LogisticsController {
     @GetMapping("/my-deliveries/{id}")
     public ResponseEntity<DispatchResponse> myDelivery(@RequestAttribute(ACCESS) CurrentAccessContext c,
                                                        @PathVariable String id) {
-        DriverDeliveryModels.DeliveryView value = requests.execute(c,
+        DriverDeliveryModels.DeliveryView value = reads.read(c,
                 FulfillmentDeliveryRequestRunner.Requirements.driver(),
                 composition -> composition.driverDeliveries().getAssigned(c, deliveryId(id)));
         return ResponseEntity.ok().eTag(etag(value.version())).body(driverResponse(c, value));
@@ -148,6 +153,11 @@ public final class LogisticsController {
     private DispatchEventResponse event(LogisticsOperationsModels.DispatchEventView x){return new DispatchEventResponse(x.id(),x.type(),x.fromStatus(),x.toStatus(),x.occurredAt(),x.buyerVisible(),x.summary());}
     private HandoffNoteResponse handoffNote(LogisticsOperationsModels.HandoffNoteView x){return new HandoffNoteResponse(x.id(),x.dispatchOrderId(),x.note(),x.authorMembershipId(),x.occurredAt(),x.dispatchVersion());}
     private static long version(String value){if(value==null||value.isBlank())throw new LogisticsException("PRECONDITION_REQUIRED",false);try{long parsed=Long.parseLong(value.replace("\"",""));if(parsed<0)throw new NumberFormatException();return parsed;}catch(NumberFormatException e){throw new LogisticsException("PRECONDITION_REQUIRED",false);}}
+
+    private <T> T readLogistics(CurrentAccessContext context, Function<LogisticsOperations, T> work) {
+        return reads.readWithAccountLocks(context, FulfillmentDeliveryRequestRunner.Requirements.warehouse(),
+                composition -> work.apply(composition.logistics()));
+    }
 
     private <T> T runLogistics(CurrentAccessContext context,
                                Function<com.nexa.api.fulfillmentdelivery.application.publicapi.LogisticsOperations, T> work) {

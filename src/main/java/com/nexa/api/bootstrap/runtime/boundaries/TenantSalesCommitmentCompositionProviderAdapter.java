@@ -62,9 +62,8 @@ public final class TenantSalesCommitmentCompositionProviderAdapter
         static class LocalPurchaseRequests { }
 
         @Profile("tenant-cloud")
-        @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-buyer-journey-read", name = "enabled",
-                havingValue = "true")
-        static class CloudBuyerReads { }
+        @Conditional(SalesCommitmentQueryConfiguration.CloudReadsEnabled.class)
+        static class CloudSalesReads { }
     }
 
     private final TenantCustomerAccountQueryFactory customerAccounts;

@@ -5,10 +5,14 @@ import com.nexa.api.businessdocuments.tenantdatabase.TenantBusinessEvidenceQuery
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantSellableSkuQueryFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryReadRunner;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
 import com.nexa.api.fulfillmentdelivery.application.port.PickingWorkRead;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantFulfillmentInventoryQueryFactory;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.fulfillmentdelivery.application.FulfillmentDeliveryComposition;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
+import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantWarehouseOperationsCompositionFactory;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
@@ -22,6 +26,7 @@ import com.nexa.api.fulfillmentdelivery.application.model.PhysicalAllocationMode
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,6 +36,29 @@ import org.springframework.context.annotation.Profile;
 @Configuration(proxyBeanMethods = false)
 @Profile("!test")
 public class MobileOperationsReadConfiguration {
+    @Bean
+    FulfillmentDeliveryReadRunner fulfillmentDeliveryReadRunner(FulfillmentDeliveryRequestRunner requests) {
+        return requests::execute;
+    }
+
+    @Bean
+    WarehouseDirectoryRead warehouseDirectoryRead(WarehouseOperationsRequestRunner requests) {
+        return warehouseDirectory(requests);
+    }
+
+    private static WarehouseDirectoryRead warehouseDirectory(WarehouseOperationsRequestRunner queries) {
+        return new WarehouseDirectoryRead() {
+            public WarehouseOperationsService.Page<WarehouseOperationsService.WarehouseSummary> list(
+                    CurrentAccessContext c, int page, int size, String sort) {
+                return queries.execute(c, service -> service.warehouses(c, page, size, sort));
+            }
+
+            public WarehouseOperationsService.WarehouseSummary get(CurrentAccessContext c, String id) {
+                return queries.execute(c, service -> service.warehouse(c, id));
+            }
+        };
+    }
+
     @Bean
     InventoryLotsRead inventoryLotsRead(WarehouseOperationsRequestRunner requests) {
         return new InventoryLotsRead() {
@@ -73,6 +101,39 @@ public class MobileOperationsReadConfiguration {
     @Profile("tenant-cloud")
     @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-operations-read", name = "enabled", havingValue = "true")
     static class CloudReads {
+        @Bean
+        @Primary
+        FulfillmentDeliveryReadRunner cloudFulfillmentDeliveryReadRunner(TenantBusinessDatabaseRouter router,
+                TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
+                WarehouseObjectAccess warehouses, WorkforceDirectory workforce) {
+            var runner = new TenantBoundFulfillmentDeliveryRequestRunner(router, compositions, warehouses, workforce);
+            return new FulfillmentDeliveryReadRunner() {
+                @Override
+                public <T> T read(CurrentAccessContext context, Requirements requirements,
+                                  Function<FulfillmentDeliveryComposition, T> query) {
+                    return runner.read(context, requirements, query);
+                }
+
+                @Override
+                public <T> T readWithAccountLocks(CurrentAccessContext context, Requirements requirements,
+                                                   Function<FulfillmentDeliveryComposition, T> query) {
+                    return runner.readWithAccountLocks(context, requirements, query);
+                }
+            };
+        }
+
+        @Bean
+        @Primary
+        WarehouseDirectoryRead cloudWarehouseDirectoryRead(TenantBusinessDatabaseRouter router,
+                TenantWarehouseOperationsCompositionFactory compositions, TenantCustomerAccountQueryFactory accounts,
+                TenantSellableSkuQueryFactory skus, TenantSalesOrderFulfillmentQueryFactory orders,
+                TenantFulfillmentInventoryQueryFactory fulfillment, TenantBusinessEvidenceQueryFactory evidence,
+                TenantChangeEventPersistenceFactory events, TenantBusinessTraceabilityBindingsFactory traceability,
+                WarehouseObjectAccess warehouses, OperationalSettingsAccess settings) {
+            var runner = new TenantBoundWarehouseOperationsRequestRunner(router, compositions, accounts, skus,
+                    orders, fulfillment, evidence, events, traceability, warehouses, settings);
+            return warehouseDirectory(runner::read);
+        }
         @Bean
         @Primary
         InventoryLotsRead cloudInventoryLotsRead(TenantBusinessDatabaseRouter router,

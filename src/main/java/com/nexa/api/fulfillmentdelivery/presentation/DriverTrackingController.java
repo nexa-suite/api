@@ -2,6 +2,7 @@ package com.nexa.api.fulfillmentdelivery.presentation;
 
 import com.nexa.api.fulfillmentdelivery.application.model.DriverTrackingModels.*;
 import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner;
+import com.nexa.api.fulfillmentdelivery.application.port.FulfillmentDeliveryRequestRunner.Requirements;
 import com.nexa.api.fulfillmentdelivery.application.service.DriverTrackingService;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import org.springframework.context.annotation.Profile;
@@ -33,13 +34,31 @@ public class DriverTrackingController {
  @PostMapping("/driver/workdays/{id}/location-availability") @Operation(operationId="recordDriverLocationAvailability")
  public ResponseEntity<Workday> availability(@RequestAttribute(ACCESS) CurrentAccessContext c,@PathVariable UUID id,@RequestHeader("Idempotency-Key")String key,@RequestHeader("If-Match")String version,@Valid @RequestBody Availability request){return response(requests.execute(c,FulfillmentDeliveryRequestRunner.Requirements.driver(),composition->composition.driverTracking().command(c,id,version(version),request.locationAvailable()?"AVAILABLE":"UNAVAILABLE",key)));}
  @PostMapping("/driver/workdays/{id}/locations") @Operation(operationId="captureDriverWorkdayLocation")
- public Coordinate capture(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID id,@Valid @RequestBody Sample request){return requests.execute(c,FulfillmentDeliveryRequestRunner.Requirements.driver(),composition->composition.driverTracking().capture(c,id,request.sampleId(),request.latitude(),request.longitude(),request.accuracyMeters(),request.capturedAt()));}
+ public Coordinate capture(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable UUID id,
+                           @Valid @RequestBody Sample request) {
+  return requests.execute(c, Requirements.driver().withStoredDriverLocation(),
+          composition -> composition.driverTracking().capture(c, id, request.sampleId(), request.latitude(),
+                  request.longitude(), request.accuracyMeters(), request.capturedAt()));
+ }
  @GetMapping("/driver/location") @Operation(operationId="getOwnDriverLocation")
- public Coordinate own(@RequestAttribute(ACCESS)CurrentAccessContext c){return requests.execute(c,FulfillmentDeliveryRequestRunner.Requirements.driver(),composition->composition.driverTracking().ownLocation(c));}
+ public Coordinate own(@RequestAttribute(ACCESS) CurrentAccessContext c) {
+  return requests.execute(c, Requirements.driver().withStoredDriverLocation(),
+          composition -> composition.driverTracking().ownLocation(c));
+ }
  @GetMapping("/dispatch/drivers/{membershipId}/location") @Operation(operationId="getAuthorizedDispatchDriverLocation")
- public Coordinate dispatch(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID membershipId,@RequestParam(required=false) UUID deliveryId){return requests.execute(c,deliveryId==null?FulfillmentDeliveryRequestRunner.Requirements.assignable(Set.of(membershipId)):FulfillmentDeliveryRequestRunner.Requirements.warehouseAssignable(Set.of(membershipId)),composition->deliveryId==null?composition.driverTracking().dispatchLocation(c,membershipId):composition.driverTracking().dispatchLocation(c,membershipId,deliveryId));}
+ public Coordinate dispatch(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable UUID membershipId,
+                            @RequestParam(required = false) UUID deliveryId) {
+  Requirements scope = deliveryId == null ? Requirements.assignable(Set.of(membershipId))
+          : Requirements.warehouseAssignable(Set.of(membershipId));
+  return requests.execute(c, scope.withStoredDriverLocation(),
+          composition -> deliveryId == null ? composition.driverTracking().dispatchLocation(c, membershipId)
+                  : composition.driverTracking().dispatchLocation(c, membershipId, deliveryId));
+ }
  @GetMapping("/buyer/deliveries/{deliveryId}/live-location") @Operation(operationId="getBuyerOwnDeliveryLiveLocation")
- public DeliveryTracking buyer(@RequestAttribute(ACCESS)CurrentAccessContext c,@PathVariable UUID deliveryId){return requests.execute(c,FulfillmentDeliveryRequestRunner.Requirements.none(),composition->composition.driverTracking().buyerLocation(c,deliveryId));}
+ public DeliveryTracking buyer(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable UUID deliveryId) {
+  return requests.execute(c, Requirements.requiringStoredDriverLocation(),
+          composition -> composition.driverTracking().buyerLocation(c, deliveryId));
+ }
  public record Availability(@NotNull Boolean locationAvailable) { }
  public record Sample(@NotNull UUID sampleId,@NotNull Double latitude,@NotNull Double longitude,@NotNull Double accuracyMeters,@NotNull Instant capturedAt) { }
  private static ResponseEntity<Workday> response(Workday day){return day==null?ResponseEntity.noContent().build():ResponseEntity.ok().eTag("\""+day.version()+"\"").body(day);}

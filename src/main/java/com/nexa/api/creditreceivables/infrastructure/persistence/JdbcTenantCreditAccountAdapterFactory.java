@@ -1,6 +1,7 @@
 package com.nexa.api.creditreceivables.infrastructure.persistence;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
+import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
 import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigurationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigurationQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditEligibilitySource;
@@ -13,6 +14,8 @@ import com.nexa.api.creditreceivables.application.publicapi.ReceivableApplicatio
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableCommands;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivablePaymentAccess;
 import com.nexa.api.creditreceivables.application.publicapi.ReceivableNotificationSourceQuery;
+import com.nexa.api.creditreceivables.application.service.CreditExposureApplicationService;
+import com.nexa.api.creditreceivables.tenantdatabase.TenantBuyerCreditExposureReaderFactory;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantCreditAccountAdapterFactory;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.LegacyCustomerCreditInitializationQuery;
@@ -29,7 +32,8 @@ import java.util.UUID;
 /** Binds every BC-07 owner adapter to the Tenant router's current transaction session. */
 @Component
 @Profile("!test")
-public final class JdbcTenantCreditAccountAdapterFactory implements TenantCreditAccountAdapterFactory {
+public final class JdbcTenantCreditAccountAdapterFactory implements TenantCreditAccountAdapterFactory,
+        TenantBuyerCreditExposureReaderFactory {
     private final TenantLegacyCustomerCreditInitializationQueryFactory legacyCreditQueries;
     private final ObjectMapper mapper;
 
@@ -38,6 +42,13 @@ public final class JdbcTenantCreditAccountAdapterFactory implements TenantCredit
         this.legacyCreditQueries = Objects.requireNonNull(legacyCreditQueries,
                 "Tenant legacy credit query factory is required");
         this.mapper = Objects.requireNonNull(mapper, "Object mapper is required");
+    }
+
+    @Override
+    public BuyerCreditExposureReader bindBuyerExposureTo(JdbcTemplate jdbc, CustomerAccountQuery accounts,
+            CreditEligibilitySource eligibility) {
+        return new CreditExposureApplicationService(accounts, eligibility,
+                new JdbcCreditBoundary(requireTenantJdbc(jdbc), eligibility))::readBuyer;
     }
 
     @Override
