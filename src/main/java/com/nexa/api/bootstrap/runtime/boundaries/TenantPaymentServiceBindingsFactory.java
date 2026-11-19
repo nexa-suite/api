@@ -29,7 +29,7 @@ import java.util.UUID;
 
 /** Binds Payments plus BC-02/04/07/09 collaborators to one router-owned Tenant JDBC session. */
 @Component
-@Profile("local")
+@Profile("local | tenant-cloud")
 public final class TenantPaymentServiceBindingsFactory {
     private final TenantPaymentSessionFactory paymentSessions;
     private final TenantCustomerAccountQueryFactory customerAccounts;

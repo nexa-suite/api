@@ -1,10 +1,10 @@
 package com.nexa.api.creditreceivables.infrastructure.persistence;
 
 import com.nexa.api.businesstraceability.application.publicapi.BusinessTraceabilityCommands;
-import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
 import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigurationCommands;
 import com.nexa.api.creditreceivables.application.publicapi.CreditAccountConfigurationQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditEligibilitySource;
+import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureQuery;
 import com.nexa.api.creditreceivables.application.publicapi.CreditPaymentCommands;
 import com.nexa.api.creditreceivables.application.publicapi.CreditReservationCommands;
@@ -45,10 +45,10 @@ public final class JdbcTenantCreditAccountAdapterFactory implements TenantCredit
     }
 
     @Override
-    public BuyerCreditExposureReader bindBuyerExposureTo(JdbcTemplate jdbc, CustomerAccountQuery accounts,
+    public CreditExposureUseCase bindExposureTo(JdbcTemplate jdbc, CustomerAccountQuery accounts,
             CreditEligibilitySource eligibility) {
         return new CreditExposureApplicationService(accounts, eligibility,
-                new JdbcCreditBoundary(requireTenantJdbc(jdbc), eligibility))::readBuyer;
+                new JdbcCreditBoundary(requireTenantJdbc(jdbc), eligibility));
     }
 
     @Override

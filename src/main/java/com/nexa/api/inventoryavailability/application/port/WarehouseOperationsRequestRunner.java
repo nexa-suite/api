@@ -9,4 +9,14 @@ import java.util.function.Function;
 @org.springframework.modulith.NamedInterface("warehouse-operations")
 public interface WarehouseOperationsRequestRunner {
     <T> T execute(CurrentAccessContext context, Function<WarehouseOperationsService, T> operation);
+
+    @org.springframework.modulith.NamedInterface("warehouse-operations")
+    interface Receiving {
+        WarehouseOperationsService.Page<WarehouseOperationsService.ZoneSummary> zones(
+                CurrentAccessContext context, String warehouseId, int page, int size);
+
+        WarehouseOperationsService.LotSummary receive(CurrentAccessContext context,
+                WarehouseOperationsService.Receipt receipt, String key, String correlation);
+    }
+
 }

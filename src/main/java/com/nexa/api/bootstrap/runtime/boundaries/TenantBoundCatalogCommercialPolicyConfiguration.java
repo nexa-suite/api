@@ -29,4 +29,15 @@ public class TenantBoundCatalogCommercialPolicyConfiguration {
                 availabilityAdapters, compositions, regionalCurrency);
     }
 
+    @Bean
+    @Profile("tenant-cloud")
+    @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-buyer-checkout", name = "enabled", havingValue = "true")
+    TenantCatalogCommercialPolicyRequestPort.CustomerOfferReader cloudCustomerOfferReader(
+            TenantBusinessDatabaseRouter router, TenantCustomerAccountQueryFactory customerAccounts,
+            TenantSellableSkuQueryFactory sellableSkus, TenantCatalogAvailabilityAdapterFactory availabilityAdapters,
+            TenantCatalogCommercialPolicyRequestCompositionFactory compositions, RegionalCurrencyQuery regionalCurrency) {
+        return new TenantBoundCatalogCommercialPolicyRequestAdapter(router, customerAccounts, sellableSkus,
+                availabilityAdapters, compositions, regionalCurrency)::readCustomerOffer;
+    }
+
 }

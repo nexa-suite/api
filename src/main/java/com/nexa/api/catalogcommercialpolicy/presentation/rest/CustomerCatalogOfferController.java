@@ -44,17 +44,20 @@ public class CustomerCatalogOfferController {
     private final CatalogResponseMapper mapper;
     private final Clock clock;
     private final ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests;
+    private final ObjectProvider<TenantCatalogCommercialPolicyRequestPort.CustomerOfferReader> customerOffers;
     public CustomerCatalogOfferController(CatalogClientAccountPort accounts, GetCatalogItemUseCase products,
             GetCatalogItemSnapshotUseCase snapshots, CatalogResponseMapper mapper, Clock clock) {
-        this(accounts, products, snapshots, mapper, clock, null);
+        this(accounts, products, snapshots, mapper, clock, null, null);
     }
 
     @Autowired
     public CustomerCatalogOfferController(CatalogClientAccountPort accounts, GetCatalogItemUseCase products,
             GetCatalogItemSnapshotUseCase snapshots, CatalogResponseMapper mapper, Clock clock,
-            ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests) {
+            ObjectProvider<TenantCatalogCommercialPolicyRequestPort> tenantRequests,
+            ObjectProvider<TenantCatalogCommercialPolicyRequestPort.CustomerOfferReader> customerOffers) {
         this.accounts = accounts; this.products = products; this.snapshots = snapshots; this.mapper = mapper; this.clock = clock;
         this.tenantRequests = tenantRequests;
+        this.customerOffers = customerOffers;
     }
     @GetMapping("/{catalogItemId}")
     @Operation(operationId = "getCustomerCatalogOffer")
@@ -65,7 +68,8 @@ public class CustomerCatalogOfferController {
         if (context.hasRole(MembershipRole.BUYER)) throw new AccessPolicyViolation("Internal customer catalog access is unavailable to buyers");
         context.requirePermission(PermissionKey.CLIENT_READ);
         context.requirePermission(PermissionKey.CATALOG_READ);
-        OfferParts offer = CatalogHttpSupport.tenantRequest(context, tenantRequests, () -> {
+        var reader = customerOffers == null ? null : customerOffers.getIfAvailable();
+        OfferParts offer = reader == null ? CatalogHttpSupport.tenantRequest(context, tenantRequests, () -> {
             var profile = accounts.findActiveProfile(context.tenantId().value(), context.workspaceId().value(), clientAccountId)
                     .orElseThrow(() -> new ApiResourceNotFoundException("client-account"));
             var scope = new CatalogScope(context.tenantId().value(), context.workspaceId().value(), false,
@@ -74,16 +78,18 @@ public class CustomerCatalogOfferController {
             var quote = snapshots.findActive(catalogItemId, context.tenantId().value(), context.workspaceId().value(), clientAccountId, quantity)
                     .orElseThrow(() -> new ApiResourceNotFoundException("catalog-item"));
             return new OfferParts(product, quote);
-        }, request -> {
-            var tenantOffer = request.customerOffer(clientAccountId, catalogItemId, quantity);
-            var quote = tenantOffer.quote().orElseThrow(() -> new ApiResourceNotFoundException("catalog-item"));
-            return new OfferParts(tenantOffer.product(), quote);
-        });
+        }, request -> offerParts(request.customerOffer(clientAccountId, catalogItemId, quantity)))
+                : offerParts(reader.read(context, clientAccountId, catalogItemId, quantity));
         var product = mapper.toDetail(offer.product());
         var quote = offer.quote();
         return new OfferResponse(clientAccountId.toString(), product, quantity,
                 new MoneyResponse(quote.unitPriceAmount(), quote.unitPriceCurrency()), clock.instant());
     }
+    private static OfferParts offerParts(TenantCatalogCommercialPolicyRequestPort.CustomerOffer offer) {
+        return new OfferParts(offer.product(),
+                offer.quote().orElseThrow(() -> new ApiResourceNotFoundException("catalog-item")));
+    }
+
     private record OfferParts(CatalogItemDetail product, CatalogItemSnapshot quote) { }
     public record MoneyResponse(BigDecimal amount, String currency) { }
     public record OfferResponse(String clientAccountId, CatalogItemDetailResponse product, BigDecimal quantity,

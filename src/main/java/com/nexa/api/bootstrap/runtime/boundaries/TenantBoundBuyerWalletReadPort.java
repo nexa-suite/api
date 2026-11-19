@@ -26,7 +26,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Composes the local BC-02 relationship check and BC-08 read on one routed Tenant session. */
+/** Composes the BC-02 relationship check and BC-08 read on one routed Tenant session. */
 public final class TenantBoundBuyerWalletReadPort implements BuyerWalletReadPort {
     private final TenantBusinessDatabaseRouter router;
     private final TenantCustomerAccountQueryFactory customerAccounts;
@@ -69,9 +69,10 @@ public final class TenantBoundBuyerWalletReadPort implements BuyerWalletReadPort
     public BuyerWalletModels.Snapshot read(CurrentAccessContext context, UUID humanIdentityId, int page, int size) {
         requireVerifiedScope(context, humanIdentityId);
         try {
-            return router.inTransaction(context, tenantJdbc -> readWithinTenant(
+            return router.inReadOnlyTransaction(context, tenantJdbc -> readWithinTenant(
                     context, humanIdentityId, page, size, tenantJdbc));
-        } catch (TenantBusinessDatabaseUnavailableException | DataAccessException unavailable) {
+        } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
+                 | DataAccessException | CannotCreateTransactionException unavailable) {
             throw new BuyerWalletStoreUnavailableException(unavailable);
         }
     }

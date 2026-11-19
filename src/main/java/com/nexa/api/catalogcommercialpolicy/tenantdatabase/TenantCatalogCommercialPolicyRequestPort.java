@@ -27,6 +27,11 @@ public interface TenantCatalogCommercialPolicyRequestPort {
     <T> T inRequest(CurrentAccessContext accessContext, Work<T> work);
 
     @FunctionalInterface
+    interface CustomerOfferReader {
+        CustomerOffer read(CurrentAccessContext context, UUID clientAccountId, String catalogItemId, BigDecimal quantity);
+    }
+
+    @FunctionalInterface
     interface Work<T> {
         T execute(Request request);
     }

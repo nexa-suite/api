@@ -153,7 +153,7 @@ public final class TenantBusinessDatabaseRouter implements AutoCloseable {
 		public JdbcTemplate jdbcTemplate() { return jdbc; }
 		public PlatformTransactionManager transactionManager() { return transactionManager; }
 
-		private <T> T inReadOnlyTransaction(TenantBusinessDatabaseWork<T> work) {
+		public <T> T inReadOnlyTransaction(TenantBusinessDatabaseWork<T> work) {
 			TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 			transaction.setReadOnly(true);
 			transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);

@@ -1,6 +1,8 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReadPort;
+import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFactory;
 import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantBuyerCreditExposureReaderFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
@@ -33,10 +35,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Runs the cloud read composition with a real, physically separate Tenant fixture database. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-@TestPropertySource(properties = "nexa.tenant-business.fulfillment-delivery.enabled=false")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.fulfillment-delivery.enabled=false",
+        "nexa.tenant-business.purchase-request.enabled=false"
+})
 @Import(CloudBuyerJourneyHttpIT.ReadComposition.class)
 class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
     private static final String DELIVERIES = "/api/v1/buyer/deliveries";
+
+    @Test
+    void walletReadsCurrentBuyerAndReportsOrderPaymentAvailability() throws Exception {
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String logistics = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        mockMvc.perform(get("/api/v1/buyer/wallet").header("Authorization", buyer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.currency").value("PEN"))
+                .andExpect(jsonPath("$.capabilities.orderPaymentSupported").value(false));
+        mockMvc.perform(get("/api/v1/buyer/wallet").header("Authorization", logistics))
+                .andExpect(status().isForbidden());
+    }
 
     @Test
     void buyerReadsOnlyOwnTenantCreditAndWorkforceCannotUseTheBuyerRoute() throws Exception {
@@ -56,6 +73,16 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
         String route = "/api/v1/client-accounts/me/credit-exposure";
         String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
         String logistics = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String sales = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=? where id=?",
+                UUID.fromString(membershipId(SALES_EMAIL)), account);
+
+        mockMvc.perform(get("/api/v1/client-accounts/{id}/credit-exposure", account)
+                        .param("currency", "USD").header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.creditLimit").value(750));
+        mockMvc.perform(get("/api/v1/client-accounts/{id}/credit-exposure", otherAccount)
+                        .param("currency", "USD").header("Authorization", sales))
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get(route).param("currency", "USD").param("clientAccountId", otherAccount.toString())
                         .header("Authorization", buyer))
@@ -256,6 +283,20 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
     static class ReadComposition {
         @Bean
         @Primary
+        BuyerWalletReadPort cloudWalletReadsForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantCustomerAccountQueryFactory accounts, BuyerWalletTenantDatabaseAdapterFactory wallet) {
+            return new TenantBoundBuyerWalletReadConfiguration().cloudBuyerWalletReadPort(router, accounts, wallet);
+        }
+
+        @Bean
+        BuyerCreditExposureReadConfiguration.CloudWorkforceCreditExposure cloudWorkforceCreditForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantBuyerCreditExposureReaderFactory credit,
+                TenantCustomerAccountQueryFactory accounts) {
+            return new BuyerCreditExposureReadConfiguration.CloudReads().cloudWorkforceCreditExposure(router, credit, accounts);
+        }
+
+        @Bean
+        @Primary
         BuyerCreditExposureReader cloudBuyerCreditExposureReadsForHttpTest(TenantBusinessDatabaseRouter router,
                 TenantBuyerCreditExposureReaderFactory credit, TenantCustomerAccountQueryFactory accounts) {
             return new BuyerCreditExposureReadConfiguration.CloudReads()
@@ -270,6 +311,12 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
             return new BuyerDeliveryTrackingReadConfiguration.CloudReads()
                     .cloudBuyerDeliveryTrackingReads(router, tracking, accounts, orders);
         }
+        @Bean
+        TenantSalesCommitmentCompositionProvider cloudSalesProviderForJourneyTest(
+                org.springframework.beans.factory.config.AutowireCapableBeanFactory factory) {
+            return factory.createBean(TenantSalesCommitmentCompositionProviderAdapter.class);
+        }
+
         @Bean
         @Primary
         SalesCommitmentQueryRunner cloudBuyerSalesReadsForHttpTest(TenantBusinessDatabaseRouter router,
