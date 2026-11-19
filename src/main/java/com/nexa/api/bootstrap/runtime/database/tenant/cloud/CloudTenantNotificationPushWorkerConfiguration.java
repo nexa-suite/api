@@ -41,7 +41,7 @@ public class CloudTenantNotificationPushWorkerConfiguration {
         config.setMaximumPoolSize(2);
         config.setReadOnly(true);
         config.setPoolName("notification-push-scope-reader");
-        return new JdbcTenantBusinessDocumentWorkerScopeQuery(new HikariDataSource(config), boundTenantId);
+        return JdbcTenantBusinessDocumentWorkerScopeQuery.forCloudBinding(new HikariDataSource(config), boundTenantId);
     }
 
     @Bean(destroyMethod = "close")

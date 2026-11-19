@@ -30,8 +30,12 @@ public final class JdbcTenantBusinessDocumentWorkerScopeQuery
 		this(pool, null);
 	}
 
-	/** Restricts single-binding workers before enumerating central READY metadata. */
-	public JdbcTenantBusinessDocumentWorkerScopeQuery(DataSource pool, UUID boundTenantId) {
+	/** Restricts a managed cloud worker to its configured Tenant before enumerating READY metadata. */
+	public static JdbcTenantBusinessDocumentWorkerScopeQuery forCloudBinding(DataSource pool, UUID tenantId) {
+		return new JdbcTenantBusinessDocumentWorkerScopeQuery(pool, Objects.requireNonNull(tenantId, "Cloud Tenant is required"));
+	}
+
+	private JdbcTenantBusinessDocumentWorkerScopeQuery(DataSource pool, UUID boundTenantId) {
 		this.boundTenantId = boundTenantId;
 		DataSource requiredPool = Objects.requireNonNull(pool, "Dedicated central scope-reader pool is required");
 		if (!(requiredPool instanceof AutoCloseable closeable)) {
@@ -90,15 +94,25 @@ public final class JdbcTenantBusinessDocumentWorkerScopeQuery
 
 	private void verifyScopeReaderRole() {
 		String role = jdbc.queryForObject("select current_user", String.class);
-		Boolean safeRole = jdbc.queryForObject("select rolcanlogin and not rolsuper and not rolcreatedb "
-				+ "and not rolcreaterole and not rolreplication and not rolbypassrls "
-				+ "and not exists (select 1 from pg_auth_members where member=pg_roles.oid or roleid=pg_roles.oid) "
-				+ "and not exists (select 1 from pg_database where datdba=pg_roles.oid) "
-				+ "and not exists (select 1 from pg_namespace where nspowner=pg_roles.oid) "
-				+ "and not exists (select 1 from pg_class where relowner=pg_roles.oid) "
-				+ "and not exists (select 1 from pg_proc where proowner=pg_roles.oid) "
-				+ "and not exists (select 1 from pg_namespace where has_schema_privilege(pg_roles.oid, oid, 'CREATE')) "
-				+ "from pg_roles where rolname=current_user", Boolean.class);
+		Boolean safeRole = jdbc.queryForObject("""
+				SELECT reader.rolcanlogin AND NOT reader.rolsuper AND NOT reader.rolcreatedb
+				    AND NOT reader.rolcreaterole AND NOT reader.rolreplication AND NOT reader.rolbypassrls
+				    AND NOT EXISTS (
+				        SELECT 1 FROM pg_auth_members membership
+				        WHERE (membership.member=reader.oid OR membership.roleid=reader.oid)
+				          AND (CAST(? AS boolean) AND NOT reader.rolinherit AND membership.roleid=reader.oid
+				               AND membership.member=(SELECT datdba FROM pg_database WHERE datname=current_database())
+				               AND pg_get_userbyid(membership.member)='neondb_owner'
+				               AND pg_get_userbyid(membership.grantor)='cloud_admin'
+				               AND membership.admin_option AND NOT membership.inherit_option AND NOT membership.set_option) IS NOT TRUE
+				    )
+				    AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datdba=reader.oid)
+				    AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=reader.oid)
+				    AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relowner=reader.oid)
+				    AND NOT EXISTS (SELECT 1 FROM pg_proc WHERE proowner=reader.oid)
+				    AND NOT EXISTS (SELECT 1 FROM pg_namespace WHERE has_schema_privilege(reader.oid, oid, 'CREATE'))
+				FROM pg_roles reader WHERE reader.rolname=current_user
+				""", Boolean.class, boundTenantId != null);
 		if (!"nexa_business_documents_scope_reader".equals(role) || !Boolean.TRUE.equals(safeRole)) {
 			throw new IllegalStateException("Dedicated Business Documents scope-reader role is required");
 		}
