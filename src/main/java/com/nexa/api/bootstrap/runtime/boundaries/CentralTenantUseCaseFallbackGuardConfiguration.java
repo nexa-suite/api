@@ -53,8 +53,11 @@ class CentralTenantUseCaseFallbackGuardConfiguration {
     @Conditional(CentralCustomerRelationshipsRouteNotSelected.class)
     FieldVisitUseCase centralFallbackFieldVisitUseCase(
             @Qualifier("fieldVisitService") FieldVisitUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
-        return CentralFallbackUseCaseGuard.protect(FieldVisitUseCase.class, delegate, guard);
+            CentralTenantBusinessDataAccessGuard guard,
+            ObjectProvider<CloudTenantReadConfiguration.CloudFieldVisits> cloud) {
+        var visits = cloud.getIfAvailable();
+        return visits == null ? CentralFallbackUseCaseGuard.protect(FieldVisitUseCase.class, delegate, guard)
+                : visits;
     }
 
     @Bean

@@ -181,6 +181,11 @@ both authorized reads and rejected commands before rehearsing Mobile. A
 successful empty list indicates no visible business rows; it is not evidence
 that data were seeded or a workflow completed.
 
+With the cloud account reads configured, set
+`NEXA_TENANT_BUSINESS_CLOUD_FIELD_VISITS_ENABLED=true` to route customer visit
+history and recording to the Tenant database. Existing account assignment,
+permission, version and idempotency checks still apply.
+
 ## Buyer request, order, delivery and credit reads
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED=true` with the
