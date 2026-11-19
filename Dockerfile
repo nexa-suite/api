@@ -22,8 +22,13 @@ RUN java -Djarmode=tools -jar target/api-*.jar extract --layers \
 
 FROM eclipse-temurin:25-jre-noble@sha256:b573af9e331196fbc42e246da4df24df9b6c556c73e7efddfde0511f1c9508c5
 
+# The amd64 mirror serves Ubuntu's signed security and update pockets.
 RUN apt_get() { apt-get -o Acquire::Retries=2 -o Acquire::https::Timeout=20 "$@"; }; \
     sed -i 's|^URIs: http://|URIs: https://|' /etc/apt/sources.list.d/ubuntu.sources \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        sed -Ei 's@^URIs: https://(archive|security)\.ubuntu\.com/ubuntu/?$@URIs: https://mirror.us.leaseweb.net/ubuntu/@' \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
     && apt_get update -o APT::Update::Error-Mode=any \
     && apt_get upgrade -y --no-install-recommends \
     && apt_get install -y --no-install-recommends curl \
