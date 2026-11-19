@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [3.0.2]
+
+- Route Buyer checkout and Sales conversion through the cloud Tenant database.
+- Enable scoped Warehouse, Dispatch, Driver and Buyer receipt workflows.
+- Restore Buyer credit exposure and Sales order visibility.
+- Accept the restricted Neon scope reader for Firebase notification delivery.
+- Use a reachable Ubuntu mirror for amd64 runtime packages.
+
+See the [release notes](docs/releases/v3.0.2.md).
+
 ## [3.0.1]
 
 - Restore Buyer access to existing purchase requests, orders, delivery history, and receipt history on the cloud profile.
