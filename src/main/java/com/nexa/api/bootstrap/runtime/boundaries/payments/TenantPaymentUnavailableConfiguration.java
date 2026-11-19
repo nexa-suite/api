@@ -1,5 +1,8 @@
 package com.nexa.api.bootstrap.runtime.boundaries.payments;
 
+import com.nexa.api.bootstrap.runtime.boundaries.TenantPaymentServiceBindingsFactory;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,7 +17,16 @@ import org.springframework.context.annotation.Profile;
 public class TenantPaymentUnavailableConfiguration {
     @Bean
     @Primary
-    TenantPaymentUnavailableAdapter tenantPaymentUnavailableAdapter() {
-        return new TenantPaymentUnavailableAdapter();
+    TenantPaymentUnavailableAdapter tenantPaymentUnavailableAdapter(
+            ObjectProvider<TenantPaymentUnavailableAdapter.BuyerReceivableRoutes> buyerReceivables) {
+        return new TenantPaymentUnavailableAdapter(buyerReceivables.getIfAvailable());
+    }
+
+    @Bean
+    @Profile("tenant-cloud")
+    @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-buyer-journey-read", name = "enabled", havingValue = "true")
+    TenantPaymentUnavailableAdapter.BuyerReceivableRoutes cloudBuyerReceivableRoutes(
+            TenantBusinessDatabaseRouter router, TenantPaymentServiceBindingsFactory services) {
+        return new TenantPaymentUnavailableAdapter.BuyerReceivableRoutes(router, services);
     }
 }
