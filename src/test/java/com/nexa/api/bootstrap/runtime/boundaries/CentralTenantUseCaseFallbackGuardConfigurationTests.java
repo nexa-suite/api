@@ -1,5 +1,6 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.businessdocuments.application.publicapi.BusinessDocumentUseCase;
 import com.nexa.api.businesstraceability.application.port.in.AuditViewerUseCase;
 import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCase;
@@ -7,9 +8,15 @@ import com.nexa.api.creditreceivables.application.publicapi.FinancialAdjustmentU
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.port.ClientAccountUseCase;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.application.fieldvisit.port.FieldVisitUseCase;
+import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
+import com.nexa.api.edge.streaming.ChangeEventAudience;
 import com.nexa.api.edge.streaming.ChangeFeedReadUseCase;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeFeedQueryFactory;
 import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -19,11 +26,15 @@ import org.springframework.context.annotation.Primary;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 class CentralTenantUseCaseFallbackGuardConfigurationTests {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -99,6 +110,93 @@ class CentralTenantUseCaseFallbackGuardConfigurationTests {
                     assertThat(context.containsBean("centralFallbackAuditViewerUseCase")).isFalse();
                     assertThat(context.containsBean("centralFallbackChangeFeedReadUseCase")).isFalse();
                 });
+    }
+
+    @Test
+    void cloudBuyerReadsRequireTheJourneyFlagAndDocumentWritesStayClosed() {
+        contextRunner.withPropertyValues("spring.profiles.active=tenant-cloud").run(context ->
+                assertThat(context).hasNotFailed().doesNotHaveBean("cloudBuyerBusinessDocuments")
+                        .doesNotHaveBean("cloudBuyerChangeFeed"));
+
+        var router = mock(TenantBusinessDatabaseRouter.class);
+        var bindings = mock(TenantBusinessDocumentBindingsFactory.class);
+        var warehouses = mock(WarehouseObjectAccess.class);
+        var buyer = mock(CurrentAccessContext.class);
+        when(buyer.surface()).thenReturn(Surface.PORTAL);
+        when(buyer.hasRole(MembershipRole.BUYER)).thenReturn(true);
+
+        contextRunner.withPropertyValues("spring.profiles.active=tenant-cloud",
+                        "nexa.tenant-business.cloud-buyer-journey-read.enabled=true")
+                .withBean(TenantBusinessDatabaseRouter.class, () -> router)
+                .withBean(TenantBusinessDocumentBindingsFactory.class, () -> bindings)
+                .withBean(WarehouseObjectAccess.class, () -> warehouses)
+                .withBean(TenantCustomerAccountQueryFactory.class, () -> mock(TenantCustomerAccountQueryFactory.class))
+                .withBean(TenantChangeFeedQueryFactory.class, () -> mock(TenantChangeFeedQueryFactory.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed().hasBean("cloudBuyerBusinessDocuments")
+                            .hasBean("cloudBuyerChangeFeed");
+                    var documents = context.getBean(BusinessDocumentUseCase.class);
+                    assertThat(documents).isInstanceOf(TenantBoundBusinessDocumentPort.class);
+                    assertThatThrownBy(() -> documents.request(buyer, "SALES_ORDER", UUID.randomUUID(),
+                            "ORDER_SUMMARY", "PDF", "test-document"))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    assertThatThrownBy(() -> documents.uploadEvidence(buyer, "RECEIVABLE", UUID.randomUUID(),
+                            "proof.pdf", "application/pdf", new byte[0]))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    assertBlocked(context.getBean(AuditViewerUseCase.class), context.getBean("auditViewerUseCase"));
+                    verifyNoInteractions(router, bindings, warehouses, context.getBean("businessDocumentService"));
+                });
+    }
+
+    @Test
+    void salesDocumentReadsAreOptInAndWritesRemainClosed() {
+        var router = mock(TenantBusinessDatabaseRouter.class);
+        var bindings = mock(TenantBusinessDocumentBindingsFactory.class);
+        var warehouses = mock(WarehouseObjectAccess.class);
+        var sales = mock(CurrentAccessContext.class);
+        when(sales.surface()).thenReturn(Surface.PLATFORM);
+        when(sales.hasRole(MembershipRole.SALES)).thenReturn(true);
+        contextRunner.withPropertyValues("spring.profiles.active=tenant-cloud",
+                        "nexa.tenant-business.cloud-operations-read.enabled=true")
+                .withBean(TenantBusinessDatabaseRouter.class, () -> router)
+                .withBean(TenantBusinessDocumentBindingsFactory.class, () -> bindings)
+                .withBean(WarehouseObjectAccess.class, () -> warehouses)
+                .run(context -> {
+                    assertThat(context).hasNotFailed().hasBean("cloudBuyerBusinessDocuments");
+                    var documents = context.getBean(BusinessDocumentUseCase.class);
+                    assertThatThrownBy(() -> documents.request(sales, "SALES_ORDER", UUID.randomUUID(),
+                            "ORDER_SUMMARY", "PDF", "key"))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    assertThatThrownBy(() -> documents.uploadEvidence(sales, "SALES_ORDER", UUID.randomUUID(),
+                            "proof.pdf", "application/pdf", new byte[0]))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    assertThatThrownBy(() -> documents.evidence(sales, UUID.randomUUID()))
+                            .isInstanceOf(TenantBusinessDatabaseUnavailableException.class);
+                    verifyNoInteractions(router, bindings, warehouses);
+                });
+    }
+
+    @Test
+    void cloudFeedRestrictsRequestedAudiencesAndNonBuyerContextsKeepTheFallback() {
+        var reader = mock(ChangeFeedReadUseCase.class);
+        var fallback = mock(ChangeFeedReadUseCase.class);
+        var feed = new CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerChangeFeed(reader).withFallback(fallback);
+        var buyer = mock(CurrentAccessContext.class);
+        when(buyer.surface()).thenReturn(Surface.PORTAL);
+        when(buyer.hasRole(MembershipRole.BUYER)).thenReturn(true);
+        var workforce = mock(CurrentAccessContext.class);
+        when(workforce.surface()).thenReturn(Surface.PLATFORM);
+        var audiences = Set.of(ChangeEventAudience.BUYER, ChangeEventAudience.SALES);
+
+        feed.minimumId(buyer);
+        feed.after(buyer, audiences, 9L, 3);
+        feed.minimumId(workforce);
+        feed.after(workforce, audiences, 9L, 3);
+
+        verify(reader).minimumId(buyer);
+        verify(reader).after(buyer, Set.of(ChangeEventAudience.BUYER), 9L, 3);
+        verify(fallback).minimumId(workforce);
+        verify(fallback).after(workforce, audiences, 9L, 3);
     }
 
     private static void assertBlocked(Object guarded, Object delegate) {

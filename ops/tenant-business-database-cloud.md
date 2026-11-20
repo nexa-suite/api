@@ -172,18 +172,35 @@ transaction that supports those locks. Missing bindings,
 physical identities, schema manifests or scope fail closed. No fallback to
 central business tables is introduced.
 
-Keep the general Warehouse and Fulfillment flags disabled. The read flag does
-not enable mutations, workers or complete inventory/picking workflows. Verify
+Keep the general Warehouse and Fulfillment flags disabled. The same flag enables the existing Warehouse zone list and inbound receipt
+command through the scoped Warehouse runner. The server still requires the
+current Warehouse grant, applies the receiving policy and persists the lot
+and movement atomically. Other Warehouse mutations and scheduled workers
+require their own cloud composition. Verify
 both authorized reads and rejected commands before rehearsing Mobile. A
 successful empty list indicates no visible business rows; it is not evidence
 that data were seeded or a workflow completed.
+
+With the cloud account reads configured, set
+`NEXA_TENANT_BUSINESS_CLOUD_FIELD_VISITS_ENABLED=true` to route customer visit
+history and recording to the Tenant database. Existing account assignment,
+permission, version and idempotency checks still apply.
 
 ## Buyer request, order, delivery and credit reads
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_JOURNEY_READ_ENABLED=true` with the
 existing cloud router to route authenticated Buyer purchase-request and sales-order
-lists, detail and history, delivery tracking and receipt history, and the
-current Buyer credit exposure to the authorized Tenant database. The queries retain active Buyer account and Workspace
+lists, detail and history, Buyer order-summary PDF and CSV downloads,
+delivery tracking and receipt history, and the
+current Buyer credit exposure to the authorized Tenant database. It also
+routes Buyer receivable list/detail, payment history, saved payment-method
+reads, the Buyer wallet read and Buyer document and evidence reads. Document
+reads retain the existing permissions and account checks. Downloads also
+require access to the private object store. Document generation and evidence
+uploads remain outside this cloud route. Sales credit exposure uses the
+existing account assignment policy. Buyer change-feed streams replay events
+marked for the active Buyer account and audience. Wallet-funded orders and provider
+callbacks require separate activation. The queries retain active Buyer account and Workspace
 checks and run in a PostgreSQL read-only transaction. A missing or unhealthy
 binding is reported as unavailable.
 
@@ -196,7 +213,10 @@ ownership enforcement.
 
 Enable `NEXA_TENANT_BUSINESS_CLOUD_BUYER_CHECKOUT_ENABLED=true` with Buyer
 journey reads and the verified cloud router to route the existing Buyer draft
-and submission endpoints and the Sales review and conversion commands.
+and submission endpoints and the Sales review and conversion commands. Sales
+can also read offers for assigned customers and confirm direct orders. Buyer
+bank transfer reporting uses the existing payable-receivable checks and leaves
+the reported payment in `PROCESSING` for review.
 Buyer account addresses use the same scoped
 Tenant database and active relationship check. Submission verifies the current
 Workspace expiry policy and performs inventory backing, request persistence and

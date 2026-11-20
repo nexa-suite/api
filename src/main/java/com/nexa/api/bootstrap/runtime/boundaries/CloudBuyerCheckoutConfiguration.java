@@ -9,6 +9,7 @@ import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.model.UpdateClientAccountAddressCommand;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.port.ClientAccountAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerRelationshipsCompositionFactory;
+import com.nexa.api.salescommitment.application.directorder.port.DirectOrderUseCase;
 import com.nexa.api.salescommitment.application.port.PurchaseRequestDraftPort;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
@@ -43,11 +44,11 @@ public class CloudBuyerCheckoutConfiguration {
         var orders = new TenantBoundSalesOrderUseCase(router, policies, sales, false);
         var addresses = new TenantBoundCustomerRelationshipsUseCase(router, accounts, buyers,
                 salesMemberships, traceability);
-        return new Routes(drafts, addresses, requests, orders);
+        return new Routes(drafts, addresses, requests, orders, new TenantBoundDirectOrderUseCase(router, sales));
     }
 
     record Routes(PurchaseRequestDraftPort drafts, ClientAccountAddressUseCase buyerAddresses,
-                  PurchaseRequestUseCase purchaseRequests, SalesOrderUseCase salesOrders) {
+                  PurchaseRequestUseCase purchaseRequests, SalesOrderUseCase salesOrders, DirectOrderUseCase directOrders) {
         ClientAccountAddressUseCase routeAccountAddresses(ClientAccountAddressUseCase existing) {
             return new ClientAccountAddressUseCase() {
                 private ClientAccountAddressUseCase forCaller(CurrentAccessContext context) {

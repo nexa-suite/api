@@ -5,11 +5,6 @@ import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.ClientSurface;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.SessionId;
 import com.nexa.api.tenantaccessgovernance.iam.domain.publicapi.UserAccountId;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
-import com.nexa.api.edge.streaming.ChangeEventAudience;
-import com.nexa.api.edge.streaming.ChangeEventView;
-import com.nexa.api.edge.streaming.ChangeFeedCapacityException;
-import com.nexa.api.edge.streaming.ChangeFeedConnectionRegistry;
-import com.nexa.api.edge.streaming.ChangeFeedQueryPort;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessRequest;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.port.in.ResolveCurrentAccessContextUseCase;
@@ -26,12 +21,14 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Web adapter for the authenticated change-feed stream; application ports remain transport-neutral. */
 public final class ChangeFeedStreamService implements AutoCloseable {
@@ -41,8 +38,10 @@ public final class ChangeFeedStreamService implements AutoCloseable {
     private final ResolveCurrentAccessContextUseCase accessContext;
     private final ValidateAccessSessionUseCase accessSession;
     private final ChangeFeedConnectionRegistry connections;
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
-        Thread thread = new Thread(runnable, "nexa-change-feed"); thread.setDaemon(true); return thread;
+    private final ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(2, runnable -> {
+        Thread thread = new Thread(runnable, "nexa-change-feed");
+        thread.setDaemon(true);
+        return thread;
     });
     private final AtomicInteger activeStreams = new AtomicInteger();
 
@@ -50,6 +49,7 @@ public final class ChangeFeedStreamService implements AutoCloseable {
             ValidateAccessSessionUseCase accessSession,
             ChangeFeedConnectionRegistry connections) {
         this.feed = feed; this.accessContext = accessContext; this.accessSession = accessSession; this.connections = connections;
+        scheduler.setRemoveOnCancelPolicy(true);
     }
 
     /** Compatibility constructor for callers that still compose the central-backed legacy reader. */
@@ -67,18 +67,29 @@ public final class ChangeFeedStreamService implements AutoCloseable {
                 verified.userId().toString() + ":" + verified.surface(), verified.tenantId() + ":" + verified.workspaceId());
         if (activeStreams.incrementAndGet() > 100) { activeStreams.decrementAndGet(); lease.close(); throw new ChangeFeedCapacityException(); }
         SseEmitter emitter = new SseEmitter(MAX_STREAM_MILLIS + 5_000);
-        AtomicBoolean closed = new AtomicBoolean(); AtomicLong cursor = new AtomicLong(last); long started = System.currentTimeMillis();
-        Runnable release = () -> { if (closed.compareAndSet(false, true)) { activeStreams.decrementAndGet(); lease.close(); } };
+        AtomicBoolean closed = new AtomicBoolean();
+        AtomicLong cursor = new AtomicLong(last);
+        AtomicReference<ScheduledFuture<?>> polling = new AtomicReference<>();
+        long started = System.currentTimeMillis();
+        Runnable release = () -> {
+            if (!closed.compareAndSet(false, true)) return;
+            ScheduledFuture<?> task = polling.getAndSet(null);
+            if (task != null) task.cancel(false);
+            activeStreams.decrementAndGet();
+            lease.close();
+        };
         emitter.onCompletion(release); emitter.onTimeout(() -> { release.run(); emitter.complete(); }); emitter.onError(ignored -> release.run());
         try {
             verified = verify(jwt, initial);
             Set<ChangeEventAudience> audiences = audiences(verified);
             if (isTooOld(verified, last)) { sendResync(emitter); release.run(); emitter.complete(); return emitter; }
-            sendBatch(emitter, cursor, feed.after(verified, audiences, last, MAX_REPLAY), jwt, initial);
+            List<ChangeEventView> events = feed.after(verified, audiences, last, MAX_REPLAY);
+            if (events.isEmpty()) sendHeartbeat(emitter);
+            else sendBatch(emitter, cursor, events, jwt, initial);
         } catch (RuntimeException | IOException exception) {
             release.run(); emitter.completeWithError(exception); return emitter;
         }
-        scheduler.scheduleAtFixedRate(() -> {
+        Runnable poll = () -> {
             if (closed.get()) return;
             if (System.currentTimeMillis() - started >= MAX_STREAM_MILLIS) { release.run(); emitter.complete(); return; }
             try {
@@ -86,9 +97,20 @@ public final class ChangeFeedStreamService implements AutoCloseable {
                 Set<ChangeEventAudience> currentAudiences = audiences(current);
                 if (isTooOld(current, position)) { sendResync(emitter); release.run(); emitter.complete(); return; }
                 sendBatch(emitter, cursor, feed.after(current, currentAudiences, position, MAX_REPLAY), jwt, initial);
-                emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
+                sendHeartbeat(emitter);
             } catch (RuntimeException | IOException exception) { release.run(); emitter.completeWithError(exception); }
-        }, 15, 15, TimeUnit.SECONDS);
+        };
+        try {
+            ScheduledFuture<?> task = scheduler.scheduleWithFixedDelay(poll, 15, 15, TimeUnit.SECONDS);
+            polling.set(task);
+            if (closed.get()) {
+                polling.compareAndSet(task, null);
+                task.cancel(false);
+            }
+        } catch (RejectedExecutionException exception) {
+            release.run();
+            emitter.completeWithError(exception);
+        }
         return emitter;
     }
 
@@ -100,6 +122,9 @@ public final class ChangeFeedStreamService implements AutoCloseable {
         }
     }
     private void sendResync(SseEmitter emitter) throws IOException { emitter.send(SseEmitter.event().name("resync-required").data("{\"reason\":\"replay-window-expired\"}", MediaType.APPLICATION_JSON)); }
+    private static void sendHeartbeat(SseEmitter emitter) throws IOException {
+        emitter.send(SseEmitter.event().name("heartbeat").data("{}", MediaType.APPLICATION_JSON));
+    }
     private boolean isTooOld(CurrentAccessContext context, long last) { long minimum = feed.minimumId(context); return last > 0 && minimum > 0 && last < minimum - 1; }
     private static Set<ChangeEventAudience> audiences(CurrentAccessContext context) {
         EnumSet<ChangeEventAudience> result = EnumSet.noneOf(ChangeEventAudience.class);

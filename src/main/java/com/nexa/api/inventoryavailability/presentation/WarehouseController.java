@@ -5,6 +5,7 @@ import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.Cu
 import com.nexa.api.inventoryavailability.application.WarehouseOperationsService;
 import com.nexa.api.inventoryavailability.application.port.WarehouseOperationsRequestRunner;
 import com.nexa.api.inventoryavailability.application.port.InventoryLotsRead;
+import com.nexa.api.inventoryavailability.application.port.InventoryTransfersRead;
 import com.nexa.api.inventoryavailability.application.port.WarehouseDirectoryRead;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseOperationalSettingsCommands;
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,6 +18,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -41,12 +43,17 @@ public final class WarehouseController {
     private final WarehouseOperationsRequestRunner operations;
     private final WarehouseOperationalSettingsCommands operationalSettings;
     private final InventoryLotsRead lotsRead;
+    private final InventoryTransfersRead transfersRead;
     private final WarehouseDirectoryRead directory;
+    private final WarehouseOperationsRequestRunner.Receiving cloudReceiving;
 
     public WarehouseController(WarehouseOperationsRequestRunner operations,
                                WarehouseOperationalSettingsCommands operationalSettings, InventoryLotsRead lotsRead,
-                               WarehouseDirectoryRead directory) {
+                               WarehouseDirectoryRead directory, InventoryTransfersRead transfersRead,
+                               ObjectProvider<WarehouseOperationsRequestRunner.Receiving> cloudReceiving) {
+        this.cloudReceiving = cloudReceiving.getIfAvailable();
         this.directory = directory;
+        this.transfersRead = transfersRead;
         this.lotsRead = lotsRead;
         this.operations = operations;
         this.operationalSettings = operationalSettings;
@@ -234,7 +241,9 @@ public final class WarehouseController {
 
     @GetMapping("/warehouses/{warehouseId}/zones")
     public PageResponse<ZoneResponse> zones(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable String warehouseId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "25") int size) {
-        return execute(c, service -> page(service.zones(c, warehouseId, page, size), this::zone));
+        var result = cloudReceiving == null ? execute(c, service -> service.zones(c, warehouseId, page, size))
+                : cloudReceiving.zones(c, warehouseId, page, size);
+        return page(result, this::zone);
     }
 
     @PostMapping("/warehouses/{warehouseId}/zones")
@@ -285,7 +294,12 @@ public final class WarehouseController {
 
     @PostMapping("/inventory/inbound-receipts")
     public ResponseEntity<LotResponse> receive(@RequestAttribute(ACCESS) CurrentAccessContext c, @RequestHeader(name = "Idempotency-Key", required = false) String key, @RequestBody ReceiptRequest r, @RequestAttribute(value = RequestMetadata.CORRELATION_ID_ATTRIBUTE, required = false) Object correlation) {
-        var result = execute(c, service -> service.receive(c, new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(), r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(), r.skuId(), r.temperatureEvidenceObjectId(), r.productionDate(), r.receivedAt()), key, String.valueOf(correlation)));
+        var receipt = new WarehouseOperationsService.Receipt(r.warehouseId(), r.zoneId(), r.catalogItemId(),
+                r.batchNumber(), r.expirationDate(), r.quantity(), r.unit(), r.temperatureReading(), r.notes(),
+                r.skuId(), r.temperatureEvidenceObjectId(), r.productionDate(), r.receivedAt());
+        String correlationId = String.valueOf(correlation);
+        var result = cloudReceiving == null ? execute(c, service -> service.receive(c, receipt, key, correlationId))
+                : cloudReceiving.receive(c, receipt, key, correlationId);
         var response = ResponseEntity.status(201).eTag(etag(result.version()));
         if (result.confirmedReceivedQuantity() != null) {
             response.header("X-Nexa-Received-Quantity", result.confirmedReceivedQuantity().toPlainString());
@@ -419,7 +433,7 @@ public final class WarehouseController {
                                                     @RequestParam(required = false) String destinationWarehouseId,
                                                     @RequestParam(defaultValue = "0") int page,
                                                     @RequestParam(defaultValue = "25") int size) {
-        return execute(c, service -> page(service.transfers(c, sourceWarehouseId, destinationWarehouseId, page, size), this::transfer));
+        return page(transfersRead.list(c, sourceWarehouseId, destinationWarehouseId, page, size), this::transfer);
     }
 
     @GetMapping("/inventory/transfers/{id}")

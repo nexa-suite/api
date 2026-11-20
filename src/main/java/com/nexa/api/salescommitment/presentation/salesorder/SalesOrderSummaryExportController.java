@@ -52,7 +52,7 @@ public final class SalesOrderSummaryExportController {
 	@Operation(operationId = "exportBuyerSalesOrderSummaryPdf")
 	public ResponseEntity<byte[]> exportBuyerPdf(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable String id) {
-		return exportPdf(context, id);
+		return response(exports.exportBuyer(context, id, SalesOrderSummaryExportFormat.PDF));
 	}
 
 	@GetMapping("/api/v1/sales-orders/{id}/exports/summary.csv")
@@ -66,7 +66,7 @@ public final class SalesOrderSummaryExportController {
 	@Operation(operationId = "exportBuyerSalesOrderSummaryCsv")
 	public ResponseEntity<byte[]> exportBuyerCsv(@RequestAttribute(ACCESS_CONTEXT) CurrentAccessContext context,
 			@PathVariable String id) {
-		return exportCsv(context, id);
+		return response(exports.exportBuyer(context, id, SalesOrderSummaryExportFormat.CSV));
 	}
 
 	private ResponseEntity<byte[]> response(SalesOrderSummaryExportResult result) {

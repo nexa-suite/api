@@ -3,6 +3,7 @@ package com.nexa.api.bootstrap.runtime.boundaries;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogDetailQueryFactory;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogHttpReadPort;
+import com.nexa.api.customerbuyerrelationships.application.clientaccount.model.ClientAccountBuyerMembershipPage;
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.model.ClientAccountView;
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.model.CustomerAccountPage;
 import com.nexa.api.customerbuyerrelationships.application.clientaccount.port.ClientAccountUseCase;
@@ -65,6 +66,22 @@ class CloudTenantReadConfigurationTests {
         });
     }
 
+    @Test
+    void fieldVisitOptInSelectsOnlyTheFieldVisitUseCase() {
+        enabled().withPropertyValues("nexa.tenant-business.cloud-field-visits.enabled=true").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBean(FieldVisitUseCase.class))
+                    .isInstanceOf(CloudTenantReadConfiguration.CloudFieldVisits.class);
+            assertThat(context.getBean(ClientAccountUseCase.class)).isInstanceOf(CloudBuyerSelfAccountReadUseCase.class);
+            var access = mock(CurrentAccessContext.class);
+            when(access.tenantId()).thenReturn(new TenantId(UUID.randomUUID()));
+            when(access.workspaceId()).thenReturn(new WorkspaceId(UUID.randomUUID()));
+            assertThatThrownBy(() -> context.getBean(FieldVisitUseCase.class).listForCustomer(access, "account-id"))
+                    .isInstanceOf(AccessPolicyViolation.class);
+            verifyNoInteractions(context.getBean("fieldVisitService"), context.getBean(TenantBusinessDatabaseRouter.class));
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(strings = { "nexa.tenant-business.cloud-router.enabled", "nexa.tenant-business.cloud-read.enabled",
             "nexa.tenant-business.catalog-detail-read.enabled" })
@@ -102,8 +119,13 @@ class CloudTenantReadConfigurationTests {
         assertThat(read.detail(context, "account-id")).isSameAs(result);
         verify(tenant).list(context, "customer", "ACTIVE", 0, 20);
         verify(tenant).detail(context, "account-id");
+
+        var memberships = new ClientAccountBuyerMembershipPage(List.of(), 0, 20, 0, 0);
+        when(tenant.buyerMemberships(context, "account-id", 0, 20)).thenReturn(memberships);
+        assertThat(read.buyerMemberships(context, "account-id", 0, 20)).isSameAs(memberships);
+        verify(tenant).buyerMemberships(context, "account-id", 0, 20);
         for (Method method : ClientAccountUseCase.class.getMethods()) {
-            if (Set.of("buyerDetail", "list", "detail").contains(method.getName())) continue;
+            if (Set.of("buyerDetail", "list", "detail", "buyerMemberships").contains(method.getName())) continue;
             Object[] arguments = new Object[method.getParameterCount()];
             for (int index = 0; index < arguments.length; index++) {
                 Class<?> type = method.getParameterTypes()[index];

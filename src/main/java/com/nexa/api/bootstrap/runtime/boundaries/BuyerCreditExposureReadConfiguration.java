@@ -8,6 +8,7 @@ import com.nexa.api.creditreceivables.application.publicapi.CreditExposureUseCas
 import com.nexa.api.creditreceivables.tenantdatabase.TenantBuyerCreditExposureReaderFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.PermissionKey;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -26,11 +27,40 @@ public class BuyerCreditExposureReadConfiguration {
         return service::readBuyer;
     }
 
+    record CloudWorkforceCreditExposure(CreditExposureUseCase useCase) { }
+
     @Configuration(proxyBeanMethods = false)
     @Profile("tenant-cloud")
     @ConditionalOnProperty(prefix = "nexa.tenant-business.cloud-buyer-journey-read", name = "enabled",
             havingValue = "true")
     static class CloudReads {
+        @Bean
+        CloudWorkforceCreditExposure cloudWorkforceCreditExposure(TenantBusinessDatabaseRouter router,
+                TenantBuyerCreditExposureReaderFactory credit, TenantCustomerAccountQueryFactory customerAccounts) {
+            return new CloudWorkforceCreditExposure(new CreditExposureUseCase() {
+                @Override
+                public CreditExposureView read(CurrentAccessContext context,
+                        String accountId, String currency) {
+                    try {
+                        return router.inReadOnlyTransaction(context, jdbc -> {
+                            var accounts = customerAccounts.bindTo(jdbc);
+                            return credit.bindExposureTo(jdbc, accounts, TenantCreditEligibilitySourceFactory.bindTo(accounts))
+                                    .read(context, accountId, currency);
+                        });
+                    } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
+                             | DataAccessException | CannotCreateTransactionException unavailable) {
+                        throw new CreditReceivablesUnavailableException(unavailable);
+                    }
+                }
+
+                @Override
+                public CreditExposureView readBuyer(CurrentAccessContext context,
+                        String currency) {
+                    return cloudBuyerCreditExposureReads(router, credit, customerAccounts).readBuyer(context, currency);
+                }
+            });
+        }
+
         @Bean
         @Primary
         BuyerCreditExposureReader cloudBuyerCreditExposureReads(TenantBusinessDatabaseRouter router,

@@ -11,6 +11,7 @@ import com.nexa.api.edge.streaming.ChangeFeedReadUseCase;
 import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeFeedQueryFactory;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.AccessPolicyViolation;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -49,7 +50,7 @@ public final class TenantBoundChangeFeedReadUseCase implements ChangeFeedReadUse
             java.util.function.Function<JdbcTemplate, T> work) {
         Objects.requireNonNull(context, "Revalidated Tenant access context is required");
         try {
-            return router.inTransaction(context, work::apply);
+            return router.inReadOnlyTransaction(context, work::apply);
         } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
                  | DataAccessException | CannotCreateTransactionException unavailable) {
             throw new TechnicalFailureException(TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE,
@@ -61,7 +62,9 @@ public final class TenantBoundChangeFeedReadUseCase implements ChangeFeedReadUse
         if (!context.hasRole(MembershipRole.BUYER)) return null;
         return accounts.bindTo(jdbc)
                 .findBuyerReference(tenant(context), workspace(context), context.membershipId().toString())
-                .map(CustomerAccountReference::id).orElseThrow();
+                .filter(CustomerAccountReference::active)
+                .map(CustomerAccountReference::id)
+                .orElseThrow(() -> new AccessPolicyViolation("Active Buyer account is required for the change feed"));
     }
 
     private static String tenant(CurrentAccessContext context) { return context.tenantId().toString(); }

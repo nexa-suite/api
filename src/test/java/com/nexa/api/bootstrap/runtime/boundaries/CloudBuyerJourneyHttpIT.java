@@ -1,42 +1,232 @@
 package com.nexa.api.bootstrap.runtime.boundaries;
 
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.businessdocuments.application.port.ObjectStoragePort;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.WarehouseObjectAccess;
+import com.nexa.api.payments.application.publicapi.BuyerWalletReadPort;
+import com.nexa.api.payments.tenantdatabase.BuyerWalletTenantDatabaseAdapterFactory;
 import com.nexa.api.creditreceivables.application.publicapi.BuyerCreditExposureReader;
 import com.nexa.api.creditreceivables.tenantdatabase.TenantBuyerCreditExposureReaderFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
+import com.nexa.api.edge.streaming.ChangeFeedStreamService;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeEventPersistenceFactory;
+import com.nexa.api.edge.streaming.tenantdatabase.TenantChangeFeedQueryFactory;
 import com.nexa.api.fulfillmentdelivery.application.port.BuyerDeliveryTrackingRequestRunner;
 import com.nexa.api.fulfillmentdelivery.tenantdatabase.TenantBuyerDeliveryTrackingQueryFactory;
 import com.nexa.api.salescommitment.application.model.SalesCommitmentQueryRunner;
 import com.nexa.api.salescommitment.application.purchaserequest.port.PurchaseRequestUseCase;
 import com.nexa.api.salescommitment.application.salesorder.port.SalesOrderUseCase;
 import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderFulfillmentQueryFactory;
+import com.nexa.api.salescommitment.tenantdatabase.TenantSalesOrderSummaryExportFactory;
 import com.nexa.api.support.PostgresIntegrationSupport;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Runs the cloud read composition with a real, physically separate Tenant fixture database. */
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
-@TestPropertySource(properties = "nexa.tenant-business.fulfillment-delivery.enabled=false")
+@TestPropertySource(properties = {
+        "nexa.tenant-business.business-documents.enabled=false",
+        "nexa.tenant-business.business-traceability.enabled=false",
+        "nexa.tenant-business.fulfillment-delivery.enabled=false",
+        "nexa.tenant-business.purchase-request.enabled=false"
+})
 @Import(CloudBuyerJourneyHttpIT.ReadComposition.class)
 class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
     private static final String DELIVERIES = "/api/v1/buyer/deliveries";
+
+    @Autowired
+    private ObjectStoragePort storage;
+
+    @Autowired
+    private TenantChangeEventPersistenceFactory tenantChangeEvents;
+
+    @Autowired
+    private ChangeFeedStreamService streams;
+
+    @Test
+    void buyerStreamReplaysOnlyRetainedTenantAccountEventsAndCancelsPollingWhenClosed() throws Exception {
+        String tenant = tenantId();
+        String workspace = workspaceId();
+        String account = buyerClientAccountId();
+        String otherAccount = seedAccount(UUID.fromString(tenant), UUID.fromString(workspace)).toString();
+        String prior = uuid();
+        String visible = uuid();
+        String foreign = uuid();
+        String internal = uuid();
+        String expired = uuid();
+        String route = "/api/v1/change-feed/stream";
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String owner = "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM");
+        long now = System.currentTimeMillis();
+        var events = tenantChangeEvents.bindTo(tenantJdbc());
+        events.append(tenant, workspace, account, "sales_order", prior, "sales.sales-order.confirmed", "CONFIRMED", now, true);
+        events.append(tenant, workspace, otherAccount, "sales_order", foreign, "sales.sales-order.confirmed",
+                "CONFIRMED", now, true);
+        events.append(tenant, workspace, account, "sales_order", internal, "sales.sales-order.created", "CREATED", now, false);
+        events.append(tenant, workspace, account, "sales_order", expired, "sales.sales-order.confirmed", "CONFIRMED",
+                now - Duration.ofDays(15).toMillis(), true);
+        events.append(tenant, workspace, account, "sales_order", visible, "sales.sales-order.confirmed", "CONFIRMED", now, true);
+        long cursor = tenantJdbc().queryForObject("select sequence from integration.change_event where aggregate_id=?",
+                Long.class, UUID.fromString(prior));
+        long current = tenantJdbc().queryForObject("select sequence from integration.change_event where aggregate_id=?",
+                Long.class, UUID.fromString(visible));
+
+        var scheduler = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(streams, "scheduler");
+        var replay = mockMvc.perform(get(route).accept(MediaType.TEXT_EVENT_STREAM)
+                        .header(HttpHeaders.AUTHORIZATION, buyer).header("Last-Event-ID", cursor))
+                .andExpect(request().asyncStarted()).andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)).andReturn();
+        try {
+            assertThat(replay.getResponse().getContentAsString())
+                    .contains("event:sales.sales-order.confirmed", "id:" + current, visible)
+                    .doesNotContain(prior, foreign, internal, expired);
+            assertThat(scheduler.getQueue()).hasSize(1);
+        } finally {
+            replay.getRequest().getAsyncContext().complete();
+        }
+        assertThat(scheduler.getQueue()).isEmpty();
+
+        var caughtUp = mockMvc.perform(get(route).accept(MediaType.TEXT_EVENT_STREAM)
+                        .header(HttpHeaders.AUTHORIZATION, buyer).header("Last-Event-ID", current))
+                .andExpect(request().asyncStarted()).andExpect(status().isOk()).andReturn();
+        try {
+            assertThat(caughtUp.getResponse().getContentAsString()).contains("event:heartbeat");
+        } finally {
+            caughtUp.getRequest().getAsyncContext().complete();
+        }
+        assertThat(scheduler.getQueue()).isEmpty();
+
+        mockMvc.perform(get(route)).andExpect(status().isUnauthorized());
+        var forbidden = mockMvc.perform(get(route).accept(MediaType.TEXT_EVENT_STREAM)
+                        .header(HttpHeaders.AUTHORIZATION, owner))
+                .andExpect(request().asyncStarted()).andReturn();
+        mockMvc.perform(asyncDispatch(forbidden)).andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    void buyerOpensOnlyOwnTenantDocumentsAndDownloadsTheStoredContent() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID ownAccount = tenantJdbc().queryForObject(
+                "select id from sales.client_account where tenant_id=? and workspace_id=? and code='CLI-001'",
+                UUID.class, tenant, workspace);
+        UUID otherAccount = seedAccount(tenant, workspace);
+        UUID actor = UUID.fromString(membershipId(SALES_EMAIL));
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=? where id=?", actor, ownAccount);
+        UUID subject = seedOrder(tenant, workspace, actor, ownAccount);
+        UUID otherSubject = seedOrder(tenant, workspace, actor, otherAccount);
+        byte[] bytes = "%PDF-1.7\nBuyer document fixture".getBytes(StandardCharsets.US_ASCII);
+        UUID ownDocument = seedIssuedDocument(tenant, workspace, ownAccount, subject, bytes);
+        UUID otherDocument = seedIssuedDocument(tenant, workspace, otherAccount, otherSubject, bytes);
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String operations = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String documents = "/api/v1/business-documents";
+
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", subject.toString()).param("size", "1").header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(ownDocument.toString()));
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", otherSubject.toString()).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
+        mockMvc.perform(get(documents + "/{id}", ownDocument).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("GENERATED"));
+        mockMvc.perform(get(documents + "/{id}/events", ownDocument).header("Authorization", buyer))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(documents + "/{id}/downloads", ownDocument).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(content().bytes(bytes))
+                .andExpect(header().string("Cache-Control", "private, no-store"))
+                .andExpect(header().exists("X-Content-SHA256"));
+        mockMvc.perform(get(documents + "/{id}", otherDocument).header("Authorization", buyer))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents + "/{id}/downloads", otherDocument).header("Authorization", buyer))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(documents).header("Authorization", operations))
+                .andExpect(status().isServiceUnavailable());
+        String sales = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", subject.toString()).param("size", "1").header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(ownDocument.toString()));
+        mockMvc.perform(get(documents).param("subjectType", "SALES_ORDER")
+                        .param("subjectId", otherSubject.toString()).header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(0));
+        mockMvc.perform(get(documents + "/{id}", ownDocument).header("Authorization", sales))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(documents + "/{id}/events", ownDocument).header("Authorization", sales))
+                .andExpect(status().isOk());
+        mockMvc.perform(get(documents + "/{id}/downloads", ownDocument).header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(content().bytes(bytes));
+        mockMvc.perform(get(documents + "/{id}", otherDocument).header("Authorization", sales))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents + "/{id}/events", otherDocument).header("Authorization", sales))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get(documents + "/{id}/downloads", otherDocument).header("Authorization", sales))
+                .andExpect(status().isNotFound());
+    }
+
+    private UUID seedIssuedDocument(UUID tenant, UUID workspace, UUID account, UUID subject, byte[] bytes) {
+        UUID id = UUID.randomUUID();
+        String object = "documents/" + tenant + "/" + id + ".pdf";
+        var stored = storage.put(object, new ByteArrayInputStream(bytes), bytes.length, "application/pdf");
+        tenantJdbc().update("""
+                insert into business_documents.object_storage_object
+                    (object_key,bucket_name,checksum_sha256,content_type,byte_size,private_object,created_at)
+                values (?,?,?,?,?,true,current_timestamp)
+                """, stored.objectKey(), "nexa-private", stored.checksumSha256(), stored.contentType(), stored.byteSize());
+        tenantJdbc().update("""
+                insert into business_documents.business_document
+                    (id,tenant_id,workspace_id,client_account_id,subject_type,subject_id,document_type,version,status,
+                     format,storage_object_key,checksum_sha256,content_type,byte_size,generated_at,created_at,updated_at)
+                values (?,?,?,?,'SALES_ORDER',?,'ORDER_SUMMARY',1,'GENERATED','PDF',?,?,?,?,current_timestamp,
+                        current_timestamp,current_timestamp)
+                """, id, tenant, workspace, account, subject, stored.objectKey(), stored.checksumSha256(),
+                stored.contentType(), stored.byteSize());
+        return id;
+    }
+
+    @Test
+    void walletReadsCurrentBuyerAndReportsOrderPaymentAvailability() throws Exception {
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String logistics = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        mockMvc.perform(get("/api/v1/buyer/wallet").header("Authorization", buyer))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.currency").value("PEN"))
+                .andExpect(jsonPath("$.capabilities.orderPaymentSupported").value(false));
+        mockMvc.perform(get("/api/v1/buyer/wallet").header("Authorization", logistics))
+                .andExpect(status().isForbidden());
+    }
 
     @Test
     void buyerReadsOnlyOwnTenantCreditAndWorkforceCannotUseTheBuyerRoute() throws Exception {
@@ -56,6 +246,16 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
         String route = "/api/v1/client-accounts/me/credit-exposure";
         String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
         String logistics = "Bearer " + accessToken(LOGISTICS_EMAIL, "PLATFORM");
+        String sales = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        tenantJdbc().update("update sales.client_account set sales_owner_membership_id=? where id=?",
+                UUID.fromString(membershipId(SALES_EMAIL)), account);
+
+        mockMvc.perform(get("/api/v1/client-accounts/{id}/credit-exposure", account)
+                        .param("currency", "USD").header("Authorization", sales))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.creditLimit").value(750));
+        mockMvc.perform(get("/api/v1/client-accounts/{id}/credit-exposure", otherAccount)
+                        .param("currency", "USD").header("Authorization", sales))
+                .andExpect(status().isNotFound());
 
         mockMvc.perform(get(route).param("currency", "USD").param("clientAccountId", otherAccount.toString())
                         .header("Authorization", buyer))
@@ -140,6 +340,55 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
         mockMvc.perform(get("/api/v1/sales-orders").param("clientAccountId", otherAccount.toString())
                         .header("Authorization", buyer))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.items").isEmpty());
+    }
+
+    @Test
+    void buyerDownloadsExistingOwnOrderSummariesAndCannotExportAnotherAccountsOrder() throws Exception {
+        UUID tenant = UUID.fromString(tenantId());
+        UUID workspace = UUID.fromString(workspaceId());
+        UUID buyerMembership = UUID.fromString(membershipId(BUYER_EMAIL));
+        UUID account = tenantJdbc().queryForObject(
+                "select id from sales.client_account where tenant_id=? and workspace_id=? and code='CLI-001'",
+                UUID.class, tenant, workspace);
+        UUID ownOrder = seedOrder(tenant, workspace, buyerMembership, account);
+        UUID foreignOrder = seedOrder(tenant, workspace, buyerMembership, seedAccount(tenant, workspace));
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String owner = "Bearer " + accessToken(OWNER_EMAIL, "PLATFORM");
+        String route = "/api/v1/buyer/orders/{id}/exports/summary";
+        String number = "T" + ownOrder.toString().substring(0, 8);
+
+        var pdf = mockMvc.perform(get(route + ".pdf", ownOrder).header(HttpHeaders.AUTHORIZATION, buyer))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_PDF))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"nexa-order-summary-" + number + ".pdf\""))
+                .andReturn().getResponse();
+        try (var document = Loader.loadPDF(pdf.getContentAsByteArray())) {
+            assertThat(new PDFTextStripper().getText(document)).contains(ownOrder.toString(), number)
+                    .doesNotContain(foreignOrder.toString());
+        }
+
+        var csv = mockMvc.perform(get(route + ".csv", ownOrder).header(HttpHeaders.AUTHORIZATION, buyer))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/csv;charset=UTF-8"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"nexa-order-summary-" + number + ".csv\""))
+                .andReturn().getResponse();
+        assertThat(csv.getContentAsString(StandardCharsets.UTF_8)).contains(ownOrder.toString(), number)
+                .doesNotContain(foreignOrder.toString());
+
+        for (String format : new String[]{".pdf", ".csv"}) {
+            mockMvc.perform(get(route + format, foreignOrder).header(HttpHeaders.AUTHORIZATION, buyer))
+                    .andExpect(status().isNotFound());
+        }
+        mockMvc.perform(get(route + ".pdf", ownOrder)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(route + ".pdf", ownOrder).header(HttpHeaders.AUTHORIZATION, owner))
+                .andExpect(status().isServiceUnavailable());
+        mockMvc.perform(get("/api/v1/sales-orders/{id}/exports/summary.csv", ownOrder)
+                        .header(HttpHeaders.AUTHORIZATION, buyer))
+                .andExpect(status().isServiceUnavailable());
     }
 
     private void assertBuyerReadsOnlyOwnRecords(String route, String buyer, UUID own, UUID other) throws Exception {
@@ -255,6 +504,43 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
     @TestConfiguration(proxyBeanMethods = false)
     static class ReadComposition {
         @Bean
+        CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerChangeFeed cloudChangeFeedForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantCustomerAccountQueryFactory accounts,
+                TenantChangeFeedQueryFactory feed) {
+            return new CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerChangeFeedConfiguration()
+                    .cloudBuyerChangeFeed(router, accounts, feed);
+        }
+
+        @Bean
+        TenantBoundSalesOrderSummaryExportConfiguration.CloudBuyerExports cloudBuyerExportsForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantCustomerAccountQueryFactory accounts,
+                TenantSalesOrderSummaryExportFactory exports) {
+            return new TenantBoundSalesOrderSummaryExportConfiguration().cloudBuyerExports(router, accounts, exports);
+        }
+
+        @Bean
+        CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerBusinessDocuments cloudDocumentsForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantBusinessDocumentBindingsFactory bindings,
+                WarehouseObjectAccess warehouses) {
+            return new CentralTenantUseCaseFallbackGuardConfiguration.CloudBuyerBusinessDocumentConfiguration()
+                    .cloudBuyerBusinessDocuments(router, bindings, warehouses, true, true);
+        }
+
+        @Bean
+        @Primary
+        BuyerWalletReadPort cloudWalletReadsForHttpTest(TenantBusinessDatabaseRouter router,
+                TenantCustomerAccountQueryFactory accounts, BuyerWalletTenantDatabaseAdapterFactory wallet) {
+            return new TenantBoundBuyerWalletReadConfiguration().cloudBuyerWalletReadPort(router, accounts, wallet);
+        }
+
+        @Bean
+        BuyerCreditExposureReadConfiguration.CloudWorkforceCreditExposure cloudWorkforceCreditForHttpTest(
+                TenantBusinessDatabaseRouter router, TenantBuyerCreditExposureReaderFactory credit,
+                TenantCustomerAccountQueryFactory accounts) {
+            return new BuyerCreditExposureReadConfiguration.CloudReads().cloudWorkforceCreditExposure(router, credit, accounts);
+        }
+
+        @Bean
         @Primary
         BuyerCreditExposureReader cloudBuyerCreditExposureReadsForHttpTest(TenantBusinessDatabaseRouter router,
                 TenantBuyerCreditExposureReaderFactory credit, TenantCustomerAccountQueryFactory accounts) {
@@ -270,6 +556,12 @@ class CloudBuyerJourneyHttpIT extends PostgresIntegrationSupport {
             return new BuyerDeliveryTrackingReadConfiguration.CloudReads()
                     .cloudBuyerDeliveryTrackingReads(router, tracking, accounts, orders);
         }
+        @Bean
+        TenantSalesCommitmentCompositionProvider cloudSalesProviderForJourneyTest(
+                org.springframework.beans.factory.config.AutowireCapableBeanFactory factory) {
+            return factory.createBean(TenantSalesCommitmentCompositionProviderAdapter.class);
+        }
+
         @Bean
         @Primary
         SalesCommitmentQueryRunner cloudBuyerSalesReadsForHttpTest(TenantBusinessDatabaseRouter router,

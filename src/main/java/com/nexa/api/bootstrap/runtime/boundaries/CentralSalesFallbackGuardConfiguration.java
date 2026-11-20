@@ -67,7 +67,9 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     DirectOrderUseCase centralFallbackDirectOrderUseCase(
             @Qualifier("directOrderUseCase") DirectOrderUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
+            CentralTenantBusinessDataAccessGuard guard, ObjectProvider<CloudBuyerCheckoutConfiguration.Routes> cloud) {
+        var checkout = cloud.getIfAvailable();
+        if (checkout != null) return checkout.directOrders();
         return CentralFallbackUseCaseGuard.protect(DirectOrderUseCase.class, delegate, guard);
     }
 
@@ -91,8 +93,11 @@ class CentralSalesFallbackGuardConfiguration {
     @Primary
     SalesOrderSummaryExportUseCase centralFallbackSalesOrderSummaryExportUseCase(
             @Qualifier("salesOrderSummaryExportUseCase") SalesOrderSummaryExportUseCase delegate,
-            CentralTenantBusinessDataAccessGuard guard) {
-        return CentralFallbackUseCaseGuard.protect(SalesOrderSummaryExportUseCase.class, delegate, guard);
+            CentralTenantBusinessDataAccessGuard guard,
+            ObjectProvider<TenantBoundSalesOrderSummaryExportConfiguration.CloudBuyerExports> cloud) {
+        var guarded = CentralFallbackUseCaseGuard.protect(SalesOrderSummaryExportUseCase.class, delegate, guard);
+        var exports = cloud.getIfAvailable();
+        return exports == null ? guarded : exports.withFallback(guarded);
     }
 
     static final class CentralSalesRouteSelected implements Condition {

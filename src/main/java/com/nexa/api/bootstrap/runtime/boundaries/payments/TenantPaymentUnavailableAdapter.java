@@ -1,20 +1,36 @@
 package com.nexa.api.bootstrap.runtime.boundaries.payments;
 
+import com.nexa.api.bootstrap.runtime.boundaries.TenantPaymentServiceBindingsFactory;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseSchemaManifestMismatchException;
 import com.nexa.api.payments.application.publicapi.PaymentUseCases;
+import com.nexa.api.payments.application.publicapi.TenantPaymentSession;
 import com.nexa.api.payments.application.publicapi.model.PaymentModels;
 import com.nexa.api.payments.application.publicapi.webhooks.PaymentWebhookIntake;
 import com.nexa.api.shared.application.error.TechnicalFailureException;
+import com.nexa.api.shared.application.error.TenantBusinessDatabaseUnavailableException;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.MembershipRole;
+import com.nexa.api.tenantaccessgovernance.tenantmanagement.domain.publicapi.Surface;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.CannotCreateTransactionException;
 
-import java.util.UUID;
 import java.util.List;
+import java.util.UUID;
+import java.util.function.Function;
 
-/** Fails closed when HTTP payment requests have no verified Tenant persistence adapter. */
+/** Selects the Buyer receivable reads and transfer reporting supplied by the cloud profile. */
 public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, PaymentWebhookIntake {
+    private final BuyerReceivableRoutes buyerReceivables;
+
+    TenantPaymentUnavailableAdapter(BuyerReceivableRoutes buyerReceivables) {
+        this.buyerReceivables = buyerReceivables;
+    }
+
     @Override
     public PaymentModels.Page<PaymentModels.ReceivableView> listReceivables(CurrentAccessContext context,
             int page, int size) {
-        throw unavailable();
+        return readBuyerReceivable(context, session -> session.listReceivables(context, page, size));
     }
 
     @Override
@@ -26,7 +42,7 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
     @Override
     public PaymentModels.Page<PaymentModels.PaymentSummaryView> listPaymentsForReceivable(
             CurrentAccessContext context, UUID receivableId, int page, int size) {
-        throw unavailable();
+        return readBuyerReceivable(context, session -> session.listPaymentsForReceivable(context, receivableId, page, size));
     }
 
     @Override
@@ -43,7 +59,7 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
 
     @Override
     public PaymentModels.ReceivableView getReceivable(CurrentAccessContext context, UUID receivableId) {
-        throw unavailable();
+        return readBuyerReceivable(context, session -> session.getReceivable(context, receivableId));
     }
 
     @Override
@@ -78,7 +94,10 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
     @Override
     public PaymentModels.PaymentView createBankTransfer(CurrentAccessContext context, UUID receivableId,
             String idempotencyKey, String transferReference, UUID proofEvidenceId) {
-        throw unavailable();
+        BuyerReceivableRoutes routes = requireBuyerReceivableRoutes(context);
+        if (!routes.bankTransferReportingEnabled()) throw unavailable();
+        return routes.write(context, session -> session.createBankTransfer(context, receivableId, idempotencyKey,
+                transferReference, proofEvidenceId));
     }
 
     @Override
@@ -87,7 +106,10 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
         throw unavailable();
     }
 
-    @Override public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext context) { throw unavailable(); }
+    @Override
+    public List<PaymentModels.BuyerSavedPaymentMethodView> listBuyerSavedPaymentMethods(CurrentAccessContext context) {
+        return readBuyerReceivable(context, session -> session.listBuyerSavedPaymentMethods(context));
+    }
     @Override public PaymentModels.BuyerPaymentMethodSetupView createBuyerPaymentMethodSetup(CurrentAccessContext context, String idempotencyKey) { throw unavailable(); }
     @Override public PaymentModels.BuyerSavedPaymentMethodView setBuyerSavedPaymentMethodDefault(CurrentAccessContext context, UUID paymentMethodId) { throw unavailable(); }
     @Override public void removeBuyerSavedPaymentMethod(CurrentAccessContext context, UUID paymentMethodId) { throw unavailable(); }
@@ -97,8 +119,47 @@ public final class TenantPaymentUnavailableAdapter implements PaymentUseCases, P
         throw unavailable();
     }
 
+    private <T> T readBuyerReceivable(CurrentAccessContext context, Function<TenantPaymentSession, T> read) {
+        return requireBuyerReceivableRoutes(context).read(context, read);
+    }
+
+    private BuyerReceivableRoutes requireBuyerReceivableRoutes(CurrentAccessContext context) {
+        if (buyerReceivables == null || context == null || context.surface() != Surface.PORTAL
+                || !context.hasRole(MembershipRole.BUYER)) {
+            throw unavailable();
+        }
+        return buyerReceivables;
+    }
+
+    record BuyerReceivableRoutes(TenantBusinessDatabaseRouter router, TenantPaymentServiceBindingsFactory services,
+                                boolean bankTransferReportingEnabled) {
+        private <T> T read(CurrentAccessContext context, Function<TenantPaymentSession, T> query) {
+            try {
+                return router.inTenantSession(context, session -> session.inReadOnlyTransaction(
+                        jdbc -> query.apply(services.bindTo(jdbc, session.transactionManager()))));
+            } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
+                     | DataAccessException | CannotCreateTransactionException failure) {
+                throw unavailable(failure);
+            }
+        }
+
+        private <T> T write(CurrentAccessContext context, Function<TenantPaymentSession, T> command) {
+            try {
+                return router.inTenantSession(context, session ->
+                        command.apply(services.bindTo(session.jdbcTemplate(), session.transactionManager())));
+            } catch (TenantBusinessDatabaseUnavailableException | TenantBusinessDatabaseSchemaManifestMismatchException
+                     | DataAccessException | CannotCreateTransactionException failure) {
+                throw unavailable(failure);
+            }
+        }
+    }
+
     private static TechnicalFailureException unavailable() {
+        return unavailable(null);
+    }
+
+    private static TechnicalFailureException unavailable(Throwable cause) {
         return new TechnicalFailureException(TechnicalFailureException.Kind.TECHNICAL_CAPABILITY_UNAVAILABLE,
-                "Tenant payment database routing is unavailable");
+                "Tenant payment database routing is unavailable", cause);
     }
 }

@@ -13,7 +13,7 @@ import java.util.Objects;
 
 /** Payments-owned assembly for a short-lived Tenant session. */
 @Component
-@Profile("local")
+@Profile("local | tenant-cloud")
 public final class JdbcTenantPaymentSessionFactory implements TenantPaymentSessionFactory {
     private final StripePaymentProvider stripe;
     private final String publishableKey;

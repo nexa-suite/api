@@ -9,12 +9,15 @@ import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommerci
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogDetailQueryFactory;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantSellableSkuQueryFactory;
 import com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountQuery;
+import com.nexa.api.customerbuyerrelationships.application.clientaccount.service.ClientAccountAccessPolicy;
+import com.nexa.api.shared.application.error.ApiResourceNotFoundException;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantCatalogAvailabilityAdapterFactory;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext;
 import com.nexa.api.tenantaccessgovernance.tenantmanagement.application.publicapi.RegionalCurrencyQuery;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.math.BigDecimal;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -55,6 +58,19 @@ public final class TenantBoundCatalogCommercialPolicyRequestAdapter
                 regionalCurrency.findCurrency(tenantId), "Regional currency query returned no result");
         return router.inTransaction(context, tenantJdbc -> operation.execute(bind(
                 context, tenantJdbc, regionalCurrencySnapshot)));
+    }
+
+    CustomerOffer readCustomerOffer(CurrentAccessContext context, UUID accountId, String itemId, BigDecimal quantity) {
+        ClientAccountAccessPolicy.requireRead(context);
+        Optional<String> currency = regionalCurrency.findCurrency(context.tenantId().value());
+        return router.inReadOnlyTransaction(context, jdbc -> {
+            if (ClientAccountAccessPolicy.isSalesOwnerScoped(context) && customerAccounts.bindTo(jdbc)
+                    .findSalesOwnerReference(context.tenantId().toString(), context.workspaceId().toString(),
+                            accountId.toString(), context.membershipId().toString()).isEmpty()) {
+                throw new ApiResourceNotFoundException("client-account");
+            }
+            return bind(context, jdbc, currency).customerOffer(accountId, itemId, quantity);
+        });
     }
 
     private Request bind(CurrentAccessContext accessContext, JdbcTemplate tenantJdbc,

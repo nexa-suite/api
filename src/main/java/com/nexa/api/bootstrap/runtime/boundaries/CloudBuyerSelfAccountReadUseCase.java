@@ -46,7 +46,9 @@ final class CloudBuyerSelfAccountReadUseCase implements ClientAccountUseCase {
     @Override public ClientAccountView associateBuyer(CurrentAccessContext context, String id,
             String membershipId, long version) { throw unavailable(); }
     @Override public ClientAccountBuyerMembershipPage buyerMemberships(CurrentAccessContext context,
-            String id, int page, int size) { throw unavailable(); }
+            String id, int page, int size) {
+        return tenantDelegate.buyerMemberships(context, id, page, size);
+    }
     @Override public ClientAccountBuyerMembershipMutation associateBuyerMembership(CurrentAccessContext context,
             String id, String membershipId, long version) { throw unavailable(); }
     @Override public ClientAccountBuyerMembershipMutation deactivateBuyerMembership(CurrentAccessContext context,
