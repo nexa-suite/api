@@ -155,7 +155,7 @@ See [release notes](docs/releases/v1.0.0.md).
 Historical compatible patch candidate for runtime-configurable Swagger UI and
 OpenAPI documentation support in cloud deployments; its scope is carried by
 the v1.0.0 boundary.
-See [historical notes](docs/releases/v0.21.1.md).
+See the [historical notes](https://github.com/nexa-suite/api/blob/bb33a05efa9b8ffa92802595b2919e2d21679775/docs/releases/v0.21.1.md).
 
 ### Changed
 
