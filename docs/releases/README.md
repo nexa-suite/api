@@ -1,18 +1,18 @@
 # API release notes
 
-Release notes are scoped to the API repository and do not imply complete Nexa domain or migration parity.
-
-## Release boundaries
-
-Consumer support requires a verified signed tag and the corresponding published
-GitHub Release; a preparation branch alone is not released support.
+Use [GitHub Releases](https://github.com/nexa-suite/api/releases) to find shipped
+versions and their signed tags. The notes here describe API changes and setup.
 
 ## Releases
 
 | Release | Summary |
 |---|---|
-| [v2.0.3](./v2.0.3.md) | Complete Swagger navigation and opt-in Tenant-routed inventory/picking reads; publication requires signed tag and GitHub Release |
-| [v2.0.2](./v2.0.2.md) | Swagger presentation and compatible patch verification; publication requires signed tag and GitHub Release |
+| [v3.0.3](./v3.0.3.md) | Restores Buyer documents, payments and live updates, and fills in Sales and Warehouse cloud routes |
+| [v3.0.2](./v3.0.2.md) | Connects Buyer checkout, Warehouse preparation, dispatch and receipt to the cloud database |
+| [v3.0.1](./v3.0.1.md) | Restores Buyer order reads and delivery tracking |
+| [v3.0.0](./v3.0.0.md) | Adds mobile terms, notifications and the cloud routes for ICISA validation |
+| [v2.0.3](./v2.0.3.md) | Swagger navigation and optional cloud inventory and picking reads |
+| [v2.0.2](./v2.0.2.md) | Swagger presentation and patch compatibility checks |
 | [v2.0.1](./v2.0.1.md) | Published source patch: bounded Tenant-routed customer, catalog/SKU and notification capabilities; [release](https://github.com/nexa-suite/api/releases/tag/v2.0.1) |
 | [v2.0.0](./v2.0.0.md) | Published source release: five-business-day delivery rule, Buyer password recovery and reviewed contract migration; [release](https://github.com/nexa-suite/api/releases/tag/v2.0.0) |
 | [v1.2.0](./v1.2.0.md) | NEXA Academic Stable Checkpoint; [published release](https://github.com/nexa-suite/api/releases/tag/v1.2.0) |
@@ -46,18 +46,4 @@ GitHub Release; a preparation branch alone is not released support.
 | `v0.5.0` | INTERNAL_PREPARATION_ONLY | Release-preparation commits exist; no public tag, GitHub Release or merged release PR. |
 | `v0.7.0` | INTERNAL_PREPARATION_ONLY | Release-preparation commit exists; no public tag, GitHub Release or merged release PR. |
 
-The public API line therefore advances from `v0.4.0` to `v0.6.0` and from
-`v0.6.0` to `v0.8.0` without fabricated releases. Preparation commits remain
-reachable in Git history.
-
-## Historical and development material
-
-| Draft | Status |
-|---|---|
-| [HISTORICAL CANDIDATE: v0.21.1](./v0.21.1.md) | Swagger/OpenAPI runtime patch scope carried into the v1.0.0 boundary |
-| [UNRELEASED HISTORICAL CANDIDATE: v0.7.0](./v0.7.0.md) | Consolidated into later published work; no tag or GitHub Release |
-| [UNRELEASED DRAFT: v0.8.1 candidate](./v0.8.1.md) | Development material retained for historical context; no published tag or GitHub Release |
-
-The v0.18.0 release follows the published v0.17.1 migration baseline. No
-historical v0.17.1 release-note file is present in this repository; the
-v0.17.0 notes remain unchanged.
+The public release history skips `v0.5.0` and `v0.7.0`. Git history retains their preparation commits.

@@ -1,33 +1,26 @@
 # API operations
 
-The current local API runtime is the modern Compose stack in
-[`compose/modern.compose.yml`](./compose/modern.compose.yml). Prepare the local
-environment with `scripts/setup-local-environment.sh`, then use
-`compose/scripts/modern-up.sh`, `modern-down.sh` and `status.sh`.
-After updating an older checkout, run `scripts/generate-local-env.sh` once to
-add the separate `nexa_runtime` and `nexa_migrator` credentials to
-`.env.local`.
+Use [Modern Compose](compose/modern.compose.yml) for local API work. From the
+API checkout, `./scripts/setup-local-environment.sh` prepares the local files
+and starts the stack. Use `./ops/compose/scripts/status.sh` to check it and
+`./ops/compose/scripts/modern-down.sh` to stop it.
 
-Legacy Compose files and scripts remain as comparison and compatibility
-evidence. They are not the default runtime. `compare-up.sh` intentionally starts
-both stacks; use `modern-up.sh` for the current API runtime.
+For an older checkout, `./scripts/generate-local-env.sh` adds the separate
+`nexa_runtime` and `nexa_migrator` credentials to `.env.local`. See the
+[Compose guide](compose/README.md) and [developer scripts](../scripts/README.md)
+for more commands. `compare-up.sh` starts both the Modern and Legacy stacks
+for side-by-side testing.
 
-See [Compose details](./compose/README.md) and the
-[script inventory](../scripts/README.md). This navigation does not change
-service topology or runtime behavior.
-
-The opt-in per-Tenant local business database workflow is documented in
-[Local Tenant business database provisioning](./tenant-business-database-local.md).
-
-The disabled, incomplete cloud routing foundation and its remaining gates are
-documented in [Cloud Tenant database routing foundation](./tenant-business-database-cloud.md).
+See [local database provisioning](tenant-business-database-local.md) and
+[cloud database routing](tenant-business-database-cloud.md) for the Tenant
+business database setup.
 
 ## Academic Render and Neon deployment
 
-The Render service uses GitHub `main`, the Free plan and the existing Neon
-`production` branch. Render receives the public database and Object Storage
-identifiers from [`render.yaml`](../render.yaml); passwords and access keys
-remain service secrets and are never stored in the repository.
+The academic API runs on Render Free from GitHub `main`. Use
+[`render.yaml`](../render.yaml) for the service definitions and check Render's
+configured connections to identify the active Neon branches. Render stores the
+database passwords and object storage keys as service secrets.
 
 The academic deployment sets `NEXA_CLAMAV_MODE=disabled` because no private
 ClamAV service is available on the Free plan. This mode is fail-closed:

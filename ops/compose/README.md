@@ -1,10 +1,7 @@
 # Nexa local runtimes
 
-Modern is the current API runtime. Legacy remains available for comparison and
-compatibility. Both use the canonical `api/.env.local` file.
-
-Run the modern stack for current API work. `compare-up.sh` intentionally starts
-both Modern and Legacy for side-by-side comparison.
+Use Modern Compose for local API work. Both stacks read `api/.env.local`.
+Run `./scripts/setup-local-environment.sh` if you still need to set it up.
 
 ```bash
 ./ops/compose/scripts/modern-up.sh
@@ -20,7 +17,8 @@ To run both stacks for comparison:
 ./ops/compose/scripts/compare-down.sh
 ```
 
-Modern expone API `8080`, Platform `4200` y Portal `4300`. PostgreSQL no publica puerto y vive en `nexa-modern-data`.
+The Modern stack exposes API on `8080`, Platform on `4200`, and Portal on
+`4300`. PostgreSQL stays on the Compose network and uses `nexa-modern-data`.
 
 The Modern startup script follows `NEXA_MODERN_SPRING_PROFILE`: profiles that
 include `minio` or `s3` build and start the pinned MinIO Community Edition image,
@@ -34,6 +32,10 @@ runs MinIO as unprivileged UID 10001. MinIO Community Edition is archived
 upstream, so this Compose service supports development and verification only.
 Select a maintained object-storage provider before the Production Gate.
 
-Legacy expone API ASP.NET `5068`, Platform Vue `5173` y Portal Vue `5174`. PostgreSQL no publica puerto y vive en `nexa-legacy-data`.
+The Legacy stack exposes the ASP.NET API on `5068`, Vue Platform on `5173`,
+and Vue Portal on `5174`. Its PostgreSQL service stays on the Compose network
+and uses `nexa-legacy-data`.
 
-Las redes, volúmenes, credenciales y migraciones son independientes. Los overrides `modern.db-admin.compose.yml` y `legacy.db-admin.compose.yml` son opcionales y no se habilitan por defecto.
+Each stack has separate networks, volumes, credentials, and migrations. Use
+the optional `modern.db-admin.compose.yml` or `legacy.db-admin.compose.yml`
+override only when you need database administration tools.

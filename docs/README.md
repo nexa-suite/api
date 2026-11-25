@@ -1,69 +1,23 @@
-# Nexa API documentation index
+# Nexa API documentation
 
-API documentation describes implementation mapping, HTTP contracts, runtime
-behavior, security implementation, database implementation, tests and release
-evidence. Nexa Blueprint remains the canonical Product, Domain and accepted
-architecture source: [nexa-suite/blueprint](https://github.com/nexa-suite/blueprint).
+Start with the [repository README](../README.md) to run the API and find the ICISA deployment. The [Nexa Blueprint](https://github.com/nexa-suite/blueprint) records the product and architecture decisions behind the implementation.
 
-## Architecture and module map
+## Use the API
 
-- [Canonical bounded-context implementation map](./architecture/bounded-context-module-map.md)
-- [Logical layer boundaries](./architecture/logical-layering.md)
-- [Architecture decisions](./architecture/decisions/README.md)
-- [Tenant physical-database routing foundation](./architecture/tenant-database-routing-foundation.md)
-- [Context implementation notes](./architecture/bounded-contexts/)
+- [Read or generate the OpenAPI contract](openapi/README.md)
+- [Browse the committed contract](openapi/openapi.json)
+- [Authentication](security/authentication.md) and [authorization](security/authorization.md)
+- [Buyer delivery dates](integration/buyer-delivery-lead-policy.md)
 
-The eleven business context roots are listed in the module map. `edge`,
-`bootstrap` and `shared` are technical modules, not additional business
-contexts.
+## Work on the backend
 
-## HTTP and OpenAPI contracts
+- [Context map](architecture/bounded-context-module-map.md), [logical layers](architecture/logical-layering.md), and [architecture decisions](architecture/decisions/README.md)
+- [Database routing](architecture/tenant-database-routing-foundation.md) and [runtime database permissions](security/runtime-database-role.md)
+- [Tenant resolution](security/tenant-resolution.md), [row-level security](security/rls-scope-classification.md), and [schema audit](security/rls-current-schema-audit.md)
+- [Flyway migrations](../src/main/resources/db/migration/), [seed data](../src/main/resources/seed/), and [XML schemas](../src/main/resources/schemas/)
 
-- [Backend preparado para frontend — brechas, contratos y decisiones abiertas](./backend-preparado-para-frontend.md)
-- [Operations contract closure and implementation boundaries](./operations-contract-closure.md)
-- [Buyer delivery lead policy](./integration/buyer-delivery-lead-policy.md)
+## Run and deploy
 
-- [OpenAPI instructions and compatibility checks](./openapi/README.md)
-- [Committed OpenAPI snapshot](./openapi/openapi.json)
-- [Cross-client API contract evidence — 2026-09-24](./verification/cross-client-contract-2026-09-24.md)
-
-## Security implementation
-
-- [Current-schema RLS audit](./security/rls-current-schema-audit.md)
-- [Authentication](./security/authentication.md)
-- [Authorization](./security/authorization.md)
-- [Tenant resolution](./security/tenant-resolution.md)
-- [RLS scope classification](./security/rls-scope-classification.md)
-- [Runtime database role](./security/runtime-database-role.md)
-- [Threat models](./security/threat-models.md)
-- [Security notifications and outbox](./security-notification-outbox.md)
-
-## Database and resources
-
-- [Flyway migration history](../src/main/resources/db/migration/)
-- [Deterministic seed resources](../src/main/resources/seed/)
-- [Business XML and XSD schemas](../src/main/resources/schemas/)
-- [ICISA catalog reference handoff](./catalog-reference/README.md)
-
-Migration history, seed artifacts and schemas remain source evidence. No
-structural refactor should rewrite them.
-
-## Runtime and local development
-
-- [Operations overview](../ops/README.md)
-- [Compose runtime details](../ops/compose/README.md)
-- [Local setup and verification scripts](../scripts/README.md)
-- [Production-gate runtime requirements](./operations/production-gate-requirements.md)
-
-## Testing and release evidence
-
-- [Testing notes](./testing/)
-- [API structure differential — 2026-09-24](./verification/api-structure-differential-2026-09-24.md)
-- [API foundation verification — 2026-09-24](./verification/foundation-gates-2026-09-24.md)
-- [Release notes](./releases/README.md)
-- [Repository changelog](../CHANGELOG.md)
-- [Historical audits](./audits/)
-
-## Domain foundation notes
-
-- [API domain foundation archive](./domain/README.md)
+- [Local Compose runtime](../ops/compose/README.md) and [developer scripts](../scripts/README.md)
+- [Runtime operations](../ops/README.md) and [cloud database routing](../ops/tenant-business-database-cloud.md)
+- [Release notes](releases/README.md), [changelog](../CHANGELOG.md), and [release policy](../.github/RELEASE_POLICY.md)

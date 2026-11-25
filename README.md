@@ -1,306 +1,57 @@
 <div align="center">
 
-<br />
-
 <img src="./docs/assets/nexa.svg" alt="Nexa" width="240" />
 
 # Nexa API
 
-**Authoritative business and integration backbone for Nexa Suite.**
+[![Latest Git tag](https://img.shields.io/github/v/tag/nexa-suite/api?sort=semver&style=flat-square&label=latest%20release)](https://github.com/nexa-suite/api/releases)
 
-![Java 25](https://img.shields.io/badge/Java-25-ED8B00?style=flat-square&logo=openjdk&logoColor=white) ![Spring Boot 4.1.1](https://img.shields.io/badge/Spring%20Boot-4.1.1-6DB33F?style=flat-square&logo=springboot&logoColor=white) ![PostgreSQL 18.4](https://img.shields.io/badge/PostgreSQL-18.4-4169E1?style=flat-square&logo=postgresql&logoColor=white) ![Maven](https://img.shields.io/badge/Maven-build-C71A36?style=flat-square&logo=apachemaven&logoColor=white) ![Latest Git tag](https://img.shields.io/github/v/tag/nexa-suite/api?sort=semver&style=flat-square&label=latest%20Git%20tag)
-
-[OpenAPI](./docs/openapi/README.md) · [Architecture](./docs/architecture/) · [Releases](./docs/releases/) · [Contributing](./.github/CONTRIBUTING.md) · [Security](./.github/SECURITY.md)
+[Swagger](https://nexa-api-69bj.onrender.com/swagger-ui/index.html) · [Service status](https://nexa-api-69bj.onrender.com/actuator/health/readiness) · [Android apps](https://github.com/nexa-suite/mobile/releases/tag/v3.0.2)
 
 </div>
 
----
+Nexa API is the backend for our Buyer and Operations apps, Buyer Portal, and Platform. Buyers use it to browse the catalog, send purchase requests, and track deliveries. Sales, Warehouse, and Logistics use the same API to process requests, prepare orders, and record delivery.
 
-## Overview
+## Try the ICISA deployment
 
-Nexa API is the authoritative Spring Boot modular monolith for identity, tenant
-and workspace scope, commercial workflows, inventory, fulfillment, delivery,
-finance, documents, notifications and traceability. Consumer support is
-established by a verified signed Git tag and its corresponding GitHub Release.
-An API release does not claim complete Nexa System Acceptance or full-system
-Production Readiness.
+- [Swagger UI](https://nexa-api-69bj.onrender.com/swagger-ui/index.html) lists the HTTP endpoints. Choose `complete` to see all documented routes.
+- [API readiness](https://nexa-api-69bj.onrender.com/actuator/health/readiness) shows when the service is ready. Render Free can take a moment to start after sitting idle.
+- [API v3.0.3](https://github.com/nexa-suite/api/releases/tag/v3.0.3) is the release used with the [Buyer and Operations APKs](https://github.com/nexa-suite/mobile/releases/tag/v3.0.2). The [v3.0.3 notes](docs/releases/v3.0.3.md) list the cloud routes included in that patch.
 
-The current published source release is [v2.0.1](
-https://github.com/nexa-suite/api/releases/tag/v2.0.1). Its bounded cloud
-composition supports the explicitly enabled reads documented in the
-[release notes](./docs/releases/v2.0.1.md); source publication does not imply
-that every implemented business workflow is enabled in a managed deployment.
+## Run locally
 
-The OpenAPI migration workflow checks the published v2.0.0 and historical
-consumer baselines, including [v0.21.0](./docs/releases/v0.21.0.md), v0.20.0,
-v0.19.0, v0.18.0 and v0.17.1. An exact approved migration is distinct from a
-claim of backward compatibility; see the [migration policy](
-./docs/openapi/migrations/README.md).
+Use Java 25 and Docker with Compose. The project includes the Maven Wrapper. Keep the Platform and Buyer Portal checkouts next to the API if you want to start the full local stack.
 
-The v1.0.0 API boundary aligns the Maven, Render and OpenAPI version metadata
-and carries the compatible Swagger/OpenAPI runtime configuration work recorded
-in the historical v0.21.1 candidate. It also gives the seeded warehouse to the
-seeded warehouse membership through an explicit grant when the opt-in local
-development bootstrap runs. This fixture-only change does not alter normal
-warehouse creation, non-local authorization or Render bootstrap behavior.
-Technical state gauges retain their suppliers for the registered meter's
-lifetime; this observability correction does not change API contracts or
-business behavior.
-Consumer support for v1.0.0 follows the annotated signed-tag and GitHub Release
-requirements in the [release policy](./.github/RELEASE_POLICY.md).
-
-The v0.17.1 release remains the verified upgrade baseline. This repository
-retains the v0.17.0 release notes and has no historical v0.17.1 release-note
-file.
-
-The API remains the server authority for authorization, tenant isolation,
-business decisions and durable state. Java packages and Spring Modulith
-modules are implementation structure, not automatic Bounded Contexts.
-
-## Nexa Product Ecosystem
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### [Nexa Mobile Report](https://github.com/nexa-suite/mobile-report)
-
-Academic report and delivery evidence for Nexa Mobile.
-
-![Markdown](https://img.shields.io/badge/Markdown-academic%20evidence-000000?style=flat-square&logo=markdown&logoColor=white)
-
-</td>
-<td width="50%" valign="top">
-
-### [Nexa Mobile](https://github.com/nexa-suite/mobile)
-
-Operations Android/Kotlin/Jetpack Compose and Buyer Flutter/Dart both have
-implemented clients and APKs in the [Mobile v2.0.1 source release](
-https://github.com/nexa-suite/mobile/releases/tag/v2.0.1). Their application
-versions are independent of the repository release version. Implemented
-screens and published APKs do not establish complete business journeys,
-Product Acceptance or Production Readiness.
-
-![Operations Android](https://img.shields.io/badge/Operations%20Mobile-Android-3DDC84?style=flat-square&logo=android&logoColor=white) ![Buyer Flutter](https://img.shields.io/badge/Buyer%20Mobile-Flutter%2FDart-02569B?style=flat-square&logo=flutter&logoColor=white)
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### [Nexa API](https://github.com/nexa-suite/api)
-
-This repository: business and integration authority.
-
-![Java](https://img.shields.io/badge/Java-25-ED8B00?style=flat-square&logo=openjdk&logoColor=white) ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?style=flat-square&logo=springboot&logoColor=white)
-
-</td>
-<td width="50%" valign="top">
-
-### [Nexa Website](https://github.com/nexa-suite/website)
-
-Public product experience and acquisition entry point.
-
-![HTML5](https://img.shields.io/badge/HTML5-static-E34F26?style=flat-square&logo=html5&logoColor=white) ![CSS3](https://img.shields.io/badge/CSS3-responsive-1572B6?style=flat-square&logo=css3&logoColor=white) ![JavaScript](https://img.shields.io/badge/JavaScript-vanilla-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### [Nexa Buyer Portal](https://github.com/nexa-suite/portal)
-
-Buyer-facing Web experience for B2B purchasing and delivery visibility.
-
-![Angular](https://img.shields.io/badge/Angular-22-DD0031?style=flat-square&logo=angular&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
-
-</td>
-<td width="50%" valign="top">
-
-### [Nexa Platform](https://github.com/nexa-suite/platform)
-
-Internal operational Web workspace for tenant teams.
-
-![Angular](https://img.shields.io/badge/Angular-22-DD0031?style=flat-square&logo=angular&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
-
-</td>
-</tr>
-</table>
-
-## Implemented API Areas
-
-- Identity sessions, refresh rotation and membership verification.
-- Browser-cookie and native-header refresh transports over the same session
-  lifecycle.
-- Tenant-scoped catalog, pricing, customer, Purchase Request and Sales Order
-  contracts.
-- Inventory Availability, FEFO, safety stock, lot controls and physical
-  allocation.
-- Fulfillment and Delivery lifecycle, picking discrepancies, dispatch,
-  handover, delivery attempts, POD and temperature evidence.
-- Credit, receivables, financial adjustments and payment foundations with
-  provider boundaries kept explicit.
-- Business Traceability through the append-only audit and outbox backbone.
-- Problem Details, idempotency, optimistic concurrency and Flyway-managed
-  PostgreSQL schemas.
-
-Development evidence is not Product Acceptance evidence. The API does not add
-Mobile, Scanner, QR or Device Bounded Contexts.
-
-## Architecture and Authority Boundary
-
-Presentation, Application, Domain and Infrastructure remain separate. Domain
-code stays independent of Spring, persistence, JSON and SQL concerns where the
-architecture requires it. The canonical module map and ownership notes live in
-[`docs/architecture/bounded-context-module-map.md`](./docs/architecture/bounded-context-module-map.md).
-
-`edge`, `bootstrap` and `shared` are technical modules, not Bounded Contexts.
-`edge` composes inbound HTTP, security, Problem Details and change-feed
-adapters. `bootstrap.runtime` contains runtime-wide wiring and workers;
-`bootstrap.local` contains local development bootstrap. `shared` retains
-framework-neutral technical contracts and primitives. Client applications
-consume approved contracts; they do not become business or persistence
-authorities.
-
-## Technology Stack
-
-| Concern | Current evidence |
-| --- | --- |
-| Language | Java 25 |
-| Runtime | Spring Boot 4.1.1 |
-| HTTP/API | Spring MVC, REST and Springdoc OpenAPI 3.1.0 |
-| Security | Spring Security resource server |
-| Persistence | JPA infrastructure and PostgreSQL 18.4 local/Testcontainers baseline |
-| Migrations | Flyway with PostgreSQL support |
-| Build | Maven Wrapper |
-| Operations | Spring Boot Actuator and OpenTelemetry support |
-
-## Getting Started
-
-```bash
-./mvnw clean test
-./mvnw spring-boot:run
+```sh
+./scripts/setup-local-environment.sh
 ```
 
-Local health and information endpoints use port `8080`. Swagger/OpenAPI is
-enabled with the local profile. Local execution does not imply a released
-public business API.
+The setup script prepares local configuration and starts the stack. The API listens on `http://127.0.0.1:8080`. With the local environment already configured, run `./ops/compose/scripts/modern-up.sh api-runtime` to start the API services. See the [Compose guide](ops/compose/README.md) for status, shutdown, storage, and local profiles. Keep the local environment file and signing keys outside Git.
 
-With the opt-in local development bootstrap enabled, provide both
-`NEXA_DEV_BOM_EMAIL` and `NEXA_DEV_BOM_PASSWORD` to seed a separate Business
-Operations Manager membership. Both values are optional together; an incomplete
-pair fails startup. Keep credentials in the ignored local environment file.
+## Run the tests
 
-## Validation
-
-```bash
+```sh
 ./mvnw clean test
 ./mvnw clean verify -Dnexa.integration.enabled=true
 ```
 
-The integration gate requires Docker/Testcontainers and the configured external
-adapter test doubles. A unit-test pass does not replace that gate.
+The second command runs the integration tests with PostgreSQL through Testcontainers. Keep Docker running for that command.
 
-## Repository Structure
+## How the code is organized
 
-```text
-src/main/java/com/nexa/api/       Eleven business context roots
-                                  plus edge/, bootstrap/ and shared/
-src/main/java/com/nexa/api/edge/  Inbound HTTP, security, errors and streaming
-src/main/java/com/nexa/api/bootstrap/{runtime,local}/ Runtime and local startup
-src/main/java/com/nexa/api/shared/ Framework-neutral technical primitives
-src/main/resources/               Migrations, seeds, schemas and configuration
-src/test/java/com/nexa/api/       Tests organized by source ownership
-docs/                              Implementation maps, contracts and evidence
-ops/                               Compose runtime and operational tooling
-scripts/                           Local setup, access checks and evidence
-```
+The API is a Java 25 and Spring Boot modular monolith backed by PostgreSQL. Flyway manages the schema. The server checks permissions and workspace scope and records the final outcome of business actions.
 
-## Documentation
+- `src/main/java/com/nexa/api` contains the business contexts. Each context separates HTTP handlers, application use cases, domain code, and persistence or provider adapters.
+- `edge`, `bootstrap`, and `shared` contain HTTP security, application wiring, and common technical code.
+- `src/main/resources` contains runtime configuration, migrations, and seed data. `src/test` contains unit and integration tests.
+- `ops` and `scripts` hold the local runtime and deployment tooling.
 
-- [Documentation index](./docs/README.md)
-- [OpenAPI instructions](./docs/openapi/README.md)
-- [Authentication contract](./docs/security/authentication.md)
-- [Runtime database role](./docs/security/runtime-database-role.md)
-- [Canonical bounded contexts](./docs/architecture/bounded-context-module-map.md)
-- [Release notes](./docs/releases/)
-- [Changelog](./CHANGELOG.md)
-- [Runtime operations](./ops/README.md)
-- [Developer scripts](./scripts/README.md)
+The [context map](docs/architecture/bounded-context-module-map.md) links this implementation to the [Nexa Blueprint](https://github.com/nexa-suite/blueprint).
 
-## Nexa Engineering & Documentation
+## Project links
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### [Nexa Blueprint](https://github.com/nexa-suite/blueprint)
-
-Canonical Product, Domain, Architecture, data, security and accepted
-engineering decision source.
-
-![C4](https://img.shields.io/badge/C4-canonical%20model-64748B?style=flat-square) ![Markdown](https://img.shields.io/badge/Markdown-documentation-000000?style=flat-square&logo=markdown&logoColor=white)
-
-</td>
-<td width="50%" valign="top">
-
-### [Nexa Web Report](https://github.com/nexa-suite/web-report)
-
-Academic report and evidence repository for the Nexa Web course.
-
-![Docs as Code](https://img.shields.io/badge/Docs%20as%20Code-academic%20evidence-64748B?style=flat-square)
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### [Nexa Complementary](https://github.com/nexa-suite/complementary)
-
-Supporting references, reproducible engineering resources and shared tooling;
-not Product, Domain or Architecture authority.
-
-![Support tooling](https://img.shields.io/badge/Support%20tooling-reference-64748B?style=flat-square)
-
-</td>
-<td width="50%" valign="top">
-
-### [Nexa Design Lab](https://github.com/nexa-suite/design-lab)
-
-UX/UI, interaction, design-system, prototype and current design-evidence
-workspace.
-
-![Angular](https://img.shields.io/badge/Angular-22-DD0031?style=flat-square&logo=angular&logoColor=white)
-
-</td>
-</tr>
-</table>
-
-## Security
-
-Follow the repository [Security Policy](./.github/SECURITY.md) for reporting
-vulnerabilities. Tenant isolation, authorization, secret handling and data
-integrity remain server-side responsibilities.
-
-### Optional Firebase push delivery
-
-Firebase Cloud Messaging is currently wired to the local Tenant database
-runtime. Enable `NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED=true` and
-`NEXA_TENANT_BUSINESS_BUSINESS_TRACEABILITY_ENABLED=true`, then select it with
-`NEXA_PUSH_PROVIDER=fcm`, set `NEXA_FCM_PROJECT_ID`, and provide Google
-Application Default Credentials. The API fails startup if FCM is selected
-outside the local profile or without either Tenant capability. Push
-destinations are stored encrypted in each routed Tenant business database;
-provide the external
-`NEXA_PUSH_DESTINATION_KEY` (at least 32 characters) and its
-`NEXA_PUSH_DESTINATION_KEY_VERSION`. During key rotation, keep old versions in
-`NEXA_PUSH_DESTINATION_PREVIOUS_KEYS` as comma-separated `version=key` entries
-until stored destinations have been re-registered. The default provider remains
-`deferred`; cloud-profile push delivery is not wired yet.
-
-## Legal
-
-Copyright © 2026 Nexa. All rights reserved. No open-source license is claimed
-by this README.
-
-<div align="center"><br />Nexa · Server authority, explicit evidence boundaries</div>
+- [Developer documentation](docs/README.md)
+- [OpenAPI contract and compatibility checks](docs/openapi/README.md)
+- [Release notes](docs/releases/README.md) and [changelog](CHANGELOG.md)
+- [Contributing](.github/CONTRIBUTING.md) and [security](.github/SECURITY.md)
+- [Buyer Portal](https://github.com/nexa-suite/portal), [Platform](https://github.com/nexa-suite/platform), [Website](https://github.com/nexa-suite/website), and [Mobile report](https://github.com/nexa-suite/mobile-report)
