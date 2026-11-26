@@ -33,7 +33,7 @@ import java.util.UUID;
 
 /** HTTP boundary for the current Buyer membership's personal Catalog offer preferences. */
 @RestController
-@Profile("local")
+@Profile({"local", "tenant-cloud"})
 @ConditionalOnProperty(prefix = "nexa.tenant-business.catalog-favorites", name = "enabled", havingValue = "true")
 @RequestMapping("/api/v1/buyer/favorites")
 @Tag(name = "Buyer catalog favorites")

@@ -67,7 +67,7 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 
 	@ParameterizedTest
 	@ValueSource(strings = { "buyer-wallet-read", "buyer-wallet-recharge", "purchase-request",
-			"catalog-favorites", "catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
+			"catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
 			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability" })
 	void refusesBusinessCapabilitiesUntilCloudCompositionIsImplemented(String capability) throws IOException {
 		context().withPropertyValues("nexa.tenant-business." + capability + ".enabled=true")
@@ -143,6 +143,17 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 				.run(context -> assertThat(context).hasFailed());
 		context().withPropertyValues("nexa.tenant-business.cloud-read.enabled=true",
 				"nexa.tenant-business.catalog-detail-read.enabled=true", "nexa.tenant-business.cloud-router.enabled=true")
+				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
+	}
+
+	@Test
+	void favoritesRequireTheExplicitCatalogReadComposition() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.catalog-favorites.enabled=true")
+				.run(context -> assertThat(context).hasFailed().getFailure()
+						.hasRootCauseMessage("Cloud Buyer favorites require the explicit cloud router and catalog read composition"));
+		context().withPropertyValues("nexa.tenant-business.catalog-favorites.enabled=true",
+				"nexa.tenant-business.cloud-read.enabled=true", "nexa.tenant-business.catalog-detail-read.enabled=true",
+				"nexa.tenant-business.cloud-router.enabled=true")
 				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
 	}
 

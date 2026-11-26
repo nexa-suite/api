@@ -31,7 +31,7 @@ import java.util.Locale;
 public class CloudTenantBusinessDatabaseRouterConfiguration {
 	private static final List<String> UNSUPPORTED_CAPABILITIES = List.of(
 			"buyer-wallet-read", "buyer-wallet-recharge", "purchase-request",
-			"catalog-favorites", "catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
+			"catalog-management", "payments", "fulfillment-delivery", "warehouse-operations",
 			"local-fixtures", "support-sales-order-read", "business-documents", "business-traceability");
 
 	public CloudTenantBusinessDatabaseRouterConfiguration(Environment environment) {
@@ -72,6 +72,11 @@ public class CloudTenantBusinessDatabaseRouterConfiguration {
         }
 		boolean readEnabled = enabled(environment, "nexa.tenant-business.cloud-read.enabled");
 		boolean catalogEnabled = enabled(environment, "nexa.tenant-business.catalog-detail-read.enabled");
+		if (enabled(environment, "nexa.tenant-business.catalog-favorites.enabled")
+				&& (!readEnabled || !catalogEnabled
+						|| !enabled(environment, "nexa.tenant-business.cloud-router.enabled"))) {
+			throw new IllegalStateException("Cloud Buyer favorites require the explicit cloud router and catalog read composition");
+		}
 		if ((readEnabled || catalogEnabled) && (!readEnabled || !catalogEnabled
 				|| !enabled(environment, "nexa.tenant-business.cloud-router.enabled"))) {
 			throw new IllegalStateException("Cloud reads require the explicit cloud router and catalog read composition");

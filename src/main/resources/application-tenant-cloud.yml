@@ -12,6 +12,8 @@ nexa:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_MOBILE_FULFILLMENT_ENABLED:false}
     cloud-read:
       enabled: ${NEXA_TENANT_BUSINESS_CLOUD_READ_ENABLED:false}
+    catalog-favorites:
+      enabled: ${NEXA_TENANT_BUSINESS_CATALOG_FAVORITES_ENABLED:false}
     catalog-detail-read:
       enabled: ${NEXA_TENANT_BUSINESS_CATALOG_DETAIL_READ_ENABLED:false}
     cloud-notification-push:
