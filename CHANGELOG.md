@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [3.0.4]
+
+- Restore Buyer catalog favorites on Render.
+- Preserve the version header when Buyer resumes a purchase request.
+
+See the [release notes](docs/releases/v3.0.4.md).
+
 ## [3.0.3]
 
 - Restore Buyer receivables, wallet balance, saved payment method and document reads.
