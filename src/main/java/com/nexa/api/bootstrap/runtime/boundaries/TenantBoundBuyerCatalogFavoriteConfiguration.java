@@ -11,9 +11,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
-/** Enables Buyer favorites only when explicit local Tenant database routing is enabled. */
+/** Enables Buyer favorites when explicitly enabled for the active Tenant router. */
 @Configuration(proxyBeanMethods = false)
-@Profile("local")
+@Profile({"local", "tenant-cloud"})
 @ConditionalOnProperty(prefix = "nexa.tenant-business.catalog-favorites", name = "enabled",
         havingValue = "true", matchIfMissing = false)
 public class TenantBoundBuyerCatalogFavoriteConfiguration {

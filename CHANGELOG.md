@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [3.0.3]
+
+- Restore Buyer receivables, wallet balance, saved payment method and document reads.
+- Route Buyer bank transfer reports and restore PDF and CSV order summary downloads.
+- Restore Sales offer prices, credit reads, direct orders, field visits and assigned document reads.
+- Restore Warehouse receiving zones, inbound receipts and transfer history.
+- Fix overlapping text in PDF order summaries.
+- Restore Buyer live updates and release polling tasks when a stream closes.
+
+See the [release notes](docs/releases/v3.0.3.md).
+
 ## [3.0.2]
 
 - Route Buyer checkout and Sales conversion through the cloud Tenant database.

@@ -23,6 +23,11 @@ authorized Buyer self-account read (`GET /api/v1/client-accounts/me`) plus exist
 personal-profile access continue through their existing central authority.
 An independent `NEXA_TENANT_BUSINESS_NOTIFICATIONS_ENABLED=true` opt-in enables the existing Tenant-routed HTTP inbox, unread count, read-state and personal-preference operations. Workspace notification-settings writes remain unavailable in cloud because their central security audit is outside the Tenant transaction. Push delivery, background projections and callbacks are not enabled or verified by this composition.
 
+`NEXA_TENANT_BUSINESS_CATALOG_FAVORITES_ENABLED=true` enables the existing
+Buyer favorites endpoints when all three cloud catalog read switches are set.
+The endpoints reuse the Tenant database and scope each saved SKU to the
+signed-in Buyer membership. The switch defaults to `false`.
+
 All other Tenant business capability flags remain rejected. Those capabilities
 still require their complete cloud composition, workers and callback adapters.
 Keep this profile disabled in deployed services until the remaining gates below

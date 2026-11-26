@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -84,6 +85,11 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
                 .andExpect(status().isCreated()).andReturn();
         String draftId = json(created).path("id").asText();
         String draft = DRAFTS + "/" + draftId;
+        mockMvc.perform(get(draft).header("Authorization", buyer).header("X-Nexa-Client", "NATIVE"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store, no-transform"))
+                .andExpect(header().string("ETag", created.getResponse().getHeader("ETag")))
+                .andExpect(jsonPath("$.lines").isEmpty());
         var lines = changeDraft(put(draft + "/lines"), buyer, created,
                 """
                 {"lines":[{"skuId":"%s","quantity":1,"unit":"UNIT"}]}
