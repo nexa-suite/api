@@ -16,6 +16,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Max;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.context.annotation.Profile;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -32,6 +33,8 @@ import java.util.UUID;
 @Validated
 public class PurchaseRequestDraftController {
     private static final String ACCESS = "com.nexa.api.tenantaccessgovernance.tenantmanagement.application.model.CurrentAccessContext";
+    // The draft version is also the mutation precondition. Preserve its strong ETag through the edge.
+    private static final CacheControl DRAFT_CACHE_CONTROL = CacheControl.noStore().noTransform();
     private final PurchaseRequestDraftServiceFacade service;
     public PurchaseRequestDraftController(PurchaseRequestDraftServiceFacade service) { this.service = service; }
 
@@ -39,7 +42,7 @@ public class PurchaseRequestDraftController {
     @Operation(operationId = "createPurchaseRequestDraft")
     public ResponseEntity<PurchaseRequestDraftModels.DraftView> create(@RequestAttribute(ACCESS) CurrentAccessContext context, @Valid @RequestBody CreateDraftRequest request) {
         PurchaseRequestDraftModels.DraftView value = service.create(context, request.clientAccountId(), request.requestedDeliveryDate());
-        return ResponseEntity.created(URI.create("/api/v1/buyer/purchase-request-drafts/" + value.id())).eTag(etag(value.version())).body(value);
+        return ResponseEntity.created(URI.create("/api/v1/buyer/purchase-request-drafts/" + value.id())).cacheControl(DRAFT_CACHE_CONTROL).eTag(etag(value.version())).body(value);
     }
     @GetMapping
     @Operation(operationId = "listPurchaseRequestDrafts", summary = "List drafts available to the active Buyer relationship")
@@ -50,27 +53,27 @@ public class PurchaseRequestDraftController {
     }
     @GetMapping("/{draftId}")
     @Operation(operationId = "getPurchaseRequestDraft")
-    public ResponseEntity<PurchaseRequestDraftModels.DraftView> get(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId) { var value = service.get(context, draftId); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
+    public ResponseEntity<PurchaseRequestDraftModels.DraftView> get(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId) { var value = service.get(context, draftId); return ResponseEntity.ok().cacheControl(DRAFT_CACHE_CONTROL).eTag(etag(value.version())).body(value); }
     @PutMapping("/{draftId}/lines")
     @Operation(operationId = "replacePurchaseRequestDraftLines")
     public ResponseEntity<PurchaseRequestDraftModels.DraftView> lines(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId,
             @Parameter(name = "If-Match", in = ParameterIn.HEADER, required = true, description = "Current draft ETag") @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @Valid @RequestBody LinesRequest request) { var value = service.replaceLines(context, draftId, version(ifMatch), request.lines().stream().map(line -> new PurchaseRequestDraftServiceFacade.LineCommand(line.skuId(), line.quantity(), line.unit(), line.notes())).toList()); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
+            @Valid @RequestBody LinesRequest request) { var value = service.replaceLines(context, draftId, version(ifMatch), request.lines().stream().map(line -> new PurchaseRequestDraftServiceFacade.LineCommand(line.skuId(), line.quantity(), line.unit(), line.notes())).toList()); return ResponseEntity.ok().cacheControl(DRAFT_CACHE_CONTROL).eTag(etag(value.version())).body(value); }
     @PutMapping("/{draftId}/destination")
     @Operation(operationId = "setPurchaseRequestDraftDestination")
     public ResponseEntity<PurchaseRequestDraftModels.DraftView> destination(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId,
             @Parameter(name = "If-Match", in = ParameterIn.HEADER, required = true, description = "Current draft ETag") @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @Valid @RequestBody DestinationRequest request) { var value = service.setDestination(context, draftId, version(ifMatch), request.addressId()); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
+            @Valid @RequestBody DestinationRequest request) { var value = service.setDestination(context, draftId, version(ifMatch), request.addressId()); return ResponseEntity.ok().cacheControl(DRAFT_CACHE_CONTROL).eTag(etag(value.version())).body(value); }
     @PostMapping("/{draftId}/route-previews")
     @Operation(operationId = "previewPurchaseRequestDraftRoute")
     public ResponseEntity<PurchaseRequestDraftModels.DraftView> route(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId,
             @Parameter(name = "If-Match", in = ParameterIn.HEADER, required = true, description = "Current draft ETag") @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @RequestBody(required = false) RouteRequest request) { var value = service.previewRoute(context, draftId, version(ifMatch), request == null ? null : request.provider()); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
+            @RequestBody(required = false) RouteRequest request) { var value = service.previewRoute(context, draftId, version(ifMatch), request == null ? null : request.provider()); return ResponseEntity.ok().cacheControl(DRAFT_CACHE_CONTROL).eTag(etag(value.version())).body(value); }
     @PutMapping("/{draftId}/preferences")
     @Operation(operationId = "setPurchaseRequestDraftPreferences")
     public ResponseEntity<PurchaseRequestDraftModels.DraftView> preferences(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId,
             @Parameter(name = "If-Match", in = ParameterIn.HEADER, required = true, description = "Current draft ETag") @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @Valid @RequestBody PreferencesRequest request) { var value = service.setPreferences(context, draftId, version(ifMatch), request.paymentPreference(), request.requestedDeliveryDate()); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
+            @Valid @RequestBody PreferencesRequest request) { var value = service.setPreferences(context, draftId, version(ifMatch), request.paymentPreference(), request.requestedDeliveryDate()); return ResponseEntity.ok().cacheControl(DRAFT_CACHE_CONTROL).eTag(etag(value.version())).body(value); }
     @GetMapping("/{draftId}/review")
     @Operation(operationId = "reviewPurchaseRequestDraft")
     public PurchaseRequestDraftModels.ReviewView review(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId) { return service.review(context, draftId); }
@@ -78,7 +81,7 @@ public class PurchaseRequestDraftController {
     @Operation(operationId = "submitPurchaseRequestDraft")
     public ResponseEntity<PurchaseRequestDraftModels.DraftView> submit(@RequestAttribute(ACCESS) CurrentAccessContext context, @PathVariable UUID draftId,
             @Parameter(name = "If-Match", in = ParameterIn.HEADER, required = true, description = "Current draft ETag") @RequestHeader(name = "If-Match", required = false) String ifMatch,
-            @Parameter(name = "Idempotency-Key", in = ParameterIn.HEADER, required = true, description = "Stable retry key for this submission") @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) { var value = service.submit(context, draftId, version(ifMatch), idempotencyKey); return ResponseEntity.ok().eTag(etag(value.version())).body(value); }
+            @Parameter(name = "Idempotency-Key", in = ParameterIn.HEADER, required = true, description = "Stable retry key for this submission") @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) { var value = service.submit(context, draftId, version(ifMatch), idempotencyKey); return ResponseEntity.ok().cacheControl(DRAFT_CACHE_CONTROL).eTag(etag(value.version())).body(value); }
 
     private static String etag(long version) { return "\"" + version + "\""; }
     private static long version(String value) { if (value == null || value.isBlank()) throw new PurchaseRequestDraftPreconditionRequiredException(); try { return Long.parseLong(value.replace("\"", "").trim()); } catch (NumberFormatException e) { throw new PurchaseRequestDraftPreconditionRequiredException(); } }
