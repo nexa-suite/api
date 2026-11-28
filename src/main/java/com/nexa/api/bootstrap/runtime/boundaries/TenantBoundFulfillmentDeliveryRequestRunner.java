@@ -34,12 +34,13 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
     private final WarehouseObjectAccess centralWarehouseAccess;
     private final WorkforceDirectory centralWorkforce;
     private final boolean storedDriverLocationEnabled;
+    private final boolean scopedCloudLocationEnabled;
 
     public TenantBoundFulfillmentDeliveryRequestRunner(TenantBusinessDatabaseRouter router,
                                                        TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
                                                        WarehouseObjectAccess centralWarehouseAccess,
                                                        WorkforceDirectory centralWorkforce) {
-        this(router, compositions, centralWarehouseAccess, centralWorkforce, false);
+        this(router, compositions, centralWarehouseAccess, centralWorkforce, false, false);
     }
 
     TenantBoundFulfillmentDeliveryRequestRunner(TenantBusinessDatabaseRouter router,
@@ -47,6 +48,14 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
                                                 WarehouseObjectAccess centralWarehouseAccess,
                                                 WorkforceDirectory centralWorkforce,
                                                 boolean storedDriverLocationEnabled) {
+        this(router, compositions, centralWarehouseAccess, centralWorkforce, storedDriverLocationEnabled, false);
+    }
+
+    TenantBoundFulfillmentDeliveryRequestRunner(TenantBusinessDatabaseRouter router,
+                                                TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
+                                                WarehouseObjectAccess centralWarehouseAccess,
+                                                WorkforceDirectory centralWorkforce,
+                                                boolean storedDriverLocationEnabled, boolean scopedCloudLocationEnabled) {
         this.router = Objects.requireNonNull(router, "Tenant business database router is required");
         this.compositions = Objects.requireNonNull(compositions, "Tenant BC-06 composition factory is required");
         this.centralWarehouseAccess = Objects.requireNonNull(centralWarehouseAccess,
@@ -54,12 +63,14 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
         this.centralWorkforce = Objects.requireNonNull(centralWorkforce,
                 "BC-01 workforce is required for preflight");
         this.storedDriverLocationEnabled = storedDriverLocationEnabled;
+        this.scopedCloudLocationEnabled = scopedCloudLocationEnabled;
     }
 
     @Override
     public <T> T execute(CurrentAccessContext context, Requirements requirements,
                          Function<FulfillmentDeliveryComposition, T> work) {
-        return execute(context, requirements, work, false);
+        return execute(context, requirements, work, scopedCloudLocationEnabled
+                && requirements.locationPurpose() == Requirements.LocationPurpose.BUYER_DELIVERY);
     }
 
     public FulfillmentWorkListModels.Page listPickingWork(
@@ -112,7 +123,8 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
         Function<FulfillmentDeliveryComposition, T> action = Objects.requireNonNull(work,
                 "BC-06 request work is required");
 
-        if (needed.storedDriverLocation() && !storedDriverLocationEnabled) {
+        if (needed.storedDriverLocation() && !storedDriverLocationEnabled
+                && !(scopedCloudLocationEnabled && needed.locationPurpose() != Requirements.LocationPurpose.OTHER)) {
             throw new FulfillmentOperationException("DRIVER_LOCATION_UNAVAILABLE", false);
         }
 

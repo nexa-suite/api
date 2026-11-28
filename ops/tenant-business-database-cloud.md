@@ -248,20 +248,33 @@ Set `NEXA_TENANT_BUSINESS_CLOUD_MOBILE_FULFILLMENT_ENABLED=true` with Buyer
 checkout and Operations reads to route the existing fulfillment, load,
 dispatch, driver workday, delivery and Buyer receipt use cases. They use the
 same Tenant transaction, Warehouse grants, driver assignment and Buyer
-relationship checks as the fulfillment domain. Stored driver coordinates
-require separate cloud activation and remain disabled in this composition.
+relationship checks as the fulfillment domain. This mode does not persist driver coordinates in the cloud Tenant database.
 
 Verify the same order through picking, dispatch, an assigned Driver outcome
 and Buyer receipt in the isolated cloud database before enabling this flag.
 Check receipt replay, the final order state and the linked sealed proof of
 delivery. Push delivery is verified separately through the worker below.
 
+## Buyer delivery location
+
+Set `NEXA_TENANT_BUSINESS_CLOUD_BUYER_LOCATION_ENABLED=true` with cloud mobile
+fulfillment and `NEXA_SCHEDULING_ENABLED=true`. The driver shares their location
+from Operations during an active workday. Buyer can see a recent sample only
+for an active delivery assigned to that driver and within the Buyer’s account.
+
+The cloud API serves the latest in-memory sample for up to two minutes. A
+30-second sweep removes expired samples. A process restart clears the store,
+and the next valid sample restores the map. Verify capture, Buyer visibility, reassignment, receipt and expiry
+with a synthetic delivery before enabling the flag.
+
 ## Opt-in notification push worker
 
 The cloud push composition is disabled unless
 `NEXA_TENANT_BUSINESS_CLOUD_NOTIFICATION_PUSH_ENABLED=true`. It also requires the
 cloud router, Tenant notifications, FCM provider and the existing least-privilege
-runtime check. General business traceability remains disabled and is still
+runtime check. Enable `NEXA_SCHEDULING_ENABLED=true` and verify the active
+workspace has a READY central anchor matching its existing Tenant database.
+General business traceability remains disabled and is still
 rejected in this profile. The worker handles only the existing notification
 projection and push-delivery consumers; it does not run the general traceability
 scheduler.

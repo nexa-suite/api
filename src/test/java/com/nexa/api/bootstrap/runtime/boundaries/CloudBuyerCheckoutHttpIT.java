@@ -378,7 +378,7 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
                 TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
                 WarehouseObjectAccess warehouses, WorkforceDirectory workforce) {
             return new CloudMobileFulfillmentConfiguration().cloudMobileFulfillmentRoute(
-                    router, compositions, warehouses, workforce);
+                    router, compositions, warehouses, workforce, false, new org.springframework.mock.env.MockEnvironment());
         }
 
         @Bean
