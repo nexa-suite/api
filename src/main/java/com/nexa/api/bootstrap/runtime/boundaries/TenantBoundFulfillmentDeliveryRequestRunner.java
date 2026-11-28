@@ -70,7 +70,7 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
     public <T> T execute(CurrentAccessContext context, Requirements requirements,
                          Function<FulfillmentDeliveryComposition, T> work) {
         return execute(context, requirements, work, scopedCloudLocationEnabled
-                && requirements.locationPurpose() == Requirements.LocationPurpose.BUYER_DELIVERY);
+                && requirements.readsBuyerDeliveryLocation());
     }
 
     public FulfillmentWorkListModels.Page listPickingWork(
@@ -124,7 +124,7 @@ public final class TenantBoundFulfillmentDeliveryRequestRunner implements Fulfil
                 "BC-06 request work is required");
 
         if (needed.storedDriverLocation() && !storedDriverLocationEnabled
-                && !(scopedCloudLocationEnabled && needed.locationPurpose() != Requirements.LocationPurpose.OTHER)) {
+                && !(scopedCloudLocationEnabled && needed.usesDeliveryScopedLocation())) {
             throw new FulfillmentOperationException("DRIVER_LOCATION_UNAVAILABLE", false);
         }
 

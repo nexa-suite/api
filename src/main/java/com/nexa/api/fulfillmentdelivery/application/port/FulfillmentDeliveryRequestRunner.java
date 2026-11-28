@@ -81,6 +81,14 @@ public interface FulfillmentDeliveryRequestRunner {
             return new Requirements(false, false, false, Set.of(), true, false, LocationPurpose.BUYER_DELIVERY);
         }
 
+        public boolean usesDeliveryScopedLocation() {
+            return locationPurpose != LocationPurpose.OTHER;
+        }
+
+        public boolean readsBuyerDeliveryLocation() {
+            return locationPurpose == LocationPurpose.BUYER_DELIVERY;
+        }
+
         public static Requirements assignable(Collection<UUID> membershipIds) {
             return new Requirements(false, false, false,
                     membershipIds == null ? Set.of() : Set.copyOf(membershipIds));
