@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [3.0.5]
+
+- Restore personal addresses in Buyer on Render.
+- Enable messaging between Buyer and the assigned Sales user.
+- Show the driver’s latest shared location for an active delivery.
+
 ## [3.0.4]
 
 - Restore Buyer catalog favorites on Render.
