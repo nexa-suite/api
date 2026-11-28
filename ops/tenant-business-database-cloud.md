@@ -28,6 +28,17 @@ Buyer favorites endpoints when all three cloud catalog read switches are set.
 The endpoints reuse the Tenant database and scope each saved SKU to the
 signed-in Buyer membership. The switch defaults to `false`.
 
+`NEXA_TENANT_BUSINESS_CLOUD_BUYER_SALES_MESSAGING_ENABLED=true` independently
+enables the existing Buyer/Sales HTTP polling endpoints when the explicit cloud
+router is enabled. The existing Tenant-bound use case remains authoritative for
+the active Buyer relationship, account ownership, Sales assignment, recipient
+membership, permission and idempotency checks; no central business fallback or
+realtime delivery is introduced. The V34 Tenant migration already creates
+`sales.buyer_sales_message` with forced Tenant/Workspace RLS and grants the
+runtime role only `SELECT, INSERT`; `UPDATE` and `DELETE` remain denied. Verify
+that grant and an authenticated Buyer-send, assigned-Sales-read/reply and
+Buyer-read flow on an isolated ICISA Tenant database before enabling the flag.
+
 All other Tenant business capability flags remain rejected. Those capabilities
 still require their complete cloud composition, workers and callback adapters.
 Keep this profile disabled in deployed services until the remaining gates below
