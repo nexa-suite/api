@@ -25,7 +25,10 @@ import static com.nexa.api.fulfillmentdelivery.application.service.DriverTrackin
 @Profile("!test")
 public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
  private final JdbcTemplate jdbc;
- public JdbcDriverTrackingAdapter(JdbcTemplate jdbc){this.jdbc=jdbc;}
+ private final EphemeralDriverLocations ephemeral;
+ @org.springframework.beans.factory.annotation.Autowired
+ public JdbcDriverTrackingAdapter(JdbcTemplate jdbc){this(jdbc, null);}
+ public JdbcDriverTrackingAdapter(JdbcTemplate jdbc, EphemeralDriverLocations ephemeral){this.jdbc=jdbc; this.ephemeral=ephemeral;}
  @Override public Workday current(UUID t,UUID w,UUID a){
   return jdbc.query("select * from logistics.driver_workday where tenant_id=? and workspace_id=? and actor_membership_id=? and status<>'CLOSED'",(rs,n)->day(rs),t,w,a).stream().findFirst().orElse(null);
  }
@@ -53,6 +56,7 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
    jdbc.update("update logistics.driver_workday set version=version+1,status=?,ended_at=? where tenant_id=? and workspace_id=? and id=?",status,ts(day.endedAt()),r.tenantId(),r.workspaceId(),day.id());
   }
   jdbc.update("insert into logistics.driver_workday_event(id,tenant_id,workspace_id,actor_membership_id,workday_id,workday_version,action,status,started_at,ended_at,occurred_at,idempotency_key,request_hash) values(?,?,?,?,?,?,?,?,?,?,?,?,?)",UUID.randomUUID(),r.tenantId(),r.workspaceId(),r.actorMembershipId(),day.id(),day.version(),r.action(),day.status(),ts(day.startedAt()),ts(day.endedAt()),ts(now),r.idempotencyKey(),r.requestHash());
+  if(ephemeral!=null && !"ACTIVE".equals(day.status())) ephemeral.clear(r.tenantId(),r.workspaceId(),r.actorMembershipId());
   return day;
  }
  @Override @Transactional(propagation=Propagation.MANDATORY)
@@ -60,10 +64,19 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   Workday day=lockDay(r.tenantId(),r.workspaceId(),r.actorMembershipId(),r.workdayId());
   if(day==null || !"ACTIVE".equals(day.status()))throw error("DRIVER_LOCATION_UNAVAILABLE",false);
   Coordinate c=r.coordinate();
-  var activeDeliveries=jdbc.queryForList("select d.id from logistics.delivery d join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? and d.status in ('DISPATCHED','IN_TRANSIT') and coalesce(d.dispatched_at,d.created_at)<=? order by d.id for share of d",
-          UUID.class,r.tenantId(),r.workspaceId(),r.actorMembershipId(),ts(c.capturedAt()));
+  String assignmentTimeCheck = ephemeral == null ? "" : " and a.assigned_at<=?";
+  String query = "select d.id from logistics.delivery d join logistics.delivery_assignment a "
+          + "on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id "
+          + "where d.tenant_id=? and d.workspace_id=? and a.responsible_membership_id=? "
+          + "and d.status in ('DISPATCHED','IN_TRANSIT') and coalesce(d.dispatched_at,d.created_at)<=?"
+          + assignmentTimeCheck + " order by d.id" + (ephemeral == null ? "" : " limit 129") + " for share of d";
+  var activeDeliveries=ephemeral == null
+          ? jdbc.queryForList(query, UUID.class,r.tenantId(),r.workspaceId(),r.actorMembershipId(),ts(c.capturedAt()))
+          : jdbc.queryForList(query, UUID.class,r.tenantId(),r.workspaceId(),r.actorMembershipId(),ts(c.capturedAt()),ts(c.capturedAt()));
   if(activeDeliveries.isEmpty())throw error("DRIVER_LOCATION_NO_ACTIVE_DELIVERY",false);
+  if(ephemeral!=null && activeDeliveries.size()>128)throw error("DRIVER_LOCATION_UNAVAILABLE",false);
   if(!DriverLocationPolicy.valid(c.latitude(),c.longitude(),c.accuracyMeters(),c.capturedAt(),day.startedAt(),r.now()))throw error("DRIVER_COORDINATE_INVALID",false);
+  if(ephemeral!=null) return ephemeral.capture(r, java.util.Set.copyOf(activeDeliveries));
   String requestHash=coordinateHash(r);
   var old=jdbc.query("select * from logistics.driver_coordinate where tenant_id=? and workspace_id=? and sample_id=? for update",
           (rs,n)->new StoredCoordinate(coordinate(rs),rs.getString("request_hash"),rs.getObject("actor_membership_id",UUID.class),rs.getObject("workday_id",UUID.class)),
@@ -90,6 +103,21 @@ public class JdbcDriverTrackingAdapter implements DriverTrackingPort {
   return jdbc.query("select coalesce(f.sales_order_id,o.sales_order_id) sales_order_id,a.responsible_membership_id,d.status,coalesce(d.dispatched_at,d.created_at) tracking_started_at,d.fulfillment_id from logistics.delivery d left join logistics.fulfillment f on f.tenant_id=d.tenant_id and f.workspace_id=d.workspace_id and f.id=d.fulfillment_id left join logistics.dispatch_order o on o.tenant_id=d.tenant_id and o.workspace_id=d.workspace_id and o.id=d.dispatch_order_id join logistics.delivery_assignment a on a.tenant_id=d.tenant_id and a.workspace_id=d.workspace_id and a.delivery_id=d.id where d.tenant_id=? and d.workspace_id=? and d.id=?",(rs,n)->new DeliveryScope(rs.getObject("sales_order_id",UUID.class),rs.getObject("responsible_membership_id",UUID.class),rs.getString("status"),instant(rs,"tracking_started_at"),rs.getObject("fulfillment_id",UUID.class)),t,w,id).stream().findFirst().orElse(null);
  }
  @Override public Coordinate latestForDelivery(UUID t,UUID w,UUID a,UUID deliveryId,Instant now){
+  if(ephemeral!=null) {
+   var sample=ephemeral.latest(t,w,a,now);
+   if(sample==null || !sample.deliveries().contains(deliveryId)) return null;
+   Boolean active=jdbc.queryForObject("""
+           select exists(select 1 from logistics.driver_workday day
+           join logistics.delivery_assignment assignment on assignment.tenant_id=day.tenant_id
+             and assignment.workspace_id=day.workspace_id and assignment.responsible_membership_id=day.actor_membership_id
+           join logistics.delivery delivery on delivery.tenant_id=assignment.tenant_id
+             and delivery.workspace_id=assignment.workspace_id and delivery.id=assignment.delivery_id
+           where day.tenant_id=? and day.workspace_id=? and day.actor_membership_id=? and day.id=?
+             and day.status='ACTIVE' and delivery.id=? and delivery.status in ('DISPATCHED','IN_TRANSIT')
+             and ? >= greatest(coalesce(delivery.dispatched_at,delivery.created_at),assignment.assigned_at))
+           """, Boolean.class,t,w,a,sample.workday(),deliveryId,ts(sample.coordinate().capturedAt()));
+   return Boolean.TRUE.equals(active) ? sample.coordinate() : null;
+  }
   return jdbc.query("""
           select p.* from logistics.driver_coordinate p
           join logistics.driver_workday day on day.tenant_id=p.tenant_id and day.workspace_id=p.workspace_id

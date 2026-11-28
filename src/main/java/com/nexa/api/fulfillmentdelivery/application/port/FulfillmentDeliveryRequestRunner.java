@@ -17,9 +17,18 @@ public interface FulfillmentDeliveryRequestRunner {
     @org.springframework.modulith.NamedInterface(value = "fulfillment-tenant-composition", propagate = false)
     record Requirements(boolean warehouseGrants, boolean currentDriver, boolean logisticsAssignees,
                         Set<UUID> assignableMemberships, boolean storedDriverLocation,
-                        boolean exceptionAssignees) {
+                        boolean exceptionAssignees, LocationPurpose locationPurpose) {
         public Requirements {
+            locationPurpose = locationPurpose == null ? LocationPurpose.OTHER : locationPurpose;
             assignableMemberships = Set.copyOf(assignableMemberships == null ? Set.of() : assignableMemberships);
+        }
+
+        public enum LocationPurpose { OTHER, DRIVER_CAPTURE, BUYER_DELIVERY }
+
+        public Requirements(boolean warehouseGrants, boolean currentDriver, boolean logisticsAssignees,
+                            Set<UUID> assignableMemberships, boolean storedDriverLocation, boolean exceptionAssignees) {
+            this(warehouseGrants, currentDriver, logisticsAssignees, assignableMemberships,
+                    storedDriverLocation, exceptionAssignees, LocationPurpose.OTHER);
         }
 
         public Requirements(boolean warehouseGrants, boolean currentDriver, boolean logisticsAssignees,
@@ -62,6 +71,22 @@ public interface FulfillmentDeliveryRequestRunner {
         public Requirements withStoredDriverLocation() {
             return new Requirements(warehouseGrants, currentDriver, logisticsAssignees, assignableMemberships,
                     true, exceptionAssignees);
+        }
+
+        public static Requirements driverLocationCapture() {
+            return new Requirements(false, true, false, Set.of(), true, false, LocationPurpose.DRIVER_CAPTURE);
+        }
+
+        public static Requirements buyerDeliveryLocation() {
+            return new Requirements(false, false, false, Set.of(), true, false, LocationPurpose.BUYER_DELIVERY);
+        }
+
+        public boolean usesDeliveryScopedLocation() {
+            return locationPurpose != LocationPurpose.OTHER;
+        }
+
+        public boolean readsBuyerDeliveryLocation() {
+            return locationPurpose == LocationPurpose.BUYER_DELIVERY;
         }
 
         public static Requirements assignable(Collection<UUID> membershipIds) {

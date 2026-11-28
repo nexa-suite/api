@@ -86,6 +86,16 @@ class CloudTenantBusinessDatabaseRouterConfigurationTests {
 	}
 
 	@Test
+	void buyerSalesMessagingRequiresExplicitCloudRouter() throws IOException {
+		context().withPropertyValues("nexa.tenant-business.cloud-buyer-sales-messaging.enabled=true")
+				.run(context -> assertThat(context).hasFailed().getFailure()
+						.hasRootCauseMessage("Cloud Buyer and Sales messaging requires the explicit cloud router"));
+		context().withPropertyValues("nexa.tenant-business.cloud-buyer-sales-messaging.enabled=true",
+				"nexa.tenant-business.cloud-router.enabled=true")
+				.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TenantBusinessDatabaseRouter.class));
+	}
+
+	@Test
 	void checkoutRequiresTheExplicitBuyerJourneyAndCloudRouter() throws IOException {
 		context().withPropertyValues("nexa.tenant-business.cloud-buyer-checkout.enabled=true")
 				.run(context -> assertThat(context).hasFailed().getFailure()
