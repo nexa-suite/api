@@ -14,7 +14,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -34,8 +34,9 @@ import java.util.UUID;
 
 /** Buyer personal address book; company-wide addresses remain under Client Account Addresses. */
 @RestController
-@Profile("local")
-@ConditionalOnProperty(prefix = "nexa.tenant-business.purchase-request", name = "enabled", havingValue = "true")
+@Profile({"local", "tenant-cloud"})
+@ConditionalOnExpression("${nexa.tenant-business.purchase-request.enabled:false} or "
+        + "${nexa.tenant-business.cloud-buyer-checkout.enabled:false}")
 @RequestMapping("/api/v1")
 @Tag(name = "Buyer personal addresses")
 @SecurityRequirement(name = "bearerAuth")
@@ -131,23 +132,5 @@ public final class BuyerPersonalAddressController {
                 CustomerRelationshipHttpHeaders.requireVersion(ifMatch));
         return ResponseEntity.ok().eTag(CustomerRelationshipHttpHeaders.etag(value.version()))
                 .body(BuyerAddressResponse.from(value));
-    }
-
-    @GetMapping("/client-accounts/{clientAccountId}/buyers/{buyerMembershipId}/addresses")
-    @Operation(operationId = "listAssociatedBuyerPersonalAddresses",
-            description = "Read-only audit view for the exact Buyer membership linked to this active Client Account. "
-                    + "Only its assigned Sales Representative or Tenant-local BOM may call it. Personal addresses remain "
-                    + "membership-owned and cannot be managed by workforce users.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Associated Buyer personal addresses returned"),
-            @ApiResponse(responseCode = "403", description = "Assigned Sales Representative or BOM read access required"),
-            @ApiResponse(responseCode = "404", description = "Account, assignment, Buyer relationship, or membership is unavailable"),
-            @ApiResponse(responseCode = "503", description = "Tenant business database unavailable")
-    })
-    public List<BuyerAddressResponse> listForAccountBuyer(
-            @RequestAttribute(ACCESS) CurrentAccessContext context,
-            @PathVariable UUID clientAccountId, @PathVariable UUID buyerMembershipId) {
-        return addresses.listForAccountBuyer(context, clientAccountId.toString(), buyerMembershipId).stream()
-                .map(BuyerAddressResponse::from).toList();
     }
 }

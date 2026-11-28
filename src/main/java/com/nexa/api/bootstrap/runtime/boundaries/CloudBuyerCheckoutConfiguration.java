@@ -4,6 +4,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseAuth
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePolicySnapshotWriterDataSourceFactory;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabasePurchaseRequestExpiryPolicyResolver;
 import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRouter;
+import com.nexa.api.customerbuyerrelationships.application.buyeraddress.port.BuyerAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.model.ClientAccountAddressView;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.model.CreateClientAccountAddressCommand;
 import com.nexa.api.customerbuyerrelationships.application.clientaccountaddress.model.UpdateClientAccountAddressCommand;
@@ -44,10 +45,16 @@ public class CloudBuyerCheckoutConfiguration {
         var orders = new TenantBoundSalesOrderUseCase(router, policies, sales, false);
         var addresses = new TenantBoundCustomerRelationshipsUseCase(router, accounts, buyers,
                 salesMemberships, traceability);
-        return new Routes(drafts, addresses, requests, orders, new TenantBoundDirectOrderUseCase(router, sales));
+        return new Routes(drafts, addresses, addresses, requests, orders, new TenantBoundDirectOrderUseCase(router, sales));
+    }
+
+    @Bean
+    BuyerAddressUseCase cloudBuyerPersonalAddresses(Routes routes) {
+        return routes.personalAddresses();
     }
 
     record Routes(PurchaseRequestDraftPort drafts, ClientAccountAddressUseCase buyerAddresses,
+                  BuyerAddressUseCase personalAddresses,
                   PurchaseRequestUseCase purchaseRequests, SalesOrderUseCase salesOrders, DirectOrderUseCase directOrders) {
         ClientAccountAddressUseCase routeAccountAddresses(ClientAccountAddressUseCase existing) {
             return new ClientAccountAddressUseCase() {

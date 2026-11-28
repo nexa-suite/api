@@ -31,9 +31,17 @@ public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.a
     private final SalesOrderFulfillmentQuery orders;
     private final DispatchReadinessQueries readiness;
     private final Clock clock;
+    private final boolean requireActiveBuyerReference;
+    @org.springframework.beans.factory.annotation.Autowired
     public DriverTrackingService(DriverTrackingPort tracking, WorkforceDirectory workforce,
                                  CustomerAccountQuery accounts, SalesOrderFulfillmentQuery orders,
                                  DispatchReadinessQueries readiness, Clock clock) {
+        this(tracking, workforce, accounts, orders, readiness, clock, false);
+    }
+    public DriverTrackingService(DriverTrackingPort tracking, WorkforceDirectory workforce,
+                                 CustomerAccountQuery accounts, SalesOrderFulfillmentQuery orders,
+                                 DispatchReadinessQueries readiness, Clock clock, boolean requireActiveBuyerReference) {
+        this.requireActiveBuyerReference = requireActiveBuyerReference;
         this.tracking=tracking; this.workforce=workforce; this.accounts=accounts; this.orders=orders;
         this.readiness=readiness; this.clock=clock;
     }
@@ -97,8 +105,12 @@ public class DriverTrackingService implements com.nexa.api.fulfillmentdelivery.a
         if (scope==null || !Set.of("DISPATCHED","IN_TRANSIT").contains(scope.status())
                 || scope.salesOrderId()==null || scope.driverMembershipId()==null) throw error("DELIVERY_NOT_FOUND",true);
         var account=orders.get(t(c),w(c),scope.salesOrderId()).clientAccountId();
-        if(account==null || !accounts.hasBuyerRelationship(t(c).toString(),w(c).toString(),a(c).toString(),account.toString()))
-            throw error("DELIVERY_NOT_FOUND",true);
+        boolean authorized = account != null && (requireActiveBuyerReference
+                ? accounts.findBuyerReference(t(c).toString(), w(c).toString(), a(c).toString())
+                    .filter(com.nexa.api.customerbuyerrelationships.application.publicapi.CustomerAccountReference::active)
+                    .map(reference -> account.toString().equals(reference.id())).orElse(false)
+                : accounts.hasBuyerRelationship(t(c).toString(),w(c).toString(),a(c).toString(),account.toString()));
+        if (!authorized) throw error("DELIVERY_NOT_FOUND",true);
         Coordinate location=tracking.latestForDelivery(t(c),w(c),scope.driverMembershipId(),delivery,clock.instant());
         if(location!=null && (scope.trackingStartedAt()==null || location.capturedAt().isBefore(scope.trackingStartedAt()))) location=null;
         return new DeliveryTracking(delivery,location);
