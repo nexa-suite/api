@@ -18,7 +18,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,9 +35,9 @@ import java.util.UUID;
 
 /** HTTP polling contract for one Buyer and its assigned Sales membership. */
 @RestController
-@Profile("local")
-@ConditionalOnProperty(prefix = "nexa.tenant-business.purchase-request", name = "enabled",
-        havingValue = "true", matchIfMissing = false)
+@Profile({"local", "tenant-cloud"})
+@ConditionalOnExpression("${nexa.tenant-business.purchase-request.enabled:false} or "
+        + "${nexa.tenant-business.cloud-buyer-sales-messaging.enabled:false}")
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Buyer and Sales messages")
 public final class BuyerSalesConversationController {

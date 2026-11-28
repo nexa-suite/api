@@ -36,7 +36,7 @@ public class DriverTrackingController {
  @PostMapping("/driver/workdays/{id}/locations") @Operation(operationId="captureDriverWorkdayLocation")
  public Coordinate capture(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable UUID id,
                            @Valid @RequestBody Sample request) {
-  return requests.execute(c, Requirements.driver().withStoredDriverLocation(),
+  return requests.execute(c, Requirements.driverLocationCapture(),
           composition -> composition.driverTracking().capture(c, id, request.sampleId(), request.latitude(),
                   request.longitude(), request.accuracyMeters(), request.capturedAt()));
  }
@@ -56,7 +56,7 @@ public class DriverTrackingController {
  }
  @GetMapping("/buyer/deliveries/{deliveryId}/live-location") @Operation(operationId="getBuyerOwnDeliveryLiveLocation")
  public DeliveryTracking buyer(@RequestAttribute(ACCESS) CurrentAccessContext c, @PathVariable UUID deliveryId) {
-  return requests.execute(c, Requirements.requiringStoredDriverLocation(),
+  return requests.execute(c, Requirements.buyerDeliveryLocation(),
           composition -> composition.driverTracking().buyerLocation(c, deliveryId));
  }
  public record Availability(@NotNull Boolean locationAvailable) { }

@@ -44,7 +44,8 @@ import java.nio.file.Path;
                 + "'${nexa.tenant-business.support-sales-order-read.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.business-documents.enabled:false}' == 'true' or "
                 + "'${nexa.tenant-business.business-traceability.enabled:false}' == 'true' or "
-                + "'${nexa.tenant-business.notifications.enabled:false}' == 'true'")
+                + "'${nexa.tenant-business.notifications.enabled:false}' == 'true' or "
+                + "'${nexa.tenant-business.cloud-buyer-sales-messaging.enabled:false}' == 'true'")
 public class LocalTenantBusinessDatabaseRouterConfiguration {
     @Bean
     TenantBusinessDatabaseBindingRegistry localTenantBusinessDatabaseBindingRegistry(JdbcTemplate centralJdbc) {

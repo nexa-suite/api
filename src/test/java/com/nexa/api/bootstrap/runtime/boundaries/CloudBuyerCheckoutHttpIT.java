@@ -6,6 +6,7 @@ import com.nexa.api.bootstrap.runtime.database.tenant.TenantBusinessDatabaseRout
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestCompositionFactory;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantCatalogCommercialPolicyRequestPort;
 import com.nexa.api.catalogcommercialpolicy.tenantdatabase.TenantSellableSkuQueryFactory;
+import com.nexa.api.customerbuyerrelationships.application.buyeraddress.port.BuyerAddressUseCase;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerAccountQueryFactory;
 import com.nexa.api.customerbuyerrelationships.tenantdatabase.TenantCustomerRelationshipsCompositionFactory;
 import com.nexa.api.inventoryavailability.tenantdatabase.TenantCatalogAvailabilityAdapterFactory;
@@ -33,7 +34,9 @@ import java.time.Clock;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -44,12 +47,56 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @EnabledIfSystemProperty(named = "nexa.integration.enabled", matches = "true")
 @TestPropertySource(properties = {
         "nexa.tenant-business.purchase-request.enabled=false",
+        "nexa.tenant-business.cloud-buyer-checkout.enabled=true",
         "nexa.tenant-business.fulfillment-delivery.enabled=false"
 })
 @Import(CloudBuyerCheckoutHttpIT.CheckoutComposition.class)
 class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
     private static final String DRAFTS = "/api/v1/buyer/purchase-request-drafts";
     private static final String ADDRESSES = "/api/v1/client-accounts/{accountId}/addresses";
+
+    @Test
+    void buyerManagesPersonalAddressesThroughTheCloudComposition() throws Exception {
+        String collection = "/api/v1/buyer/addresses";
+        String buyer = "Bearer " + accessToken(BUYER_EMAIL, "PORTAL");
+        String sales = "Bearer " + accessToken(SALES_EMAIL, "PLATFORM");
+        String address = """
+                {"addressType":"STREET","line":"Av. Synthetic 123","countryCode":"PE",
+                 "departmentCode":"15","provinceCode":"1501","districtCode":"150101",
+                 "recipientName":"Test Buyer","recipientPhone":"+51999999999","streetName":"Av. Synthetic",
+                 "streetNumber":"123","roadType":"STREET","latitude":-12.0464,"longitude":-77.0428,"source":"MANUAL"}
+                """;
+        mockMvc.perform(get(collection)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(collection).header("Authorization", sales)).andExpect(status().isForbidden());
+        mockMvc.perform(get(collection).header("Authorization", buyer)).andExpect(status().isOk());
+
+        var created = mockMvc.perform(post(collection).header("Authorization", buyer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"label\":\"Cloud personal address\",\"defaultAddress\":false,\"address\":" + address + "}"))
+                .andExpect(status().isCreated()).andReturn();
+        String id = json(created).path("id").asText();
+        String resource = collection + "/" + id;
+        mockMvc.perform(get(collection).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.id == '" + id + "')]").isNotEmpty());
+
+        var updated = mockMvc.perform(patch(resource).header("Authorization", buyer)
+                        .header("If-Match", created.getResponse().getHeader("ETag"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"label\":\"Updated personal address\",\"address\":" + address + "}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.label").value("Updated personal address")).andReturn();
+        var preferred = mockMvc.perform(put(resource + "/default").header("Authorization", buyer)
+                        .header("If-Match", updated.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.defaultAddress").value(true)).andReturn();
+        mockMvc.perform(delete(resource).header("Authorization", buyer)
+                        .header("If-Match", preferred.getResponse().getHeader("ETag")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.active").value(false));
+        mockMvc.perform(get(collection).header("Authorization", buyer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[?(@.id == '" + id + "')]").isEmpty());
+
+        assertThat(tenantJdbc().queryForObject("select status from sales.buyer_address where id=?",
+                String.class, UUID.fromString(id))).isEqualTo("INACTIVE");
+        assertThat(jdbc.queryForObject("select to_regclass('sales.buyer_address') is null", Boolean.class)).isTrue();
+    }
 
     @Test
     void buyerAndOperationsCompleteTheSameOrderThroughTheCloudComposition() throws Exception {
@@ -322,11 +369,16 @@ class CloudBuyerCheckoutHttpIT extends NexaWorkflowIntegrationSupport {
     @TestConfiguration(proxyBeanMethods = false)
     static class CheckoutComposition {
         @Bean
+        BuyerAddressUseCase cloudBuyerPersonalAddressesForHttpTest(CloudBuyerCheckoutConfiguration.Routes routes) {
+            return new CloudBuyerCheckoutConfiguration().cloudBuyerPersonalAddresses(routes);
+        }
+
+        @Bean
         CloudMobileFulfillmentConfiguration.Route cloudFulfillmentForHttpTest(TenantBusinessDatabaseRouter router,
                 TenantFulfillmentDeliveryCompositionProviderAdapter compositions,
                 WarehouseObjectAccess warehouses, WorkforceDirectory workforce) {
             return new CloudMobileFulfillmentConfiguration().cloudMobileFulfillmentRoute(
-                    router, compositions, warehouses, workforce);
+                    router, compositions, warehouses, workforce, false, new org.springframework.mock.env.MockEnvironment());
         }
 
         @Bean

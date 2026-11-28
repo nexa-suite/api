@@ -30,6 +30,8 @@ import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcDeliveryO
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcDispatchReadinessQueryAdapter;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcDriverDeliveryPersistenceAdapter;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcDriverTrackingAdapter;
+import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.EphemeralDriverLocations;
+import org.springframework.beans.factory.ObjectProvider;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcDispatchWindowPlanPersistenceAdapter;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcDeliveryLoadPersistenceAdapter;
 import com.nexa.api.fulfillmentdelivery.infrastructure.persistence.JdbcDeliveryInstructionPersistenceAdapter;
@@ -66,13 +68,15 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
     private final Clock clock;
     private final ObjectMapper mapper;
     private final Duration handoffTtl;
+    private final EphemeralDriverLocations cloudLocations;
 
     public JdbcTenantFulfillmentDeliveryCompositionFactory(Clock clock, ObjectMapper mapper,
                                                             @Value("${nexa.mobile.delivery-handoff-ttl:PT10M}")
-                                                            Duration handoffTtl) {
+                                                            Duration handoffTtl, ObjectProvider<EphemeralDriverLocations> cloudLocations) {
         this.clock = Objects.requireNonNull(clock);
         this.mapper = Objects.requireNonNull(mapper);
         this.handoffTtl = Objects.requireNonNull(handoffTtl);
+        this.cloudLocations = cloudLocations.getIfAvailable();
     }
 
     @Override
@@ -121,8 +125,8 @@ public final class JdbcTenantFulfillmentDeliveryCompositionFactory
                 access, clock, orders);
         DriverDeliveryService driverDeliveries = new DriverDeliveryService(
                 new JdbcDriverDeliveryPersistenceAdapter(jdbc, false), lifecycle, clock);
-        DriverTrackingService driverTracking = new DriverTrackingService(new JdbcDriverTrackingAdapter(jdbc),
-                workforce, accounts, orders, readiness, clock);
+        DriverTrackingService driverTracking = new DriverTrackingService(new JdbcDriverTrackingAdapter(jdbc, cloudLocations),
+                workforce, accounts, orders, readiness, clock, cloudLocations != null);
         BuyerDeliveryTrackingQueries buyerTracking = bindBuyerTracking(jdbc, accounts, orders);
         var operationalExceptions = new JdbcOperationalExceptionPersistenceAdapter(jdbc);
         DispatchWindowPlanService dispatchWindowPlans = new DispatchWindowPlanService(
